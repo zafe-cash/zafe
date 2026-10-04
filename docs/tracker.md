@@ -541,9 +541,10 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       code per request (memory-hard hash, ~30 bits, number matching) against tampering on
       any channel; complements zcash/zips#977 (signed requests). Offered a Zafe prototype +
       draft ZIP if there's interest; nothing built until they answer
-- [ ] **Reply owed** on frost#1082 (resharing proposal posted 2026-10-03): johnnynanjiang
-      asked (2026-10-03) whether deleting old shares is the only way to revoke them, or
-      whether to combine resharing with real key rotation
+- [ ] frost#1082 (resharing proposal posted 2026-10-03): answered johnnynanjiang's
+      revocation question 2026-10-04 (only a new key + moving the funds revokes old shares;
+      https://github.com/ZcashFoundation/frost/issues/1082#issuecomment-5982780783). Follow
+      up if ZF wants a spec
 - [ ] frost-tools#433 (group description + threshold sent to DKG participants): design
       proposed 2026-10-03, offered to implement; waiting for answers to its two questions
       (`-d` mismatch: error or override; breaking older frost-client participants) before
