@@ -533,6 +533,21 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] Proposed `ths start --detach` for scripts/CI (thus-spoke-zakura#147, 2026-10-04): opt-in,
       foreground stays the default (their #14). If accepted, send the PR; then `up.sh` becomes
       `ths start --detach` and `down.sh` `ths stop`
+- [ ] **ZIP 321 link security** (zodl-project#60, open since 2024, `I-SECURITY`): proposal
+      posted 2026-10-04
+      (https://github.com/zodl-inc/zodl-project/issues/60#issuecomment-5982699354):
+      (1) a verified https link per wallet (`https://<wallet domain>/zip321#<zcash: URI>`, no
+      shared `pay.z.cash`, answers nuttycom's centralisation/IP objections) and (2) a check
+      code per request (memory-hard hash, ~30 bits, number matching) against tampering on
+      any channel; complements zcash/zips#977 (signed requests). Offered a Zafe prototype +
+      draft ZIP if there's interest; nothing built until they answer
+- [ ] **Reply owed** on frost#1082 (resharing proposal posted 2026-10-03): johnnynanjiang
+      asked (2026-10-03) whether deleting old shares is the only way to revoke them, or
+      whether to combine resharing with real key rotation
+- [ ] frost-tools#433 (group description + threshold sent to DKG participants): design
+      proposed 2026-10-03, offered to implement; waiting for answers to its two questions
+      (`-d` mismatch: error or override; breaking older frost-client participants) before
+      the PR
 - [ ] Zakura's faster prover (V7): **supports Ironwood now** (zakura-core/common 2.2.0,
       2026-09-30, forked from orchard 0.15.5; MIT/Apache-2.0). Optimized Halo 2/Pasta with
       AArch64 assembly; zakura-bench (i7, 1 core): warm 2-action Ironwood proof 2.85 s →
@@ -720,6 +735,13 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
   wrong": say "This vault isn't on this relay" instead; on the emulator the app
   sometimes shows a ~12% white veil (#262929 instead of #080B0B) over the Flutter
   surface, also with the main build and not in the app's view tree (cause unknown)
+- *(idea)* **"Pay with Zafe" verified link** `https://zafe.cash/pay#<zcash: URI>` (App Link;
+  zafe.cash already serves `assetlinks.json` for `/join`): only the genuine Zafe opens it,
+  unlike `zcash:`. Add the `/pay` path to the manifest, route it into the payment request
+  screen, a static no-analytics fallback page, a dapp snippet (incl. the native-app path:
+  explicit intent + `PackageManager.hasSigningCertificate`), AASA once there's an Apple
+  team ID. Build when the first dapp/merchant asks. Same thread: a check code + number
+  matching only if a ZIP gains traction (zodl-project#60)
 - *(idea)* Propose from a request: a scanned/pasted/opened `zcash:` URI shows a card that
   prechecks and builds the proposal up front (`lib/src/features/send/widgets/payment_request_host.dart`,
   `lib/src/features/send/services/payment_request_precheck.dart`)
