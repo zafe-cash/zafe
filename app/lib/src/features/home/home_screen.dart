@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
-import '../../core/formatting/balance_notes.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/layout/mobile/mobile_top_scroll_fade.dart';
@@ -30,6 +29,8 @@ import '../../providers/tor_provider.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../proposals/activity_feed.dart';
 import '../../providers/vault_provider.dart';
+import '../../providers/zec_price_provider.dart';
+import '../../services/app_update.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -112,6 +113,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  /// Play installs the downloaded update and restarts the app: never in the middle of
+  /// sending a payment.
+  void _restartForUpdate(BuildContext context) {
+    final sending = ref
+        .read(proposalsProvider)
+        .sends
+        .values
+        .any((s) => s.running);
+    if (sending) {
+      showAppToast(context, 'Restart once the payment has been sent');
+      return;
+    }
+    unawaited(ref.read(appUpdateProvider.notifier).restart());
+  }
+
   /// The poll: proposals, then the wallet only if the chain tip moved (or proposals
   /// changed); `force` syncs regardless (resume, first open).
   Future<void> _refresh({bool force = false}) async {
@@ -187,15 +203,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     children: [
                       BalanceCard(
                         totalZat: vault.balance?.totalZat,
-                        notes: vault.balance == null
-                            ? const []
-                            : balanceNotes(
-                                incomingPendingZat:
-                                    vault.balance!.incomingPendingZat,
-                                changePendingZat:
-                                    vault.balance!.changePendingZat,
-                                lockedZat: vault.balance!.lockedZat,
-                                ticker: kZcashDefaultCurrencyTicker,
+                        // The total includes money still confirming: what's pending
+                        // shows in the activity rows, not on the card.
+                        fiatText: vault.balance == null
+                            ? null
+                            : fiatText(
+                                vault.balance!.totalZat,
+                                ref.watch(zecPriceProvider),
                               ),
                         hidden: ref.watch(privacyModeProvider),
                         threshold: summary.threshold,
@@ -261,6 +275,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                         const SizedBox(height: AppSpacing.md),
                       ],
+                      if (ref.watch(appUpdateProvider) ==
+                          AppUpdateState.ready) ...[
+                        NoticeCard(
+                          title: 'Update ready',
+                          body: 'Restart Zafe to finish updating',
+                          warning: false,
+                          onTap: () => _restartForUpdate(context),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
                       if (ref.watch(backupStatusProvider).value == false) ...[
                         NoticeCard(
                           title: 'Back up this vault',
@@ -294,15 +318,15 @@ class BalanceCard extends StatelessWidget {
   const BalanceCard({
     super.key,
     required this.totalZat,
-    required this.notes,
+    required this.fiatText,
     required this.hidden,
     required this.onToggle,
     required this.threshold,
     required this.members,
   });
 
-  /// Money in the total that can't be spent yet, one line per kind.
-  final List<String> notes;
+  /// The total in dollars ("$1,234.56"); null off mainnet or without a price.
+  final String? fiatText;
   final BigInt? totalZat;
   final bool hidden;
   final VoidCallback onToggle;
@@ -410,16 +434,15 @@ class BalanceCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                if (!hidden)
-                  for (final note in notes.take(2))
-                    Text(
-                      note,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTypography.bodySmall.copyWith(
-                        color: card.textSecondary,
-                      ),
+                if (fiatText case final fiat?)
+                  Text(
+                    hidden ? '\$${fixedPrivacyMask()}' : fiat,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.bodyMedium.copyWith(
+                      color: card.textSecondary,
                     ),
+                  ),
                 const SizedBox(height: AppSpacing.sm),
                 _ThresholdStrip(threshold: threshold, members: members),
               ],
@@ -631,10 +654,14 @@ class NoticeCard extends StatelessWidget {
     required this.title,
     required this.body,
     this.onTap,
+    this.warning = true,
   });
   final String title;
   final String body;
   final VoidCallback? onTap;
+
+  /// A warning (backup reminder) or good news (an update is ready).
+  final bool warning;
 
   @override
   Widget build(BuildContext context) {
@@ -663,12 +690,18 @@ class NoticeCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AppIcon(
-                AppIcons.warning,
-                size: 20,
-                color: colors.icon.warning,
-                patina: colors.icon.warning,
-              ),
+              warning
+                  ? AppIcon(
+                      AppIcons.warning,
+                      size: 20,
+                      color: colors.icon.warning,
+                      patina: colors.icon.warning,
+                    )
+                  : AppIcon(
+                      AppIcons.renew,
+                      size: 20,
+                      color: colors.icon.accent,
+                    ),
               const SizedBox(width: AppSpacing.s),
               Expanded(
                 child: Column(

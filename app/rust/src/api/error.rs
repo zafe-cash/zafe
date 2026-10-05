@@ -2,7 +2,8 @@
 //! `kind` for copy and recovery actions, and shows `message` only as detail.
 
 use zafe_core::{
-    net::NetFailure, node::NodeError, relay_client::RelayClientError, wallet::WalletError,
+    net::NetFailure, node::NodeError, price::PriceError, relay_client::RelayClientError,
+    wallet::WalletError,
 };
 use zafe_proto::UnsupportedVersion;
 
@@ -155,6 +156,16 @@ impl From<NodeError> for ZafeError {
 impl From<RelayClientError> for ZafeError {
     fn from(e: RelayClientError) -> Self {
         NodeError::Relay(e).into()
+    }
+}
+
+impl From<PriceError> for ZafeError {
+    fn from(e: PriceError) -> Self {
+        let kind = match &e {
+            PriceError::Network { failure, .. } => net_kind(*failure),
+            PriceError::BadResponse(_) => ZafeErrorKind::Other,
+        };
+        Self::new(kind, e.to_string())
     }
 }
 

@@ -833,6 +833,22 @@ Learned while studying it:
   handler (haptics only); needs CAF/M4A copies. Payment sounds are a signature, not UI
   feedback: keep them clean, short, open intervals (the user rejected chimes, bass
   "tactile" thuds and bright major-third runs).
+- **Balance card + dollars** (2026-10-06, after Vizor): one total (pending included; what's
+  pending shows as "Pending" in activity rows, not as notes on the card) and a dollar line
+  `fiatText` from `zecPriceProvider`. **Mainnet builds only** (`kShowsFiat`: test coins
+  have no value; Vizor does the same), so testnet/regtest never fetch a price. The price
+  comes from Rust (`zafe_core::price::zec_usd`, bridge `api/price.rs`) so it follows the Tor
+  policy: Tor on → `zcash_client_backend` cryptex (several exchanges, Gemini trusted, own
+  isolated circuit `Purpose::Price`); off → one CoinGecko request (needs a User-Agent:
+  403 without). Refresh 3 min in the foreground, last price cached 1 h in prefs
+  (`zafe_zec_usd_v1`). Live tests: `price::tests::live_direct_price` and the Tor live test.
+- **In-app updates** (`services/app_update.dart`, `in_app_update` **4.2.5**: 5.x needs
+  Flutter 3.44): Android Play installs only; checks at launch/unlock/resume (6 h apart).
+  Priority ≥ 4 (set per release in the Play Console/API) = immediate full-screen update,
+  except while a payment is sending; otherwise a background download, then a Home
+  "Update ready" card whose Restart is refused mid-send. Debug/sideloaded installs get a
+  Play error and nothing shows. Can only be tested end to end with a Play install
+  (internal app sharing or an internal testing track).
 - **Secret screens** block capture: wrap a route's page in `SecureScreen`
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:

@@ -327,6 +327,14 @@ Open
       them: a member who never opens the app again stops one-tap for the whole vault once
       the keygen pool (16 proposals' worth) is used up. Assign only groups whose members
       all have pools. Changes replay, so gate it like an event version; needs a spec note
+- [x] Balance card: one total + dollar value (mainnet only), no pending notes (2026-10-06)
+- [x] Play in-app updates (2026-10-06): background download + "Update ready" card;
+      priority ≥ 4 takes over the screen
+  - [ ] Test end to end through Play (internal app sharing) once the app is on Play
+  - [ ] iOS: an update prompt from the App Store version (no Play equivalent)
+  - [ ] Releases: set the in-app update priority per release (Play Developer API
+        `inAppUpdatePriority`; the Console has no field), e.g. in `release.yml`
+- [ ] Dollar values beyond the card (payment amounts, send review) *(idea)*
 - [ ] Unlock gate follow-ups: it is a UI gate only (key material in secure storage is not
       bound to user authentication; a Keystore key with `setUserAuthenticationRequired` /
       Keychain `.userPresence` would make it cryptographic, but background round-2 signing

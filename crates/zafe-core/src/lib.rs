@@ -10,6 +10,7 @@ pub mod mempool;
 pub mod net;
 pub mod node;
 pub mod nonce_store;
+pub mod price;
 pub mod relay_client;
 pub mod repair;
 pub mod session;

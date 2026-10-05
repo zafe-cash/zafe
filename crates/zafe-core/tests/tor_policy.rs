@@ -210,7 +210,7 @@ async fn dormancy_can_be_set_before_tor_exists() {
 }
 
 /// Bootstraps real Tor into a temporary directory, then talks to the public testnet
-/// lightwalletd and an HTTPS site through it.
+/// lightwalletd, an HTTPS site and the ZEC price through it.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs the internet and the Tor network"]
 async fn live_tor_reaches_lightwalletd_and_https() {
@@ -243,6 +243,14 @@ async fn live_tor_reaches_lightwalletd_and_https() {
         }
         other => panic!("expected an HTTP answer, got {other:?}"),
     }
+
+    // The price through Tor: several exchanges on the price circuit.
+    let started = Instant::now();
+    let usd = zafe_core::price::zec_usd()
+        .await
+        .expect("price through Tor");
+    println!("ZEC = ${usd} through Tor in {:?}", started.elapsed());
+    assert!(usd > 1.0 && usd < 100_000.0);
 
     // Dormant and awake again: a request still works.
     tor::set_dormant(true);

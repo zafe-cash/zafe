@@ -5,6 +5,7 @@ pub mod error;
 pub mod history;
 pub mod mempool;
 pub mod names;
+pub mod price;
 pub mod proposals;
 pub mod received;
 pub mod repair;

@@ -9,6 +9,7 @@ import 'api/error.dart';
 import 'api/history.dart';
 import 'api/mempool.dart';
 import 'api/names.dart';
+import 'api/price.dart';
 import 'api/proposals.dart';
 import 'api/received.dart';
 import 'api/repair.dart';
@@ -77,7 +78,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1219480254;
+  int get rustContentHash => -1564155899;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -377,6 +378,8 @@ abstract class RustLibApi extends BaseApi {
     required List<int> material,
     required PlatformInt64 watchId,
   });
+
+  Future<double> crateApiPriceZecUsdPrice();
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -2344,6 +2347,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     argNames: ["relayUrl", "seeds", "material", "watchId", "sink"],
   );
 
+  @override
+  Future<double> crateApiPriceZecUsdPrice() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 55,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_f_64,
+          decodeErrorData: sse_decode_zafe_error,
+        ),
+        constMeta: kCrateApiPriceZecUsdPriceConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPriceZecUsdPriceConstMeta =>
+      const TaskConstMeta(debugName: "zec_usd_price", argNames: []);
+
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -2455,6 +2485,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bytes: dco_decode_list_prim_u_8_strict(arr[0]),
       text: dco_decode_String(arr[1]),
     );
+  }
+
+  @protected
+  double dco_decode_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
   }
 
   @protected
@@ -3118,6 +3154,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_bytes = sse_decode_list_prim_u_8_strict(deserializer);
     var var_text = sse_decode_String(deserializer);
     return ExportedBackup(bytes: var_bytes, text: var_text);
+  }
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat64();
   }
 
   @protected
@@ -3932,6 +3974,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(self.bytes, serializer);
     sse_encode_String(self.text, serializer);
+  }
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat64(self);
   }
 
   @protected

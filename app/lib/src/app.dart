@@ -43,6 +43,7 @@ import 'providers/theme_mode_provider.dart';
 import 'notifications/vault_updates.dart' show kReceivedPrefix, kSeatMovePrefix;
 import 'notifications/vault_watch.dart';
 import 'providers/vault_provider.dart';
+import 'services/app_update.dart';
 import 'services/invite_links.dart';
 
 final _routerProvider = Provider<GoRouter>((ref) {
@@ -330,6 +331,8 @@ class ZafeApp extends ConsumerWidget {
     ref.watch(mempoolWatchProvider);
     // "Use Tor": connect at launch, dormant in the background.
     ref.watch(torLifecycleProvider);
+    // Play in-app updates: checks at launch and on resume (Android, Play installs).
+    ref.watch(appUpdateProvider);
     return AppThemeHost(
       themeMode: themeMode,
       child: MaterialApp.router(

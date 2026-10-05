@@ -81,6 +81,8 @@ pub enum TorError {
 pub(crate) enum Purpose {
     Relay,
     Lightwalletd,
+    /// The ZEC/USD price (`crate::price`).
+    Price,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,7 @@ struct Clients {
     base: Client,
     relay: Client,
     lightwalletd: Client,
+    price: Client,
 }
 
 impl Clients {
@@ -95,6 +98,7 @@ impl Clients {
         Self {
             relay: base.isolated_client(),
             lightwalletd: base.isolated_client(),
+            price: base.isolated_client(),
             base,
         }
     }
@@ -103,6 +107,7 @@ impl Clients {
         match purpose {
             Purpose::Relay => self.relay.clone(),
             Purpose::Lightwalletd => self.lightwalletd.clone(),
+            Purpose::Price => self.price.clone(),
         }
     }
 }

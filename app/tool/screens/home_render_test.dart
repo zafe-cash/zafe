@@ -93,7 +93,7 @@ Widget _home() => Builder(
               children: [
                 BalanceCard(
                   totalZat: BigInt.from(4237485000),
-                  notes: const ['0.25 TAZ incoming'],
+                  fiatText: r'$5,668.30',
                   hidden: false,
                   onToggle: () {},
                   threshold: 2,
