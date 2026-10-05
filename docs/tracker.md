@@ -6,7 +6,7 @@ finished ones, tick them and add the commit. Spec references are to `spec.md`.
 
 Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not yet decided
 
-Last updated: 2026-10-01 (stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
+Last updated: 2026-10-06 (relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
 
 ---
 
@@ -140,9 +140,12 @@ Open
 - [x] Relay packaging (2026-09-30): `infra/relay/Dockerfile` (non-root, `/data` volume,
       `$PORT`), `GET /health`, SIGTERM shutdown, FCM key from a file or secret env var;
       Fly.io template, VPS recipe (systemd + Caddy), nightly backup timer, README
-- [ ] **(you)** Hosted relay deployment (testnet): waiting on the host choice (Fly.io or a
-      VPS) and account/DNS; steps in `infra/relay/README.md`. Then build the testnet app
-      with `ZAFE_RELAY_URL`. Relay is SQLite today, Postgres for the hosted tier
+- [~] Hosted relay deployment (testnet), 2026-10-06: OVH VPS-1 (UK, Ubuntu 26.04,
+      57.129.172.198) at `testnet.relay.zafe.cash`, Docker Compose + Caddy, deployed by
+      `.github/workflows/relay-deploy.yml` (GHCR image by digest, provenance, health check,
+      rollback; `infra/relay/README.md` Path B). Left: **(you)** the DNS record, the first
+      green deploy, then `ZAFE_RELAY_URL` in the release variables and a testnet build.
+      Relay is SQLite today, Postgres for the hosted tier
 - [x] Relay rate and size limits (2026-09-30): token buckets per signing key (after the
       signature verifies) and per client IP (`zafe_relay::limits`, 429 + `Retry-After`,
       env-tunable, proxy header for Fly/Caddy), 1 MiB body cap; client
@@ -455,6 +458,18 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] **(you)** Mainnet musts: the audit above, a hosted relay (OVH VPS) with its URL in
       `kMainnetRelayUrl`, and a small end-to-end mainnet dry run (create, receive,
       propose, sign, send, restore) incl. `zec.rocks:443` with the app
+- [ ] Relay loss and rollback, before mainnet (found 2026-10-06): apps keep no copy of the
+      vault log and no saved head (`node::load_log` re-reads from entry 0), so (a) a relay
+      serving an older log (restored backup, or a malicious relay) is accepted silently and
+      can bring back a cancelled proposal that already has t one-tap shares, and (b) a lost
+      relay DB freezes every vault with no way back (proposals, votes, names gone; funds
+      safe but unspendable in the app). Fix: store the log length + head hash per vault and
+      refuse a shorter/forked log (spec §6.3 "relay inconsistency"), keep the decrypted log
+      cache spec §14 promises, and add re-seeding/moving a vault to another relay from
+      members' copies (spec says vaults can move relays; no code does)
+- [ ] Mainnet relay: second compose service + `relay.zafe.cash` + Litestream to object
+      storage + a `relay-mainnet` environment with required reviewers that promotes a
+      digest already on testnet
 - [ ] Capped mainnet beta (per-vault limit, "beta" label) before full launch
 
 ## M3 / M4 — later (spec §16)

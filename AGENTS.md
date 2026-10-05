@@ -60,8 +60,9 @@ crates/zafe-proto   identities, signed/HPKE envelopes, vault log, relay API type
 crates/zafe-relay   blind axum relay on SQLite (ZAFE_RELAY_DB), push hook, pruning
 crates/zafe-cli     `zafe` binary: headless member for tests (dev-only plain-file state)
 infra/regtest       regtest through `ths` with NU6.3 active (up.sh / fund.sh / down.sh)
-infra/relay         relay Dockerfile, fly.toml template, VPS recipe (systemd + Caddy),
-                    backups; README says what the user must do to deploy (not deployed)
+infra/relay         relay Dockerfile, fly.toml template, vps/ (Docker Compose + Caddy +
+                    backup sidecar, bootstrap.sh, deploy.sh); hosted testnet relay deployed
+                    by .github/workflows/relay-deploy.yml (README Path B)
 scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
 ```
 
@@ -427,6 +428,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   10001 with `setpriv` (Fly volumes mount root-owned). The Docker context must contain
   **every workspace member** (`app/rust` too) or `cargo build --locked` fails;
   `.dockerignore` whitelists them. One machine per SQLite file, never scale out.
+- **Hosted relay (testnet)**: `testnet.relay.zafe.cash` on an OVH VPS (57.129.172.198,
+  Ubuntu 26.04), compose in `/opt/zafe-relay`. Never deploy by hand (scp/systemctl): push
+  to `main` or run the Relay deploy workflow; it deploys an image **by digest**, and
+  `deploy.sh` backs up, switches, health-checks through Caddy and rolls back. The DNS
+  record must stay **DNS only** in Cloudflare (two-level name: no universal cert; a proxy
+  would see client IPs). Compose gotchas: bind-mount the Caddy *directory* (CI replaces
+  files, a single-file mount keeps the old inode); relay containers run as uid 10001 on a
+  named volume (Docker copies the image's `/data` ownership into a new named volume, so
+  the entrypoint's chown isn't needed and `cap_drop: ALL` works); Docker-published ports
+  bypass ufw, so publish nothing but Caddy's.
 - **Public testnet lightwalletd**: `https://testnet.zec.rocks:443` (Ironwood-aware;
   Ironwood live on testnet since block 4,134,000). Mainnet: `https://zec.rocks:443`.
 - **A `CARGO_TARGET_DIR` shared between worktrees races** when their workspace crates

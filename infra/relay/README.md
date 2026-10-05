@@ -1,18 +1,19 @@
-# Deploying the relay (testnet)
+# Deploying the relay
 
 The relay is one small binary with one SQLite file. It is blind (public keys,
 ciphertext and metadata only), so the host never holds anything that spends or
 decrypts funds, but it does see who talks to which mailbox and when: pick a host you
 trust with that metadata, and keep access logs off.
 
-Nothing in this directory has been deployed. Two paths, pick one:
+The hosted testnet relay runs on a VPS through Path B, deployed by CI
+(`.github/workflows/relay-deploy.yml`). Two paths:
 
-| | Fly.io | VPS (Caddy + systemd) |
+| | Fly.io | VPS (Docker Compose + Caddy) |
 |---|---|---|
 | TLS | Fly's edge (`*.fly.dev` or your domain) | Caddy + Let's Encrypt, automatic |
 | Files | `fly.toml`, `Dockerfile` | `vps/` |
-| Cost (roughly) | shared-cpu-1x 256 MB + 1 GB volume | any 1 vCPU / 512 MB box |
-| You do | `fly auth login`, create app/volume, secrets | a server, a DNS record |
+| Cost (roughly) | shared-cpu-1x 256 MB + 1 GB volume | any 1 vCPU / 1 GB box |
+| You do | `fly auth login`, create app/volume, secrets | a server, a DNS record, `bootstrap.sh` |
 
 Runtime contract (both paths):
 
@@ -29,7 +30,7 @@ Runtime contract (both paths):
   relay answers `429` with `Retry-After`, and the app says the relay is busy. Tune with
   `ZAFE_RELAY_KEY_RATE` / `ZAFE_RELAY_IP_RATE` (per minute, `0` = off), or
   `ZAFE_RELAY_LIMITS=off`. Behind a proxy set `ZAFE_RELAY_CLIENT_IP_HEADER` (Fly:
-  `fly-client-ip`, already in `fly.toml`; Caddy: `x-forwarded-for`, in the systemd unit),
+  `fly-client-ip`, already in `fly.toml`; Caddy: `x-forwarded-for`, in `vps/compose.yml`),
   or every client shares the proxy's address. Never point it at a header clients can set
   directly.
 - Creating a vault (mailbox) is free, so creations are capped too: 20 a day per client
@@ -107,53 +108,92 @@ fly ssh console --app zafe-relay-testnet -C \
 fly ssh sftp get /data/backup.sqlite ./relay-backup.sqlite --app zafe-relay-testnet
 ```
 
-## Path B: a VPS (Debian/Ubuntu) with Caddy
+## Path B: a VPS with Docker Compose (the hosted testnet relay)
 
-You provide: a server with a public IP, ports 80 and 443 open, and a DNS **A/AAAA
-record** for the relay's domain pointing at it.
+`vps/compose.yml` runs Caddy (TLS) in front of the relay image, plus a backup sidecar.
+The relay runs as uid 10001 with a read-only root filesystem, no capabilities and no
+published port; only Caddy reaches it. Access logs stay off.
+
+**Hosted testnet** (`testnet.relay.zafe.cash` on an OVH VPS, Ubuntu 26.04): every push to
+`main` that touches the relay builds the image, pushes it to
+`ghcr.io/zafe-cash/zafe-relay` (tags `sha-<commit>` and `main`, with build provenance:
+`gh attestation verify oci://ghcr.io/zafe-cash/zafe-relay:main -R zafe-cash/zafe`), and
+deploys that digest. `vps/deploy.sh` on the server pulls it, backs up the database,
+switches, waits for `/health` and **rolls back** to the previous image if it fails.
+Actions > Relay deploy > Run workflow redeploys by hand.
+
+One-time setup of a new server (Ubuntu/Debian, you have sudo over SSH):
 
 ```bash
-# 1. the binary (build on the server, or extract it from the image)
-cargo build --release --locked -p zafe-relay
-sudo install -m755 target/release/zafe-relay /usr/local/bin/zafe-relay
-#   or: id=$(docker create zafe-relay) && docker cp $id:/usr/local/bin/zafe-relay . && docker rm $id
+# 1. DNS: an A record for the domain pointing at the server, DNS only (no CDN proxy:
+#    Caddy needs the real connection, and a proxy would see every client IP)
 
-# 2. the service (DynamicUser, state in /var/lib/zafe-relay, localhost:8787)
-sudo cp infra/relay/vps/zafe-relay.service /etc/systemd/system/
-#   optional FCM: key at /etc/zafe-relay/fcm-service-account.json (root, 0600), then
-#   uncomment LoadCredential/Environment in the unit
-sudo systemctl daemon-reload && sudo systemctl enable --now zafe-relay
-curl http://127.0.0.1:8787/health
+# 2. a key for CI, then the server setup: Docker, ufw (22/80/443), unattended-upgrades,
+#    key-only SSH, the `deploy` user (docker group: root-equivalent), /opt/zafe-relay
+ssh-keygen -t ed25519 -N '' -C zafe-relay-ci -f relay-ci
+ssh ubuntu@<host> 'sudo bash -s -- "'"$(cat relay-ci.pub)"'"' < infra/relay/vps/bootstrap.sh
 
-# 3. Caddy (https://caddyserver.com/docs/install), then set your domain in the Caddyfile
-sudo cp infra/relay/vps/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-curl https://relay.example.com/health
+# 3. the GitHub environment `relay-testnet` (deploys from main only) and its settings
+gh secret set RELAY_SSH_KEY --env relay-testnet < relay-ci
+ssh-keyscan -t ed25519 <host> | gh secret set RELAY_KNOWN_HOSTS --env relay-testnet
+#    (compare that host key with the one you see over your own SSH session)
+gh variable set RELAY_HOST --env relay-testnet --body <host>
+gh variable set RELAY_DOMAIN --env relay-testnet --body testnet.relay.zafe.cash
+rm relay-ci relay-ci.pub
 
-# 4. nightly backups (see below)
-sudo apt install sqlite3
-sudo cp infra/relay/vps/zafe-relay-backup.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now zafe-relay-backup.timer
+# 4. deploy: Actions > Relay deploy > Run workflow (or push to main)
+curl https://testnet.relay.zafe.cash/health     # ok
 ```
 
-Caddy gets and renews the certificate on its own once DNS resolves to the server.
+**Self-hosting without CI:** copy `vps/` to the server, write `.env` with
+`RELAY_TESTNET_IMAGE=ghcr.io/zafe-cash/zafe-relay:main` and
+`RELAY_TESTNET_DOMAIN=<your domain>`, create `/var/backups/zafe-relay/testnet` owned by
+uid 10001, and run `docker compose up -d`.
+
+**FCM pushes** (optional, not wired up yet): mount the key as a compose secret file and set
+`ZAFE_FCM_SERVICE_ACCOUNT` on the relay service; never put it in the image or the repo.
+
+**Mainnet** (later): a second relay service with its own volume, backup sidecar and
+backup directory, a second Caddy site block (`relay.zafe.cash`), and a `relay-mainnet`
+environment with required reviewers that promotes a digest already running on testnet.
+
+Operations (as `ubuntu` or `deploy`, in `/opt/zafe-relay`):
+
+```bash
+docker compose ps
+docker compose logs -f relay-testnet
+docker compose exec backup-testnet sh /backup.sh once          # backup now
+bash deploy.sh ghcr.io/zafe-cash/zafe-relay@sha256:<old> testnet.relay.zafe.cash </dev/null   # manual rollback
+```
 
 ## Backups
 
 What's lost with the database: mailboxes, member lists, undelivered envelopes and the
 encrypted vault logs. Members keep their keys (funds are safe), but today there is no way
 to re-seed a relay from members' devices, so a lost database means vaults stop
-coordinating. Back it up.
+coordinating, and apps don't detect a relay that serves an older log (a restored
+backup). Back it up, and fix both before mainnet (`docs/tracker.md`).
 
-- **Nightly `sqlite3 .backup`** (VPS: `vps/zafe-relay-backup.{service,timer}`): an online,
-  consistent copy through SQLite's backup API, checked with `integrity_check`, gzipped,
-  kept 14 days in `/var/backups/zafe-relay`. Ship that directory off the machine (restic,
-  rclone, the provider's snapshots).
-- **Litestream** (suggestion, either path): streams the WAL to S3-compatible storage
-  continuously, with point-in-time restore. Run it as a sidecar/second process with
+- **Nightly `sqlite3 .backup`** (VPS: the `backup-testnet` sidecar, `vps/backup.sh`):
+  an online, consistent copy through SQLite's backup API, checked with
+  `integrity_check`, gzipped, kept 14 days in `/var/backups/zafe-relay/testnet`. One
+  runs at 03:17 UTC, one whenever the sidecar starts, and one before every deploy. Ship
+  that directory off the machine too (restic, rclone, the provider's backups).
+- **Litestream** (planned for mainnet, either path): streams the WAL to S3-compatible
+  storage continuously, with point-in-time restore. Run it as another sidecar with
   `litestream replicate /data/relay.sqlite s3://bucket/relay`. Not wired up here.
 
-Restore: stop the relay, replace `relay.sqlite` (delete stale `-wal`/`-shm`), start it.
+Restore (VPS, in `/opt/zafe-relay`): stop the relay, replace `relay.sqlite` in the volume
+(deleting stale `-wal`/`-shm`), start it. Backups are readable by root only:
+
+```bash
+sudo gunzip -c /var/backups/zafe-relay/testnet/relay-<time>.sqlite.gz > /tmp/relay.sqlite
+docker compose stop relay-testnet backup-testnet
+docker compose run --rm --no-deps --entrypoint /bin/rm backup-testnet -f /data/relay.sqlite-wal /data/relay.sqlite-shm
+docker compose run --rm --no-deps -v /tmp/relay.sqlite:/restore.sqlite:ro --entrypoint /bin/cp \
+  backup-testnet /restore.sqlite /data/relay.sqlite
+docker compose start relay-testnet backup-testnet && rm /tmp/relay.sqlite
+```
 
 ## Pointing the app at it
 
@@ -161,7 +201,7 @@ Build the app with the testnet preset and the relay URL:
 
 ```bash
 flutter build apk --dart-define=ZAFE_NETWORK=test \
-  --dart-define=ZAFE_RELAY_URL=https://zafe-relay-testnet.fly.dev
+  --dart-define=ZAFE_RELAY_URL=https://testnet.relay.zafe.cash
 ```
 
 The testnet preset already uses `https://testnet.zec.rocks:443` (Ironwood-aware

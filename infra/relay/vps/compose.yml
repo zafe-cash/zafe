@@ -1,0 +1,74 @@
+# The relay on a VPS: Caddy (TLS) in front of one relay per network, plus a backup
+# sidecar per relay. Deployed by .github/workflows/relay-deploy.yml through deploy.sh,
+# which writes the image references and domains into .env next to this file:
+#
+#   RELAY_TESTNET_IMAGE=ghcr.io/zafe-cash/zafe-relay@sha256:...
+#   RELAY_TESTNET_DOMAIN=testnet.relay.zafe.cash
+#
+# Self-hosting: set those two in .env, then `docker compose up -d`.
+# Mainnet later: copy the relay-testnet + backup-testnet services as relay-mainnet +
+# backup-mainnet (own volume and backup directory), and add a site block to the Caddyfile.
+
+x-relay: &relay
+  restart: unless-stopped
+  # Runs as the image's `zafe` user straight away: a named volume starts out with the
+  # image's /data ownership (uid 10001), so the entrypoint's chown step isn't needed.
+  user: "10001:10001"
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  environment:
+    RUST_LOG: zafe_relay=info
+    # Caddy sets X-Forwarded-For to the client address (it drops client-supplied values).
+    ZAFE_RELAY_CLIENT_IP_HEADER: x-forwarded-for
+  networks: [relay]
+  # No published ports: only Caddy reaches the relay.
+
+x-backup: &backup
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  entrypoint: ["/bin/sh", "/backup.sh"]
+  network_mode: none
+
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      RELAY_TESTNET_DOMAIN: ${RELAY_TESTNET_DOMAIN:?set in .env}
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [relay]
+
+  relay-testnet:
+    <<: *relay
+    image: ${RELAY_TESTNET_IMAGE:?set in .env}
+    volumes:
+      - relay-testnet-data:/data
+
+  backup-testnet:
+    <<: *backup
+    image: ${RELAY_TESTNET_IMAGE:?set in .env}
+    volumes:
+      - relay-testnet-data:/data
+      - ./backup.sh:/backup.sh:ro
+      - /var/backups/zafe-relay/testnet:/backups
+
+networks:
+  relay: {}
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+  relay-testnet-data: {}

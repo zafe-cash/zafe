@@ -1,0 +1,21 @@
+# Caddy in compose.yml. It obtains and renews the Let's Encrypt certificate by itself
+# once the domain's A/AAAA record points at this server (DNS only, no CDN proxy) and
+# ports 80 and 443 are open.
+
+{$RELAY_TESTNET_DOMAIN} {
+	# Relay requests are small signed postcard bodies; refuse anything large early
+	# (the relay itself refuses bodies over 1 MiB).
+	request_body {
+		max_size 1MB
+	}
+	# No response timeout (Caddy's default): long polls on /v1/wait hold up to 25 s.
+	# One upstream: no active health checks (they keep it marked down for a whole interval
+	# after a deploy restarts it). Instead a request that arrives during the restart is
+	# retried for up to 10 s.
+	reverse_proxy relay-testnet:8080 {
+		lb_try_duration 10s
+		lb_try_interval 250ms
+	}
+	# No access log on purpose: the relay keeps as little metadata as it can, and client
+	# IPs with timestamps would undo part of that. Add a `log` block only to debug.
+}
