@@ -37,6 +37,11 @@ val zafeLinkHost: String = dartDefines["ZAFE_LINK_HOST"].orEmpty().lowercase().a
     }
 }
 
+// Testnet builds (`--dart-define=ZAFE_NETWORK=test`) are a separate app, "Zafe Testnet"
+// (`xyz.zafe.zafe.testnet`), so it installs next to the mainnet app and can never update
+// it or share its data. Mainnet and regtest (development) builds are `xyz.zafe.zafe`.
+val zafeTestnet: Boolean = dartDefines["ZAFE_NETWORK"] in setOf("test", "testnet")
+
 android {
     namespace = "xyz.zafe.zafe"
     compileSdk = flutter.compileSdkVersion
@@ -54,10 +59,8 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "xyz.zafe.zafe"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = if (zafeTestnet) "xyz.zafe.zafe.testnet" else "xyz.zafe.zafe"
+        manifestPlaceholders["zafeAppLabel"] = if (zafeTestnet) "Zafe Testnet" else "Zafe"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

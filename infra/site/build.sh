@@ -15,7 +15,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 out="$here/dist"
-package="xyz.zafe.zafe"
+# The mainnet app and the separate testnet app (ZAFE_NETWORK=test builds).
+packages=(xyz.zafe.zafe xyz.zafe.zafe.testnet)
 repo="https://github.com/zafe-cash/zafe"
 download="${ZAFE_DOWNLOAD_URL:-}"
 source_url="${ZAFE_SOURCE_URL:-$repo}"
@@ -77,18 +78,20 @@ PY
 
 if (( ${#fingerprints[@]} )); then
   mkdir -p "$out/.well-known"
-  cat > "$out/.well-known/assetlinks.json" <<EOF
-[
-  {
+  # One entry per app package, each with every signing certificate.
+  python3 - "$out/.well-known/assetlinks.json" "${fingerprints[@]}" -- "${packages[@]}" <<'PY'
+import json, sys
+args = sys.argv[2:]
+cut = args.index("--")
+prints, packages = args[:cut], args[cut + 1:]
+links = [{
     "relation": ["delegate_permission/common.handle_all_urls"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "$package",
-      "sha256_cert_fingerprints": [$(join_quoted "${fingerprints[@]}")]
-    }
-  }
-]
-EOF
+    "target": {"namespace": "android_app", "package_name": p, "sha256_cert_fingerprints": prints},
+} for p in packages]
+with open(sys.argv[1], "w") as f:
+    json.dump(links, f, indent=2)
+    f.write("\n")
+PY
 else
   echo "warning: no ZAFE_ANDROID_CERT_SHA256, so no assetlinks.json (App Links won't verify)" >&2
 fi

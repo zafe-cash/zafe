@@ -50,7 +50,8 @@ git tag v0.1.0
 git push origin main v0.1.0
 ```
 
-The workflow builds `zafe-<version>-testnet-arm64.apk`, publishes it as a **pre-release**
+The workflow builds `zafe-<version>-testnet-arm64.apk` (app "Zafe Testnet", package
+`xyz.zafe.zafe.testnet`, separate from the future mainnet app `xyz.zafe.zafe`), publishes it as a **pre-release**
 with a `.sha256` file and the signing certificate fingerprint in the notes. The build
 number is the workflow run number, so each release installs over the previous one. Only tags
 start it: the `android-release` environment refuses any other ref.

@@ -428,6 +428,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   10001 with `setpriv` (Fly volumes mount root-owned). The Docker context must contain
   **every workspace member** (`app/rust` too) or `cargo build --locked` fails;
   `.dockerignore` whitelists them. One machine per SQLite file, never scale out.
+- **Testnet is a separate Android app**: `ZAFE_NETWORK=test` builds get
+  `applicationId xyz.zafe.zafe.testnet` and the label "Zafe Testnet" (`build.gradle.kts`
+  reads the dart-define; the manifest label is `${zafeAppLabel}`), so it installs next to
+  the mainnet app and can't update it. Mainnet and regtest/dev builds stay
+  `xyz.zafe.zafe` (the harness and `adb` commands use that). The site's
+  `assetlinks.json` lists both packages. `google-services.json` must contain a client
+  for whichever package you build, or the Google Services Gradle plugin fails.
 - **Hosted relay (testnet)**: `testnet.relay.zafe.cash` on an OVH VPS (57.129.172.198,
   Ubuntu 26.04), compose in `/opt/zafe-relay`. Never deploy by hand (scp/systemctl): push
   to `main` or run the Relay deploy workflow; it deploys an image **by digest**, and
@@ -988,8 +995,10 @@ Learned while studying it:
   `app/android/app/` (gitignored) and the Gradle plugin applies itself; without it the app
   builds and relies on background checks. Relay: `ZAFE_FCM_SERVICE_ACCOUNT=<key.json>`
   (never commit it). APNs isn't implemented yet (iOS).
-- **Firebase project `zafe-18c4d`** (the user's account), Android app `xyz.zafe.zafe`
-  (`1:303423821426:android:deff491a8e80f394ea14eb`). Regenerate the app config with
+- **Firebase project `zafe-18c4d`** (the user's account), Android apps `xyz.zafe.zafe`
+  (`1:303423821426:android:deff491a8e80f394ea14eb`) and the testnet app
+  `xyz.zafe.zafe.testnet` (`1:303423821426:android:8a429ba817be26f5ea14eb`, added
+  2026-10-06); one `google-services.json` lists both. Regenerate the app config with
   `npx -y firebase-tools@latest apps:sdkconfig ANDROID <app id> --project zafe-18c4d --out
   app/android/app/google-services.json`. The relay key (service account
   `firebase-adminsdk-fbsvc@zafe-18c4d.iam.gserviceaccount.com`) lives at
