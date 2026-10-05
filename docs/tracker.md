@@ -25,8 +25,9 @@ Last updated: 2026-10-06 (relay CI/CD deploy to the OVH VPS; relay loss/rollback
   - [x] The repo is public (2026-10-01, rescanned first); description and homepage link
         the site. Moved to `zafe-cash/zafe` on 2026-10-03.
   - [ ] **(you)** Post the preview (Zypherpunk Discord).
-  - [ ] After the relay is deployed: testnet APK in GitHub Releases, set
-        `ZAFE_DOWNLOAD_URL` in the site build ("Get Zafe" comes back), second post.
+  - [ ] Testnet APK in GitHub Releases (relay live since 2026-10-06; `v0.1.0` tagged, its
+        first Release runs were cancelled mid-build), then set `ZAFE_DOWNLOAD_URL` in the
+        site build ("Get Zafe" comes back), second post.
 
 - [x] **Brand: Verdigris + Seam** (decided 2026-10-01, `docs/brand.md`; implemented on
       branch `worktree-agent-a762a0ef73fae7642`): palette tokens (generated,
