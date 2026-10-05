@@ -301,8 +301,7 @@ class _LightwalletdSheetState extends ConsumerState<_LightwalletdSheet> {
           Text(
             'The lightwalletd server this phone reads the $kZafeNetwork chain '
             'from. It sees which blocks this phone downloads, not the vault\'s '
-            'keys. If a listed server stops answering, Zafe moves to the next '
-            'one.',
+            'keys.${kLightwalletdPresets.length > 1 ? ' If a listed server stops answering, Zafe moves to the next one.' : ''}',
             style: AppTypography.bodyMedium.copyWith(
               color: colors.text.secondary,
             ),
