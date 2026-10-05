@@ -435,6 +435,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `xyz.zafe.zafe` (the harness and `adb` commands use that). The site's
   `assetlinks.json` lists both packages. `google-services.json` must contain a client
   for whichever package you build, or the Google Services Gradle plugin fails.
+- **Zcash server list** (2026-10-06, Vizor-style): `core/config/lightwalletd_presets.dart`
+  holds the public servers per network (first = the build default; mainnet: Zec Rocks
+  global/na/eu/ap/sa, Stardust us/eu, Zcash Explorer; testnet: only testnet.zec.rocks
+  answered). Settings > Zcash server lists them with a latency probe each
+  (`probeLightwalletd`, a `checkLightwalletd` call, through Tor when it's on) plus
+  "Custom server". Sync fails over (`serverFailoverProvider`, from `VaultNotifier.sync`)
+  to the next listed server on unreachable/timeout/TLS/server-behind, at most once per
+  5 min, never away from a custom URL, and the app toasts the move. Background checks
+  don't fail over. Re-probe the list (`grpcurl ... GetLightdInfo`) before adding hosts:
+  Stardust eu2/jp and two community servers were dead or had broken TLS.
 - **Hosted relay (testnet)**: `testnet.relay.zafe.cash` on an OVH VPS (57.129.172.198,
   Ubuntu 26.04), compose in `/opt/zafe-relay`. Never deploy by hand (scp/systemctl): push
   to `main` or run the Relay deploy workflow; it deploys an image **by digest**, and

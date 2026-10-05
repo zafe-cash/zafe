@@ -18,6 +18,7 @@ import 'device_lock_provider.dart' show kAppLockKey, kRequireUnlockKey;
 import 'endpoints_provider.dart';
 import 'payment_sounds_provider.dart' show kPaymentSoundsKey;
 import 'privacy_mode_provider.dart' show kPrivacyModeKey;
+import 'server_failover_provider.dart';
 import 'theme_mode_provider.dart' show kThemeModeKey, themeModeFromName;
 
 const kActiveVaultKey = 'zafe_active_vault';
@@ -424,7 +425,13 @@ class VaultNotifier extends Notifier<VaultState> {
     } catch (e) {
       _dirty = true;
       debugPrint('sync failed at $step: ${describeError(e)}');
+      // A listed Zcash server that stops answering: move to the next listed one and
+      // sync again (at most one attempt per few minutes, never away from a custom URL).
+      final switched = await ref
+          .read(serverFailoverProvider.notifier)
+          .afterSyncFailure(e);
       state = state.copyWith(syncing: false, syncError: e);
+      if (switched) await sync();
     }
   }
 }

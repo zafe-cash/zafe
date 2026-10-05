@@ -39,6 +39,7 @@ import 'features/settings/viewing_key_screen.dart';
 import 'providers/device_lock_provider.dart';
 import 'providers/tor_provider.dart';
 import 'providers/mempool_watch_provider.dart';
+import 'providers/server_failover_provider.dart';
 import 'providers/theme_mode_provider.dart';
 import 'notifications/vault_updates.dart' show kReceivedPrefix, kSeatMovePrefix;
 import 'notifications/vault_watch.dart';
@@ -160,6 +161,17 @@ final _routerProvider = Provider<GoRouter>((ref) {
   paymentLinks.addListener(openPaymentLink);
   ref.onDispose(() => paymentLinks.removeListener(openPaymentLink));
   ref.listen(appLockedProvider, (_, _) => scheduleMicrotask(openPaymentLink));
+  // Sync moved to another listed Zcash server: say so once.
+  ref.listen(serverFailoverProvider, (_, moved) {
+    final context = router.routerDelegate.navigatorKey.currentContext;
+    if (moved == null || context == null) return;
+    showAppToast(
+      context,
+      moved.message,
+      iconName: AppIcons.warningCircle,
+      duration: const Duration(seconds: 4),
+    );
+  });
   WidgetsBinding.instance.addPostFrameCallback((_) {
     void retry() => scheduleMicrotask(openPaymentLink);
     router.routerDelegate.addListener(retry);

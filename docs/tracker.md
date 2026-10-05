@@ -482,6 +482,10 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       Self-hosting = a DAO runs `infra/relay/vps/compose.yml` and all its members connect to
       it. Follow-up: spec §6/§14 still promise moving relays and a device log cache; update
       them when the spec is next revised
+- [x] Zcash server list + failover (2026-10-06): public lightwalletd presets per network
+      with latency in Settings, custom URL, automatic failover between listed servers
+      (AGENTS.md "Zcash server list"). Not done: switching back to the chosen server when
+      it recovers, failover in background checks
 - [ ] Relay URL per vault: the invite carries the vault's relay URL and the app stores it
       with the vault (today one relay setting per network for the whole app), so vaults on
       a self-hosted relay and on ours coexist in one app. Bumps the invite version

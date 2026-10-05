@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/config/endpoints.dart';
+import '../../core/config/lightwalletd_presets.dart';
 import '../../core/config/network_config.dart';
 import '../../core/errors/sync_failure.dart';
 import '../../core/errors/zafe_error_copy.dart';
@@ -17,11 +18,14 @@ import '../../core/widgets/mobile_text_field.dart';
 import '../../notifications/vault_watch.dart' show reregisterPush;
 import '../../providers/endpoints_provider.dart';
 import '../../providers/proposals_provider.dart';
+import '../../providers/server_failover_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/endpoints.dart' as rust;
 
 /// Edits the relay or lightwalletd URL: checks the format, tries a connection, then saves
 /// (for every vault on this phone). "Reset to default" goes back to the build's URL.
+/// The Zcash server opens on the list of public servers first ([kLightwalletdPresets]),
+/// with a custom URL one tap away.
 Future<void> showEndpointSheet(
   BuildContext context,
   WidgetRef ref,
@@ -29,7 +33,9 @@ Future<void> showEndpointSheet(
 ) async {
   final changed = await showAppMobileSheet<bool>(
     context: context,
-    builder: (_) => _EndpointSheet(kind: kind),
+    builder: (_) => kind == EndpointKind.lightwalletd
+        ? const _LightwalletdSheet()
+        : const _EndpointSheet(kind: EndpointKind.relay),
   );
   if (changed == true) {
     if (kind == EndpointKind.relay) unawaited(reregisterPush());
@@ -153,6 +159,183 @@ Future<String?> tryEndpoint(EndpointKind kind, String url) async {
             ? 'This doesn\'t look like a Zafe relay.'
             : 'This doesn\'t look like a lightwalletd server.',
     };
+  }
+}
+
+/// The public servers and the custom one, with what each answered. Plain data, so it can
+/// be rendered without Rust (`tool/screens/servers_render_test.dart`).
+class LightwalletdServerList extends StatelessWidget {
+  const LightwalletdServerList({
+    super.key,
+    required this.presets,
+    required this.selectedUrl,
+    required this.probes,
+    required this.onSelect,
+    required this.onCustom,
+    this.busyUrl,
+  });
+
+  final List<LightwalletdPreset> presets;
+  final String selectedUrl;
+  final Map<String, ServerProbe> probes;
+  final ValueChanged<LightwalletdPreset>? onSelect;
+  final VoidCallback? onCustom;
+
+  /// The server being tried after a tap.
+  final String? busyUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final custom = lightwalletdPresetFor(selectedUrl, presets) == null;
+    Widget selectedMark(bool selected) => SizedBox(
+      width: 20,
+      child: selected
+          ? AppIcon(AppIcons.check, size: 20, color: colors.icon.accent)
+          : null,
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final preset in presets)
+          MobileListRow(
+            leading: selectedMark(preset.url == selectedUrl),
+            label: preset.label,
+            value: busyUrl == preset.url
+                ? 'Connecting...'
+                : (probes[preset.url] ?? ServerProbe.checking).label,
+            valueColor: switch ((probes[preset.url] ?? ServerProbe.checking)
+                .check) {
+              ServerCheck.unavailable ||
+              ServerCheck.wrongNetwork => colors.text.destructive,
+              _ => colors.text.secondary,
+            },
+            minRowHeight: 48,
+            onTap: onSelect == null ? null : () => onSelect!(preset),
+          ),
+        MobileListRow(
+          leading: selectedMark(custom),
+          label: 'Custom server',
+          value: custom ? endpointHost(selectedUrl) : null,
+          valueColor: colors.text.secondary,
+          minRowHeight: 48,
+          showChevron: true,
+          onTap: onCustom,
+        ),
+      ],
+    );
+  }
+}
+
+/// Picks the Zcash server from the public list (each one checked when the sheet opens) or
+/// opens the custom URL editor.
+class _LightwalletdSheet extends ConsumerStatefulWidget {
+  const _LightwalletdSheet();
+
+  @override
+  ConsumerState<_LightwalletdSheet> createState() => _LightwalletdSheetState();
+}
+
+class _LightwalletdSheetState extends ConsumerState<_LightwalletdSheet> {
+  final _probes = <String, ServerProbe>{};
+  String? _busyUrl;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final preset in kLightwalletdPresets) {
+      unawaited(
+        probeLightwalletd(preset.url).then((probe) {
+          if (mounted) setState(() => _probes[preset.url] = probe);
+        }),
+      );
+    }
+  }
+
+  Future<void> _select(LightwalletdPreset preset) async {
+    if (preset.url == ref.read(endpointsProvider).lightwalletdUrl) {
+      Navigator.of(context).pop(false);
+      return;
+    }
+    setState(() {
+      _busyUrl = preset.url;
+      _error = null;
+    });
+    final problem = await tryEndpoint(EndpointKind.lightwalletd, preset.url);
+    if (!mounted) return;
+    if (problem != null) {
+      setState(() {
+        _busyUrl = null;
+        _error = '${preset.label}: $problem';
+        _probes[preset.url] = const ServerProbe(ServerCheck.unavailable);
+      });
+      return;
+    }
+    await ref
+        .read(endpointsProvider.notifier)
+        .set(EndpointKind.lightwalletd, preset.url);
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _custom() async {
+    final changed = await showAppMobileSheet<bool>(
+      context: context,
+      builder: (_) => const _EndpointSheet(kind: EndpointKind.lightwalletd),
+    );
+    if (changed == true && mounted) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final busy = _busyUrl != null;
+    return MobileModalScaffold(
+      title: 'Zcash server',
+      onClose: () => Navigator.of(context).pop(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'The lightwalletd server this phone reads the $kZafeNetwork chain '
+            'from. It sees which blocks this phone downloads, not the vault\'s '
+            'keys. If a listed server stops answering, Zafe moves to the next '
+            'one.',
+            style: AppTypography.bodyMedium.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.s),
+          LightwalletdServerList(
+            presets: kLightwalletdPresets,
+            selectedUrl: ref.watch(endpointsProvider).lightwalletdUrl,
+            probes: _probes,
+            busyUrl: _busyUrl,
+            onSelect: busy ? null : _select,
+            onCustom: busy ? null : _custom,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              _error!,
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.destructive,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Checking the list contacts each server once (through Tor when '
+            'it\'s on).',
+            style: AppTypography.bodySmall.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
