@@ -174,10 +174,12 @@ bash deploy.sh ghcr.io/zafe-cash/zafe-relay@sha256:<old> testnet.relay.zafe.cash
 ## Backups
 
 What's lost with the database: mailboxes, member lists, undelivered envelopes and the
-encrypted vault logs. Members keep their keys (funds are safe), but today there is no way
-to re-seed a relay from members' devices, so a lost database means vaults stop
-coordinating, and apps don't detect a relay that serves an older log (a restored
-backup). Back it up, and fix both before mainnet (`docs/tracker.md`).
+encrypted vault logs. Members keep their keys (funds are safe), but the relay holds the
+only copy of each vault's log (one relay per vault by design, no re-seeding), so a lost
+database means vaults stop coordinating. The database is the thing to protect: back it
+up here, and use a managed database with point-in-time recovery once the relay scales out
+(Postgres). Apps don't yet detect a relay that serves an older log (a restored backup);
+that check comes before mainnet (`docs/tracker.md`).
 
 - **Nightly `sqlite3 .backup`** (VPS: the `backup-testnet` sidecar, `vps/backup.sh`):
   an online, consistent copy through SQLite's backup API, checked with

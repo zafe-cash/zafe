@@ -468,15 +468,22 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] **(you)** Mainnet musts: the audit above, a hosted relay (OVH VPS) with its URL in
       `kMainnetRelayUrl`, and a small end-to-end mainnet dry run (create, receive,
       propose, sign, send, restore) incl. `zec.rocks:443` with the app
-- [ ] Relay loss and rollback, before mainnet (found 2026-10-06): apps keep no copy of the
-      vault log and no saved head (`node::load_log` re-reads from entry 0), so (a) a relay
-      serving an older log (restored backup, or a malicious relay) is accepted silently and
-      can bring back a cancelled proposal that already has t one-tap shares, and (b) a lost
-      relay DB freezes every vault with no way back (proposals, votes, names gone; funds
-      safe but unspendable in the app). Fix: store the log length + head hash per vault and
-      refuse a shorter/forked log (spec §6.3 "relay inconsistency"), keep the decrypted log
-      cache spec §14 promises, and add re-seeding/moving a vault to another relay from
-      members' copies (spec says vaults can move relays; no code does)
+- [ ] Relay rollback check, before mainnet (found 2026-10-06): apps keep no saved head
+      (`node::load_log` re-reads from entry 0), so a relay serving an older log (a restored
+      backup, or a self-hosted relay run by someone else) is accepted silently and can bring
+      back a cancelled proposal that already has t one-tap shares. Fix: store the log length
+      + head hash per vault in secure storage and refuse a shorter/forked log (spec §6.3
+      "relay inconsistency")
+- [x] **Decided 2026-10-06: one relay per vault, no relay migration.** Considered and
+      dropped: moving a vault between relays (fallback lists, signed move entries, history
+      re-seeded from a device log cache) and per-member home relays. Scaling = stateless
+      relay instances on a shared remote DB (Postgres; managed backups cover DB loss).
+      Self-hosting = a DAO runs `infra/relay/vps/compose.yml` and all its members connect to
+      it. Follow-up: spec §6/§14 still promise moving relays and a device log cache; update
+      them when the spec is next revised
+- [ ] Relay URL per vault: the invite carries the vault's relay URL and the app stores it
+      with the vault (today one relay setting per network for the whole app), so vaults on
+      a self-hosted relay and on ours coexist in one app. Bumps the invite version
 - [ ] Mainnet relay: second compose service + `relay.zafe.cash` + Litestream to object
       storage + a `relay-mainnet` environment with required reviewers that promotes a
       digest already on testnet
