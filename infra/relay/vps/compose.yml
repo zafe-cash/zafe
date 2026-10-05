@@ -22,6 +22,12 @@ x-relay: &relay
     RUST_LOG: zafe_relay=info
     # Caddy sets X-Forwarded-For to the client address (it drops client-supplied values).
     ZAFE_RELAY_CLIENT_IP_HEADER: x-forwarded-for
+  # Optional secrets, never in the repo or the image: ZAFE_FCM_SERVICE_ACCOUNT_JSON (the
+  # Firebase service-account key on one line) enables pushes. CI writes this file from the
+  # environment secret RELAY_FCM_SERVICE_ACCOUNT_JSON; without it pushes are only logged.
+  env_file:
+    - path: secrets.env
+      required: false
   networks: [relay]
   # No published ports: only Caddy reaches the relay.
 

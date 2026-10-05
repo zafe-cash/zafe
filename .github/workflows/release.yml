@@ -2,26 +2,24 @@ name: Release (Android)
 
 # Builds a signed testnet APK and publishes it as a GitHub pre-release.
 #
-#   git tag v0.1.0 && git push origin v0.1.0      (or run it by hand: Actions > Release)
+#   git tag v0.1.0 && git push origin v0.1.0
 #
-# Needs (Settings > Secrets and variables > Actions), see docs/releasing.md:
-#   variable ZAFE_RELAY_URL            the deployed testnet relay, e.g. https://relay.example.com
-#   variable ZAFE_LINK_HOST            optional: host of the invite landing site (infra/site/),
-#                                      e.g. zafe.example; without it invites are zafe:// links
-#   secret   ANDROID_KEYSTORE_BASE64   base64 of the upload keystore (.jks)
-#   secret   ANDROID_KEYSTORE_PASSWORD
-#   secret   ANDROID_KEY_ALIAS
-#   secret   ANDROID_KEY_PASSWORD
-#   secret   GOOGLE_SERVICES_JSON      optional: Firebase config for push notifications
+# Needs, see docs/releasing.md:
+#   repository variables
+#     ZAFE_RELAY_URL             the deployed testnet relay (https://testnet.relay.zafe.cash)
+#     ZAFE_LINK_HOST             optional: host of the invite landing site (infra/site/),
+#                                e.g. zafe.cash; without it invites are zafe:// links
+#   secrets of the environment `android-release` (only v* tags may use it, so no branch or
+#   pull-request workflow can read the signing key)
+#     ANDROID_KEYSTORE_BASE64    base64 of the upload keystore (.jks)
+#     ANDROID_KEYSTORE_PASSWORD
+#     ANDROID_KEY_ALIAS
+#     ANDROID_KEY_PASSWORD
+#     GOOGLE_SERVICES_JSON       optional: Firebase config for push notifications
 
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Version name without the "v" (e.g. 0.1.0); tagged v<version>
-        required: true
 
 permissions:
   contents: write
@@ -38,6 +36,7 @@ jobs:
     name: Build and publish the APK
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    environment: android-release
     env:
       ZAFE_RELAY_URL: ${{ vars.ZAFE_RELAY_URL }}
       ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
@@ -47,11 +46,7 @@ jobs:
       - name: Version
         id: version
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            v="${GITHUB_REF_NAME#v}"
-          else
-            v="${{ inputs.version }}"
-          fi
+          v="${GITHUB_REF_NAME#v}"
           if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$'; then
             echo "::error::Version '$v' is not like 1.2.3"; exit 1
           fi

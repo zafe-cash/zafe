@@ -8,6 +8,8 @@ name: Relay deploy
 #   secret   RELAY_KNOWN_HOSTS   `ssh-keyscan -t ed25519 <host>` output, checked out of band
 #   variable RELAY_HOST          the VPS address, e.g. 57.129.172.198
 #   variable RELAY_DOMAIN        e.g. testnet.relay.zafe.cash (DNS only, pointing at the VPS)
+#   secret   RELAY_FCM_SERVICE_ACCOUNT_JSON   optional: Firebase service-account key (JSON)
+#                                for pushes; written to the server's secrets.env each deploy
 
 on:
   push:
@@ -115,6 +117,19 @@ jobs:
             "${{ vars.RELAY_HOST }}" > ~/.ssh/config
       - name: Copy compose files
         run: tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh | ssh relay 'tar -C /opt/zafe-relay -xz'
+      - name: Relay secrets
+        env:
+          FCM: ${{ secrets.RELAY_FCM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$FCM" ]; then
+            # One line, single-quoted: Compose then takes it literally (no ${} interpolation).
+            json=$(jq -ce . <<<"$FCM")
+            case "$json" in *"'"*) echo "::error::the FCM key contains a single quote"; exit 1;; esac
+            printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'\n" "$json" |
+              ssh relay 'umask 077 && cat > /opt/zafe-relay/secrets.env'
+          else
+            ssh relay 'rm -f /opt/zafe-relay/secrets.env'
+          fi
       - name: Deploy
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}

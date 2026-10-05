@@ -150,8 +150,13 @@ curl https://testnet.relay.zafe.cash/health     # ok
 `RELAY_TESTNET_DOMAIN=<your domain>`, create `/var/backups/zafe-relay/testnet` owned by
 uid 10001, and run `docker compose up -d`.
 
-**FCM pushes** (optional, not wired up yet): mount the key as a compose secret file and set
-`ZAFE_FCM_SERVICE_ACCOUNT` on the relay service; never put it in the image or the repo.
+**FCM pushes** (optional): the relay reads `secrets.env` next to `compose.yml` if it
+exists (mode 600, never in the repo or the image), with the Firebase service-account key
+on one line, single-quoted so Compose takes it literally:
+`ZAFE_FCM_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'`. The hosted relay gets it
+from the `relay-testnet` environment secret `RELAY_FCM_SERVICE_ACCOUNT_JSON`, which the
+deploy writes on every run (removing the secret removes the file). The app must be built
+with the matching Firebase project's `google-services.json` (`docs/releasing.md`).
 
 **Mainnet** (later): a second relay service with its own volume, backup sidecar and
 backup directory, a second Caddy site block (`relay.zafe.cash`), and a `relay-mainnet`

@@ -25,18 +25,22 @@ Releases are testnet APKs on GitHub Releases, built and signed by
      `zafe.cash` (set 2026-10-01; the site serves `assetlinks.json` with this key's
      fingerprint). Without it, invites are `zafe://` links, which only work where Zafe
      is installed.
-   - Secrets (not set yet; set them before the first release), from `~/zafe`:
+   - Environment `android-release` (set 2026-10-06): deployment policy **tags `v*` only**,
+     so only a release tag's run can read the signing key. Its secrets, from `~/zafe`:
 
      ```bash
-     d=~/.config/zafe
-     base64 -w0 $d/zafe-upload.jks | gh secret set ANDROID_KEYSTORE_BASE64
-     gh secret set ANDROID_KEYSTORE_PASSWORD < $d/zafe-upload.password
-     gh secret set ANDROID_KEY_PASSWORD < $d/zafe-upload.password
-     printf zafe | gh secret set ANDROID_KEY_ALIAS
+     d=~/.config/zafe; e="--env android-release"
+     base64 -w0 $d/zafe-upload.jks | gh secret set ANDROID_KEYSTORE_BASE64 $e
+     gh secret set ANDROID_KEYSTORE_PASSWORD $e < $d/zafe-upload.password
+     gh secret set ANDROID_KEY_PASSWORD $e < $d/zafe-upload.password
+     printf zafe | gh secret set ANDROID_KEY_ALIAS $e
+     gh secret set GOOGLE_SERVICES_JSON $e < app/android/app/google-services.json
      ```
-   - Optional secret `GOOGLE_SERVICES_JSON`: the contents of
-     `app/android/app/google-services.json` (Firebase project `zafe-18c4d`), for push.
-     The relay then needs the FCM service account too.
+   - Push (set 2026-10-06): `GOOGLE_SERVICES_JSON` above (Firebase project `zafe-18c4d`)
+     puts Firebase in the APK; the relay sends through FCM with the service account in
+     the `relay-testnet` environment secret `RELAY_FCM_SERVICE_ACCOUNT_JSON`
+     (`gh secret set RELAY_FCM_SERVICE_ACCOUNT_JSON --env relay-testnet < $d/fcm-service-account.json`,
+     then redeploy the relay).
 
 ## Each release
 
@@ -48,8 +52,8 @@ git push origin main v0.1.0
 
 The workflow builds `zafe-<version>-testnet-arm64.apk`, publishes it as a **pre-release**
 with a `.sha256` file and the signing certificate fingerprint in the notes. The build
-number is the workflow run number, so each release installs over the previous one. You
-can also start it from the Actions tab with a version (it creates the tag).
+number is the workflow run number, so each release installs over the previous one. Only tags
+start it: the `android-release` environment refuses any other ref.
 
 ## Locally
 
