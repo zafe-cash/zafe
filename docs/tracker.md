@@ -140,11 +140,13 @@ Open
 - [x] Relay packaging (2026-09-30): `infra/relay/Dockerfile` (non-root, `/data` volume,
       `$PORT`), `GET /health`, SIGTERM shutdown, FCM key from a file or secret env var;
       Fly.io template, VPS recipe (systemd + Caddy), nightly backup timer, README
-- [~] Hosted relay deployment (testnet), 2026-10-06: OVH VPS-1 (UK, Ubuntu 26.04,
+- [x] Hosted relay deployment (testnet), 2026-10-06: OVH VPS-1 (UK, Ubuntu 26.04,
       57.129.172.198) at `testnet.relay.zafe.cash`, Docker Compose + Caddy, deployed by
       `.github/workflows/relay-deploy.yml` (GHCR image by digest, provenance, health check,
-      rollback; `infra/relay/README.md` Path B). Left: **(you)** the DNS record, the first
-      green deploy, then `ZAFE_RELAY_URL` in the release variables and a testnet build.
+      rollback; `infra/relay/README.md` Path B). Live: first CI deploy green (`abc19c0`),
+      `https://testnet.relay.zafe.cash/health` answers ok, release variable `ZAFE_RELAY_URL`
+      set. Left: **(you)** make the GHCR package `zafe-relay` public (self-hosters, and
+      `gh attestation verify` without login), then a testnet build against it.
       Relay is SQLite today, Postgres for the hosted tier
 - [x] Relay rate and size limits (2026-09-30): token buckets per signing key (after the
       signature verifies) and per client IP (`zafe_relay::limits`, 429 + `Retry-After`,

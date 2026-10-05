@@ -21,7 +21,7 @@ Releases are testnet APKs on GitHub Releases, built and signed by
    base64 -w0 zafe-upload.jks > zafe-upload.jks.b64
    ```
 3. **GitHub settings** of the repo (Settings > Secrets and variables > Actions):
-   - Variables: `ZAFE_RELAY_URL` = the relay URL (not set yet). `ZAFE_LINK_HOST` =
+   - Variables: `ZAFE_RELAY_URL` = `https://testnet.relay.zafe.cash` (set 2026-10-06). `ZAFE_LINK_HOST` =
      `zafe.cash` (set 2026-10-01; the site serves `assetlinks.json` with this key's
      fingerprint). Without it, invites are `zafe://` links, which only work where Zafe
      is installed.
