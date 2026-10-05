@@ -295,7 +295,6 @@ Open
       with this phone's own label taking precedence. Tests: `tests/vault.rs`
       (`members_share_their_names`, `version_1_events_still_replay`), `node_keygen`
       (over the relay), `member_names_test.dart`. Needs an on-device check
-- [ ] Endpoint settings editable (today: compile-time dart-defines, read-only)
 - [x] Endpoint settings editable (done 2026-09-30): Settings → Relay / Zcash server opens
       a sheet (format check: https except localhost/127.0.0.1/10.0.2.2 on regtest; then a
       live test: relay `GET /health`, lightwalletd `GetLightdInfo` incl. network) and
@@ -312,6 +311,17 @@ Open
 - [x] Biometric/passcode gate before approving and signing (spec §14; done 2026-09-30,
       `local_auth`; approve, send, propose, backup export, vault removal; setting in
       Settings, default on). Needs an on-device check with a real screen lock
+- [x] Payment sounds + haptics (2026-10-06, `docs/sounds.md`): approve, ready, sent,
+      received, failed; "Payment sounds" in Settings
+  - [ ] iOS handler for `xyz.zafe/payment_feedback` (AVAudioPlayer, CAF/M4A copies; the
+        ringer switch should silence it)
+  - [ ] Hear them on a real phone (the emulator runs with `-no-audio`)
+- [x] First payment is one tap (2026-10-06): every member publishes its commitment pool at
+      the end of keygen (bridge `run_keygen` + CLI), not on its first refresh
+- [ ] One-tap needs **every** member's pool (`vault::assign_commitments`), not just t of
+      them: a member who never opens the app again stops one-tap for the whole vault once
+      the keygen pool (16 proposals' worth) is used up. Assign only groups whose members
+      all have pools. Changes replay, so gate it like an event version; needs a spec note
 - [ ] Unlock gate follow-ups: it is a UI gate only (key material in secure storage is not
       bound to user authentication; a Keystore key with `setUserAuthenticationRequired` /
       Keychain `.userPresence` would make it cryptographic, but background round-2 signing

@@ -16,6 +16,7 @@ import '../rust/api/vault.dart' as rust;
 import '../core/security/app_lock.dart';
 import 'device_lock_provider.dart' show kAppLockKey, kRequireUnlockKey;
 import 'endpoints_provider.dart';
+import 'payment_sounds_provider.dart' show kPaymentSoundsKey;
 import 'privacy_mode_provider.dart' show kPrivacyModeKey;
 import 'theme_mode_provider.dart' show kThemeModeKey, themeModeFromName;
 
@@ -33,6 +34,7 @@ class VaultBootstrap {
     this.appLock = AppLockDelay.standard,
     this.endpoints = ZafeEndpoints.defaults,
     this.useTor = false,
+    this.paymentSounds = true,
   });
   final List<StoredVault> vaults;
   final String? activeId;
@@ -44,6 +46,9 @@ class VaultBootstrap {
 
   /// "Use Tor" (the route was already switched in `main()`; see `torProvider`).
   final bool useTor;
+
+  /// "Payment sounds" (`paymentSoundsProvider`).
+  final bool paymentSounds;
 
   /// Needs Rust initialized (parses the legacy invite when migrating).
   static Future<VaultBootstrap> load() async {
@@ -70,6 +75,7 @@ class VaultBootstrap {
       appLock: AppLockDelay.fromName(prefs.getString(kAppLockKey)),
       endpoints: ZafeEndpoints.fromPrefs(prefs),
       useTor: prefs.getBool(kUseTorKey) ?? false,
+      paymentSounds: prefs.getBool(kPaymentSoundsKey) ?? true,
     );
   }
 }
@@ -324,6 +330,7 @@ class VaultNotifier extends Notifier<VaultState> {
       expiryDays: (await SharedPreferences.getInstance()).getInt(
         _expiryDaysKey(vaultId),
       ),
+      stateDir: await (await ZafePaths.get()).stateDir(vaultId),
     );
     await _store.writeMaterial(vaultId, material);
     await _reload(activeId: vaultId);

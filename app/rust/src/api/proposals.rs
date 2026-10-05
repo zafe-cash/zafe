@@ -14,6 +14,7 @@ use zafe_core::{
     relay_client::RelayClient,
     repair,
     session::{NonceStore, ProposalId},
+    state_dir,
     vault::{ProposalStatus, ProposedPayment, VaultState},
     wallet::{connect, PaymentRequest, ZafeNetwork},
 };
@@ -267,19 +268,19 @@ fn parse_id(hex_id: &str) -> Result<ProposalId, ZafeError> {
 }
 
 fn leader_dir(state_dir: &str) -> PathBuf {
-    PathBuf::from(state_dir).join("leader")
+    PathBuf::from(state_dir).join(state_dir::LEADER)
 }
 
 fn request_file(state_dir: &str, id: &ProposalId) -> PathBuf {
-    leader_dir(state_dir).join(format!("{}.req", hex::encode(id)))
+    leader_dir(state_dir).join(format!("{}.{}", hex::encode(id), state_dir::REQUEST_EXT))
 }
 
 fn pool_store(state_dir: &str) -> FilePoolStore {
-    FilePoolStore::new(PathBuf::from(state_dir).join("pool"))
+    FilePoolStore::new(PathBuf::from(state_dir).join(state_dir::POOL))
 }
 
 fn nonce_store(state_dir: &str) -> FileNonceStore {
-    FileNonceStore::new(PathBuf::from(state_dir).join("nonces"))
+    FileNonceStore::new(PathBuf::from(state_dir).join(state_dir::NONCES))
 }
 
 fn info(state: &VaultState, me: [u8; 32], state_dir: &str) -> Vec<ProposalInfo> {
@@ -426,7 +427,7 @@ pub fn list_proposals(
         let (_, state) = node::load_state(&relay, &me, &m).await?;
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
-        let repair_dir = PathBuf::from(&state_dir).join("repair");
+        let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
         if let Err(e) = repair::help_repairs(&relay, &me, &m, &state, &repair_dir, &mut OsRng).await
         {
             eprintln!("share repair: {e}");
@@ -844,7 +845,7 @@ pub fn cancel_proposal(
 #[flutter_rust_bridge::frb(sync)]
 pub fn restart_signing(state_dir: String, proposal_id: String) -> Result<(), ZafeError> {
     let id = parse_id(&proposal_id)?;
-    for ext in ["req", "own"] {
+    for ext in [state_dir::REQUEST_EXT, state_dir::OWN_SHARES_EXT] {
         let path = leader_dir(&state_dir).join(format!("{}.{ext}", hex::encode(id)));
         match fs::remove_file(&path) {
             Ok(()) => {}
@@ -1020,7 +1021,7 @@ pub fn send_with_progress(
         Ok(bytes) => node::decode_request(&bytes)?,
         Err(_) => {
             // Commitment sets already put in a request must never be reused.
-            let used_path = leader_dir(&state_dir).join("used_commitments.bin");
+            let used_path = leader_dir(&state_dir).join(state_dir::USED_COMMITMENTS);
             let mut used: BTreeSet<[u8; 32]> = match fs::read(&used_path) {
                 Ok(bytes) => node::decode_used_commitments(&bytes)?,
                 Err(_) => BTreeSet::new(),
@@ -1046,7 +1047,11 @@ pub fn send_with_progress(
     runtime().block_on(async {
         // Our own shares, if we are one of the chosen signers: signed once (that consumes
         // the nonces) and kept until the broadcast, so a retry reuses them.
-        let own_path = leader_dir(&state_dir).join(format!("{}.own", hex::encode(id)));
+        let own_path = leader_dir(&state_dir).join(format!(
+            "{}.{}",
+            hex::encode(id),
+            state_dir::OWN_SHARES_EXT
+        ));
         let own: Option<Vec<Vec<u8>>> = match fs::read(&own_path) {
             Ok(bytes) => Some(node::decode_own_shares(&bytes)?),
             Err(_) => {

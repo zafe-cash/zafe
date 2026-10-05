@@ -19,6 +19,7 @@ import '../../core/security/app_lock.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../providers/device_lock_provider.dart';
 import '../../providers/endpoints_provider.dart';
+import '../../providers/payment_sounds_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/theme_mode_provider.dart';
 import '../../providers/tor_provider.dart';
@@ -41,6 +42,7 @@ class SettingsScreen extends ConsumerWidget {
     final vault = ref.watch(vaultProvider);
     final summary = vault.summary;
     final hideAmounts = ref.watch(privacyModeProvider);
+    final paymentSounds = ref.watch(paymentSoundsProvider);
     final themeMode = ref.watch(themeModeProvider);
     final requireUnlock = ref.watch(requireUnlockProvider);
     final appLock = ref.watch(appLockDelayProvider);
@@ -161,6 +163,15 @@ class SettingsScreen extends ConsumerWidget {
                           value: hideAmounts ? 'On' : 'Off',
                           onTap: () =>
                               ref.read(privacyModeProvider.notifier).toggle(),
+                        ),
+                        row(
+                          icon: paymentSounds
+                              ? AppIcons.sound
+                              : AppIcons.soundOff,
+                          label: 'Payment sounds',
+                          value: paymentSounds ? 'On' : 'Off',
+                          onTap: () =>
+                              ref.read(paymentSoundsProvider.notifier).toggle(),
                         ),
                         row(
                           icon: appLock == AppLockDelay.off

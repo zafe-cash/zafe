@@ -15,8 +15,18 @@ use zafe_core::{
     relay_client::RelayClient,
     repair::{self, RecoveryRequest, RecoveryStatus},
     session::ProposalId,
+    state_dir,
     wallet::{connect, latest_height, PaymentRequest, VaultWallet, WalletKey, ZafeNetwork},
 };
+
+// Files in a member's home (dev-only plain files). Signing state uses `state_dir` names.
+const IDENTITY_FILE: &str = "identity.bin";
+const INVITE_FILE: &str = "invite.txt";
+const VAULT_FILE: &str = "vault.bin";
+const WALLET_DB_FILE: &str = "wallet.sqlite";
+const WALLET_KEY_FILE: &str = "wallet.key";
+/// The leader's signing requests and used commitments.
+const REQUESTS_DIR: &str = "requests";
 use zafe_proto::{Identity, IdentitySeeds};
 use zcash_protocol::memo::Memo;
 
@@ -159,18 +169,18 @@ impl Home {
     }
 
     fn identity(&self) -> Result<Identity> {
-        let bytes = fs::read(self.path("identity.bin")).context("no identity; run `zafe init`")?;
+        let bytes = fs::read(self.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?;
         Ok(Identity::from_seeds(IdentitySeeds::from_bytes(&bytes)?))
     }
 
     fn invite(&self) -> Result<Invite> {
-        let s = fs::read_to_string(self.path("invite.txt"))
+        let s = fs::read_to_string(self.path(INVITE_FILE))
             .context("no invite; create or join a vault")?;
         Ok(Invite::decode(&s)?)
     }
 
     fn material(&self) -> Result<VaultMaterial> {
-        let bytes = fs::read(self.path("vault.bin"))
+        let bytes = fs::read(self.path(VAULT_FILE))
             .context("vault not created yet; run `zafe vault keygen`")?;
         Ok(VaultMaterial::from_bytes(&bytes)?)
     }
@@ -197,10 +207,10 @@ async fn open_wallet(
     lwd: &str,
 ) -> Result<VaultWallet<ZafeNetwork>> {
     let mut client = connect(lwd).await?;
-    let path = home.path("wallet.sqlite");
+    let path = home.path(WALLET_DB_FILE);
     let ufvk = material.vault_keys()?.ufvk()?;
     // Dev-only: the wallet key sits in a plain file next to the database.
-    let key_path = home.path("wallet.key");
+    let key_path = home.path(WALLET_KEY_FILE);
     let key = match fs::read(&key_path) {
         Ok(bytes) => WalletKey::from_slice(&bytes)?,
         Err(_) => {
@@ -250,11 +260,11 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Init => {
-            if home.path("identity.bin").exists() {
+            if home.path(IDENTITY_FILE).exists() {
                 bail!("identity already exists in {}", home.0.display());
             }
             let id = Identity::generate(&mut rng);
-            fs::write(home.path("identity.bin"), id.seeds().to_bytes())?;
+            fs::write(home.path(IDENTITY_FILE), id.seeds().to_bytes())?;
             println!("identity {}", hex::encode(id.public().sig_pk));
         }
         Command::Vault(cmd) => vault(cmd, &home, &relay, &cli.lightwalletd, &mut rng).await?,
@@ -292,7 +302,7 @@ async fn main() -> Result<()> {
                 &material,
                 &mut wallet,
                 &mut connect(&cli.lightwalletd).await?,
-                &node::SentTxs::in_dir(home.path("sent")),
+                &node::SentTxs::in_dir(home.path(state_dir::SENT)),
                 &payments,
                 auto_send,
                 &mut rng,
@@ -323,8 +333,8 @@ async fn main() -> Result<()> {
         Command::Approve { proposal } => {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
-            let mut store = FileNonceStore::new(home.path("nonces"));
-            let mut pool = FilePoolStore::new(home.path("pool"));
+            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
+            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
             let approved = node::approve(
                 &relay,
                 &home.identity()?,
@@ -353,9 +363,9 @@ async fn main() -> Result<()> {
         Command::Backup { passphrase } => {
             let contents = zafe_core::backup::Contents {
                 identity_seeds: home.identity()?.seeds().to_bytes(),
-                material: fs::read(home.path("vault.bin"))
+                material: fs::read(home.path(VAULT_FILE))
                     .context("vault not created yet; run `zafe vault keygen`")?,
-                invite: fs::read_to_string(home.path("invite.txt"))?,
+                invite: fs::read_to_string(home.path(INVITE_FILE))?,
                 created_at: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs(),
@@ -380,7 +390,7 @@ async fn main() -> Result<()> {
         }
         Command::Pool => {
             let material = home.material()?;
-            let mut pool = FilePoolStore::new(home.path("pool"));
+            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
             let n = node::top_up_pool(&relay, &home.identity()?, &material, &mut pool, &mut rng)
                 .await?;
             println!("published {n} commitment(s)");
@@ -400,7 +410,7 @@ async fn main() -> Result<()> {
                 &mut rng,
             )
             .await?;
-            node::SentTxs::in_dir(home.path("sent")).put(&sent);
+            node::SentTxs::in_dir(home.path(state_dir::SENT)).put(&sent);
             println!("broadcast txid {}", hex_txid(&sent.txid));
         }
         Command::Reject { proposal } => {
@@ -419,7 +429,7 @@ async fn main() -> Result<()> {
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
             let id = parse_proposal(&proposal)?;
             // Commitment sets already put in a request must never be reused.
-            let used_path = home.path("requests/used_commitments.bin");
+            let used_path = home.path(REQUESTS_DIR).join(state_dir::USED_COMMITMENTS);
             let mut used = match fs::read(&used_path) {
                 Ok(bytes) => node::decode_used_commitments(&bytes)?,
                 Err(_) => Default::default(),
@@ -436,14 +446,14 @@ async fn main() -> Result<()> {
             )
             .await?;
             used.extend(sent.used_commitments);
-            fs::create_dir_all(home.path("requests"))?;
+            fs::create_dir_all(home.path(REQUESTS_DIR))?;
             fs::write(&used_path, node::encode_used_commitments(&used)?)?;
             fs::write(
                 home.path(&format!("requests/{proposal}.bin")),
                 node::encode_request(&sent.request)?,
             )?;
             // If this member is also a signer, it signs its own part now (never via relay).
-            let mut store = FileNonceStore::new(home.path("nonces"));
+            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
             if let Some(own) = node::sign_own_shares(
                 &relay,
                 &home.identity()?,
@@ -525,24 +535,24 @@ async fn main() -> Result<()> {
                         &me,
                         &material,
                         &state,
-                        &home.path("repair"),
+                        &home.path(state_dir::REPAIR),
                         &mut rng,
                     )
                     .await?;
                     if let Some(updated) = repair::current_material(&material, &state) {
-                        fs::write(home.path("vault.bin"), updated.to_bytes()?)?;
+                        fs::write(home.path(VAULT_FILE), updated.to_bytes()?)?;
                     }
                     println!("{report:?}");
                 }
             }
         }
         Command::Recover { wait, timeout_secs } => {
-            if home.path("vault.bin").exists() {
+            if home.path(VAULT_FILE).exists() {
                 bail!("this home already holds a vault");
             }
-            if !home.path("identity.bin").exists() {
+            if !home.path(IDENTITY_FILE).exists() {
                 let id = Identity::generate(&mut rng);
-                fs::write(home.path("identity.bin"), id.seeds().to_bytes())?;
+                fs::write(home.path(IDENTITY_FILE), id.seeds().to_bytes())?;
             }
             let me = home.identity()?;
             let request = RecoveryRequest {
@@ -554,8 +564,8 @@ async fn main() -> Result<()> {
             loop {
                 match repair::try_recover(&relay, &me).await? {
                     RecoveryStatus::Done { material, invite } => {
-                        fs::write(home.path("vault.bin"), material.to_bytes()?)?;
-                        fs::write(home.path("invite.txt"), invite.encode())?;
+                        fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
+                        fs::write(home.path(INVITE_FILE), invite.encode())?;
                         repair::mark_repair_done(&relay, &me, &material, &mut rng).await?;
                         println!("recovered {}", material.descriptor.name);
                         break;
@@ -574,7 +584,7 @@ async fn main() -> Result<()> {
         Command::Respond => {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
-            let mut store = FileNonceStore::new(home.path("nonces"));
+            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
             let report = node::respond(
                 &relay,
                 &home.identity()?,
@@ -614,7 +624,7 @@ async fn main() -> Result<()> {
                 &mut rng,
             )
             .await?;
-            node::SentTxs::in_dir(home.path("sent")).put(&sent);
+            node::SentTxs::in_dir(home.path(state_dir::SENT)).put(&sent);
             println!("broadcast txid {}", hex_txid(&sent.txid));
         }
     }
@@ -637,13 +647,13 @@ async fn vault(
             let invite =
                 node::create_vault(relay, &home.identity()?, &name, threshold, members, rng)
                     .await?;
-            fs::write(home.path("invite.txt"), invite.encode())?;
+            fs::write(home.path(INVITE_FILE), invite.encode())?;
             println!("{}", invite.encode());
         }
         VaultCmd::Join { invite } => {
             let parsed = Invite::decode(&invite)?;
             node::join_vault(relay, &home.identity()?, &parsed).await?;
-            fs::write(home.path("invite.txt"), parsed.encode())?;
+            fs::write(home.path(INVITE_FILE), parsed.encode())?;
             println!("joined vault {}", parsed.name);
         }
         VaultCmd::Members => {
@@ -685,8 +695,13 @@ async fn vault(
                 Duration::from_secs(timeout_secs),
             )
             .await?;
-            fs::write(home.path("vault.bin"), material.to_bytes()?)?;
+            fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
             println!("vault created: {}", material.descriptor.address);
+            // Like the app: publish the one-tap commitment pool while every member is
+            // present, so the first payment can be one tap.
+            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
+            let n = node::top_up_pool(relay, &me, &material, &mut pool, rng).await?;
+            println!("published {n} commitment(s)");
         }
         VaultCmd::Show => {
             let m = home.material()?;

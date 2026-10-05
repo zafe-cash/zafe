@@ -166,7 +166,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   signing when pools are short or C(n, t) > 64. Pool size (`node::pool_target`):
   `POOL_PROPOSALS` = 16 single-spend proposals' worth, C(n-1, t-1) each, at least
   `MIN_POOL_TARGET` = 32 and at most one batch (256; replay caps a member at 4096
-  outstanding); refilled when below half by `top_up_pool`, which the bridge's
+  outstanding); published first at the end of keygen (bridge `run_keygen` takes the vault's
+  `state_dir`; CLI `vault keygen`), while every member is present, so the first payment
+  is one tap (it used to wait for each member's first refresh; the harness's CLI members
+  never published, and the app fell back to interactive); `assign_commitments` needs
+  **every** member's pool, not just t of them; refilled when below half by `top_up_pool`, which the bridge's
   `list_proposals` runs on every refresh (app poll, after approving/proposing, and each
   background check). Pools drain when a proposal **enters the log**, for every member,
   approving or not. Security reading of ePrint 2024/436 is in
@@ -281,6 +285,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 
 ## Dependency gotchas
+
+- **State dir names** live in `zafe_core::state_dir` (`NONCES`, `POOL`, `LEADER`, `REPAIR`,
+  `SENT`, `USED_COMMITMENTS`, `REQUEST_EXT`, `OWN_SHARES_EXT`); the CLI's own home files
+  are consts at the top of `zafe-cli/src/main.rs`. Never spell a path name inline.
 
 - Exact pins live in `Cargo.toml` (spec §4.4): `reddsa =0.5.2` (`frost` feature; 0.6 removed
   FROST), `frost-core`/`frost-rerandomized` 3.0.0, `orchard =0.15.5` (no `unstable-frost`
@@ -801,6 +809,19 @@ Learned while studying it:
   bootstrap): every amount goes through `amountWithTicker(text, hide:)`. Vizor's
   `hideAmountIfPrivacyMode` only appends the unit to the *mask*, so passing a bare amount
   drops the ticker when visible. Payment rows use a 3-star mask (Vizor's activity rows).
+- **Payment sounds** (`docs/sounds.md`): one three-strike signature (E6, B6, E7) cut per
+  moment: approve, ready (this approval completed the signatures), sent, received,
+  failed. Synthesized by `scripts/sounds/sounds.py` (deterministic; regenerate the app's
+  `res/raw/pay_*.ogg` with `scripts/sounds/build.sh`, never edit the Oggs). Played by
+  `PaymentFeedback.play(moment, sound:)` → `xyz.zafe/payment_feedback` (`MainActivity`:
+  SoundPool, sonification usage, silent unless the ringer is normal; haptic taps in the
+  sound's tempo, kept in sync with `PaymentFeedback.taps`). Setting "Payment sounds"
+  (`paymentSoundsProvider`, `zafe_payment_sounds`, default on, read in the bootstrap)
+  mutes the sound only. Received plays from `ReceivedNotifier.refresh` for new txids that
+  are unmined or ≤ 2 confirmations, in the foreground, never on a first load. iOS: no
+  handler (haptics only); needs CAF/M4A copies. Payment sounds are a signature, not UI
+  feedback: keep them clean, short, open intervals (the user rejected chimes, bass
+  "tactile" thuds and bright major-third runs).
 - **Secret screens** block capture: wrap a route's page in `SecureScreen`
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:

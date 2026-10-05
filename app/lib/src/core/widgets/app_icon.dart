@@ -51,6 +51,8 @@ abstract final class AppIcons {
   static const renew = 'renew';
   static const share = 'share';
   static const shieldKeyhole = 'shield_keyhole';
+  static const sound = 'sound';
+  static const soundOff = 'sound_off';
   static const theme = 'theme';
   static const time = 'time';
   static const tor = 'tor';

@@ -10,7 +10,9 @@ use std::{path::PathBuf, sync::OnceLock, time::Duration};
 use rand::rngs::OsRng;
 use zafe_core::{
     node::{self, Invite, VaultMaterial},
+    nonce_store::FilePoolStore,
     relay_client::RelayClient,
+    state_dir,
     wallet::{check_server, connect, latest_height, VaultWallet, WalletKey, ZafeNetwork},
 };
 use zafe_proto::{Identity, IdentitySeeds, ProtoError};
@@ -154,6 +156,10 @@ pub fn seal_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(
 /// Runs key generation. Blocks until every member finishes (or `timeout_secs`). Returns the
 /// vault material (secret: store it in secure storage). The creator picks the birthday:
 /// `birthday_height`, or lightwalletd's tip + 1 when `None` (the app passes `None`).
+/// Then publishes this member's one-tap commitment pool (nonces in `state_dir`, the
+/// vault's signing state dir): every member is present at keygen, so every pool is in the
+/// log before anyone can propose, and the first payment is one tap. `None` skips it (the
+/// pool then waits for the first `list_proposals`); the app always passes the dir.
 #[allow(clippy::too_many_arguments)]
 pub fn run_keygen(
     relay_url: String,
@@ -165,6 +171,7 @@ pub fn run_keygen(
     timeout_secs: u32,
     birthday_height: Option<u32>,
     expiry_days: Option<u32>,
+    state_dir: Option<String>,
 ) -> Result<Vec<u8>, ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
@@ -179,7 +186,7 @@ pub fn run_keygen(
             let tip = latest_height(&mut connect(&lightwalletd_url).await?).await?;
             Some((tip + 1).max(2))
         };
-        node::run_keygen(
+        let material = node::run_keygen(
             &relay,
             &me,
             &invite,
@@ -193,7 +200,15 @@ pub fn run_keygen(
             Duration::from_secs(u64::from(timeout_secs)),
         )
         .await
-        .map_err(anyhow::Error::from)
+        .map_err(anyhow::Error::from)?;
+        // Best effort: list_proposals tops up again on every refresh.
+        if let Some(dir) = state_dir {
+            let mut pool = FilePoolStore::new(PathBuf::from(dir).join(state_dir::POOL));
+            if let Err(e) = node::top_up_pool(&relay, &me, &material, &mut pool, &mut OsRng).await {
+                eprintln!("commitment pool after keygen: {e}");
+            }
+        }
+        Ok::<_, anyhow::Error>(material)
     })?;
     Ok(material.to_bytes()?)
 }

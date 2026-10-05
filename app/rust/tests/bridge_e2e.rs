@@ -143,9 +143,13 @@ fn payment_flow_through_bridge() {
     assert!(safety.iter().all(|n| n == &safety[0]));
 
     // Keygen: all three at once (A picks birthday 2: regtest isn't up yet).
+    // Each member's signing state dir, where keygen leaves its one-tap pool nonces. C
+    // publishes none (as if it closed the app right after keygen), so the first payment
+    // falls back to interactive signing and this test covers that path.
     let handles: Vec<_> = seeds
         .iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
             let (relay, lwd, s, invite, sn) = (
                 relay.clone(),
                 lwd.clone(),
@@ -153,6 +157,10 @@ fn payment_flow_through_bridge() {
                 invite.clone(),
                 safety[0].clone(),
             );
+            let state = (i != 2).then(|| {
+                let dir = tmp.join(format!("m{i}")).join("signing");
+                dir.to_string_lossy().into_owned()
+            });
             thread::spawn(move || {
                 vault::run_keygen(
                     relay,
@@ -164,6 +172,7 @@ fn payment_flow_through_bridge() {
                     120,
                     Some(2),
                     None,
+                    state,
                 )
                 .unwrap()
             })
@@ -748,7 +757,8 @@ fn payment_flow_through_bridge() {
     // The creator picks lightwalletd's tip + 1 as the birthday (as the app does).
     let handles: Vec<_> = seeds2
         .iter()
-        .map(|s| {
+        .zip(["v2-a", "v2-e"])
+        .map(|(s, who)| {
             let (relay, lwd, s, invite, sn) = (
                 relay.clone(),
                 lwd.clone(),
@@ -756,9 +766,22 @@ fn payment_flow_through_bridge() {
                 invite2.clone(),
                 safety2.clone(),
             );
+            let state = tmp.join(who).join("signing");
             thread::spawn(move || {
-                vault::run_keygen(relay, lwd, "regtest".into(), s, invite, sn, 120, None, None)
-                    .unwrap()
+                let state = Some(state.to_string_lossy().into());
+                vault::run_keygen(
+                    relay,
+                    lwd,
+                    "regtest".into(),
+                    s,
+                    invite,
+                    sn,
+                    120,
+                    None,
+                    None,
+                    state,
+                )
+                .unwrap()
             })
         })
         .collect();

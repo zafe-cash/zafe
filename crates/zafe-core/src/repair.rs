@@ -198,6 +198,11 @@ pub struct RepairReport {
     pub waiting: usize,
 }
 
+/// A helper's saved deltas, written before they are sent.
+const DELTA_EXT: &str = "delta";
+/// Marks a helper's finished attempt (its sigma was sent).
+const DONE_EXT: &str = "done";
+
 fn helper_path(dir: &Path, r: &Replacement, ext: &str) -> PathBuf {
     dir.join(format!("{}-{}.{ext}", r.index, r.attempt))
 }
@@ -238,7 +243,7 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
         .replacements
         .iter()
         .filter(|r| !r.done && r.helpers().contains(&my_pk))
-        .filter(|r| !helper_path(dir, r, "done").exists())
+        .filter(|r| !helper_path(dir, r, DONE_EXT).exists())
         .collect();
     let mut report = RepairReport::default();
     if mine.is_empty() {
@@ -271,7 +276,7 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
     for r in mine {
         let (helper_ids, participant) = repair_ids(state, r)?;
         let helpers = r.helpers();
-        let state_path = helper_path(dir, r, "delta");
+        let state_path = helper_path(dir, r, DELTA_EXT);
         let mut hs: HelperState = match std::fs::read(&state_path) {
             Ok(bytes) => version::decode(Format::Repair, &bytes)?,
             Err(_) => {
@@ -367,7 +372,7 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
         )
         .map_err(proto)?;
         relay.send(&env).await?;
-        write_atomic(&helper_path(dir, r, "done"), b"")?;
+        write_atomic(&helper_path(dir, r, DONE_EXT), b"")?;
         let _ = std::fs::remove_file(&state_path);
         let _ = relay.ack_inbox(me, mailbox, &cursors).await;
         report.sigmas_sent += 1;

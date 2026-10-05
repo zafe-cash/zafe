@@ -1433,6 +1433,7 @@ fn wire__crate__api__vault__run_keygen_impl(
             let api_timeout_secs = <u32>::sse_decode(&mut deserializer);
             let api_birthday_height = <Option<u32>>::sse_decode(&mut deserializer);
             let api_expiry_days = <Option<u32>>::sse_decode(&mut deserializer);
+            let api_state_dir = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, crate::api::error::ZafeError>((move || {
@@ -1446,6 +1447,7 @@ fn wire__crate__api__vault__run_keygen_impl(
                         api_timeout_secs,
                         api_birthday_height,
                         api_expiry_days,
+                        api_state_dir,
                     )?;
                     Ok(output_ok)
                 })())

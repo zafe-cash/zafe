@@ -47,8 +47,11 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         .safety_number;
     let materials: Vec<Vec<u8>> = seeds
         .iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
             let (relay, s, invite, sn) = (relay.clone(), s.clone(), invite.clone(), safety.clone());
+            // The same dir `state_dir(i)` returns below.
+            let state = tmp.join(format!("m{i}")).to_string_lossy().into_owned();
             thread::spawn(move || {
                 vault::run_keygen(
                     relay,
@@ -60,6 +63,7 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
                     60,
                     Some(2),
                     None,
+                    Some(state),
                 )
                 .unwrap()
             })

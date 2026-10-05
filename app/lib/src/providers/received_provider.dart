@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/errors/zafe_error_copy.dart';
+import '../core/feedback/payment_feedback.dart';
 import '../core/storage/zafe_paths.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../notifications/vault_watch.dart' show recordSeen;
 import '../rust/api/received.dart' as rust;
+import 'payment_sounds_provider.dart';
 import 'vault_provider.dart';
 
 class ReceivedState {
@@ -61,11 +65,25 @@ class ReceivedNotifier extends Notifier<ReceivedState> {
       );
       // The vault may have changed while reading.
       if (ref.read(vaultProvider).activeId == vaultId) {
+        final previous = state.loaded ? state.items.map((r) => r.txid) : null;
         state = ReceivedState(items: items, loaded: true);
         // Seen on screen: never announced from the background (foreground only, so a
         // refresh running in the background doesn't swallow news).
         if (WidgetsBinding.instance.lifecycleState ==
             AppLifecycleState.resumed) {
+          // Money arriving while the app is open: pending, or just mined (not history
+          // found by a long sync).
+          final fresh = items
+              .where((r) => r.minedHeight == 0 || r.confirmations <= 2)
+              .map((r) => r.txid);
+          if (newArrivals(previous, fresh).isNotEmpty) {
+            unawaited(
+              PaymentFeedback.play(
+                PaymentMoment.received,
+                sound: ref.read(paymentSoundsProvider),
+              ),
+            );
+          }
           await recordSeen(vaultId, null, received: items);
         }
       }

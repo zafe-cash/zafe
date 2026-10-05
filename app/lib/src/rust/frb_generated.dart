@@ -298,6 +298,7 @@ abstract class RustLibApi extends BaseApi {
     required int timeoutSecs,
     int? birthdayHeight,
     int? expiryDays,
+    String? stateDir,
   });
 
   Future<void> crateApiVaultSealVault({
@@ -1715,6 +1716,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int timeoutSecs,
     int? birthdayHeight,
     int? expiryDays,
+    String? stateDir,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1729,6 +1731,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_32(timeoutSecs, serializer);
           sse_encode_opt_box_autoadd_u_32(birthdayHeight, serializer);
           sse_encode_opt_box_autoadd_u_32(expiryDays, serializer);
+          sse_encode_opt_String(stateDir, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1751,6 +1754,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           timeoutSecs,
           birthdayHeight,
           expiryDays,
+          stateDir,
         ],
         apiImpl: this,
       ),
@@ -1769,6 +1773,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "timeoutSecs",
       "birthdayHeight",
       "expiryDays",
+      "stateDir",
     ],
   );
 

@@ -4,9 +4,10 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/feedback/app_haptics.dart';
+import '../../core/feedback/payment_feedback.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/widgets/mobile/mobile_transaction_progress_screen.dart';
+import '../../providers/payment_sounds_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
 import '../onboarding/onboarding_art.dart';
@@ -40,15 +41,16 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
     });
   }
 
-  /// One haptic per outcome.
+  /// One sound and haptic per outcome.
   void _announce(MobileTransactionProgressPhase phase) {
     if (_announced == phase) return;
     _announced = phase;
+    final sound = ref.read(paymentSoundsProvider);
     if (phase == MobileTransactionProgressPhase.succeeded) {
-      unawaited(AppHaptics.sendSuccess());
+      unawaited(PaymentFeedback.play(PaymentMoment.sent, sound: sound));
     }
     if (phase == MobileTransactionProgressPhase.failed) {
-      unawaited(AppHaptics.sendFailure());
+      unawaited(PaymentFeedback.play(PaymentMoment.failed, sound: sound));
     }
   }
 

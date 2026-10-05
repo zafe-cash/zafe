@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/errors/zafe_error_copy.dart';
+import '../../core/feedback/payment_feedback.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
@@ -14,6 +15,7 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/member_names_provider.dart';
+import '../../providers/payment_sounds_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../providers/vault_provider.dart';
@@ -70,6 +72,12 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     try {
       if (approve) {
         final r = await notifier.approve(widget.id);
+        unawaited(
+          PaymentFeedback.play(
+            approvalMoment(completed: r.completed),
+            sound: ref.read(paymentSoundsProvider),
+          ),
+        );
         if (mounted && r.completed && r.autoSend) {
           // This approval completed the signatures: watch it go out.
           context.push('/proposal/${widget.id}/send');

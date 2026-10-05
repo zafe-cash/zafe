@@ -14,6 +14,7 @@ pub mod relay_client;
 pub mod repair;
 pub mod session;
 pub mod signing;
+pub mod state_dir;
 pub mod tor;
 pub mod tx;
 pub mod vault;

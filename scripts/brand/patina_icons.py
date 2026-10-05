@@ -68,6 +68,8 @@ MAP = {
     "shield_keyhole": "shield-check",
     "theme": "circle-half",
     "time": "clock",
+    "sound": "speaker-high",
+    "sound_off": "speaker-slash",
     "tor": "detective",
     "trash": "trash",
     "unlock": "lock-open",

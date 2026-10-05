@@ -68,6 +68,10 @@ Future<void> sealVault({
 /// Runs key generation. Blocks until every member finishes (or `timeout_secs`). Returns the
 /// vault material (secret: store it in secure storage). The creator picks the birthday:
 /// `birthday_height`, or lightwalletd's tip + 1 when `None` (the app passes `None`).
+/// Then publishes this member's one-tap commitment pool (nonces in `state_dir`, the
+/// vault's signing state dir): every member is present at keygen, so every pool is in the
+/// log before anyone can propose, and the first payment is one tap. `None` skips it (the
+/// pool then waits for the first `list_proposals`); the app always passes the dir.
 Future<Uint8List> runKeygen({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -78,6 +82,7 @@ Future<Uint8List> runKeygen({
   required int timeoutSecs,
   int? birthdayHeight,
   int? expiryDays,
+  String? stateDir,
 }) => RustLib.instance.api.crateApiVaultRunKeygen(
   relayUrl: relayUrl,
   lightwalletdUrl: lightwalletdUrl,
@@ -88,6 +93,7 @@ Future<Uint8List> runKeygen({
   timeoutSecs: timeoutSecs,
   birthdayHeight: birthdayHeight,
   expiryDays: expiryDays,
+  stateDir: stateDir,
 );
 
 VaultSummary vaultSummary({required List<int> material}) =>
