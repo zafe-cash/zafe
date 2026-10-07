@@ -131,7 +131,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
 - **Nonce storage**: `nonce_store::FileNonceStore` (atomic write+rename; `put` returns an
   error so a failed write never publishes an approval). The directory must be excluded from
   backups/device transfer: the Android app disables both (`allowBackup=false`,
-  `res/xml/data_extraction_rules.xml`); iOS needs `isExcludedFromBackup` (not done yet).
+  `res/xml/data_extraction_rules.xml`); iOS: `ZafeBackup.excludeStateFromBackups()` (AppDelegate.swift) sets `isExcludedFromBackup` on Application Support and Documents at every launch (a directory's flag covers its contents, the Tor dir included). Not device-tested.
 - **Nonces**: one pair per spend, keyed by (proposal, pczt hash); check the request's
   packages against stored commitments **before** consuming; delete before sending a share;
   never reuse. Re-approval produces fresh commitments; leaders track used commitment sets.
@@ -455,8 +455,8 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   reaches a server once Tor is requested, waiters wake on failure, a direct long poll
   and a lightwalletd call are cut; ignored live test: cold bootstrap ~14 s, testnet tip
   through Tor ~3.5 s, an HTTPS GET ~1 s), Dart `test/tor_setting_test.dart`; sheet
-  preview `flutter test tool/screens/tor_render_test.dart`. Not done: iOS backup
-  exclusion of the Tor dir, onion endpoints, per-vault circuit isolation.
+  preview `flutter test tool/screens/tor_render_test.dart`. Not done:
+  onion endpoints, per-vault circuit isolation.
 - **Relay limits** (`zafe_relay::limits`): off in `Relay::new()` (tests), on in the
   `zafe-relay` binary (`Limits::hosted()`: 300/min per key, 1200/min per IP). Charge a
   key only after its signature verifies (`verified(relay, body)`, and after
@@ -619,7 +619,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   The splash follows the app's theme setting, not just the OS: `AppThemeHost` sends it
   over `xyz.zafe/window_appearance` (`setBrightness`), and on Android 12+ `MainActivity`
   calls `UiModeManager.setApplicationNightMode`, which the OS persists for the next
-  launch's splash. Android < 12 and iOS (no handler yet) still follow the OS theme.
+  launch's splash. Android < 12 still follows the OS theme; on iOS the same channel sets `overrideUserInterfaceStyle` on the windows (the launch screen still follows the OS).
   Check resources without a Gradle build: `aapt2 compile --dir res` + `aapt2 link` against
   `platforms/android-36/android.jar`.
 - **Screen previews without a device**: `flutter test tool/screens/home_render_test.dart`
@@ -955,8 +955,9 @@ Learned while studying it:
   sound's tempo, kept in sync with `PaymentFeedback.taps`). Setting "Payment sounds"
   (`paymentSoundsProvider`, `zafe_payment_sounds`, default on, read in the bootstrap)
   mutes the sound only. Received plays from `ReceivedNotifier.refresh` for new txids that
-  are unmined or ≤ 2 confirmations, in the foreground, never on a first load. iOS: no
-  handler (haptics only); needs CAF/M4A copies. Payment sounds are a signature, not UI
+  are unmined or ≤ 2 confirmations, in the foreground, never on a first load. iOS: `ZafeNative`
+  (AppDelegate.swift) plays `assets/sounds/pay_*.m4a` (AAC, made by `build.sh` too) with AVAudioPlayer on
+  an ambient session (the silent switch mutes it) plus impact haptics. Payment sounds are a signature, not UI
   feedback: keep them clean, short, open intervals (the user rejected chimes, bass
   "tactile" thuds and bright major-third runs).
 - **Balance card + dollars** (2026-10-06, after Vizor): one total (pending included; what's
@@ -978,8 +979,7 @@ Learned while studying it:
 - **Secret screens** block capture: wrap a route's page in `SecureScreen`
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:
-  `xyz.zafe/haptics` and `window_appearance` have none yet (Dart swallows
-  `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
+  iOS handles the same channels in `ios/Runner/AppDelegate.swift` (`ZafeNative`): it can't block screenshots, so `ZafePrivacy` covers the app while the screen is recorded or mirrored on a secret screen (`UIScreen.isCaptured`) and always in the app switcher. Dart swallows `MissingPluginException` where there is no handler (tests). Check with `adb shell dumpsys window windows | grep SECURE`.
 - Settings (`/settings` tab; the vault switcher's "Vault settings" goes there too): vault info
   (name renames locally), signer key,
   hide amounts, theme (`themeModeProvider`, persisted), endpoints (editable, see above),
@@ -1035,8 +1035,7 @@ Learned while studying it:
   `secureRequested`). That flag doesn't hide the **live** tile Android 13+ shows for the
   running app, so `AppLockGate` also draws `PrivacyCover` whenever the lifecycle isn't
   `resumed` (switcher, notification shade, system dialogs, the unlock prompt). iOS:
-  `SceneDelegate` adds a launch-screen cover on `sceneWillResignActive` (untested: iOS
-  has never been built). Verified on the emulator 2026-10-04: blank recents card,
+  `SceneDelegate` tells `ZafePrivacy` (AppDelegate.swift) to cover the app on `sceneWillResignActive` (built in CI, untested on a device). Verified on the emulator 2026-10-04: blank recents card,
   cover gone on return. Emulator test: the
   AVD has no screen lock (the lock then opens at once); `adb shell locksettings set-pin
   1234`, unlock with `adb shell input text 1234` + `KEYCODE_ENTER`, and `locksettings
@@ -1302,6 +1301,25 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   feature (`zafe-core/tests/reshare.rs`, a dev-dependency only; spec §10.4.4). Not shipped:
   own crypto, needs spec + audit and one-time ceremony keys first. Kept old shares always
   still sign at the old t.
+
+## iOS (built in CI since 2026-10-07; never run on a device by an agent)
+
+- `.github/workflows/ios.yml` (macOS runner, **`macos-26` + latest stable Xcode**: `workmanager_apple`
+  uses `BGContinuedProcessingTask`, iOS 26 SDK only): an unsigned device build (artifact
+  `zafe-ios-unsigned`) and a simulator build. The `sign` job turns the device build into
+  `Zafe-signed.ipa` when the `ios-signing` environment has `IOS_CERT_P12_BASE64`,
+  `IOS_CERT_PASSWORD`, `IOS_PROFILE_BASE64` (development or ad-hoc profile for `xyz.zafe.zafe`
+  listing the phone's UDID); restrict that environment to trusted branches.
+- Deployment target **15.5** (`ios/Podfile`, project settings): ML Kit barcode scanning needs
+  15.5, `workmanager_apple` 14+. `ios/Podfile` is committed; keep its `platform` in sync.
+- Native iOS code lives in `ios/Runner/AppDelegate.swift` (channels `ZafeNative`, `ZafePrivacy`,
+  `ZafeBackup`, background task registration) and `SceneDelegate.swift`; no new Swift files, so
+  the Xcode project needs no edits. Background vault checks are a BGTaskScheduler periodic task
+  `zafe-vault-check` (Info.plist `BGTaskSchedulerPermittedIdentifiers` + `fetch`); the system
+  decides when it runs. The one-off "soon" check and in-app updates are Android only.
+- Not done on iOS: APNs push (the relay has no APNs sender; Firebase isn't configured, the app
+  falls back to background checks), Associated Domains / universal links (the entitlement breaks
+  signing with a profile that lacks it), TestFlight upload, a launch smoke test in CI.
 
 ## Machine hygiene
 
