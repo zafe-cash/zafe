@@ -56,7 +56,6 @@ jobs:
     permissions:
       contents: read
       packages: read
-      id-token: write
       attestations: read
     steps:
       - uses: actions/checkout@v5
@@ -65,7 +64,9 @@ jobs:
           DIGEST: ${{ inputs.digest }}
           SOAK: ${{ inputs.min_soak_hours }}
           DOMAIN: ${{ vars.RELAY_DOMAIN }}
+          MAX_VAULTS: ${{ vars.RELAY_MAX_VAULTS }}
         run: |
+          [[ -z $MAX_VAULTS || $MAX_VAULTS =~ ^[0-9]+$ ]] || { echo "::error::RELAY_MAX_VAULTS must be a number"; exit 1; }
           [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::digest must be sha256:<64 hex>"; exit 1; }
           [[ $SOAK =~ ^[0-9]+$ ]] || { echo "::error::min_soak_hours must be a number"; exit 1; }
           [[ $DOMAIN =~ ^[a-z0-9.-]+$ ]] || { echo "::error::set the environment variable RELAY_DOMAIN"; exit 1; }
@@ -76,7 +77,9 @@ jobs:
         run: |
           gh attestation verify "oci://${IMAGE}@${{ inputs.digest }}" \
             --repo "${{ github.repository }}" \
-            --signer-workflow "${{ github.repository }}/.github/workflows/relay-deploy.yml"
+            --signer-workflow "${{ github.repository }}/.github/workflows/relay-deploy.yml" \
+            --source-ref refs/heads/main \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com
       - name: SSH setup
         env:
           SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
@@ -95,6 +98,8 @@ jobs:
           record=$(ssh relay 'cat /opt/zafe-relay/deployed/testnet.json') ||
             { echo "::error::no testnet deploy record on the server (deployed/testnet.json)"; exit 1; }
           image=$(jq -r .image <<<"$record"); at=$(jq -r .at <<<"$record")
+          # A missing or odd timestamp must not read as 0 (bash arithmetic) and pass the soak.
+          [[ $at =~ ^[0-9]+$ ]] || { echo "::error::bad timestamp in the testnet deploy record"; exit 1; }
           [ "$image" = "${IMAGE}@${DIGEST}" ] ||
             { echo "::error::testnet runs $image, not ${IMAGE}@${DIGEST}: promote what testnet runs"; exit 1; }
           hours=$(( ($(date -u +%s) - at) / 3600 ))
@@ -121,7 +126,11 @@ jobs:
           for v in LS_KEY LS_SECRET LS_BUCKET LS_ENDPOINT LS_REGION; do
             [ -n "${!v}" ] || { echo "::error::missing Litestream setting $v (secrets/variables LITESTREAM_*)"; exit 1; }
           done
-          printf 'LITESTREAM_ACCESS_KEY_ID=%s\nLITESTREAM_SECRET_ACCESS_KEY=%s\nLITESTREAM_BUCKET=%s\nLITESTREAM_ENDPOINT=%s\nLITESTREAM_REGION=%s\n' \
+          for v in LS_KEY LS_SECRET LS_BUCKET LS_ENDPOINT LS_REGION; do
+            case "${!v}" in *"'"*|*$'\n'*) echo "::error::$v contains a quote or newline"; exit 1;; esac
+          done
+          # Single-quoted: Compose then takes the values literally (a `$` or `#` in a key).
+          printf "LITESTREAM_ACCESS_KEY_ID='%s'\nLITESTREAM_SECRET_ACCESS_KEY='%s'\nLITESTREAM_BUCKET='%s'\nLITESTREAM_ENDPOINT='%s'\nLITESTREAM_REGION='%s'\n" \
             "$LS_KEY" "$LS_SECRET" "$LS_BUCKET" "$LS_ENDPOINT" "$LS_REGION" |
             ssh relay 'umask 077 && cat > /opt/zafe-relay/litestream.env'
           if [ -n "$FCM" ]; then
