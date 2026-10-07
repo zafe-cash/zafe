@@ -6,10 +6,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxesRead, MailboxesResponse,
-        MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove, ReplaceApproval,
-        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
-        WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, QUOTA_CAPACITY, QUOTA_HEADER,
+        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo, MailboxesRead,
+        MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove,
+        ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed,
+        WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, QUOTA_CAPACITY, QUOTA_HEADER,
         UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
@@ -208,6 +208,11 @@ impl RelayClient {
     pub fn with_log_cache(mut self, cache: Option<crate::log_cache::LogCache>) -> Self {
         self.log_cache = cache;
         self
+    }
+
+    /// The relay's base URL.
+    pub fn base_url(&self) -> &str {
+        &self.base
     }
 
     pub fn log_cache(&self) -> Option<&crate::log_cache::LogCache> {
@@ -532,6 +537,24 @@ impl RelayClient {
     ) -> Result<MembersResponse, RelayClientError> {
         self.signed(
             "/v1/mailbox/members",
+            who,
+            MembersRead {
+                mailbox,
+                timestamp: now(),
+            },
+        )
+        .await
+    }
+
+    /// Members, sealed flag and approval threshold the relay holds. A relay older than
+    /// the route answers 404 (`Status { status: 404 }`).
+    pub async fn mailbox_info(
+        &self,
+        who: &Identity,
+        mailbox: MailboxId,
+    ) -> Result<MailboxInfo, RelayClientError> {
+        self.signed(
+            "/v1/mailbox/info",
             who,
             MembersRead {
                 mailbox,

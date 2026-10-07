@@ -37,6 +37,9 @@ pub enum ZafeErrorKind {
     /// The relay serves another history than this device saw (a fork of the log). Do not
     /// trust it; members compare notes outside Zafe.
     RelayForked,
+    /// The relay's member list or threshold differs from the vault's (someone seeded it
+    /// wrongly when restoring it): do not trust it; funds are not at risk.
+    RelayMembership,
     /// The relay no longer knows this vault (wiped), though this device has its log: a
     /// member can restore it from the device copy.
     RelayLostVault,
@@ -140,6 +143,7 @@ impl From<NodeError> for ZafeError {
             NodeError::Relay(_)
             | NodeError::RelayRolledBack { .. }
             | NodeError::RelayForked { .. }
+            | NodeError::RelayMembership(_)
             | NodeError::RelayLostVault { .. } => ZafeEndpoint::Relay,
             _ => ZafeEndpoint::None,
         };
@@ -165,6 +169,7 @@ impl From<NodeError> for ZafeError {
             }
             NodeError::RelayRolledBack { .. } => ZafeErrorKind::RelayRolledBack,
             NodeError::RelayForked { .. } => ZafeErrorKind::RelayForked,
+            NodeError::RelayMembership(_) => ZafeErrorKind::RelayMembership,
             NodeError::RelayLostVault { .. } => ZafeErrorKind::RelayLostVault,
             NodeError::Relay(RelayClientError::AtCapacity) => ZafeErrorKind::RelayAtCapacity,
             NodeError::NotReady(_) => ZafeErrorKind::NotReady,

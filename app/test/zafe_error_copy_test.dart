@@ -11,6 +11,7 @@ void main() {
         ZafeErrorKind.relayRolledBack,
         ZafeErrorKind.relayLostVault,
         ZafeErrorKind.relayForked,
+        ZafeErrorKind.relayMembership,
       ]) {
         final text = zafeErrorMessage(
           ZafeError(kind: kind, message: 'x', endpoint: ZafeEndpoint.relay),

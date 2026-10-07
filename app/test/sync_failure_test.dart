@@ -46,6 +46,7 @@ void main() {
         ZafeErrorKind.relayRolledBack: SyncFailureKind.relayRolledBack,
         ZafeErrorKind.relayLostVault: SyncFailureKind.relayLostVault,
         ZafeErrorKind.relayForked: SyncFailureKind.relayForked,
+        ZafeErrorKind.relayMembership: SyncFailureKind.relayMembership,
       };
       cases.forEach((kind, expected) {
         final f = classifySyncFailure(err(kind, ZafeEndpoint.lightwalletd));
@@ -153,4 +154,34 @@ void main() {
       }
     },
   );
+
+  test('only a forked relay offers to follow it, with a plain warning', () {
+    for (final k in SyncFailureKind.values) {
+      expect(
+        SyncFailure(kind: k).canFollowRelay,
+        k == SyncFailureKind.relayForked,
+        reason: '$k',
+      );
+    }
+    expect(followRelayWarning, contains('lost'));
+    expect(followRelayWarning, contains('other members'));
+    expect(followRelayWarning.toLowerCase(), contains('funds are not touched'));
+    expect(followRelayDone(0), isNot(contains('dropped')));
+    expect(followRelayDone(3), contains('3 entries'));
+  });
+
+  test('a relay with other members is not trusted and points to Settings', () {
+    const f = SyncFailure(kind: SyncFailureKind.relayMembership);
+    expect(f.explanation, contains('funds are safe'));
+    expect(f.suggestsSettings, isTrue);
+    expect(f.canRestoreRelay, isFalse);
+    final c = classifySyncFailure(
+      ZafeError(
+        kind: ZafeErrorKind.relayMembership,
+        message: 'x',
+        endpoint: ZafeEndpoint.relay,
+      ),
+    );
+    expect(c.kind, SyncFailureKind.relayMembership);
+  });
 }

@@ -272,6 +272,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (votes, names too) is invisible to older apps, so members must update together.
   `LOG_CACHE` 1 (new, device file). `RELAY_API` unchanged: `POST /v1/mailbox/reseed`
   is a new route (404 on an older relay) and 507 now carries `zafe-quota: <token>`.
+  `VAULT_EVENT` 6 → 7 (2026-10-07, no new variant): a `Broadcast` written with version 7
+  must carry the txid the proposal's PCZT fixes (`ProposalState.expected_txid` = its
+  shielded sighash; v6 txids exclude signatures and proof), else `TxidMismatch` and it is
+  ignored. **Gate:** an older app skips every version 7 event, so all members must update
+  together before anyone sends. Versions 1-6 broadcasts replay unchecked, forever.
   **Pre-release: nothing reads the unversioned bytes from before 2026-09-30**; reset
   test devices (`adb shell pm clear xyz.zafe.zafe`), the harness
   (`scripts/app-harness.sh stop`) and relay DBs after pulling this change.
@@ -314,6 +319,19 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   before the first wallet call leaves no note. The report adds a "Rust panics" section. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
+- **Relay membership check**: `reseed` lets the restorer choose members and threshold and
+  the blind relay can't verify them, so `node::check_relay_membership` (route
+  `POST /v1/mailbox/info`, body `MembersRead`, response `MailboxInfo`; no `RELAY_API` bump,
+  404 = older relay -> members route only) compares them with the replayed log in
+  `load_state` and `reseed_relay` (cached 60 s per relay URL + mailbox; tolerates a seat move
+  the relay hasn't applied). Mismatch = `NodeError::RelayMembership` -> `ZafeErrorKind::
+  RelayMembership` -> sync failure `relayMembership`. Recovery is a fresh relay.
+- **Leaving a fork**: `node::follow_relay` (bridge `follow_relay`, sync sheet "Follow the
+  relay instead") is the only caller of `LogCache::remove` besides vault removal: needs a
+  real fork, verifies the relay's log from entry 0 without the anchor, then replaces the
+  copy and reports the local-only entries dropped. Always behind a dialog + unlock.
+- **Unapproved-spend grace** (`spend_watch`) only covers Approved/Broadcast proposals and
+  the txid their PCZT fixes; cancelled, rejected and open ones get none.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):

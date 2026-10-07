@@ -929,7 +929,7 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
         0,
         &VaultEvent::Broadcast {
             proposal: [3; 16],
-            txid: [7; 32],
+            txid: zafe_core::tx::shielded_sighash(&b).unwrap(),
         },
     );
     let state = log.replay().unwrap();
@@ -1060,6 +1060,7 @@ mod spend_watch_tests {
         let p = s.proposals.get_mut(&[1; 16]).unwrap();
         p.nullifiers = nfs.to_vec();
         p.txid = txid;
+        p.status = ProposalStatus::Approved;
         s
     }
 
@@ -1101,6 +1102,24 @@ mod spend_watch_tests {
     }
 
     #[test]
+    fn cancelled_and_rejected_proposals_get_no_grace() {
+        for status in [
+            ProposalStatus::Cancelled,
+            ProposalStatus::Rejected,
+            ProposalStatus::Open,
+        ] {
+            let mut s = state_with_proposal(&[A], None);
+            s.proposals.get_mut(&[1; 16]).unwrap().status = status;
+            assert_eq!(unapproved_spends(&s, &[spend(5, None, &[A])], 100).len(), 1);
+        }
+        // A transaction other than the one the PCZT fixes is not that proposal's.
+        let mut s = state_with_proposal(&[A], None);
+        s.proposals.get_mut(&[1; 16]).unwrap().expected_txid = Some([6; 32]);
+        assert_eq!(unapproved_spends(&s, &[spend(5, None, &[A])], 100).len(), 1);
+        assert!(unapproved_spends(&s, &[spend(6, None, &[A])], 100).is_empty());
+    }
+
+    #[test]
     fn a_proposals_spend_is_given_time_to_be_logged() {
         let s = state_with_proposal(&[A, B], None);
         // Sent but the broadcast entry isn't in the log yet: fine while recent...
@@ -1125,4 +1144,68 @@ mod spend_watch_tests {
         let none = state_with_proposal(&[], None);
         assert_eq!(unapproved_spends(&none, &rows, 100).len(), 1);
     }
+}
+
+/// A version 7 `Broadcast` must carry the txid the PCZT determines; older ones replay as
+/// before. A wrong txid is ignored (the proposal stays Approved, notes stay reserved).
+#[test]
+fn broadcast_txid_must_match_the_pczt() {
+    use common::{build_pczt, outside_address, receive_ironwood_note, witness, Out};
+    use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+
+    let fvk = FullViewingKey::from(&SpendingKey::from_bytes([3; 32]).unwrap());
+    let note = receive_ironwood_note(&fvk, fvk.address_at(0u32, Scope::External), 1_000_000);
+    let (anchor, path) = witness(&note);
+    let pczt = build_pczt(
+        &fvk,
+        note,
+        path,
+        anchor,
+        vec![Out {
+            ovk: None,
+            recipient: outside_address(9),
+            value: 990_000,
+            memo: zcash_protocol::memo::MemoBytes::empty(),
+        }],
+    );
+    let txid = zafe_core::tx::shielded_sighash(&pczt).unwrap();
+    let tip = common::TARGET_HEIGHT - 1;
+    let broadcast = |t: [u8; 32], v: u16| {
+        let mut bytes = VaultEvent::Broadcast {
+            proposal: [1; 16],
+            txid: t,
+        }
+        .to_bytes()
+        .unwrap();
+        bytes[..2].copy_from_slice(&v.to_le_bytes());
+        bytes
+    };
+    let base = || {
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push(0, &proposal_with(1, &pczt, tip));
+        log.push(0, &vote(1, true));
+        log.push(1, &vote(1, true));
+        log
+    };
+
+    let mut log = base();
+    log.push_raw(2, &broadcast([7; 32], 7));
+    let s = log.replay().unwrap();
+    assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Approved);
+    assert_eq!(s.proposals[&[1; 16]].txid, None);
+    assert!(matches!(s.ignored[0].1, VaultError::TxidMismatch(_)));
+    assert_eq!(s.proposals[&[1; 16]].expected_txid, Some(txid));
+
+    log.push_raw(2, &broadcast(txid, 7));
+    let s = log.replay().unwrap();
+    assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Broadcast);
+    assert_eq!(s.proposals[&[1; 16]].txid, Some(txid));
+
+    // Entries written before version 7 are not checked: old logs replay unchanged.
+    let mut old = base();
+    old.push_raw(2, &broadcast([7; 32], 6));
+    let s = old.replay().unwrap();
+    assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Broadcast);
+    assert!(s.ignored.is_empty());
 }

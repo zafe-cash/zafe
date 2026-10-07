@@ -303,6 +303,9 @@ async fn vault_pays_on_regtest() {
         .unwrap();
 
     // 6. Inject, prove, extract (fully verified), broadcast, mine.
+    // The PCZT fixes the txid (v6 txids exclude signatures and the proof): the vault log
+    // checks a Broadcast against it (VAULT_EVENT 7).
+    let expected_txid = tx::shielded_sighash(&pczt).unwrap();
     let signed = tx::apply_signatures(pczt, &signatures).unwrap();
     let pk = ProvingKey::build(OrchardCircuitVersion::PostNu6_3);
     let vk = VerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
@@ -336,6 +339,10 @@ async fn vault_pays_on_regtest() {
     println!("txid {}", transaction.txid());
     // Dropped-broadcast detection reads the whole mempool (txids in protocol order).
     let txid: [u8; 32] = *transaction.txid().as_ref();
+    assert_eq!(
+        txid, expected_txid,
+        "txid must equal the PCZT's shielded sighash"
+    );
     let mut in_mempool = false;
     for _ in 0..20 {
         if zafe_core::wallet::mempool_txids(&mut client)

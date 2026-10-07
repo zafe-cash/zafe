@@ -296,6 +296,18 @@ pub struct MembersResponse {
     pub sealed: bool,
 }
 
+/// What the relay holds about a mailbox (`POST /v1/mailbox/info`, body [`MembersRead`]; a
+/// newer route: a relay without it answers 404). Members compare it with the membership
+/// the replayed log ends with, so a relay seeded with other keys or another threshold
+/// (a malicious restorer) is noticed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailboxInfo {
+    pub members: Vec<IdentityPublic>,
+    pub sealed: bool,
+    /// The approvals the relay wants to move a seat (0: unknown, seats can't move).
+    pub threshold: u16,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxResponse {
     /// `(cursor, Envelope::to_bytes)` in delivery order. Kept as bytes so one envelope in

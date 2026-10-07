@@ -5,8 +5,9 @@
 //!
 //! A spending transaction is **accounted for** when
 //! - a proposal in the log has been marked broadcast with exactly this txid, or
-//! - it is recent (unmined, or mined at most [`GRACE_BLOCKS`] blocks ago) and some proposal
-//!   in the log spends every note it spends. That covers the moments between a leader
+//! - it is recent (unmined, or mined at most [`GRACE_BLOCKS`] blocks ago) and some
+//!   **approved or broadcast** proposal in the log (not an open, cancelled or rejected one)
+//!   spends every note it spends, with the txid its PCZT fixes. That covers the moments between a leader
 //!   broadcasting and the log entry saying so, and a send that crashed before logging.
 //!
 //! Anything else is an **unapproved spend**: no proposal at all (keys used outside Zafe),
@@ -16,7 +17,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::{vault::VaultState, wallet::VaultSpend};
+use crate::{
+    vault::{ProposalStatus, VaultState},
+    wallet::VaultSpend,
+};
 
 /// How long after a spend appears (blocks) the log may still lack its broadcast entry
 /// before it is flagged: about 30 minutes at 75 s per block.
@@ -57,10 +61,16 @@ pub fn unapproved_spends(
             }
             let recent = mined.is_none_or(|h| tip.saturating_sub(h) <= GRACE_BLOCKS);
             let known_notes = !nullifiers.is_empty()
-                && state
-                    .proposals
-                    .values()
-                    .any(|p| nullifiers.iter().all(|nf| p.nullifiers.contains(nf)));
+                && state.proposals.values().any(|p| {
+                    // Only proposals that were actually approved (or logged as sent)
+                    // can have signatures; cancelled and rejected ones get no grace.
+                    // And the transaction must be the one the proposal's PCZT fixes.
+                    matches!(
+                        p.status,
+                        ProposalStatus::Approved | ProposalStatus::Broadcast
+                    ) && p.expected_txid.is_none_or(|t| &t == txid)
+                        && nullifiers.iter().all(|nf| p.nullifiers.contains(nf))
+                });
             !(recent && known_notes)
         })
         .map(|(txid, (mined_height, _))| UnapprovedSpend { txid, mined_height })

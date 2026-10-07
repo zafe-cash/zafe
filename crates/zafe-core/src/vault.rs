@@ -56,6 +56,9 @@ pub enum VaultError {
     /// (two members proposed at the same time). At most one of them could be mined.
     #[error("entry {0}: spends a note another open proposal already spends")]
     NotesInUse(u64),
+    /// A version 7 `Broadcast` whose txid isn't the one the proposal's PCZT determines.
+    #[error("entry {0}: broadcast txid doesn't match the proposal's transaction")]
+    TxidMismatch(u64),
     #[error("entry {0}: not a valid display name")]
     BadName(u64),
     #[error("entry {0}: backup attestation for another key epoch")]
@@ -447,6 +450,9 @@ pub struct ProposalState {
     /// PCZT doesn't parse; members' verification rejects such a proposal anyway).
     pub nullifiers: Vec<[u8; 32]>,
     pub expiry_height: u32,
+    /// The txid the PCZT determines (its shielded sighash; `None` if it doesn't parse).
+    /// A version 7 `Broadcast` must carry it.
+    pub expected_txid: Option<[u8; 32]>,
     /// Set when the proposal is signed at approval time (enough commitments were in the
     /// members' pools when it was logged); `None` means interactive signing.
     pub preprocessed: Option<Preprocessed>,
@@ -611,6 +617,9 @@ impl VaultState {
                 if self.proposals.contains_key(&id) {
                     return Err(VaultError::DuplicateProposal(index));
                 }
+                let expected_txid = pczt::Pczt::parse(&pczt)
+                    .ok()
+                    .and_then(|p| crate::tx::shielded_sighash(&p).ok());
                 let (nullifiers, expiry_height) = pczt::Pczt::parse(&pczt)
                     .ok()
                     .and_then(|p| {
@@ -650,6 +659,7 @@ impl VaultState {
                         auto_send,
                         nullifiers,
                         expiry_height,
+                        expected_txid,
                         preprocessed,
                         shares: BTreeMap::new(),
                         ready_group: None,
@@ -755,6 +765,15 @@ impl VaultState {
                     .ok_or(VaultError::UnknownProposal(index))?;
                 if p.status != ProposalStatus::Approved {
                     return Err(VaultError::ProposalClosed(index));
+                }
+                // Version 7: the txid is fixed by the PCZT (it excludes signatures and
+                // the proof), so a member can't release the note reservation or fake a
+                // "logged as sent" txid with an arbitrary one. A PCZT that doesn't parse
+                // can't be signed (members reject it), so nothing to compare then.
+                if event_version >= BROADCAST_CHECKED_FROM
+                    && p.expected_txid.is_some_and(|t| t != txid)
+                {
+                    return Err(VaultError::TxidMismatch(index));
                 }
                 p.status = ProposalStatus::Broadcast;
                 p.txid = Some(txid);
@@ -1029,6 +1048,9 @@ impl VaultState {
 /// First `VAULT_EVENT` version whose proposals are assigned commitments group by group
 /// (see [`VaultState::assign_commitments`]).
 const PARTIAL_GROUPS_FROM: u16 = 6;
+
+/// First `VAULT_EVENT` version whose `Broadcast` txid is checked against the PCZT.
+const BROADCAST_CHECKED_FROM: u16 = 7;
 
 fn check_descriptor_signatures(
     descriptor: &VaultDescriptor,

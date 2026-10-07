@@ -36,3 +36,24 @@ pub fn restore_relay(
         Reseeded::Current => 0,
     })
 }
+
+/// Leaves a fork (spec §6.3): after `RelayForked`, discards this phone's copy of the vault
+/// log and follows the relay's history instead. The relay's whole log is verified first;
+/// entries that only this phone's copy has are dropped. Returns how many. Refuses when the
+/// relay does not actually show another history. Ask the user to confirm first.
+pub fn follow_relay(
+    relay_url: String,
+    seeds: Vec<u8>,
+    material: Vec<u8>,
+) -> Result<u32, ZafeError> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
+    let relay = RelayClient::new(relay_url);
+    let out = runtime().block_on(node::follow_relay(
+        &relay,
+        &me,
+        m.descriptor.vault_id,
+        &m.log_key(),
+    ))?;
+    Ok(u32::try_from(out.dropped).unwrap_or(u32::MAX))
+}

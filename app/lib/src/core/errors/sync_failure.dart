@@ -41,6 +41,9 @@ enum SyncFailureKind {
   /// The relay's log differs from the history this phone saw.
   relayForked,
 
+  /// The relay's member list or threshold differs from the vault's.
+  relayMembership,
+
   /// "Use Tor" is on and Tor is still connecting: nothing is sent meanwhile.
   torConnecting,
 
@@ -78,6 +81,7 @@ class SyncFailure {
     SyncFailureKind.relayRolledBack => 'Relay lost data',
     SyncFailureKind.relayLostVault => 'Relay lost the vault',
     SyncFailureKind.relayForked => 'Relay not trusted',
+    SyncFailureKind.relayMembership => 'Relay not trusted',
     SyncFailureKind.torConnecting => 'Connecting to Tor…',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
@@ -101,6 +105,7 @@ class SyncFailure {
     SyncFailureKind.relayRolledBack => 'The relay lost part of the vault',
     SyncFailureKind.relayLostVault => 'The relay lost the vault',
     SyncFailureKind.relayForked => 'The relay shows another history',
+    SyncFailureKind.relayMembership => 'The relay lists other members',
     SyncFailureKind.torConnecting => 'Connecting to Tor',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
@@ -154,7 +159,16 @@ class SyncFailure {
     SyncFailureKind.relayForked =>
       'The relay shows a different history of this vault than this phone saw. '
           'Zafe won\'t use it. Check with the other members whether the relay was '
-          'changed or restored, and don\'t approve anything from it until you know why.',
+          'changed or restored, and don\'t approve anything from it until you know why. '
+          'If the other members agree the relay\'s history is the right one, you can '
+          'follow it: this phone drops its own copy.',
+    SyncFailureKind.relayMembership =>
+      'The relay\'s list of members, or the number of approvals it asks for, '
+          'doesn\'t match this vault. This can happen when someone restored a wiped '
+          'relay with the wrong details. Your funds are safe: the vault\'s members '
+          'come from its signed history, not from the relay. But the relay may lock '
+          'members out, so Zafe won\'t use it. Ask the other members, and agree on a '
+          'fresh relay in Settings.',
     SyncFailureKind.torConnecting =>
       '"Use Tor" is on and Tor is still connecting. Zafe sends nothing until it '
           'is, and never connects directly instead.',
@@ -171,6 +185,10 @@ class SyncFailure {
       kind == SyncFailureKind.relayRolledBack ||
       kind == SyncFailureKind.relayLostVault;
 
+  /// This phone can drop its own copy of the history and follow the relay's (after the
+  /// relay showed another history; the other members must agree the relay is right).
+  bool get canFollowRelay => kind == SyncFailureKind.relayForked;
+
   /// Whether changing a server address in Settings could fix it.
   bool get suggestsSettings => switch (kind) {
     SyncFailureKind.lightwalletdUnreachable ||
@@ -178,6 +196,7 @@ class SyncFailure {
     SyncFailureKind.tls ||
     SyncFailureKind.serverBehind ||
     SyncFailureKind.wrongNetwork ||
+    SyncFailureKind.relayMembership ||
     SyncFailureKind.torFailed => true,
     _ => false,
   };
@@ -216,6 +235,7 @@ SyncFailure classifySyncFailure(Object error, {SyncEndpoint? fallback}) {
     ZafeErrorKind.relayRolledBack => SyncFailureKind.relayRolledBack,
     ZafeErrorKind.relayLostVault => SyncFailureKind.relayLostVault,
     ZafeErrorKind.relayForked => SyncFailureKind.relayForked,
+    ZafeErrorKind.relayMembership => SyncFailureKind.relayMembership,
     ZafeErrorKind.torConnecting => SyncFailureKind.torConnecting,
     ZafeErrorKind.torFailed => SyncFailureKind.torFailed,
     _ => SyncFailureKind.other,
@@ -290,3 +310,19 @@ String formatLastSuccess(DateTime? at, {DateTime? now}) {
   final mm = at.minute.toString().padLeft(2, '0');
   return '${at.day} ${_months[at.month - 1]}, $hh:$mm';
 }
+
+/// Title of the confirmation before this phone follows the relay's history.
+const followRelayTitle = 'Follow the relay\'s history?';
+
+/// What following the relay does, said before the user confirms.
+const followRelayWarning =
+    'This phone throws away its own saved copy of the vault\'s history and uses the '
+    'relay\'s instead. Anything only this phone saw is lost: votes, payments or '
+    'names the relay never had. Your keys and funds are not touched. Do this only '
+    'after the other members confirm the relay shows the right history. If you '
+    'are unsure, cancel.';
+
+/// The toast after following: how many entries only this phone had.
+String followRelayDone(int dropped) => dropped == 0
+    ? 'This phone now follows the relay.'
+    : 'This phone now follows the relay. $dropped entries only it had were dropped.';

@@ -47,6 +47,10 @@ String zafeErrorMessage(
     ZafeErrorKind.relayForked =>
       'The relay shows a different history than this phone saw, so Zafe isn\'t '
           'using it. Check with the other members before doing anything.',
+    ZafeErrorKind.relayMembership =>
+      'The relay\'s list of members or its approval rule doesn\'t match this '
+          'vault, so Zafe isn\'t using it. Your funds are safe. Ask the other '
+          'members, and agree on a fresh relay in Settings.',
     ZafeErrorKind.tls =>
       'Couldn\'t connect securely to the ${_server(error.endpoint)}. '
           'Check its address in Settings.',

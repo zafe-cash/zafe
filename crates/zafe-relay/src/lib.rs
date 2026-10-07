@@ -45,10 +45,11 @@ use zafe_proto::{
     log::GENESIS_PREV_HASH,
     relay::{
         encode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxesRead, MailboxesResponse,
-        MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove, ReplaceMember, Reseed,
-        ReseedResponse, Seal, SetThreshold, Signed, WaitRequest, WaitResponse, MAX_ACK_CURSORS,
-        MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
+        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo, MailboxesRead,
+        MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove,
+        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
+        WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
+        UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -393,6 +394,7 @@ impl Relay {
             .route("/v1/mailbox/seal", post(seal))
             .route("/v1/mailbox/remove", post(remove))
             .route("/v1/mailbox/members", post(members))
+            .route("/v1/mailbox/info", post(mailbox_info))
             .route("/v1/mailbox/threshold", post(set_threshold))
             .route("/v1/mailbox/replace", post(replace_member))
             .route("/v1/mailbox/reseed", post(reseed))
@@ -763,6 +765,22 @@ async fn members(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&MembersResponse {
         members,
         sealed: mb.sealed,
+    })
+}
+
+async fn mailbox_info(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<MembersRead>(&relay, &body)?;
+    relay.check_fresh(req.payload.timestamp)?;
+    let db = relay.db.lock().expect("lock");
+    let mb = mailbox(&db, &req.payload.mailbox)?;
+    let members = members_of(&db, &req.payload.mailbox)?;
+    if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk) {
+        return Err(RelayError::Forbidden);
+    }
+    ok(&MailboxInfo {
+        members,
+        sealed: mb.sealed,
+        threshold: mb.threshold,
     })
 }
 

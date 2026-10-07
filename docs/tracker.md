@@ -485,6 +485,11 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       notification, `kMainnetRelayUrl`. Dart tests: error copy, sync failure kinds,
       unapproved-spend notification, beta. `bridge_e2e` keeps the interactive fallback
       by letting only A publish a pool (no group fully covered) and asserts `!one_tap`.
+- [x] Audit section 9 follow-ups (2026-10-07, `VAULT_EVENT` 7): broadcast txid checked at
+      replay, relay membership/threshold check after a restore, "Follow the relay" for a
+      forked device, grace limited to approved proposals, Litestream/Caddy pinned by digest.
+      See `docs/audit-scope.md` section 10. Still open from section 9: beta slots, same
+      SSH key for testnet/mainnet, `catch_relay_up` across seat moves.
 - [x] One-tap pools no longer need every member (2026-10-07, `VAULT_EVENT` 6, gated by
       the author's event version; `vault` tests)
 - [x] Unapproved-spend alert core (`spend_watch`, `VaultWallet::vault_spends`; wallet

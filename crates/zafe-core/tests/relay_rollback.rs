@@ -10,8 +10,8 @@ use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     log_cache::LogCache,
     node::{
-        create_vault, join_vault, load_state, reseed_relay, run_keygen, seal, set_name, Invite,
-        NodeError, Reseeded, VaultMaterial,
+        create_vault, follow_relay, join_vault, load_state, reseed_relay, run_keygen, seal,
+        set_name, Invite, NodeError, Reseeded, VaultMaterial,
     },
     relay_client::RelayClient,
     wallet::regtest_network,
@@ -384,4 +384,128 @@ async fn a_mailbox_still_being_set_up_is_not_reseeded() {
         timestamp: 0,
     };
     assert!(relay.reseed(&ids[0], request).await.is_err());
+}
+
+/// A member restoring a wiped relay chooses its members and threshold; the relay can't read
+/// the log to check them, so the other members do (spec §6.3).
+#[tokio::test]
+async fn a_relay_restored_with_other_members_or_threshold_is_refused() {
+    use zafe_proto::relay::Reseed;
+
+    let w = world().await;
+    let total = len(&w, 2, &w.url).await.unwrap();
+    let entries: Vec<Vec<u8>> = w
+        .client(2, &w.url)
+        .log_cache()
+        .unwrap()
+        .read(&w.vault.material[2].descriptor.vault_id)
+        .unwrap()
+        .iter()
+        .map(|e| e.to_bytes().unwrap())
+        .collect();
+    assert_eq!(entries.len() as u64, total);
+    let honest: Vec<_> = w.vault.material[2]
+        .descriptor
+        .members
+        .iter()
+        .map(|m| m.identity)
+        .collect();
+    let mut rng = StdRng::seed_from_u64(900);
+    let intruder_id = Identity::generate(&mut rng);
+    let intruder = intruder_id.public();
+
+    let attacks: Vec<(&str, Vec<_>, u16)> = vec![
+        ("threshold 1", honest.clone(), 1),
+        ("extra key", [honest.clone(), vec![*intruder]].concat(), 2),
+        ("member left out", honest[1..].to_vec(), 2),
+    ];
+    let mut checked = 0;
+    for (name, members, threshold) in attacks {
+        let url = serve(Relay::new()).await;
+        let bare = RelayClient::new(&url).with_log_cache(None);
+        let answer = bare
+            .reseed(
+                &w.vault.ids[2],
+                Reseed {
+                    mailbox: w.vault.material[2].descriptor.vault_id,
+                    members,
+                    threshold,
+                    from: 0,
+                    entries: entries.clone(),
+                    finish: true,
+                    timestamp: 0,
+                },
+            )
+            .await;
+        // A relay may refuse a list that omits its own signer; the others get through.
+        if answer.is_err() {
+            continue;
+        }
+        let err = len(&w, 0, &url).await.unwrap_err();
+        assert!(
+            matches!(err, NodeError::RelayMembership(_)),
+            "{name}: {err:?}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 2, "the relay accepted too few of the attacks");
+
+    // An honest restore still passes the check.
+    let url = serve(Relay::new()).await;
+    reseed_relay(
+        &w.client(2, &url),
+        &w.vault.ids[2],
+        w.vault.material[2].descriptor.vault_id,
+        &w.vault.material[2].log_key(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(len(&w, 0, &url).await.unwrap(), total);
+}
+
+/// After `RelayForked` the minority device can choose to follow the relay.
+#[tokio::test]
+async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
+    let w = world().await;
+    let old = rewound(&w, "fork-follow").await;
+    name(&w, 1, &w.url, "Bob").await;
+    name(&w, 2, &w.url, "Carol").await;
+    let total = len(&w, 0, &w.url).await.unwrap();
+    // Two other entries on the relay the device is about to meet.
+    let bare = RelayClient::new(&old).with_log_cache(None);
+    let mut rng = StdRng::seed_from_u64(5);
+    for (i, text) in [(0, "Zed"), (1, "Yan")] {
+        set_name(&bare, &w.vault.ids[i], &w.vault.material[i], text, &mut rng)
+            .await
+            .unwrap();
+    }
+    let mailbox = w.vault.material[0].descriptor.vault_id;
+    let key = w.vault.material[0].log_key();
+    assert!(matches!(
+        len(&w, 0, &old).await,
+        Err(NodeError::RelayForked { .. })
+    ));
+
+    // Not a fork: nothing is discarded.
+    let refused = follow_relay(&w.client(0, &w.url), &w.vault.ids[0], mailbox, &key).await;
+    assert!(
+        matches!(refused, Err(NodeError::Protocol(_))),
+        "{refused:?}"
+    );
+    assert_eq!(len(&w, 0, &w.url).await.unwrap(), total);
+
+    let out = follow_relay(&w.client(0, &old), &w.vault.ids[0], mailbox, &key)
+        .await
+        .unwrap();
+    assert_eq!(
+        out.dropped, 2,
+        "Bob and Carol exist only in this device's copy"
+    );
+    assert_eq!(out.entries, total);
+    assert_eq!(len(&w, 0, &old).await.unwrap(), total);
+    // The copy now follows that relay: the first relay is the one that looks forked.
+    assert!(matches!(
+        len(&w, 0, &w.url).await,
+        Err(NodeError::RelayForked { .. })
+    ));
 }

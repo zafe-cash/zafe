@@ -304,3 +304,29 @@ cannot diverge into a double assignment; nonce safety still rests on delete-befo
 `from`, timestamp window, signer-only continuation, quotas and capacity roll back with the
 transaction); `load_log` anchor checks (index and hash of the last saved entry, 404 vs empty
 page vs fork) and atomic cache writes.
+
+## 10. Fixes for the section 9 items (2026-10-07, branch audit-fix2)
+
+- **Broadcast txid.** `VAULT_EVENT` 7. A v6 txid commits to effecting data only (no spend-auth
+  signatures, no proof), so it equals the shielded sighash that members already compute and sign;
+  vaults hold no transparent inputs, so no other digest differs. `VaultState` stores it per
+  proposal at replay (`expected_txid`); a `Broadcast` written with version 7 whose txid differs
+  is ignored (`TxidMismatch`). Chosen over "one of several candidate txids" because the PCZT
+  fixes exactly one. `regtest_e2e` asserts the real extracted transaction's txid equals it.
+  A PCZT that does not parse skips the check (never signable). Versions 1-6 broadcasts are
+  unchecked forever (old logs replay unchanged); every member must update before relying on it.
+- **Unapproved-spend grace** now covers only approved or broadcast proposals, and only the
+  transaction their PCZT fixes (`expected_txid`).
+- **Reseed membership.** The blind relay cannot verify a restorer's members/threshold (the
+  descriptor is encrypted), so clients do: `node::check_relay_membership` (new route
+  `/v1/mailbox/info`, no `RELAY_API` bump) runs in `load_state` and before catching a relay up;
+  `RelayMembership` -> bridge `RelayMembership` -> sync sheet copy. Test
+  `a_relay_restored_with_other_members_or_threshold_is_refused` (threshold 1, extra key, member
+  left out). Residual: a relay lock-out is still possible until members move to a fresh relay;
+  a device without a relay route (older relay) checks members only.
+- **Fork recovery.** `node::follow_relay` (bridge `follow_relay`, sync sheet "Follow the relay
+  instead" behind a confirmation and unlock). Verifies the relay's whole log without the anchor,
+  refuses when there is no fork, drops local-only entries. Residual: a device that follows a
+  relay which equivocates to others follows that branch; the confirmation tells the user to
+  check with the other members first.
+- **Image pinning.** Litestream and Caddy are pinned by digest in `infra/relay/vps/compose.yml`.

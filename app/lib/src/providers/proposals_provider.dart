@@ -384,6 +384,20 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return restored;
   }
 
+  /// Leaves a fork: discards this phone's copy of the vault history and follows the
+  /// relay's (spec §6.3). Returns how many entries only this phone had. The caller must
+  /// have asked the user first.
+  Future<int> followRelay() async {
+    final vault = _vault;
+    final dropped = await rust_relay_log.followRelay(
+      relayUrl: _endpoints.relayUrl,
+      seeds: vault.identity!,
+      material: vault.material!,
+    );
+    await refresh();
+    return dropped;
+  }
+
   /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`. Returns whether
   /// the seat moved (this was the last approval needed).
   Future<bool> approveSeatMove(String oldKeyHex, String code) async {

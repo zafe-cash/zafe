@@ -93,6 +93,54 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
     }
   }
 
+  bool _following = false;
+
+  /// Drops this phone's copy of the history and follows the relay's, after asking.
+  Future<void> _follow() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text(followRelayTitle),
+        content: const Text(followRelayWarning),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Follow the relay'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    if (!await confirmUnlock(
+      context,
+      ref,
+      reason: 'Unlock to follow the relay\'s history',
+    )) {
+      return;
+    }
+    setState(() => _following = true);
+    try {
+      final dropped = await ref.read(proposalsProvider.notifier).followRelay();
+      if (!mounted) return;
+      showAppToast(context, followRelayDone(dropped));
+    } catch (e) {
+      if (mounted) {
+        showAppToast(
+          context,
+          zafeErrorMessage(e, fallback: 'Couldn\'t follow the relay.'),
+          iconName: AppIcons.warningCircle,
+          tone: AppToastTone.destructive,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _following = false);
+    }
+  }
+
   Future<void> _retry() async {
     setState(() => _retrying = true);
     try {
@@ -198,6 +246,15 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
           child: Text(
             _restoring ? 'Restoring...' : 'Restore vault on the relay',
           ),
+        ),
+      ],
+      if (failure?.canFollowRelay ?? false) ...[
+        const SizedBox(height: AppSpacing.xs),
+        AppButton(
+          expand: true,
+          variant: AppButtonVariant.secondary,
+          onPressed: _following ? null : _follow,
+          child: Text(_following ? 'Following...' : 'Follow the relay instead'),
         ),
       ],
       if (failure?.suggestsSettings ?? false) ...[

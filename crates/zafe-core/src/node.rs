@@ -68,6 +68,12 @@ pub enum NodeError {
     /// saved `local_len` entries of its log.
     #[error("the relay no longer has this vault: this device has {local_len} log entries")]
     RelayLostVault { local_len: u64 },
+    /// The relay's member list or threshold differs from the membership the vault log
+    /// ends with: it was seeded by someone else's idea of the vault (a malicious restore).
+    /// Funds are not at risk (membership comes from the log) but the relay would lock
+    /// members out or move seats on fewer approvals: move to another relay.
+    #[error("the relay's member list doesn't match the vault: {0}")]
+    RelayMembership(String),
     /// This device's copy of the log can't be read or written.
     #[error(transparent)]
     LogCopy(#[from] crate::log_cache::LogCacheError),
@@ -873,6 +879,79 @@ fn load_copy(
     Ok(rebuilt.ok())
 }
 
+/// How long a passed membership check is trusted (per mailbox, per process).
+const MEMBERSHIP_RECHECK: std::time::Duration = std::time::Duration::from_secs(60);
+
+type MembershipChecks =
+    std::sync::Mutex<std::collections::HashMap<(String, MailboxId), (std::time::Instant, usize)>>;
+
+fn membership_checks() -> &'static MembershipChecks {
+    static CHECKS: std::sync::OnceLock<MembershipChecks> = std::sync::OnceLock::new();
+    CHECKS.get_or_init(Default::default)
+}
+
+/// Compares the relay's member list and threshold with the membership the replayed log
+/// ends with (spec §6.3). `reseed` lets whoever restores a relay choose both, and the
+/// relay can't read the log to check them, so every member does. A seat move the relay
+/// hasn't applied yet (log ahead of the relay) is tolerated: the old key may still hold
+/// the seat. A relay without the route (older) is checked on its member list alone;
+/// the threshold is then unknown.
+pub async fn check_relay_membership(
+    relay: &RelayClient,
+    me: &Identity,
+    state: &VaultState,
+) -> Result<(), NodeError> {
+    let mailbox = state.descriptor.vault_id;
+    let moves = state.replacements.len();
+    let cache_key = (relay.base_url().to_string(), mailbox);
+    if let Some((at, seen)) = membership_checks().lock().expect("lock").get(&cache_key) {
+        if *seen == moves && at.elapsed() < MEMBERSHIP_RECHECK {
+            return Ok(());
+        }
+    }
+    let (members, threshold) = match relay.mailbox_info(me, mailbox).await {
+        Ok(info) => (info.members, Some(info.threshold)),
+        Err(RelayClientError::Status { status: 404, .. }) => {
+            // Either an older relay without the route, or one that doesn't know the vault
+            // (the log load reports that); fall back to the older route.
+            (relay.members(me, mailbox).await?.members, None)
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let mismatch = |why: String| Err(NodeError::RelayMembership(why));
+    let mut held: Vec<IdentityPublic> = members;
+    for want in &state.descriptor.members {
+        let want = want.identity;
+        let exact = held.iter().position(|h| *h == want);
+        let moved = || {
+            let old = state.replacement_to(&want.sig_pk)?.old;
+            held.iter().position(|h| h.sig_pk == old)
+        };
+        match exact.or_else(moved) {
+            Some(i) => {
+                held.remove(i);
+            }
+            None => return mismatch("a member is missing or has another key".into()),
+        }
+    }
+    if !held.is_empty() {
+        return mismatch(format!("{} extra key(s) on the relay", held.len()));
+    }
+    if let Some(t) = threshold {
+        if t != 0 && t != state.descriptor.threshold {
+            return mismatch(format!(
+                "the relay lists a threshold of {t}, the vault's is {}",
+                state.descriptor.threshold
+            ));
+        }
+    }
+    membership_checks()
+        .lock()
+        .expect("lock")
+        .insert(cache_key, (std::time::Instant::now(), moves));
+    Ok(())
+}
+
 /// Reads and verifies the whole log, returning the chain and the replayed state.
 pub async fn load_state(
     relay: &RelayClient,
@@ -896,7 +975,66 @@ pub async fn load_state(
             "the vault log belongs to another vault".into(),
         ));
     }
+    Box::pin(check_relay_membership(relay, me, &state)).await?;
     Ok((chain, state))
+}
+
+/// What [`follow_relay`] dropped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Followed {
+    /// Entries of this device's copy that the relay's history doesn't have.
+    pub dropped: u64,
+    /// Entries the device now holds (the relay's log).
+    pub entries: u64,
+}
+
+/// Leaves a fork (spec §6.3): after [`NodeError::RelayForked`] this device's copy of the log
+/// and the relay's history disagree. A device that trusts the relay (the other members
+/// agree with it) discards its copy and follows the relay: the relay's whole log is
+/// verified from the first entry (signatures, chain, membership at each entry) before the
+/// copy is replaced, so a relay serving junk can't make a device drop its anchor.
+/// Entries only this device saw are lost; they were never in the history the other members
+/// share. Refuses when there is no fork (a rollback is restored from a copy, not followed).
+pub async fn follow_relay(
+    relay: &RelayClient,
+    me: &Identity,
+    mailbox: MailboxId,
+    key: &LogKey,
+) -> Result<Followed, NodeError> {
+    let Some(cache) = relay.log_cache() else {
+        return Err(NodeError::Protocol(
+            "this device keeps no copy to discard".into(),
+        ));
+    };
+    let (copy, _) = load_copy(relay, mailbox, key)?
+        .ok_or_else(|| NodeError::Protocol("this device has no copy to discard".into()))?;
+    // Only a real fork qualifies.
+    match Box::pin(load_log(relay, me, mailbox, key)).await {
+        Err(NodeError::RelayForked { .. }) => {}
+        Err(e) => return Err(e),
+        Ok(_) => {
+            return Err(NodeError::Protocol(
+                "the relay's log agrees with this device's copy".into(),
+            ))
+        }
+    }
+    // The relay's log must stand on its own, checked without the anchor.
+    let bare = relay.clone().with_log_cache(None);
+    let (theirs, state) = Box::pin(load_log(&bare, me, mailbox, key)).await?;
+    Box::pin(check_relay_membership(&bare, me, &state)).await?;
+    // Where the two histories part.
+    let ours = copy.entries();
+    let common = ours
+        .iter()
+        .zip(theirs.entries())
+        .take_while(|(a, b)| matches!((a.hash(), b.hash()), (Ok(x), Ok(y)) if x == y))
+        .count() as u64;
+    cache.remove(&mailbox);
+    save_copy(relay, &theirs);
+    Ok(Followed {
+        dropped: copy.len() - common,
+        entries: theirs.len(),
+    })
 }
 
 /// Reads and verifies the log of `mailbox` with `key`, without the member's material (a
@@ -1015,7 +1153,9 @@ pub async fn reseed_relay(
         };
         let answer = relay.reseed(me, request).await?;
         if !answer.restored {
-            // The relay had the vault already: check it against our copy and catch it up.
+            // The relay had the vault already: check its members against the log, its
+            // history against our copy, and catch it up.
+            Box::pin(check_relay_membership(relay, me, &state)).await?;
             return catch_relay_up(relay, me, mailbox, &chain, answer.len).await;
         }
         if answer.open {

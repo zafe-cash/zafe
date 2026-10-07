@@ -29,7 +29,11 @@ pub const LOG_ENTRY: u16 = 1;
 /// commitments for every signer group whose members all have pool commitments, instead
 /// of all-or-nothing. An older app skips such events (unsupported version) rather than
 /// computing another assignment; proposals written with versions 1-5 replay as before.
-pub const VAULT_EVENT: u16 = 6;
+/// 7 (2026-10-07): no new variant. A `Broadcast` written with version 7 must carry the
+/// txid the proposal's PCZT determines (the shielded sighash equals the v6 txid, which
+/// excludes signatures and proofs), else it is ignored. Version 1-6 broadcasts replay as
+/// before; an older app skips version 7 events.
+pub const VAULT_EVENT: u16 = 7;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).

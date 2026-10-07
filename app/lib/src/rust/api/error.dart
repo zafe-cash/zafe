@@ -77,6 +77,10 @@ enum ZafeErrorKind {
   /// trust it; members compare notes outside Zafe.
   relayForked,
 
+  /// The relay's member list or threshold differs from the vault's (someone seeded it
+  /// wrongly when restoring it): do not trust it; funds are not at risk.
+  relayMembership,
+
   /// The relay no longer knows this vault (wiped), though this device has its log: a
   /// member can restore it from the device copy.
   relayLostVault,

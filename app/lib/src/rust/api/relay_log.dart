@@ -22,3 +22,17 @@ Future<int> restoreRelay({
   seeds: seeds,
   material: material,
 );
+
+/// Leaves a fork (spec §6.3): after `RelayForked`, discards this phone's copy of the vault
+/// log and follows the relay's history instead. The relay's whole log is verified first;
+/// entries that only this phone's copy has are dropped. Returns how many. Refuses when the
+/// relay does not actually show another history. Ask the user to confirm first.
+Future<int> followRelay({
+  required String relayUrl,
+  required List<int> seeds,
+  required List<int> material,
+}) => RustLib.instance.api.crateApiRelayLogFollowRelay(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  material: material,
+);
