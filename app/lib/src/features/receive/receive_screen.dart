@@ -79,7 +79,7 @@ class ReceiveScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.xs),
           Center(
             child: Text(
-              betaNote(),
+              betaNote,
               textAlign: TextAlign.center,
               style: AppTypography.bodySmall.copyWith(
                 color: colors.text.warning,

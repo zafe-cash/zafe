@@ -6,7 +6,11 @@ name: Relay deploy
 # that has been running on testnet, after a reviewer approves.
 #
 # Needs a GitHub environment `relay-testnet` (deploys from main only) with:
-#   secret   RELAY_SSH_KEY       private key of the VPS `deploy` user (bootstrap.sh)
+#   secret   RELAY_TESTNET_SSH_KEY   private key of the VPS user `zafe-testnet` (bootstrap.sh):
+#                                its forced command can only deploy testnet. Until the
+#                                one-time migration is done (infra/relay/README.md), the
+#                                workflow falls back to the old secret RELAY_SSH_KEY and the
+#                                old `deploy` user; delete that fallback afterwards.
 #   secret   RELAY_KNOWN_HOSTS   `ssh-keyscan -t ed25519 <host>` output, checked out of band
 #   variable RELAY_HOST          the VPS address, e.g. 57.129.172.198
 #   variable RELAY_DOMAIN        e.g. testnet.relay.zafe.cash (DNS only, pointing at the VPS)
@@ -112,16 +116,30 @@ jobs:
       - uses: actions/checkout@v5
       - name: SSH setup
         env:
-          SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
+          NEW_KEY: ${{ secrets.RELAY_TESTNET_SSH_KEY }}
+          OLD_KEY: ${{ secrets.RELAY_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.RELAY_KNOWN_HOSTS }}
         run: |
+          if [ -n "$NEW_KEY" ]; then
+            user=zafe-testnet; key=$NEW_KEY; echo "MODE=forced" >> "$GITHUB_ENV"
+          else
+            # Legacy, until the key migration: the shared `deploy` user.
+            echo "::warning::RELAY_TESTNET_SSH_KEY is not set: using the old shared deploy key (see infra/relay/README.md)"
+            user=deploy; key=$OLD_KEY; echo "MODE=legacy" >> "$GITHUB_ENV"
+          fi
           install -d -m700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$key" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          printf 'Host relay\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n' \
-            "${{ vars.RELAY_HOST }}" > ~/.ssh/config
+          printf 'Host relay\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' \
+            "${{ vars.RELAY_HOST }}" "$user" > ~/.ssh/config
       - name: Copy compose files
-        run: tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh litestream.yml | ssh relay 'tar -C /opt/zafe-relay -xz'
+        run: |
+          if [ "$MODE" = forced ]; then
+            # The server downloads this commit from GitHub itself (only commits on main).
+            ssh relay "sync ${{ github.sha }}"
+          else
+            tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh litestream.yml | ssh relay 'tar -C /opt/zafe-relay -xz'
+          fi
       - name: Relay secrets
         env:
           FCM: ${{ secrets.RELAY_FCM_SERVICE_ACCOUNT_JSON }}
@@ -130,17 +148,28 @@ jobs:
             # One line, single-quoted: Compose then takes it literally (no ${} interpolation).
             json=$(jq -ce . <<<"$FCM")
             case "$json" in *"'"*) echo "::error::the FCM key contains a single quote"; exit 1;; esac
-            printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'\n" "$json" |
-              ssh relay 'umask 077 && cat > /opt/zafe-relay/secrets.env'
+            line=$(printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'" "$json")
+          else
+            line=
+          fi
+          if [ "$MODE" = forced ]; then
+            printf '%s' "$line" | ssh relay 'secrets fcm'
+          elif [ -n "$line" ]; then
+            printf '%s\n' "$line" | ssh relay 'umask 077 && cat > /opt/zafe-relay/secrets.env'
           else
             ssh relay 'rm -f /opt/zafe-relay/secrets.env'
           fi
       - name: Deploy
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ needs.image.outputs.digest }}
         run: |
-          printf '%s' "$TOKEN" | ssh relay \
-            "bash /opt/zafe-relay/deploy.sh testnet '${{ env.IMAGE }}@${{ needs.image.outputs.digest }}' '${{ vars.RELAY_DOMAIN }}'"
+          if [ "$MODE" = forced ]; then
+            printf '%s' "$TOKEN" | ssh relay "deploy $DIGEST ${{ vars.RELAY_DOMAIN }}"
+          else
+            printf '%s' "$TOKEN" | ssh relay \
+              "bash /opt/zafe-relay/deploy.sh testnet '${{ env.IMAGE }}@$DIGEST' '${{ vars.RELAY_DOMAIN }}'"
+          fi
       - name: Public health check
         run: |
           # The first deploy waits for Caddy's certificate.

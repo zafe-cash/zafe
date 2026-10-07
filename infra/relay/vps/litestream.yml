@@ -3,9 +3,10 @@
 # litestream.env, written by CI from the `relay-mainnet` environment:
 #
 #   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY   keys for the bucket only
-#   LITESTREAM_BUCKET     e.g. zafe-relay-mainnet
+#   LITESTREAM_BUCKET     e.g. zafe-mainnet (Cloudflare R2)
 #   LITESTREAM_ENDPOINT   e.g. https://s3.eu-central-003.backblazeb2.com (any S3 API)
-#   LITESTREAM_REGION     e.g. eu-central-003
+#   LITESTREAM_REGION     e.g. eu-central-003; `auto` for Cloudflare R2
+#   (R2: endpoint https://<ACCOUNT_ID>.r2.cloudflarestorage.com, path-style, as set below)
 #
 # The bucket sees the encrypted vault log, public keys and metadata, like the relay
 # itself: enable server-side encryption at rest, versioning off, and use a key that can

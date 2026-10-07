@@ -791,7 +791,7 @@ DKG + safety number + `sk` agreement + UFVK/address → sync → PCZT → FROST 
 Flutter app with vault creation (invite link and QR), receive, balance, history, payment proposals, independent verification screen, approve/reject, async signing, push notifications, hosted relay.
 
 **M2: v1 feature-complete (mainnet beta)**
-Batch payments, address book, rules, CSV export, encrypted backup and restore, repair, backup health. External security audit of zafe-core and the protocol before mainnet funds. **Mainnet gate:** the external audit, a hosted relay and a small end-to-end mainnet dry run, then a capped beta. (U1, ZF confirming the key derivation gives recoverable vaults, was answered 2026-10-01.)
+Batch payments, address book, rules, CSV export, encrypted backup and restore, repair, backup health. External security audit of zafe-core and the protocol before mainnet funds. **Mainnet gate:** the external audit, a hosted relay and a small end-to-end mainnet dry run, then a beta (label only, no cap). (U1, ZF confirming the key derivation gives recoverable vaults, was answered 2026-10-01.)
 
 **M3: Membership**
 Rotation (repair to add members, refresh to remove them, resharing to change t, §10.2), one-time ceremony keys (§10.4.4), migration flow with late-payment sweeps, unapproved-spend alert, desktop builds.

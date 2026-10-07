@@ -7,7 +7,6 @@ void main() {
     'relay trust errors have their own copy, none says to switch relays',
     () {
       for (final kind in [
-        ZafeErrorKind.relayAtCapacity,
         ZafeErrorKind.relayRolledBack,
         ZafeErrorKind.relayLostVault,
         ZafeErrorKind.relayForked,

@@ -481,7 +481,7 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [x] App side of the above (2026-10-07, merged from `audit-prep-app`, codegen re-run):
       bridge (`init_log_cache`, `restore_relay`, `unapproved_spends`, error kinds), Dart
       copy, sync-sheet "Restore vault on the relay" (same relay only; no copy implies
-      moving a vault), beta cap (`core/config/beta.dart`), unapproved-spend card +
+      moving a vault), beta label (`core/config/beta.dart`), unapproved-spend card +
       notification, `kMainnetRelayUrl`. Dart tests: error copy, sync failure kinds,
       unapproved-spend notification, beta. `bridge_e2e` keeps the interactive fallback
       by letting only A publish a pool (no group fully covered) and asserts `!one_tap`.
@@ -524,7 +524,11 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] Mainnet relay: second compose service + `relay.zafe.cash` + Litestream to object
       storage + a `relay-mainnet` environment with required reviewers that promotes a
       digest already on testnet
-- [ ] Capped mainnet beta (per-vault limit, "beta" label) before full launch
+- [ ] Deploy-key split (files prepared 2026-10-07): the user runs the migration in
+      `infra/relay/README.md` ("Migrating a running server"); then delete the legacy
+      `RELAY_SSH_KEY` fallback in `relay-deploy.yml`. Consider a separate host for mainnet.
+- [x] Mainnet beta: "beta" label only, no cap (decided 2026-10-07: no relay vault limit, no
+      per-vault fund limit)
 
 ## M3 / M4 — later (spec §16)
 

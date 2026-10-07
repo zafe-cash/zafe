@@ -175,14 +175,6 @@ impl IntoResponse for RelayError {
             RelayError::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
             RelayError::QuotaExceeded(_) => StatusCode::INSUFFICIENT_STORAGE,
         };
-        if let RelayError::QuotaExceeded(quota) = self {
-            return (
-                status,
-                [(zafe_proto::relay::QUOTA_HEADER, quota.token())],
-                self.to_string(),
-            )
-                .into_response();
-        }
         (status, self.to_string()).into_response()
     }
 }
@@ -665,7 +657,6 @@ async fn create(
             return Err(RelayError::QuotaExceeded(Quota::Mailboxes));
         }
     }
-    check_capacity(&relay, &tx)?;
     tx.execute(
         "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
         params![
@@ -676,17 +667,6 @@ async fn create(
     )?;
     tx.commit()?;
     ok(&())
-}
-
-/// Refuses a new mailbox (already inserted in `tx`) when the relay is over its total.
-fn check_capacity(relay: &Relay, tx: &rusqlite::Transaction) -> Result<(), RelayError> {
-    if let Some(max) = relay.quotas.mailboxes_total {
-        let all: i64 = tx.query_row("SELECT COUNT(*) FROM mailboxes", [], |r| r.get(0))?;
-        if all as u64 > max {
-            return Err(RelayError::QuotaExceeded(Quota::Capacity));
-        }
-    }
-    Ok(())
 }
 
 async fn join(State(relay): State<Relay>, body: Bytes) -> RelayResult {
@@ -921,7 +901,6 @@ async fn reseed(
                     return Err(RelayError::QuotaExceeded(Quota::Mailboxes));
                 }
             }
-            check_capacity(&relay, &tx)?;
             for m in &p.members {
                 tx.execute(
                     "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",

@@ -22,8 +22,6 @@
 //!   of vault log per mailbox
 //! - `ZAFE_RELAY_MAX_VAULTS_PER_KEY`: mailboxes one signing key may create (default 8).
 //!   `0` turns that quota off, as for the three before it
-//! - `ZAFE_RELAY_MAX_VAULTS`: mailboxes the relay holds in total (default: no limit); new
-//!   vaults are refused over it (HTTP 507, `zafe-quota: capacity`). A capped beta
 //!
 //! [`Limits::hosted`]: zafe_relay::limits::Limits::hosted
 //! [`Quotas::hosted`]: zafe_relay::quota::Quotas::hosted
@@ -89,12 +87,11 @@ async fn main() -> std::io::Result<()> {
     );
     let quotas = quotas_from_env(|name| std::env::var(name).ok());
     tracing::info!(
-        "quotas: envelopes per recipient {:?}, delivery bytes {:?}, log bytes {:?}, vaults per key {:?}, vaults in total {:?}",
+        "quotas: envelopes per recipient {:?}, delivery bytes {:?}, log bytes {:?}, vaults per key {:?}",
         quotas.envelopes_per_recipient,
         quotas.delivery_bytes,
         quotas.log_bytes,
-        quotas.mailboxes_per_key,
-        quotas.mailboxes_total
+        quotas.mailboxes_per_key
     );
     let relay = relay.with_limits(limits).with_quotas(quotas);
 
@@ -166,7 +163,6 @@ fn quotas_from_env(var: impl Fn(&str) -> Option<String>) -> Quotas {
     quotas.delivery_bytes = value("ZAFE_RELAY_MAX_DELIVERY_MB", 1 << 20, quotas.delivery_bytes);
     quotas.log_bytes = value("ZAFE_RELAY_MAX_LOG_MB", 1 << 20, quotas.log_bytes);
     quotas.mailboxes_per_key = value("ZAFE_RELAY_MAX_VAULTS_PER_KEY", 1, quotas.mailboxes_per_key);
-    quotas.mailboxes_total = value("ZAFE_RELAY_MAX_VAULTS", 1, quotas.mailboxes_total);
     quotas
 }
 
@@ -227,9 +223,7 @@ mod tests {
             ("ZAFE_RELAY_MAX_DELIVERY_MB", "0"),
             ("ZAFE_RELAY_MAX_LOG_MB", "2"),
             ("ZAFE_RELAY_MAX_VAULTS_PER_KEY", "3"),
-            ("ZAFE_RELAY_MAX_VAULTS", "40"),
         ]));
-        assert_eq!(q.mailboxes_total, Some(40));
         assert_eq!(q.envelopes_per_recipient, Some(50));
         assert_eq!(q.delivery_bytes, None);
         assert_eq!(q.log_bytes, Some(2 * 1024 * 1024));

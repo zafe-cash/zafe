@@ -11,7 +11,6 @@
 //! - **Log bytes per mailbox**: the vault log is kept forever, so this cap is generous and
 //!   only stops a runaway or hostile member; each entry is already at most
 //!   [`crate::MAX_BODY_BYTES`].
-//! - **Mailboxes in total** (off by default): a capped beta takes only so many vaults.
 //! - **Mailboxes per signing key**: creating a mailbox is free, so one key can't create
 //!   more than a few (an indexed count on `mailboxes.creator`).
 //!
@@ -36,8 +35,6 @@ pub enum Quota {
     Log,
     /// The signing key already created too many mailboxes.
     Mailboxes,
-    /// The relay holds as many mailboxes in total as it accepts (a capped beta).
-    Capacity,
 }
 
 impl Quota {
@@ -47,18 +44,6 @@ impl Quota {
             Quota::Deliveries => "the vault's undelivered messages are over the size limit",
             Quota::Log => "the vault log is over the size limit",
             Quota::Mailboxes => "this key has created too many vaults on this relay",
-            Quota::Capacity => "this relay has reached the number of vaults it accepts for now",
-        }
-    }
-
-    /// The machine-readable token sent in the `zafe-quota` header.
-    pub fn token(self) -> &'static str {
-        match self {
-            Quota::Inbox => "inbox",
-            Quota::Deliveries => "deliveries",
-            Quota::Log => "log",
-            Quota::Mailboxes => "mailboxes",
-            Quota::Capacity => zafe_proto::relay::QUOTA_CAPACITY,
         }
     }
 }
@@ -82,9 +67,6 @@ pub struct Quotas {
     /// restarts). The app uses a fresh key per vault, so one is the norm; the per-IP
     /// creation limit ([`crate::limits::Limits::creates_per_ip`]) bounds new keys.
     pub mailboxes_per_key: Option<u64>,
-    /// Mailboxes the relay holds in total: a capped beta. New vaults (and restores of
-    /// vaults the relay doesn't know) are refused over it; existing ones keep working.
-    pub mailboxes_total: Option<u64>,
 }
 
 const MIB: u64 = 1024 * 1024;
@@ -97,7 +79,6 @@ impl Quotas {
             delivery_bytes: None,
             log_bytes: None,
             mailboxes_per_key: None,
-            mailboxes_total: None,
         }
     }
 
@@ -112,7 +93,6 @@ impl Quotas {
             delivery_bytes: Some(256 * MIB),
             log_bytes: Some(512 * MIB),
             mailboxes_per_key: Some(8),
-            mailboxes_total: None,
         }
     }
 }

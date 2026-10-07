@@ -45,7 +45,7 @@ const String kTestnetRelayUrl = kPlaceholderRelayUrl;
 const String kTestnetLightwalletdUrl = 'https://testnet.zec.rocks:443';
 
 /// Mainnet waits on the audit and a dry run (docs/tracker.md, M2). Its relay is the
-/// capped-beta relay on the same VPS as testnet (`infra/relay/README.md`, "Mainnet"):
+/// beta relay on the same VPS as testnet (`infra/relay/README.md`, "Mainnet"):
 /// deployed by `.github/workflows/relay-mainnet.yml` once the user has done the one-time
 /// setup (DNS, bucket, environment); until then this name doesn't resolve and a mainnet
 /// build shows "Can't reach relay".

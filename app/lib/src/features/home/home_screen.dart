@@ -298,23 +298,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         const SizedBox(height: AppSpacing.md),
                       ],
                       if (kIsBeta) ...[
-                        if (overBetaCap(vault.balance?.totalZat))
-                          NoticeCard(
-                            title: 'Over the beta limit',
-                            body: betaOverCapNote(),
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.xxs,
-                            ),
-                            child: Text(
-                              betaNote(),
-                              style: AppTypography.bodySmall.copyWith(
-                                color: colors.text.muted,
-                              ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.xxs,
+                          ),
+                          child: Text(
+                            betaNote,
+                            style: AppTypography.bodySmall.copyWith(
+                              color: colors.text.muted,
                             ),
                           ),
+                        ),
                         const SizedBox(height: AppSpacing.md),
                       ],
                       if (ref.watch(backupStatusProvider).value == false) ...[

@@ -21,14 +21,6 @@ const SIGNATURE_DOMAIN: &[u8] = b"Zafe relay request v1";
 /// the relay supports.
 pub const UNSUPPORTED_VERSION_HEADER: &str = "zafe-supported-version";
 
-/// Response header of a 507 (storage quota): which cap was hit, as a machine-readable
-/// token (see [`QUOTA_CAPACITY`]); the body says it in words.
-pub const QUOTA_HEADER: &str = "zafe-quota";
-
-/// [`QUOTA_HEADER`] value: the relay has reached the number of vaults it takes in total
-/// (a capped beta), so a new vault can't be created on it right now.
-pub const QUOTA_CAPACITY: &str = "capacity";
-
 /// Read requests must be at most this old (and not from the future) when they arrive.
 pub const MAX_REQUEST_SKEW_SECS: u64 = 300;
 

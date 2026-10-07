@@ -37,9 +37,8 @@ Runtime contract (both paths):
   IP (burst 10; `429`), and 8 per signing key (`507`; the app uses a fresh key per
   vault, so one is normal). Tune with `ZAFE_RELAY_CREATES_PER_DAY` and
   `ZAFE_RELAY_MAX_VAULTS_PER_KEY` (`0` = off).
-- A **total** cap on vaults for a capped beta: `ZAFE_RELAY_MAX_VAULTS` (default: no
-  limit). Over it, new vaults (and restores of vaults the relay doesn't know) get `507`
-  with `zafe-quota: capacity`; the app says the beta is full. Existing vaults keep working.
+- There is no limit on the total number of vaults a relay holds (the mainnet beta is a
+  label in the app, not a cap); the creation limits above are the anti-abuse bound.
 - Request bodies are capped at 1 MiB (`413` above it).
 - Long polls (`POST /v1/wait`): an open app holds one request for up to **25 s** so other
   members' activity reaches it at once. Any proxy in front must let a response take
@@ -131,22 +130,57 @@ One-time setup of a new server (Ubuntu/Debian, you have sudo over SSH):
 # 1. DNS: an A record for the domain pointing at the server, DNS only (no CDN proxy:
 #    Caddy needs the real connection, and a proxy would see every client IP)
 
-# 2. a key for CI, then the server setup: Docker, ufw (22/80/443), unattended-upgrades,
-#    key-only SSH, the `deploy` user (docker group: root-equivalent), /opt/zafe-relay
-ssh-keygen -t ed25519 -N '' -C zafe-relay-ci -f relay-ci
-ssh ubuntu@<host> 'sudo bash -s -- "'"$(cat relay-ci.pub)"'"' < infra/relay/vps/bootstrap.sh
+# 2. two keys for CI (one per network), then the server setup: Docker, ufw (22/80/443),
+#    unattended-upgrades, key-only SSH, the deploy wrapper and the two restricted users
+#    (see "Deploy access" below), a root-owned /opt/zafe-relay
+ssh-keygen -t ed25519 -N '' -C zafe-relay-testnet -f relay-testnet
+ssh-keygen -t ed25519 -N '' -C zafe-relay-mainnet -f relay-mainnet
+scp infra/relay/vps/bootstrap.sh infra/relay/vps/zafe-deploy ubuntu@<host>:
+ssh -t ubuntu@<host> sudo bash bootstrap.sh "'$(cat relay-testnet.pub)'" "'$(cat relay-mainnet.pub)'"
 
 # 3. the GitHub environment `relay-testnet` (deploys from main only) and its settings
-gh secret set RELAY_SSH_KEY --env relay-testnet < relay-ci
+gh secret set RELAY_TESTNET_SSH_KEY --env relay-testnet < relay-testnet
 ssh-keyscan -t ed25519 <host> | gh secret set RELAY_KNOWN_HOSTS --env relay-testnet
 #    (compare that host key with the one you see over your own SSH session)
 gh variable set RELAY_HOST --env relay-testnet --body <host>
 gh variable set RELAY_DOMAIN --env relay-testnet --body testnet.relay.zafe.cash
-rm relay-ci relay-ci.pub
+#    the mainnet key goes ONLY into the `relay-mainnet` environment (see Mainnet below)
 
 # 4. deploy: Actions > Relay deploy > Run workflow (or push to main)
 curl https://testnet.relay.zafe.cash/health     # ok
 ```
+
+**Deploy access.** CI never gets a shell or the `docker` group (root-equivalent). Each
+network has its own unix user (`zafe-testnet`, `zafe-mainnet`) and its own key, whose
+`authorized_keys` line is `restrict,command="sudo -n /usr/local/sbin/zafe-deploy <network>"`;
+sudoers lets that user run exactly that command. `zafe-deploy` (root-owned, installed only
+by `bootstrap.sh`, header documents the grammar) accepts four commands: `sync <commit>`
+(the server downloads `infra/relay/vps/` of that commit from GitHub and refuses a commit
+that is not on `main`: CI sends no files), `secrets <fcm|litestream>` (validated env
+lines; testnet may write only its FCM file), `check` and `deploy <digest> <domain>` (image
+must be `ghcr.io/zafe-cash/zafe-relay@sha256:...`, domain pinned per network in
+`/etc/zafe-deploy.conf`; mainnet re-checks that testnet runs the digest and its soak time
+on the server). `deploy.sh` converges only its network's services, so a testnet deploy never
+recreates mainnet containers, and the two relays sit on separate Docker networks. A leaked
+testnet key can therefore choose a `main` commit and an image digest for testnet, and
+nothing else; it cannot read or write mainnet's files or secrets, and cannot deploy mainnet.
+What remains: both relays run under one Docker daemon on one host, and `zafe-deploy` runs
+code from `main` (`deploy.sh`) as root, so anyone who can push to `main` still controls the
+host, and a root exploit from the testnet container would reach mainnet. Protect `main`
+(required reviews) and, for stronger separation, give mainnet its own host. To change the
+wrapper, re-run `bootstrap.sh` (it is idempotent).
+
+**Migrating a running server** (one time; until it is done the testnet workflow falls back
+to the old shared `deploy` key from the secret `RELAY_SSH_KEY`, with a warning, and keeps
+working): generate the two keys and run `bootstrap.sh` as in step 2 above (it also retires
+the old `deploy` user and makes `/opt/zafe-relay` root-owned), then
+`gh secret set RELAY_TESTNET_SSH_KEY --env relay-testnet < relay-testnet`, re-run
+Actions > Relay deploy, and when it is green delete the old secret:
+`gh secret delete RELAY_SSH_KEY --env relay-testnet` (and from `relay-mainnet` if set),
+`ssh ubuntu@<host> sudo userdel -r deploy`, and `shred -u relay-testnet relay-mainnet
+relay-testnet.pub relay-mainnet.pub` after the secrets are set. Then remove the legacy
+branch from `relay-deploy.yml` (tracker). Between running `bootstrap.sh` and setting the new
+secret a testnet deploy fails (the old key is gone): set the secret right away.
 
 **Self-hosting without CI:** copy `vps/` to the server, write `.env` with
 `RELAY_TESTNET_IMAGE=ghcr.io/zafe-cash/zafe-relay:main` and
@@ -161,53 +195,63 @@ from the `relay-testnet` environment secret `RELAY_FCM_SERVICE_ACCOUNT_JSON`, wh
 deploy writes on every run (removing the secret removes the file). The app must be built
 with the matching Firebase project's `google-services.json` (`docs/releasing.md`).
 
-**Mainnet** (`relay.zafe.cash`, a capped beta): the same VPS runs a second relay
+**Mainnet** (`relay.zafe.cash`, a beta: labelled in the app, no cap): the same VPS runs a second relay
 (`relay-mainnet`, compose profile `mainnet`) with its own volume, its nightly backup
 (`backup-mainnet`, `/var/backups/zafe-relay/mainnet`), **Litestream** streaming the
 database to object storage (`litestream-mainnet`; `restore-mainnet` brings the database
 back from it when the volume is empty) and its own Caddy site block
 (`vps/mainnet/relay.caddy`, copied in by the mainnet deploy). It never deploys from a push:
 **Actions > Relay mainnet > Run workflow** with the digest testnet runs. The workflow
-waits for a **required reviewer** (the `relay-mainnet` environment), then checks on the
-server that testnet runs exactly that digest and has for `min_soak_hours` (24), verifies
-the image's build provenance, writes the Litestream and FCM secrets, and runs
-`deploy.sh mainnet`, which backs up, switches, health-checks and rolls back like testnet.
+waits for a **required reviewer** (the `relay-mainnet` environment), verifies the image's
+build provenance, and then, through the mainnet key's forced command (`zafe-deploy`, see
+"Deploy access"), has the server check that testnet runs exactly that digest and has for
+`min_soak_hours` (24), install the compose files of the workflow's commit, write the
+Litestream and FCM secrets, and run `deploy.sh mainnet`, which backs up, switches, health-checks and rolls back like testnet.
 One-time setup (not done by CI):
 
 ```bash
-# 1. DNS: an A record relay.zafe.cash -> the VPS, DNS only (no CDN proxy), like testnet
-# 2. an S3-compatible bucket for the replica (Backblaze B2, R2, S3...), versioning off,
-#    encryption at rest on, and a key that can only read and write that bucket
+# 1. DNS: an A record relay.zafe.cash -> the VPS, DNS only (no CDN proxy), like testnet (done)
+# 2. the replica bucket: Cloudflare R2 bucket `zafe-mainnet` (done). Create an R2 API token
+#    (R2 > Manage API tokens) with permission "Object Read & Write", scoped to that bucket
+#    only; note its Access Key ID and Secret Access Key and your Cloudflare account id.
+#    R2 encrypts at rest; there is no bucket versioning to turn off. Any other S3-compatible
+#    bucket works the same (values below).
 # 3. the GitHub environment `relay-mainnet`: required reviewers (not the person who
 #    triggers the run, when there are two), deployment branches = main only
 gh api -X PUT repos/zafe-cash/zafe/environments/relay-mainnet   # then set reviewers in the UI
-gh secret set RELAY_SSH_KEY --env relay-mainnet < relay-ci
+#    The mainnet key exists ONLY as this environment secret: the testnet job's environment
+#    has no access to it, and the VPS only lets it run the mainnet deploy.
+gh secret set RELAY_MAINNET_SSH_KEY --env relay-mainnet < relay-mainnet
 ssh-keyscan -t ed25519 <host> | gh secret set RELAY_KNOWN_HOSTS --env relay-mainnet
 gh variable set RELAY_HOST --env relay-mainnet --body <host>
 gh variable set RELAY_DOMAIN --env relay-mainnet --body relay.zafe.cash
-gh variable set RELAY_MAX_VAULTS --env relay-mainnet --body 25      # the beta cap
 gh secret set LITESTREAM_ACCESS_KEY_ID --env relay-mainnet
 gh secret set LITESTREAM_SECRET_ACCESS_KEY --env relay-mainnet
-gh variable set LITESTREAM_BUCKET --env relay-mainnet --body <bucket>
-gh variable set LITESTREAM_ENDPOINT --env relay-mainnet --body https://<s3 endpoint>
-gh variable set LITESTREAM_REGION --env relay-mainnet --body <region>
+gh variable set LITESTREAM_BUCKET --env relay-mainnet --body zafe-mainnet
+gh variable set LITESTREAM_ENDPOINT --env relay-mainnet --body https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+gh variable set LITESTREAM_REGION --env relay-mainnet --body auto
 # 4. the first promotion: the digest testnet runs (/opt/zafe-relay/deployed/testnet.json)
 gh workflow run relay-mainnet.yml -f digest=sha256:<digest>
 curl https://relay.zafe.cash/health     # ok
+shred -u relay-testnet relay-testnet.pub relay-mainnet relay-mainnet.pub   # local copies
 ```
 
 The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; a mainnet build shows the beta
-label and the per-vault cap (`ZAFE_BETA`, `ZAFE_BETA_CAP_ZAT`, `app/lib/src/core/config/beta.dart`).
+label (`ZAFE_BETA`, `app/lib/src/core/config/beta.dart`); there is no cap.
+Litestream with R2 uses the S3 API with `force-path-style: true` and region `auto`
+(`vps/litestream.yml`); that is R2's documented setup, but it has **not been run** against
+the bucket from here: after the first mainnet deploy check `docker compose logs
+litestream-mainnet` for upload errors and list the bucket's `relay-mainnet/` prefix.
 After the first deploy, check a restore on a scratch machine before real funds arrive
 (see "Backups").
 
-Operations (as `ubuntu` or `deploy`, in `/opt/zafe-relay`):
+Operations (as `ubuntu` with sudo, in `/opt/zafe-relay`, which is root-owned):
 
 ```bash
-docker compose ps
-docker compose logs -f relay-testnet
-docker compose exec backup-testnet sh /backup.sh once          # backup now
-bash deploy.sh testnet ghcr.io/zafe-cash/zafe-relay@sha256:<old> testnet.relay.zafe.cash </dev/null   # manual rollback
+sudo docker compose ps
+sudo docker compose logs -f relay-testnet
+sudo docker compose exec backup-testnet sh /backup.sh once          # backup now
+sudo bash deploy.sh testnet ghcr.io/zafe-cash/zafe-relay@sha256:<old> testnet.relay.zafe.cash </dev/null   # manual rollback
 # mainnet: the same with `mainnet`, relay-mainnet / backup-mainnet and relay.zafe.cash
 ```
 

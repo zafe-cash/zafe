@@ -85,9 +85,6 @@ enum ZafeErrorKind {
   /// member can restore it from the device copy.
   relayLostVault,
 
-  /// The relay takes no new vaults for now (a capped beta). Existing vaults still work.
-  relayAtCapacity,
-
   /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
   /// another host, or a server that doesn't speak TLS).
   tls,

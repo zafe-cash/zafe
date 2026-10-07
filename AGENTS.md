@@ -271,7 +271,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   assignment, and old logs replay as before. Cost: every event a version-6 app writes
   (votes, names too) is invisible to older apps, so members must update together.
   `LOG_CACHE` 1 (new, device file). `RELAY_API` unchanged: `POST /v1/mailbox/reseed`
-  is a new route (404 on an older relay) and 507 now carries `zafe-quota: <token>`.
+  is a new route (404 on an older relay).
   `VAULT_EVENT` 6 → 7 (2026-10-07, no new variant): a `Broadcast` written with version 7
   must carry the txid the proposal's PCZT fixes (`ProposalState.expected_txid` = its
   shielded sighash; v6 txids exclude signatures and proof), else `TxidMismatch` and it is
@@ -538,6 +538,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   named volume (Docker copies the image's `/data` ownership into a new named volume, so
   the entrypoint's chown isn't needed and `cap_drop: ALL` works); Docker-published ports
   bypass ufw, so publish nothing but Caddy's.
+- **Deploy access (prepared 2026-10-07; active after the operator's migration, README
+  "Migrating a running server")**: testnet and mainnet have separate unix users
+  (`zafe-testnet`/`zafe-mainnet`) and keys (`RELAY_TESTNET_SSH_KEY` in `relay-testnet`,
+  `RELAY_MAINNET_SSH_KEY` only in `relay-mainnet`), each pinned to a forced command
+  `sudo -n /usr/local/sbin/zafe-deploy <network>` (`vps/zafe-deploy`, installed only by
+  `bootstrap.sh`; commands `sync|secrets|check|deploy`; files come from a `main` commit
+  downloaded by the server, never from CI). No docker group for CI. Until migrated,
+  `relay-deploy.yml` falls back to the old `RELAY_SSH_KEY`/`deploy` user (remove that
+  branch afterwards). Change the wrapper by re-running bootstrap, not by deploying.
+  Residual: one host/Docker daemon, root code from `main`; see `docs/audit-scope.md` §10.
 - **Hosted relay (mainnet, prepared 2026-10-07, not deployed)**: `relay.zafe.cash`, same
   VPS, compose profile `mainnet` (`relay-mainnet`, `backup-mainnet`, `litestream-mainnet`
   to S3-compatible storage, `restore-mainnet` for an empty volume), site block
@@ -547,10 +557,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (manual, environment `relay-mainnet` with required reviewers): it promotes the digest
   testnet runs (record + `min_soak_hours`, build provenance verified); never build or
   deploy mainnet from a push. A compose variable without a default breaks the file even
-  when its profile is off: mainnet variables have defaults. Capped beta: relay
-  `ZAFE_RELAY_MAX_VAULTS` (507 + `zafe-quota: capacity` → `RelayClientError::AtCapacity`
-  → `ZafeErrorKind::RelayAtCapacity`) and the app's `core/config/beta.dart` (beta label
-  and per-vault cap on mainnet builds, `ZAFE_BETA`, `ZAFE_BETA_CAP_ZAT`).
+  when its profile is off: mainnet variables have defaults. Beta = label only, **no cap**
+  (decided 2026-10-07: no relay vault-count limit, no per-vault fund limit; the per-IP
+  and per-key creation limits stay as anti-abuse): the app's `core/config/beta.dart`
+  (`ZAFE_BETA`, default on for mainnet builds).
   `kMainnetRelayUrl` = `https://relay.zafe.cash`. Steps only the user can do:
   `infra/relay/README.md` "Mainnet"; audit scope: `docs/audit-scope.md`.
 - **Public testnet lightwalletd**: `https://testnet.zec.rocks:443` (Ironwood-aware;

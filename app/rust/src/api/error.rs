@@ -43,8 +43,6 @@ pub enum ZafeErrorKind {
     /// The relay no longer knows this vault (wiped), though this device has its log: a
     /// member can restore it from the device copy.
     RelayLostVault,
-    /// The relay takes no new vaults for now (a capped beta). Existing vaults still work.
-    RelayAtCapacity,
     /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
     /// another host, or a server that doesn't speak TLS).
     Tls,
@@ -171,7 +169,6 @@ impl From<NodeError> for ZafeError {
             NodeError::RelayForked { .. } => ZafeErrorKind::RelayForked,
             NodeError::RelayMembership(_) => ZafeErrorKind::RelayMembership,
             NodeError::RelayLostVault { .. } => ZafeErrorKind::RelayLostVault,
-            NodeError::Relay(RelayClientError::AtCapacity) => ZafeErrorKind::RelayAtCapacity,
             NodeError::NotReady(_) => ZafeErrorKind::NotReady,
             NodeError::Timeout(_) => ZafeErrorKind::Timeout,
             NodeError::Verification(_)
