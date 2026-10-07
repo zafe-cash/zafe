@@ -89,7 +89,14 @@ Future<void> startVaultWatch() async {
         AndroidFlutterLocalNotificationsPlugin
       >()
       ?.requestNotificationsPermission();
-  if (Platform.isAndroid) {
+  await _notifications
+      .resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin
+      >()
+      ?.requestPermissions(alert: true, badge: true, sound: true);
+  // iOS runs the periodic task through BGTaskScheduler (Info.plist, AppDelegate.swift):
+  // best effort, whenever the system allows. The one-off check below is Android only.
+  if (Platform.isAndroid || Platform.isIOS) {
     await Workmanager().initialize(workmanagerDispatcher);
     await Workmanager().registerPeriodicTask(
       'zafe-vault-check',

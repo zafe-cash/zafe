@@ -2,31 +2,13 @@ import Flutter
 import UIKit
 
 class SceneDelegate: FlutterSceneDelegate {
-  /// Covers the app while it isn't active, so the app switcher's snapshot shows the
-  /// launch screen instead of balances and payments.
-  private var privacyCover: UIView?
-
   override func sceneWillResignActive(_ scene: UIScene) {
     super.sceneWillResignActive(scene)
-    guard privacyCover == nil, let window = window else { return }
-    let cover = UIView(frame: window.bounds)
-    cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    cover.backgroundColor = UIColor(named: "LaunchBackground") ?? .black
-    if let image = UIImage(named: "LaunchImage") {
-      let mark = UIImageView(image: image)
-      mark.center = CGPoint(x: cover.bounds.midX, y: cover.bounds.midY)
-      mark.autoresizingMask = [
-        .flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin,
-      ]
-      cover.addSubview(mark)
-    }
-    window.addSubview(cover)
-    privacyCover = cover
+    ZafePrivacy.shared.setInactive(true, window: window)
   }
 
   override func sceneDidBecomeActive(_ scene: UIScene) {
     super.sceneDidBecomeActive(scene)
-    privacyCover?.removeFromSuperview()
-    privacyCover = nil
+    ZafePrivacy.shared.setInactive(false, window: window)
   }
 }

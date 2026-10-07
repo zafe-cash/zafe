@@ -45,6 +45,7 @@ flutter:
     - assets/icons/patina/
     - assets/icons/licenses/
     - assets/illustrations/
+    - assets/sounds/
     - assets/fonts/licenses/
     - NOTICE
   fonts:
