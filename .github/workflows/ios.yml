@@ -87,3 +87,87 @@ jobs:
           name: zafe-ios-unsigned
           path: dist/Zafe-unsigned.app.zip
           retention-days: 7
+
+  # Re-signs the unsigned device build into an IPA you can install on your own iPhone.
+  # Needs the secrets of the GitHub environment `ios-signing` (restrict that environment to
+  # this branch / main so no other workflow can read them). Without them this job is skipped.
+  #   IOS_CERT_P12_BASE64      base64 of an Apple Development (or Distribution) certificate .p12
+  #   IOS_CERT_PASSWORD        its password
+  #   IOS_PROFILE_BASE64       base64 of a provisioning profile for xyz.zafe.zafe that lists
+  #                            your iPhone's UDID (development or ad-hoc)
+  sign:
+    name: Sign the IPA
+    needs: ios
+    runs-on: macos-26
+    timeout-minutes: 20
+    environment: ios-signing
+    env:
+      CERT_P12: ${{ secrets.IOS_CERT_P12_BASE64 }}
+      CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
+    steps:
+      - name: Check secrets
+        id: check
+        run: |
+          if [ -n "$CERT_P12" ] && [ -n "$CERT_PASSWORD" ] && [ -n "$PROFILE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Signing secrets are not set in the ios-signing environment; skipping."
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          name: zafe-ios-unsigned
+
+      - name: Sign and package
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          unzip -q Zafe-unsigned.app.zip
+          app=Runner.app
+
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kcpass=$(uuidgen)
+          echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kcpass" "$kc"
+          security set-keychain-settings -lut 1200 "$kc"
+          security unlock-keychain -p "$kcpass" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpass" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          identity=$(security find-identity -v -p codesigning "$kc" | awk 'NR==1 {print $2}')
+          [ -n "$identity" ] || { echo "::error::No signing identity in the .p12"; exit 1; }
+
+          echo "$PROFILE" | base64 -d > "$RUNNER_TEMP/profile.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")
+          echo "Profile app id: $appid"
+          bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          case "$appid" in *."$bundle") ;; *) echo "::error::Profile $appid does not match bundle id $bundle"; exit 1;; esac
+          /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$RUNNER_TEMP/profile.plist" > "$RUNNER_TEMP/entitlements.plist"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$app/embedded.mobileprovision"
+
+          # Nested code first, then the app itself.
+          find "$app" \( -name '*.framework' -o -name '*.dylib' -o -name '*.appex' \) -prune -print0 |
+            xargs -0 -I{} codesign --force --sign "$identity" --keychain "$kc" {}
+          codesign --force --sign "$identity" --keychain "$kc" \
+            --entitlements "$RUNNER_TEMP/entitlements.plist" "$app"
+          codesign --verify --deep --strict "$app"
+
+          mkdir Payload && cp -R "$app" Payload/
+          zip -qry Zafe-signed.ipa Payload
+          ls -lh Zafe-signed.ipa
+
+      - name: Remove the keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/profile.mobileprovision"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          name: zafe-ios-signed
+          path: Zafe-signed.ipa
+          retention-days: 3
