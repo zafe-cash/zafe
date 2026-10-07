@@ -42,14 +42,14 @@ pub(crate) fn remember_support_dir(db_dir: &str) {
 
 fn note(info: &PanicHookInfo<'_>) {
     // The hook must never panic itself.
-    let _ = std::panic::catch_unwind(|| {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let Some(dir) = DIAG_DIR.get() else { return };
         let location = match info.location() {
             Some(l) => format!("{}:{}:{}", l.file(), l.line(), l.column()),
             None => "unknown".to_string(),
         };
         let _ = write_line(dir, &line(unix_now(), &location));
-    });
+    }));
 }
 
 fn unix_now() -> u64 {
@@ -114,7 +114,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(FILE_NAME), vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
         write_line(&dir, "new").unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join(FILE_NAME)).unwrap(), "new\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(FILE_NAME)).unwrap(),
+            "new\n"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -343,6 +343,12 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   the log doesn't account for (no proposal logged as sent with that txid, and not a
   recent spend of a logged proposal's notes within `GRACE_BLOCKS`). Reads the wallet's
   `ironwood_received_note_spends`; the alert never blocks anything.
+- **Test coverage notes (2026-10-07)**: `regtest_e2e` checks `VaultWallet::vault_spends`
+  against a real mined spend; `bridge_e2e` asserts no unapproved spend once the log has the
+  txid, and keeps the interactive path by letting only member A publish a pool (no fully
+  covered group, `!one_tap`). `m0-e2e.sh` is one-tap now (CLI keygen publishes pools):
+  `approve` x2 then `send`. Local disk: `target/` grows past 60 GB; delete
+  `target/debug/incremental` and `examples` when a link step reports "No space left".
 
 ## Dependency gotchas
 

@@ -92,13 +92,11 @@ member B approve "$PROPOSAL"
 member C approve "$PROPOSAL"
 member A proposals
 
-step "A requests signatures; B and C sign"
-member A request "$PROPOSAL"
-member B respond
-member C respond
-
-step "A aggregates, proves and broadcasts"
-member A finalize "$PROPOSAL"
+# Keygen published every member's commitment pool, so the approvals above already carry
+# the signature shares (one tap); anyone can aggregate and broadcast. The interactive
+# request/respond/finalize path is covered by `bridge_e2e`.
+step "A aggregates the approvals, proves and broadcasts"
+member A send "$PROPOSAL"
 mine 2
 sleep 3
 member A proposals
