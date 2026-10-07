@@ -25,9 +25,11 @@ Last updated: 2026-10-06 (relay CI/CD deploy to the OVH VPS; relay loss/rollback
   - [x] The repo is public (2026-10-01, rescanned first); description and homepage link
         the site. Moved to `zafe-cash/zafe` on 2026-10-03.
   - [ ] **(you)** Post the preview (Zypherpunk Discord).
-  - [ ] Testnet APK in GitHub Releases (relay live since 2026-10-06; `v0.1.0` tagged, its
-        first Release runs were cancelled mid-build), then set `ZAFE_DOWNLOAD_URL` in the
-        site build ("Get Zafe" comes back), second post.
+  - [x] Testnet APK in GitHub Releases: `v0.1.0` pre-release is published (workflow run
+        green, 16 min). `site.yml` now sets `ZAFE_DOWNLOAD_URL` to the Releases page
+        (`/releases`: `/latest` skips pre-releases), so "Get Zafe" returns on the next
+        site deploy (2026-10-07).
+  - [ ] **(you)** second post.
 
 - [x] **Brand: Verdigris + Seam** (decided 2026-10-01, `docs/brand.md`; implemented on
       branch `worktree-agent-a762a0ef73fae7642`): palette tokens (generated,
@@ -631,7 +633,7 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [x] A payment to the vault's **own address** failed every member's check (verification
       counts the output as change): `node::propose` now refuses it up front
       (`WalletError::Payment` → `InvalidInput`, "that is this vault's own address"),
-      tested in `bridge_e2e`. The Send screen still only finds out at "Propose payment"
+      tested in `bridge_e2e`. The Send screen now checks too (2026-10-07: the recipient step blocks Continue, `_propose` refuses a batch row)
 
 - [x] `AppButton` label was a separate node in accessibility trees (2026-09-30): `Focus`
       sat outside the `MergeSemantics` and added its own unlabeled focusable node. Now
@@ -784,9 +786,8 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
   app). AGENTS.md "App lock" / "Payment links". Done the same day: content hidden in
   the recent-apps view, and a cheap funds check per vault on the request page.
   Follow-ups: iOS untested (never built); exact fee via a build-without-logging
-  precheck (idea below); a vault whose relay mailbox is gone ("relay returned 404:
-  unknown mailbox", e.g. after a relay DB reset) shows the generic "Something went
-  wrong": say "This vault isn't on this relay" instead; on the emulator the app
+  precheck (idea below); (done 2026-10-07: a 404 "unknown mailbox" is
+  `ZafeErrorKind::VaultNotOnRelay`, "This vault isn't on this relay"); on the emulator the app
   sometimes shows a ~12% white veil (#262929 instead of #080B0B) over the Flutter
   surface, also with the main build and not in the app's view tree (cause unknown)
 - *(idea)* **"Pay with Zafe" verified link** `https://zafe.cash/pay#<zcash: URI>` (App Link;

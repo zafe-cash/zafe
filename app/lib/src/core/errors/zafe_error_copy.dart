@@ -51,6 +51,9 @@ String zafeErrorMessage(
     ZafeErrorKind.torFailed =>
       'Tor couldn\'t connect, so nothing was sent. Try again, or turn off Tor in '
           'Settings.',
+    ZafeErrorKind.vaultNotOnRelay =>
+      'This vault isn\'t on this relay. Check the relay address in Settings, and that '
+          'every member uses the same relay.',
     ZafeErrorKind.other => fallback,
   };
 }

@@ -43,6 +43,8 @@ jobs:
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       ZAFE_ANDROID_CERT_SHA256: ${{ vars.ZAFE_ANDROID_CERT_SHA256 }}
       ZAFE_IOS_APP_IDS: ${{ vars.ZAFE_IOS_APP_IDS }}
+      # "Get Zafe": the testnet APKs are pre-releases, so /releases/latest would 404.
+      ZAFE_DOWNLOAD_URL: https://github.com/zafe-cash/zafe/releases
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6

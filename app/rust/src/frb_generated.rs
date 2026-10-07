@@ -3032,7 +3032,8 @@ impl SseDecode for crate::api::error::ZafeErrorKind {
             14 => crate::api::error::ZafeErrorKind::WalletDatabase,
             15 => crate::api::error::ZafeErrorKind::TorConnecting,
             16 => crate::api::error::ZafeErrorKind::TorFailed,
-            17 => crate::api::error::ZafeErrorKind::Other,
+            17 => crate::api::error::ZafeErrorKind::VaultNotOnRelay,
+            18 => crate::api::error::ZafeErrorKind::Other,
             _ => unreachable!("Invalid variant for ZafeErrorKind: {}", inner),
         };
     }
@@ -3976,7 +3977,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::error::ZafeErrorKind {
             Self::WalletDatabase => 14.into_dart(),
             Self::TorConnecting => 15.into_dart(),
             Self::TorFailed => 16.into_dart(),
-            Self::Other => 17.into_dart(),
+            Self::VaultNotOnRelay => 17.into_dart(),
+            Self::Other => 18.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -4714,7 +4716,8 @@ impl SseEncode for crate::api::error::ZafeErrorKind {
                 crate::api::error::ZafeErrorKind::WalletDatabase => 14,
                 crate::api::error::ZafeErrorKind::TorConnecting => 15,
                 crate::api::error::ZafeErrorKind::TorFailed => 16,
-                crate::api::error::ZafeErrorKind::Other => 17,
+                crate::api::error::ZafeErrorKind::VaultNotOnRelay => 17,
+                crate::api::error::ZafeErrorKind::Other => 18,
                 _ => {
                     unimplemented!("");
                 }

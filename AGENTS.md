@@ -682,6 +682,7 @@ Learned while studying it:
   `ZafeEndpoints.fromPrefs(prefs)` after `prefs.reload()` (prefs cache per isolate). A
   relay change re-registers the push token (`reregisterPush`). All members of a vault
   must use the same relay.
+- **Site download link**: `site.yml` sets `ZAFE_DOWNLOAD_URL` to `https://github.com/zafe-cash/zafe/releases` (the testnet APKs are pre-releases, so `/releases/latest` 404s).
 - **Bridge errors are typed**: API functions return `Result<T, ZafeError>` (`api/error.rs`,
   `kind` + `message`); Dart maps `ZafeErrorKind` to copy in `core/errors/zafe_error_copy.dart`.
   FRB treats a `type Result<T> = ...` alias as **anyhow** — always write

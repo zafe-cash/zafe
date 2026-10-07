@@ -317,7 +317,22 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     }
   }
 
+  /// Paying the vault's own address would only shuffle its notes and cost a fee.
+  bool _isOwn(String address) {
+    final own = ref.read(vaultProvider).summary?.address;
+    return own != null && own == address.trim();
+  }
+
   Future<void> _propose() async {
+    if (_payments.any((p) => _isOwn(p.address))) {
+      showAppToast(
+        context,
+        'This payment goes to the vault\'s own address. Pick another recipient.',
+        iconName: AppIcons.warningCircle,
+        tone: AppToastTone.destructive,
+      );
+      return;
+    }
     if (!await confirmUnlock(
       context,
       ref,
@@ -387,7 +402,8 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   Widget _recipientStep() {
     final colors = context.colors;
     final check = _check;
-    final invalid = check != null && !check.valid;
+    final own = check?.valid == true && _isOwn(_address.text);
+    final invalid = own || (check != null && !check.valid);
     final filled = _address.text.trim().isNotEmpty;
     return Column(
       children: [
@@ -423,7 +439,9 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                     left: AppSpacing.xxs,
                   ),
                   child: Text(
-                    check.reason,
+                    own
+                        ? 'This is the vault\'s own address. Enter a recipient.'
+                        : check!.reason,
                     style: AppTypography.labelLarge.copyWith(
                       color: colors.text.destructive,
                     ),
@@ -474,7 +492,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
           ),
         _Cta(
           label: filled ? 'Continue' : 'Enter address to continue',
-          onPressed: check?.valid == true
+          onPressed: check?.valid == true && !own
               ? () => setState(() => _step = _Step.amount)
               : null,
         ),

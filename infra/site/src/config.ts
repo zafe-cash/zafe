@@ -1,7 +1,7 @@
 // Build-time links (build.sh validates them and passes them in the environment).
 const repo = 'https://github.com/zafe-cash/zafe';
 
-// Empty until there's an APK testers can use (a testnet build needs the hosted relay).
+// The GitHub Releases page (set by site.yml); empty falls back to the source.
 export const downloadUrl = process.env.ZAFE_DOWNLOAD_URL || '';
 export const sourceUrl = process.env.ZAFE_SOURCE_URL || repo;
 // The call to action: the app once it's downloadable, the source until then.

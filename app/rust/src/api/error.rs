@@ -45,6 +45,8 @@ pub enum ZafeErrorKind {
     TorConnecting,
     /// "Use Tor" is on but Tor couldn't connect: nothing was sent (never direct).
     TorFailed,
+    /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
+    VaultNotOnRelay,
     Other,
 }
 
@@ -137,6 +139,11 @@ impl From<NodeError> for ZafeError {
                 }
             }
             NodeError::Relay(RelayClientError::Transport { failure, .. }) => net_kind(*failure),
+            NodeError::Relay(RelayClientError::Status { status: 404, body })
+                if body.contains("unknown mailbox") =>
+            {
+                ZafeErrorKind::VaultNotOnRelay
+            }
             NodeError::Relay(RelayClientError::RateLimited { .. }) => ZafeErrorKind::NotReady,
             NodeError::Relay(RelayClientError::StorageFull { .. }) => {
                 ZafeErrorKind::RelayStorageFull

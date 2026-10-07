@@ -89,5 +89,8 @@ enum ZafeErrorKind {
 
   /// "Use Tor" is on but Tor couldn't connect: nothing was sent (never direct).
   torFailed,
+
+  /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
+  vaultNotOnRelay,
   other,
 }
