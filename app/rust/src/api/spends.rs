@@ -15,6 +15,7 @@ use super::{
 
 /// A transaction that spent vault notes with no matching approved proposal in the log:
 /// keys were used outside Zafe (old shares, or compromised phones).
+#[derive(Clone, Debug)]
 pub struct UnapprovedSpendInfo {
     /// Transaction id (hex, display order).
     pub txid: String,

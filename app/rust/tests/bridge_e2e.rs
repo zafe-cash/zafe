@@ -145,9 +145,12 @@ fn payment_flow_through_bridge() {
     assert!(safety.iter().all(|n| n == &safety[0]));
 
     // Keygen: all three at once (A picks birthday 2: regtest isn't up yet).
-    // Each member's signing state dir, where keygen leaves its one-tap pool nonces. C
-    // publishes none (as if it closed the app right after keygen), so the first payment
-    // falls back to interactive signing and this test covers that path.
+    // Each member's signing state dir, where keygen leaves its one-tap pool nonces. B
+    // and C publish none (as if they closed the app right after keygen). One-tap signing
+    // assigns every group whose members all have a pool (VAULT_EVENT 6), and with only A
+    // publishing none is covered, so the first payment falls back to interactive signing
+    // and this test covers that path. After the first payment everyone's pool is topped
+    // up and the second one is one-tap.
     let handles: Vec<_> = seeds
         .iter()
         .enumerate()
@@ -159,7 +162,7 @@ fn payment_flow_through_bridge() {
                 invite.clone(),
                 safety[0].clone(),
             );
-            let state = (i != 2).then(|| {
+            let state = (i == 0).then(|| {
                 let dir = tmp.join(format!("m{i}")).join("signing");
                 dir.to_string_lossy().into_owned()
             });
@@ -375,6 +378,10 @@ fn payment_flow_through_bridge() {
     let p = &list(&members[1])[0];
     assert_eq!(p.stage, ProposalStage::Approved);
     assert_eq!(p.my_vote, MyVote::Approved);
+    assert!(
+        !p.one_tap,
+        "no group is covered, so this one signs interactively"
+    );
 
     // Approving twice is a NotReady error, not a crash.
     let again = proposals::approve_proposal(
@@ -502,6 +509,19 @@ fn payment_flow_through_bridge() {
     assert!(
         !sent_file.exists(),
         "the kept transaction is deleted once mined"
+    );
+    // The log accounts for the mined spend: nothing is flagged as unapproved.
+    let flagged = rust_lib_zafe::api::spends::unapproved_spends(
+        relay.clone(),
+        a.db_dir.clone(),
+        a.db_key.clone(),
+        a.seeds.clone(),
+        a.material.clone(),
+    )
+    .unwrap();
+    assert!(
+        flagged.is_empty(),
+        "unexpected unapproved spends: {flagged:?}"
     );
     // The vault's own payment (and its change) is not an incoming payment.
     let incoming_after = received_list(&members[2]);

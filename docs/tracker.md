@@ -478,17 +478,18 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       `node::reseed_relay` + `zafe restore-relay` put a lost vault back on a relay from a
       member's copy (kept; moving between relays stays dropped, see the decision below).
       Tests: `relay_rollback`, `log_cache`.
-- [ ] **App side of the above, not on main** (needs `flutter_rust_bridge_codegen generate`,
-      one slow run, then `flutter analyze` + `flutter test`): branch `audit-prep-app`:
+- [x] App side of the above (2026-10-07, merged from `audit-prep-app`, codegen re-run):
       bridge (`init_log_cache`, `restore_relay`, `unapproved_spends`, error kinds), Dart
-      copy, sync-sheet "Restore vault on the relay", beta cap (`core/config/beta.dart`),
-      unapproved-spend card + notification, `kMainnetRelayUrl`. Bridge tests there call
-      `init_log_cache`; bridge_e2e comment about interactive fallback needs a look (one-tap
-      now covers groups without the pool-less member).
+      copy, sync-sheet "Restore vault on the relay" (same relay only; no copy implies
+      moving a vault), beta cap (`core/config/beta.dart`), unapproved-spend card +
+      notification, `kMainnetRelayUrl`. Dart tests: error copy, sync failure kinds,
+      unapproved-spend notification, beta. `bridge_e2e` keeps the interactive fallback
+      by letting only A publish a pool (no group fully covered) and asserts `!one_tap`.
 - [x] One-tap pools no longer need every member (2026-10-07, `VAULT_EVENT` 6, gated by
       the author's event version; `vault` tests)
 - [x] Unapproved-spend alert core (`spend_watch`, `VaultWallet::vault_spends`; wallet
-      query untested on regtest yet)
+      query checked on regtest in `regtest_e2e`, and `bridge_e2e` asserts nothing is
+      flagged once the log accounts for the spend)
 - [ ] **(you)** Mainnet relay one-time setup (files prepared, nothing deployed): DNS
       `relay.zafe.cash`, S3 bucket + keys, GitHub environment `relay-mainnet` with required
       reviewers and the variables/secrets in `infra/relay/README.md` "Mainnet"; first

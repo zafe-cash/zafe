@@ -43,6 +43,9 @@ void main() {
         ZafeErrorKind.serverBehind: SyncFailureKind.serverBehind,
         ZafeErrorKind.wrongNetwork: SyncFailureKind.wrongNetwork,
         ZafeErrorKind.relayOutdated: SyncFailureKind.relayOutdated,
+        ZafeErrorKind.relayRolledBack: SyncFailureKind.relayRolledBack,
+        ZafeErrorKind.relayLostVault: SyncFailureKind.relayLostVault,
+        ZafeErrorKind.relayForked: SyncFailureKind.relayForked,
       };
       cases.forEach((kind, expected) {
         final f = classifySyncFailure(err(kind, ZafeEndpoint.lightwalletd));
@@ -136,4 +139,18 @@ void main() {
       '28 Sep, 09:05',
     );
   });
+
+  test(
+    'only a rolled back or lost relay can be restored, on the same relay',
+    () {
+      for (final k in SyncFailureKind.values) {
+        final f = SyncFailure(kind: k);
+        final restorable =
+            k == SyncFailureKind.relayRolledBack ||
+            k == SyncFailureKind.relayLostVault;
+        expect(f.canRestoreRelay, restorable, reason: '$k');
+        expect(f.explanation.toLowerCase(), isNot(contains('another relay')));
+      }
+    },
+  );
 }

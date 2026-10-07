@@ -6,6 +6,7 @@
 // Static analysis wrongly picks the IO variant, thus ignore this
 // ignore_for_file: argument_type_not_assignable
 
+import 'api/app.dart';
 import 'api/backup.dart';
 import 'api/endpoints.dart';
 import 'api/error.dart';
@@ -15,7 +16,9 @@ import 'api/names.dart';
 import 'api/price.dart';
 import 'api/proposals.dart';
 import 'api/received.dart';
+import 'api/relay_log.dart';
 import 'api/repair.dart';
+import 'api/spends.dart';
 import 'api/tor.dart';
 import 'api/vault.dart';
 import 'api/watch.dart';
@@ -129,6 +132,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SignerName> dco_decode_list_signer_name(dynamic raw);
 
   @protected
+  List<UnapprovedSpendInfo> dco_decode_list_unapproved_spend_info(dynamic raw);
+
+  @protected
   MembershipInfo dco_decode_membership_info(dynamic raw);
 
   @protected
@@ -226,6 +232,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int dco_decode_u_8(dynamic raw);
+
+  @protected
+  UnapprovedSpendInfo dco_decode_unapproved_spend_info(dynamic raw);
 
   @protected
   void dco_decode_unit(dynamic raw);
@@ -353,6 +362,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SignerName> sse_decode_list_signer_name(SseDeserializer deserializer);
 
   @protected
+  List<UnapprovedSpendInfo> sse_decode_list_unapproved_spend_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   MembershipInfo sse_decode_membership_info(SseDeserializer deserializer);
 
   @protected
@@ -452,6 +466,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
+
+  @protected
+  UnapprovedSpendInfo sse_decode_unapproved_spend_info(
+    SseDeserializer deserializer,
+  );
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
@@ -609,6 +628,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_unapproved_spend_info(
+    List<UnapprovedSpendInfo> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_membership_info(
     MembershipInfo self,
     SseSerializer serializer,
@@ -730,6 +755,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_unapproved_spend_info(
+    UnapprovedSpendInfo self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);

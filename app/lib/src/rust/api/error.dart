@@ -68,6 +68,22 @@ enum ZafeErrorKind {
   /// expire (30 days), or whoever runs the relay raises it.
   relayStorageFull,
 
+  /// The relay has fewer log entries than this device saw: it lost data or was rewound
+  /// to an older backup. Nothing it says about the vault can be trusted until a member
+  /// restores the log on it from a device copy.
+  relayRolledBack,
+
+  /// The relay serves another history than this device saw (a fork of the log). Do not
+  /// trust it; members compare notes outside Zafe.
+  relayForked,
+
+  /// The relay no longer knows this vault (wiped), though this device has its log: a
+  /// member can restore it from the device copy.
+  relayLostVault,
+
+  /// The relay takes no new vaults for now (a capped beta). Existing vaults still work.
+  relayAtCapacity,
+
   /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
   /// another host, or a server that doesn't speak TLS).
   tls,

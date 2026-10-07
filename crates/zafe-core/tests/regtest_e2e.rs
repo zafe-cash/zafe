@@ -359,6 +359,17 @@ async fn vault_pays_on_regtest() {
     let after = wallets[1].balance().unwrap();
     println!("vault balance after payment: {after:?}");
 
+    // The unapproved-spend query sees exactly this transaction, mined, with the notes it
+    // spent (it is what the app's alert compares against the log).
+    let spends = wallets[1].vault_spends().unwrap();
+    let spend = spends
+        .iter()
+        .find(|s| s.txid == txid)
+        .expect("the wallet lists the vault's spend");
+    assert!(spend.mined_height.is_some(), "mined spend has a height");
+    assert!(!spend.nullifiers.is_empty(), "spent notes are listed");
+    assert_eq!(spends.len(), 1, "no other spends: {spends:?}");
+
     let recipient_ufvk = UnifiedFullViewingKey::from_orchard_fvk(recipient_fvk).unwrap();
     let mut recipient_wallet = VaultWallet::create(
         &dir.join("recipient.sqlite"),

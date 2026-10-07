@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/notifications/vault_updates.dart';
 import 'package:zafe/src/rust/api/proposals.dart';
 import 'package:zafe/src/rust/api/received.dart';
+import 'package:zafe/src/rust/api/spends.dart';
 
 ProposalInfo proposal(
   String id, {
@@ -284,6 +285,37 @@ void main() {
       );
       expect(movesOnly.keys, containsAll(['p1', kSeatMoveMarker]));
       expect(movesOnly.keys.any((k) => k.startsWith('mv:aa')), isFalse);
+    });
+  });
+
+  group('unapproved spends', () {
+    final spend = UnapprovedSpendInfo(txid: 'ab12', minedHeight: 0);
+    List<VaultUpdate> spends(SeenSnapshot? previous, {bool hide = false}) =>
+        vaultUpdates(
+          previous: previous,
+          proposals: const [],
+          vaultName: 'Grants',
+          hideAmounts: hide,
+          unapprovedSpends: [spend],
+        );
+
+    test('announced even on a fresh install and in privacy mode', () {
+      final fresh = spends(null);
+      expect(fresh.single.proposalId, unapprovedKey('ab12'));
+      expect(fresh.single.title, contains('without approval'));
+      expect(spends(const {}, hide: true), hasLength(1));
+    });
+
+    test('announced once', () {
+      final seen = snapshotOf(const [], unapprovedSpends: [spend]);
+      expect(seen.containsKey(unapprovedKey('ab12')), isTrue);
+      expect(spends(seen), isEmpty);
+    });
+
+    test('recording proposals keeps the spends', () {
+      final seen = snapshotOf(const [], unapprovedSpends: [spend]);
+      final next = snapshotOf([proposal('p1')], previous: seen);
+      expect(next.containsKey(unapprovedKey('ab12')), isTrue);
     });
   });
 }

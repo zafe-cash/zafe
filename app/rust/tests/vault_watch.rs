@@ -95,6 +95,8 @@ fn assert_ended(rx: &Receiver<VaultActivity>) {
 
 #[test]
 fn vault_watch_reports_activity_and_stops() {
+    let log_dir = std::env::temp_dir().join(format!("zafe-vault-watch-{}", std::process::id()));
+    rust_lib_zafe::api::app::init_log_cache(log_dir.to_string_lossy().into_owned());
     let rt = tokio::runtime::Runtime::new().unwrap();
     let url = serve(
         &rt,

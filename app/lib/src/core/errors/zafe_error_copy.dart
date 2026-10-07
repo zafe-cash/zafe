@@ -36,8 +36,7 @@ String zafeErrorMessage(
           'whoever runs the relay to raise the vault\'s limit.',
     ZafeErrorKind.relayAtCapacity =>
       'The Zafe beta is full for now, so this relay takes no new vaults. Vaults '
-          'that already exist keep working. Try again later, or use your own relay '
-          'in Settings.',
+          'that already exist keep working. Try again later.',
     ZafeErrorKind.relayRolledBack =>
       'The relay lost part of this vault\'s history, so Zafe isn\'t using it. A '
           'member whose phone has the full history can restore it from the sync '

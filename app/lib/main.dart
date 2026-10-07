@@ -13,7 +13,6 @@ import 'src/core/storage/zafe_paths.dart';
 import 'src/notifications/vault_watch.dart';
 import 'src/providers/vault_provider.dart';
 import 'src/services/invite_links.dart';
-import 'src/core/storage/zafe_paths.dart';
 import 'src/rust/api/app.dart';
 import 'src/rust/api/tor.dart';
 import 'src/rust/frb_generated.dart';
