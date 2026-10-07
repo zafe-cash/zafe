@@ -64,7 +64,12 @@ class _DiagnosticsSheetState extends State<DiagnosticsSheet> {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              ConstrainedBox(
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: colors.background.neutralSubtleOpacity,
+                  borderRadius: BorderRadius.circular(AppRadii.medium),
+                ),
                 constraints: const BoxConstraints(maxHeight: 260),
                 child: SingleChildScrollView(
                   child: SelectableText(

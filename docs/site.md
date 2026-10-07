@@ -63,8 +63,8 @@ showcase it's the replica of the main site."
   payment in three large phone cards, alternating sides (propose, check and approve,
   the sending screen); one wide still of the world as the door to /showcase; features =
   the review screen's checks ("Matches", Approve and sign), the real testnet tx card, a
-  privacy list; security = heading and the testnet warning on the left, three rows on
-  the right (no pillar columns); the call to action on the vault card colour with Bob's
+  privacy list; security = heading and the testnet warning on the left, four rows on
+  the right (no pillar columns; the fourth, "No telemetry", added 2026-10-07); the call to action on the vault card colour with Bob's
   home screen. One still left on the page (the teaser), was nine.
 - **Showcase is its own experience**: no logo intro (the world fades up from the paper),
   a title card bottom left ("Zafe, in 3D" / "One payment, start to finish" / "Three

@@ -16,6 +16,7 @@ const faq = [
   { q: 'Is Zafe safe to use?', a: 'It’s on testnet and not yet audited. Everything is open source. Don’t use real funds yet.' },
   { q: 'Is it really a multisig?', a: 'Yes, just not on-chain. Each phone holds a key share (FROST), and enough shares make one ordinary signature.' },
   { q: 'What can the relay see?', a: 'Who messages whom, and when. Never amounts, addresses or keys. It can’t sign or move funds.' },
+  { q: 'Does Zafe track me?', a: 'No. There are no analytics, no crash reports and no third-party SDKs, in the app or on this site. If something breaks, the app keeps a scrubbed error log on your phone, and it leaves only if you share it.' },
   { q: 'What if someone loses their phone?', a: 'The vault keeps working while enough members have theirs, and the share comes back from its encrypted backup. Lose too many, and the funds are gone for good.' },
   { q: 'Can we remove a member?', a: 'Not yet. Make a new vault and move the funds.' },
   { q: 'Which platforms?', a: 'Android. iPhone later.' },
@@ -204,6 +205,10 @@ const jsonLd = {
         <li>
           <Icon name="eye_closed" />
           <div><h3>A blind relay</h3><p>Phones talk through a relay that sees who and when. Never amounts, addresses or keys.</p></div>
+        </li>
+        <li>
+          <Icon name="eye_closed" />
+          <div><h3>No telemetry</h3><p>No analytics, no crash reports, no third-party SDKs. A build check fails if one is added.</p></div>
         </li>
         <li>
           <Icon name="book" />

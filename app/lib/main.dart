@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,8 +18,9 @@ import 'src/rust/frb_generated.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Local only (Settings > Diagnostic report): nothing is uploaded.
-  CrashLog.instance = CrashLog(
-    File('${(await ZafePaths.get()).diagnosticsDir}/crashes.log'),
+  CrashLog.instance = CrashLog.forDir(
+    (await ZafePaths.get()).diagnosticsDir,
+    isBackground: false,
   )..install();
   initInviteLinks(); // early, so the link that launched the app isn't missed
   // Shown on the licenses page (Settings > Open-source licenses): bundled fonts, icons

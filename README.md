@@ -40,6 +40,14 @@ Website: <https://zafe.cash> (the 3D walkthrough is at
 
 The full design is in [`spec.md`](spec.md).
 
+## No telemetry
+
+Zafe has no analytics, no crash reporting and no third-party SDKs that phone home, in the app,
+the relay or the site. When something breaks, the app keeps a short error log on the phone
+(addresses, keys, links, amounts and vault ids removed before it is written). Settings >
+Privacy > Diagnostic report shows it in full; it leaves the phone only if you share it. CI
+fails if a telemetry package is added (`scripts/check-no-telemetry.sh`).
+
 ## Repository
 
 ```
