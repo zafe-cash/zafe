@@ -82,7 +82,7 @@ Last updated: 2026-10-06 (relay CI/CD deploy to the OVH VPS; relay loss/rollback
    on the Android data dir, background check with Tor on (WorkManager and FCM time
    budget), dormant/resume, battery. Follow-ups: pooled relay connections over Tor
    (needs the arti client, which upstream's `Client` doesn't expose), onion endpoints,
-   per-vault circuit isolation, iOS backup exclusion of `<appSupport>/tor`.
+   per-vault circuit isolation.
 4. [x] **Incoming history** (2026-09-30): received payments (any transaction paying the
    vault that spends none of its notes, so never change; coinbase included) are read
    from the wallet DB (`VaultWallet::received_payments`, bridge `api/received.rs`), merged
