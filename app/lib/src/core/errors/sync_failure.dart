@@ -32,6 +32,15 @@ enum SyncFailureKind {
   /// The relay runs an older Zafe than this app.
   relayOutdated,
 
+  /// The relay has fewer log entries than this phone saw (lost data, an older backup).
+  relayRolledBack,
+
+  /// The relay doesn't know this vault any more (a wiped database).
+  relayLostVault,
+
+  /// The relay's log differs from the history this phone saw.
+  relayForked,
+
   /// "Use Tor" is on and Tor is still connecting: nothing is sent meanwhile.
   torConnecting,
 
@@ -66,6 +75,9 @@ class SyncFailure {
     SyncFailureKind.walletDatabase => 'Storage problem',
     SyncFailureKind.updateRequired => 'Update needed',
     SyncFailureKind.relayOutdated => 'Relay outdated',
+    SyncFailureKind.relayRolledBack => 'Relay lost data',
+    SyncFailureKind.relayLostVault => 'Relay lost the vault',
+    SyncFailureKind.relayForked => 'Relay not trusted',
     SyncFailureKind.torConnecting => 'Connecting to Tor…',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
@@ -86,6 +98,9 @@ class SyncFailure {
     SyncFailureKind.walletDatabase => 'Wallet storage problem',
     SyncFailureKind.updateRequired => 'Update Zafe',
     SyncFailureKind.relayOutdated => 'The relay needs an update',
+    SyncFailureKind.relayRolledBack => 'The relay lost part of the vault',
+    SyncFailureKind.relayLostVault => 'The relay lost the vault',
+    SyncFailureKind.relayForked => 'The relay shows another history',
     SyncFailureKind.torConnecting => 'Connecting to Tor',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
@@ -126,6 +141,20 @@ class SyncFailure {
     SyncFailureKind.relayOutdated =>
       'The relay runs an older version of Zafe than this app. Ask whoever runs it '
           'to update it.',
+    SyncFailureKind.relayRolledBack =>
+      'The relay has fewer entries of the vault\'s history than this phone has '
+          'already seen, for example after it was restored from an older backup. '
+          'Zafe ignores what it says until the history is put back. Any member whose '
+          'phone has the full history can restore it.',
+    SyncFailureKind.relayLostVault =>
+      'The relay no longer knows this vault, for example after its database was '
+          'wiped. Your funds are safe. Any member can restore the vault on the relay '
+          'from the history kept on their phone. Payments that were waiting for '
+          'signatures are asked for again.',
+    SyncFailureKind.relayForked =>
+      'The relay shows a different history of this vault than this phone saw. '
+          'Zafe won\'t use it. Check with the other members whether the relay was '
+          'changed or restored, and don\'t approve anything from it until you know why.',
     SyncFailureKind.torConnecting =>
       '"Use Tor" is on and Tor is still connecting. Zafe sends nothing until it '
           'is, and never connects directly instead.',
@@ -136,6 +165,11 @@ class SyncFailure {
     SyncFailureKind.other =>
       'Something went wrong while updating the vault. Zafe keeps trying.',
   };
+
+  /// A member can put the vault back on the relay from this phone's copy of its history.
+  bool get canRestoreRelay =>
+      kind == SyncFailureKind.relayRolledBack ||
+      kind == SyncFailureKind.relayLostVault;
 
   /// Whether changing a server address in Settings could fix it.
   bool get suggestsSettings => switch (kind) {
@@ -179,6 +213,9 @@ SyncFailure classifySyncFailure(Object error, {SyncEndpoint? fallback}) {
     ZafeErrorKind.walletDatabase => SyncFailureKind.walletDatabase,
     ZafeErrorKind.updateRequired => SyncFailureKind.updateRequired,
     ZafeErrorKind.relayOutdated => SyncFailureKind.relayOutdated,
+    ZafeErrorKind.relayRolledBack => SyncFailureKind.relayRolledBack,
+    ZafeErrorKind.relayLostVault => SyncFailureKind.relayLostVault,
+    ZafeErrorKind.relayForked => SyncFailureKind.relayForked,
     ZafeErrorKind.torConnecting => SyncFailureKind.torConnecting,
     ZafeErrorKind.torFailed => SyncFailureKind.torFailed,
     _ => SyncFailureKind.other,

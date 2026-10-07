@@ -44,14 +44,17 @@ const NetworkPreset kTestnetPreset = NetworkPreset(
 const String kTestnetRelayUrl = kPlaceholderRelayUrl;
 const String kTestnetLightwalletdUrl = 'https://testnet.zec.rocks:443';
 
-/// Mainnet waits on the audit and a hosted relay (docs/tracker.md, M2); the relay here is
-/// still the placeholder.
+/// Mainnet waits on the audit and a dry run (docs/tracker.md, M2). Its relay is the
+/// capped-beta relay on the same VPS as testnet (`infra/relay/README.md`, "Mainnet"):
+/// deployed by `.github/workflows/relay-mainnet.yml` once the user has done the one-time
+/// setup (DNS, bucket, environment); until then this name doesn't resolve and a mainnet
+/// build shows "Can't reach relay".
 const NetworkPreset kMainnetPreset = NetworkPreset(
   network: 'main',
   relayUrl: kMainnetRelayUrl,
   lightwalletdUrl: kMainnetLightwalletdUrl,
 );
-const String kMainnetRelayUrl = kPlaceholderRelayUrl;
+const String kMainnetRelayUrl = 'https://relay.zafe.cash';
 const String kMainnetLightwalletdUrl = 'https://zec.rocks:443';
 
 const String kPlaceholderRelayUrl = 'https://relay.zafe.invalid';

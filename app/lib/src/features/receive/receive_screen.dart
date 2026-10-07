@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/config/beta.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
@@ -74,6 +75,18 @@ class ReceiveScreen extends ConsumerWidget {
             style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
           ),
         ),
+        if (kIsBeta) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Center(
+            child: Text(
+              betaNote(),
+              textAlign: TextAlign.center,
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.warning,
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpacing.base),
         AppButton(
           expand: true,

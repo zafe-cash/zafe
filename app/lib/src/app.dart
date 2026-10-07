@@ -41,7 +41,8 @@ import 'providers/tor_provider.dart';
 import 'providers/mempool_watch_provider.dart';
 import 'providers/server_failover_provider.dart';
 import 'providers/theme_mode_provider.dart';
-import 'notifications/vault_updates.dart' show kReceivedPrefix, kSeatMovePrefix;
+import 'notifications/vault_updates.dart'
+    show kReceivedPrefix, kSeatMovePrefix, kUnapprovedPrefix;
 import 'notifications/vault_watch.dart';
 import 'providers/vault_provider.dart';
 import 'services/app_update.dart';
@@ -74,6 +75,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
     }
     if (proposalId.startsWith(kSeatMovePrefix)) {
       router.go('/signers'); // a tab: go, never push
+      return;
+    }
+    if (proposalId.startsWith(kUnapprovedPrefix)) {
+      router.go('/activity'); // a tab
       return;
     }
     router.push(

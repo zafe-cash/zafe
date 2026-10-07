@@ -3,10 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/errors/sync_failure.dart';
+import '../../core/errors/zafe_error_copy.dart';
+import '../../core/security/unlock_gate.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/storage/vault_summaries.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
+import '../../core/widgets/app_icon.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../providers/proposals_provider.dart';
@@ -51,6 +55,41 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
       VaultSummaries.read(id).then((s) {
         if (mounted) setState(() => _savedSyncedAt = s.syncedAt);
       });
+    }
+  }
+
+  bool _restoring = false;
+
+  /// Puts the vault's history back on the relay from this phone's copy.
+  Future<void> _restore() async {
+    if (!await confirmUnlock(
+      context,
+      ref,
+      reason: 'Unlock to restore the vault on the relay',
+    )) {
+      return;
+    }
+    setState(() => _restoring = true);
+    try {
+      final entries = await ref.read(proposalsProvider.notifier).restoreRelay();
+      if (!mounted) return;
+      showAppToast(
+        context,
+        entries == 0
+            ? 'The relay already has everything this phone has.'
+            : 'Restored $entries entries on the relay.',
+      );
+    } catch (e) {
+      if (mounted) {
+        showAppToast(
+          context,
+          zafeErrorMessage(e, fallback: 'Couldn\'t restore the relay.'),
+          iconName: AppIcons.warningCircle,
+          tone: AppToastTone.destructive,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _restoring = false);
     }
   }
 
@@ -150,6 +189,17 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
         onPressed: _retrying ? null : _retry,
         child: Text(_retrying ? 'Trying...' : 'Try again'),
       ),
+      if (failure?.canRestoreRelay ?? false) ...[
+        const SizedBox(height: AppSpacing.xs),
+        AppButton(
+          expand: true,
+          variant: AppButtonVariant.secondary,
+          onPressed: _restoring ? null : _restore,
+          child: Text(
+            _restoring ? 'Restoring...' : 'Restore vault on the relay',
+          ),
+        ),
+      ],
       if (failure?.suggestsSettings ?? false) ...[
         const SizedBox(height: AppSpacing.xs),
         AppButton(

@@ -35,6 +35,7 @@ fn start_relay() -> String {
 fn a_lost_phone_is_replaced_through_the_bridge() {
     let relay = start_relay();
     let tmp = std::env::temp_dir().join(format!("zafe-repair-bridge-{}", std::process::id()));
+    rust_lib_zafe::api::app::init_log_cache(tmp.join("log").to_string_lossy().into_owned());
     let seeds: Vec<Vec<u8>> = (0..3).map(|_| vault::generate_identity().seeds).collect();
     let invite =
         vault::create_vault(relay.clone(), seeds[0].clone(), "Grants".into(), 2, 3).unwrap();

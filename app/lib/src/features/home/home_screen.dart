@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/config/beta.dart';
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
 import '../../core/formatting/zec_amount.dart';
@@ -26,6 +27,7 @@ import 'sync_status_sheet.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/received_provider.dart';
 import '../../providers/tor_provider.dart';
+import '../../providers/unapproved_spends_provider.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../proposals/activity_feed.dart';
 import '../../providers/vault_provider.dart';
@@ -283,6 +285,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           warning: false,
                           onTap: () => _restartForUpdate(context),
                         ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                      if (ref.watch(unapprovedSpendsProvider).isNotEmpty) ...[
+                        NoticeCard(
+                          title: 'Money left without approval',
+                          body:
+                              'A transaction spent this vault\'s funds with no '
+                              'approved payment. Check with the other members now.',
+                          onTap: () => context.go('/activity'),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                      if (kIsBeta) ...[
+                        if (overBetaCap(vault.balance?.totalZat))
+                          NoticeCard(
+                            title: 'Over the beta limit',
+                            body: betaOverCapNote(),
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xxs,
+                            ),
+                            child: Text(
+                              betaNote(),
+                              style: AppTypography.bodySmall.copyWith(
+                                color: colors.text.muted,
+                              ),
+                            ),
+                          ),
                         const SizedBox(height: AppSpacing.md),
                       ],
                       if (ref.watch(backupStatusProvider).value == false) ...[

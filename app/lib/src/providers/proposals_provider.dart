@@ -9,10 +9,11 @@ import '../core/storage/zafe_paths.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../core/storage/vault_summaries.dart';
 import '../notifications/vault_updates.dart' show actionableCount;
-import '../notifications/vault_watch.dart' show recordSeen;
+import '../notifications/vault_watch.dart' show recordSeen, reregisterPush;
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../rust/api/error.dart';
 import '../rust/api/proposals.dart' as rust;
+import '../rust/api/relay_log.dart' as rust_relay_log;
 import '../rust/api/repair.dart' as rust_repair;
 import 'endpoints_provider.dart';
 import 'vault_provider.dart';
@@ -365,6 +366,22 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     } catch (e) {
       debugPrint('backup attestation failed: ${describeError(e)}');
     }
+  }
+
+  /// Puts the vault's history back on the relay from this phone's copy (the relay lost
+  /// it or was rewound; spec §6.3). Returns how many log entries went back (0: the relay
+  /// already had all of them).
+  Future<int> restoreRelay() async {
+    final vault = _vault;
+    final restored = await rust_relay_log.restoreRelay(
+      relayUrl: _endpoints.relayUrl,
+      seeds: vault.identity!,
+      material: vault.material!,
+    );
+    // A restored relay has forgotten this phone's push token.
+    unawaited(reregisterPush());
+    await refresh();
+    return restored;
   }
 
   /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`. Returns whether

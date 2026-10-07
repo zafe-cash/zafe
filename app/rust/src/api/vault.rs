@@ -38,7 +38,17 @@ pub(crate) fn network(name: &str) -> Result<ZafeNetwork, ZafeError> {
 }
 
 /// Identity seeds as stored by the app (`IdentitySeeds::to_bytes`, versioned).
+///
+/// Every call that talks to the relay starts here, so this is also where a missing log
+/// copy fails closed: without `init_log_cache` the relay would be trusted to remember each
+/// vault's log (spec §6.3), and no call may run that way.
 pub(crate) fn identity(seeds: &[u8]) -> Result<Identity, ZafeError> {
+    if zafe_core::log_cache::configured().is_none() {
+        return Err(ZafeError::new(
+            ZafeErrorKind::Other,
+            "the log copy is not set up (init_log_cache was not called)",
+        ));
+    }
     match IdentitySeeds::from_bytes(seeds) {
         Ok(seeds) => Ok(Identity::from_seeds(seeds)),
         Err(ProtoError::UnsupportedVersion(v)) => Err(v.into()),

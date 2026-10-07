@@ -122,6 +122,8 @@ fn payment_flow_through_bridge() {
     let relay = format!("http://127.0.0.1:{RELAY_PORT}");
     let lwd = format!("http://127.0.0.1:{LWD_PORT}");
     let tmp = std::env::temp_dir().join(format!("zafe-bridge-{}", std::process::id()));
+    // Each phone keeps a copy of the vault logs (the app does this at startup).
+    rust_lib_zafe::api::app::init_log_cache(tmp.join("log").to_string_lossy().into_owned());
     start_relay();
 
     // Setup: A creates a 2-of-3 vault, B and C join, A seals.

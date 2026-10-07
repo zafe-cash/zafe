@@ -30,6 +30,18 @@ pub enum ZafeErrorKind {
     /// The relay's storage quota for this vault is full; it frees up as old messages
     /// expire (30 days), or whoever runs the relay raises it.
     RelayStorageFull,
+    /// The relay has fewer log entries than this device saw: it lost data or was rewound
+    /// to an older backup. Nothing it says about the vault can be trusted until a member
+    /// restores the log on it from a device copy.
+    RelayRolledBack,
+    /// The relay serves another history than this device saw (a fork of the log). Do not
+    /// trust it; members compare notes outside Zafe.
+    RelayForked,
+    /// The relay no longer knows this vault (wiped), though this device has its log: a
+    /// member can restore it from the device copy.
+    RelayLostVault,
+    /// The relay takes no new vaults for now (a capped beta). Existing vaults still work.
+    RelayAtCapacity,
     /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
     /// another host, or a server that doesn't speak TLS).
     Tls,
@@ -125,7 +137,10 @@ impl From<NodeError> for ZafeError {
             return w.into();
         }
         let endpoint = match &e {
-            NodeError::Relay(_) => ZafeEndpoint::Relay,
+            NodeError::Relay(_)
+            | NodeError::RelayRolledBack { .. }
+            | NodeError::RelayForked { .. }
+            | NodeError::RelayLostVault { .. } => ZafeEndpoint::Relay,
             _ => ZafeEndpoint::None,
         };
         let kind = match &e {
@@ -148,6 +163,10 @@ impl From<NodeError> for ZafeError {
             NodeError::Relay(RelayClientError::StorageFull { .. }) => {
                 ZafeErrorKind::RelayStorageFull
             }
+            NodeError::RelayRolledBack { .. } => ZafeErrorKind::RelayRolledBack,
+            NodeError::RelayForked { .. } => ZafeErrorKind::RelayForked,
+            NodeError::RelayLostVault { .. } => ZafeErrorKind::RelayLostVault,
+            NodeError::Relay(RelayClientError::AtCapacity) => ZafeErrorKind::RelayAtCapacity,
             NodeError::NotReady(_) => ZafeErrorKind::NotReady,
             NodeError::Timeout(_) => ZafeErrorKind::Timeout,
             NodeError::Verification(_)
