@@ -383,6 +383,16 @@ pub struct ReceivedPayment {
     pub coinbase: bool,
 }
 
+/// A transaction this wallet saw spending vault notes (mined, or in the mempool).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VaultSpend {
+    /// Protocol byte order, like `ProposalState::txid`.
+    pub txid: [u8; 32],
+    pub mined_height: Option<u32>,
+    /// Nullifiers of the vault notes it spends (the ones this wallet knows).
+    pub nullifiers: Vec<[u8; 32]>,
+}
+
 /// Balances of the vault account, in zatoshis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VaultBalance {
@@ -598,6 +608,50 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
     /// transfer), not incoming money. Expired unmined transactions are left out.
     pub fn received_payments(&self) -> Result<Vec<ReceivedPayment>, WalletError> {
         received_payments_at(&self.path, &self.key, self.account.expose_uuid().as_bytes())
+    }
+
+    /// Every transaction that spent vault notes, as far as this wallet has seen (one row
+    /// per spent note, grouped by transaction). Expired unmined ones are left out. Input to
+    /// [`crate::spend_watch::unapproved_spends`].
+    pub fn vault_spends(&self) -> Result<Vec<VaultSpend>, WalletError> {
+        let conn = open_connection(&self.path, &self.key, true)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.txid, t.mined_height, rn.nf
+                 FROM ironwood_received_note_spends s
+                 JOIN ironwood_received_notes rn ON rn.id = s.ironwood_received_note_id
+                 JOIN transactions t ON t.id_tx = s.transaction_id
+                 JOIN accounts a ON a.id = rn.account_id
+                 WHERE a.uuid = ?1
+                   AND rn.nf IS NOT NULL
+                   AND NOT (t.mined_height IS NULL AND t.expiry_height BETWEEN 1
+                            AND COALESCE((SELECT MAX(height) FROM blocks), 0))
+                 ORDER BY t.id_tx, rn.id",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([self.account.expose_uuid().as_bytes().as_slice()], |r| {
+                Ok((
+                    r.get::<_, [u8; 32]>(0)?,
+                    r.get::<_, Option<u32>>(1)?,
+                    r.get::<_, [u8; 32]>(2)?,
+                ))
+            })
+            .map_err(db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_err)?;
+        let mut out: Vec<VaultSpend> = Vec::new();
+        for (txid, mined_height, nf) in rows {
+            match out.last_mut() {
+                Some(last) if last.txid == txid => last.nullifiers.push(nf),
+                _ => out.push(VaultSpend {
+                    txid,
+                    mined_height,
+                    nullifiers: vec![nf],
+                }),
+            }
+        }
+        Ok(out)
     }
 
     /// Unix time of the block that mined `txid` (protocol byte order), if the wallet has

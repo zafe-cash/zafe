@@ -692,14 +692,109 @@ fn proposals_get_disjoint_commitments_in_log_order() {
     );
 }
 
+/// A proposal written by an app on `version` (the tag is the author's `VAULT_EVENT`).
+fn proposal_v(id: u8, version: u16) -> Vec<u8> {
+    let mut bytes = proposal(id).to_bytes().unwrap();
+    bytes[..2].copy_from_slice(&version.to_le_bytes());
+    bytes
+}
+
 #[test]
-fn short_pools_fall_back_to_interactive() {
-    let mut log = pooled_log(1); // each member needs 2 per proposal
-    log.push(0, &proposal(1));
+fn version_5_proposals_keep_the_all_or_nothing_rule() {
+    // Each member needs 2 per proposal; one has 1: the whole proposal is interactive.
+    let mut log = pooled_log(1);
+    log.push_raw(0, &proposal_v(1, 5));
     let s = log.replay().unwrap();
     assert!(s.proposals[&[1; 16]].preprocessed.is_none());
     for m in 0..3 {
         assert_eq!(s.pools[&log.ids[m].public().sig_pk].available(), 1);
+    }
+    // A member with no pool at all: the same, for every group.
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    let mut rng = StdRng::seed_from_u64(5);
+    for m in 0..2 {
+        log.push(m, &commitments(&mut rng, 4));
+    }
+    log.push_raw(0, &proposal_v(1, 5));
+    let s = log.replay().unwrap();
+    assert!(s.proposals[&[1; 16]].preprocessed.is_none());
+    assert_eq!(s.pools[&log.ids[0].public().sig_pk].available(), 4);
+}
+
+#[test]
+fn short_pools_assign_only_the_groups_they_cover() {
+    let mut log = pooled_log(1); // each member needs 2 for all groups, has 1
+    log.push(0, &proposal(1));
+    let s = log.replay().unwrap();
+    let pre = s.proposals[&[1; 16]].preprocessed.as_ref().unwrap();
+    // Group order {0,1}, {0,2}, {1,2}: the first takes m0's and m1's only commitment.
+    assert_eq!(pre.subsets.len(), 1);
+    assert_eq!(
+        pre.subsets[0],
+        vec![log.ids[0].public().sig_pk, log.ids[1].public().sig_pk]
+    );
+    for m in 0..2 {
+        assert_eq!(s.pools[&log.ids[m].public().sig_pk].available(), 0);
+    }
+    // The member outside every assigned group keeps its commitment.
+    assert_eq!(s.pools[&log.ids[2].public().sig_pk].available(), 1);
+    assert!(pre.groups_of(&log.ids[2].public().sig_pk).is_empty());
+    // Nothing left for the next proposal: interactive.
+    log.push(0, &proposal(2));
+    let s = log.replay().unwrap();
+    assert!(s.proposals[&[2; 16]].preprocessed.is_none());
+}
+
+#[test]
+fn a_member_without_a_pool_does_not_take_one_tap_from_the_others() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    let mut rng = StdRng::seed_from_u64(6);
+    for m in 0..2 {
+        log.push(m, &commitments(&mut rng, 4));
+    }
+    log.push(0, &proposal(1));
+    let s = log.replay().unwrap();
+    let pre = s.proposals[&[1; 16]].preprocessed.as_ref().unwrap();
+    // Only {m0, m1} can sign one-tap.
+    assert_eq!(pre.subsets.len(), 1);
+    assert_eq!(pre.groups_of(&log.ids[0].public().sig_pk), vec![0]);
+    assert!(pre.groups_of(&log.ids[2].public().sig_pk).is_empty());
+    // Their shares complete the group; the third member isn't needed.
+    log.push(0, &share_vote(1, &[0]));
+    log.push(1, &share_vote(1, &[0]));
+    let s = log.replay().unwrap();
+    let p = &s.proposals[&[1; 16]];
+    assert_eq!(p.ready_group, Some(0));
+    assert_eq!(p.status, ProposalStatus::Approved);
+    // A share vote for a group the member isn't in is still refused.
+    log.push(2, &share_vote(1, &[0]));
+    assert!(log.replay().unwrap().ignored.iter().any(|(_, e)| matches!(
+        e,
+        VaultError::BadShares(_) | VaultError::ProposalClosed(_) | VaultError::VoteFinal(_)
+    )));
+    // Nobody has a pool: interactive.
+    let mut bare = Log::new();
+    bare.push(0, &bare.created(&[0, 1, 2]));
+    bare.push(0, &proposal(1));
+    assert!(bare.replay().unwrap().proposals[&[1; 16]]
+        .preprocessed
+        .is_none());
+}
+
+/// The assignment is a function of the log, whoever replays it.
+#[test]
+fn partial_assignment_is_deterministic() {
+    let mut log = pooled_log(3);
+    log.push(0, &proposal(1));
+    log.push(1, &proposal(2));
+    let (a, b) = (log.replay().unwrap(), log.replay().unwrap());
+    for id in [1u8, 2] {
+        assert_eq!(
+            a.proposals[&[id; 16]].preprocessed,
+            b.proposals[&[id; 16]].preprocessed
+        );
     }
 }
 
@@ -946,4 +1041,88 @@ fn expiry_heights_are_rounded_up_to_the_grid() {
     assert!((1_000_001 + 8064..1_000_001 + 8064 + R).contains(&a));
     // Already on the grid: unchanged.
     assert_eq!(expiry_height(R * 10, R), R * 11);
+}
+
+// --- Unapproved-spend alert ---------------------------------------------------------------
+
+mod spend_watch_tests {
+    use super::*;
+    use zafe_core::{
+        spend_watch::{unapproved_spends, UnapprovedSpend, GRACE_BLOCKS},
+        wallet::VaultSpend,
+    };
+
+    fn state_with_proposal(nfs: &[[u8; 32]], txid: Option<[u8; 32]>) -> VaultState {
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push(0, &proposal(1));
+        let mut s = log.replay().unwrap();
+        let p = s.proposals.get_mut(&[1; 16]).unwrap();
+        p.nullifiers = nfs.to_vec();
+        p.txid = txid;
+        s
+    }
+
+    fn spend(txid: u8, mined: Option<u32>, nfs: &[[u8; 32]]) -> VaultSpend {
+        VaultSpend {
+            txid: [txid; 32],
+            mined_height: mined,
+            nullifiers: nfs.to_vec(),
+        }
+    }
+
+    const A: [u8; 32] = [0xA1; 32];
+    const B: [u8; 32] = [0xB2; 32];
+
+    #[test]
+    fn a_spend_logged_as_sent_is_accounted_for_whenever_it_mined() {
+        let s = state_with_proposal(&[A, B], Some([7; 32]));
+        // Even long after: the log says this proposal's transaction was sent.
+        assert!(unapproved_spends(&s, &[spend(7, Some(10), &[A, B])], 10_000).is_empty());
+    }
+
+    #[test]
+    fn a_spend_no_proposal_explains_is_flagged_at_once() {
+        let s = state_with_proposal(&[A], None);
+        let c = [0xC3; 32];
+        let flagged = unapproved_spends(&s, &[spend(9, None, &[c])], 100);
+        assert_eq!(
+            flagged,
+            vec![UnapprovedSpend {
+                txid: [9; 32],
+                mined_height: None
+            }]
+        );
+        // One unknown note among known ones is enough.
+        assert_eq!(
+            unapproved_spends(&s, &[spend(9, Some(99), &[A, c])], 100).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_proposals_spend_is_given_time_to_be_logged() {
+        let s = state_with_proposal(&[A, B], None);
+        // Sent but the broadcast entry isn't in the log yet: fine while recent...
+        assert!(unapproved_spends(&s, &[spend(5, None, &[A])], 100).is_empty());
+        assert!(
+            unapproved_spends(&s, &[spend(5, Some(100), &[A, B])], 100 + GRACE_BLOCKS).is_empty()
+        );
+        // ...flagged once it has been mined for longer than the grace period with no
+        // matching broadcast (a payment that was cancelled, or paid somewhere else).
+        assert_eq!(
+            unapproved_spends(&s, &[spend(5, Some(100), &[A, B])], 100 + GRACE_BLOCKS + 1).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rows_of_one_transaction_are_one_spend_and_a_transaction_without_notes_is_flagged() {
+        let s = state_with_proposal(&[A, B], None);
+        // The wallet reports one row per spent note; together they match the proposal.
+        let rows = [spend(5, None, &[A]), spend(5, None, &[B])];
+        assert!(unapproved_spends(&s, &rows, 100).is_empty());
+        let none = state_with_proposal(&[], None);
+        assert_eq!(unapproved_spends(&none, &rows, 100).len(), 1);
+    }
 }

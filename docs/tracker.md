@@ -471,7 +471,31 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] **(you)** Mainnet musts: the audit above, a hosted relay (OVH VPS) with its URL in
       `kMainnetRelayUrl`, and a small end-to-end mainnet dry run (create, receive,
       propose, sign, send, restore) incl. `zec.rocks:443` with the app
-- [ ] Relay rollback check, before mainnet (found 2026-10-06): apps keep no saved head
+- [x] Relay rollback check (2026-10-07, core + relay + docs on main; the app side is on
+      branch `audit-prep-app`, see below): every device keeps a copy of each vault's log
+      (`log_cache`), `load_log` refuses a relay without its last entry
+      (`RelayRolledBack`/`RelayForked`/`RelayLostVault`); `POST /v1/mailbox/reseed` +
+      `node::reseed_relay` + `zafe restore-relay` put a lost vault back on a relay from a
+      member's copy (kept; moving between relays stays dropped, see the decision below).
+      Tests: `relay_rollback`, `log_cache`.
+- [ ] **App side of the above, not on main** (needs `flutter_rust_bridge_codegen generate`,
+      one slow run, then `flutter analyze` + `flutter test`): branch `audit-prep-app`:
+      bridge (`init_log_cache`, `restore_relay`, `unapproved_spends`, error kinds), Dart
+      copy, sync-sheet "Restore vault on the relay", beta cap (`core/config/beta.dart`),
+      unapproved-spend card + notification, `kMainnetRelayUrl`. Bridge tests there call
+      `init_log_cache`; bridge_e2e comment about interactive fallback needs a look (one-tap
+      now covers groups without the pool-less member).
+- [x] One-tap pools no longer need every member (2026-10-07, `VAULT_EVENT` 6, gated by
+      the author's event version; `vault` tests)
+- [x] Unapproved-spend alert core (`spend_watch`, `VaultWallet::vault_spends`; wallet
+      query untested on regtest yet)
+- [ ] **(you)** Mainnet relay one-time setup (files prepared, nothing deployed): DNS
+      `relay.zafe.cash`, S3 bucket + keys, GitHub environment `relay-mainnet` with required
+      reviewers and the variables/secrets in `infra/relay/README.md` "Mainnet"; first
+      promotion from `relay-mainnet.yml`; push-triggered testnet redeploy will use the new
+      `deploy.sh <network>` signature (check the first run)
+- [ ] **(you)** Audit: `docs/audit-scope.md`
+- [x] (old note) Relay rollback check, before mainnet (found 2026-10-06): apps keep no saved head
       (`node::load_log` re-reads from entry 0), so a relay serving an older log (a restored
       backup, or a self-hosted relay run by someone else) is accepted silently and can bring
       back a cancelled proposal that already has t one-tap shares. Fix: store the log length

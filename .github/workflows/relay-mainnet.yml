@@ -1,0 +1,152 @@
+name: Relay mainnet
+
+# Promotes a relay image that has already been running on testnet to the mainnet relay
+# (relay.zafe.cash) on the same VPS. It builds nothing: the image is the exact digest the
+# Relay deploy workflow pushed (with build provenance) and put on testnet.
+#
+# Manual only. The `relay-mainnet` GitHub environment must have REQUIRED REVIEWERS (the
+# run waits for one to approve) and deploy only from `main`. Before it deploys, this
+# workflow checks, on the server, that
+#   - the digest is the one testnet runs right now, and has run there for `min_soak_hours`;
+#   - GitHub's build provenance for that digest verifies (built by relay-deploy.yml from
+#     this repository).
+#
+# Environment `relay-mainnet`:
+#   secret   RELAY_SSH_KEY / RELAY_KNOWN_HOSTS   as for relay-testnet (may be the same key)
+#   variable RELAY_HOST                          the VPS address
+#   variable RELAY_DOMAIN                        relay.zafe.cash (DNS only, same VPS)
+#   variable RELAY_MAX_VAULTS                    capped beta: vaults the relay takes in total
+#                                                (default 25; 0 = no limit)
+#   secret   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY   bucket-only keys
+#   variable LITESTREAM_BUCKET / LITESTREAM_ENDPOINT / LITESTREAM_REGION   the S3 bucket
+#   secret   RELAY_FCM_SERVICE_ACCOUNT_JSON      optional, pushes (the mainnet app's project)
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Image digest running on testnet (sha256:...)"
+        required: true
+        type: string
+      min_soak_hours:
+        description: "Hours the digest must have run on testnet first"
+        required: false
+        default: "24"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/zafe-cash/zafe-relay
+
+jobs:
+  promote:
+    name: Promote to mainnet
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: relay-mainnet
+      url: https://${{ vars.RELAY_DOMAIN }}/health
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check the inputs
+        env:
+          DIGEST: ${{ inputs.digest }}
+          SOAK: ${{ inputs.min_soak_hours }}
+          DOMAIN: ${{ vars.RELAY_DOMAIN }}
+        run: |
+          [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::digest must be sha256:<64 hex>"; exit 1; }
+          [[ $SOAK =~ ^[0-9]+$ ]] || { echo "::error::min_soak_hours must be a number"; exit 1; }
+          [[ $DOMAIN =~ ^[a-z0-9.-]+$ ]] || { echo "::error::set the environment variable RELAY_DOMAIN"; exit 1; }
+          [ "$DOMAIN" != testnet.relay.zafe.cash ] || { echo "::error::RELAY_DOMAIN is the testnet domain"; exit 1; }
+      - name: Verify the image's build provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh attestation verify "oci://${IMAGE}@${{ inputs.digest }}" \
+            --repo "${{ github.repository }}" \
+            --signer-workflow "${{ github.repository }}/.github/workflows/relay-deploy.yml"
+      - name: SSH setup
+        env:
+          SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.RELAY_KNOWN_HOSTS }}
+        run: |
+          install -d -m700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host relay\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n' \
+            "${{ vars.RELAY_HOST }}" > ~/.ssh/config
+      - name: Check that testnet runs this digest, and has for long enough
+        env:
+          DIGEST: ${{ inputs.digest }}
+          SOAK: ${{ inputs.min_soak_hours }}
+        run: |
+          record=$(ssh relay 'cat /opt/zafe-relay/deployed/testnet.json') ||
+            { echo "::error::no testnet deploy record on the server (deployed/testnet.json)"; exit 1; }
+          image=$(jq -r .image <<<"$record"); at=$(jq -r .at <<<"$record")
+          [ "$image" = "${IMAGE}@${DIGEST}" ] ||
+            { echo "::error::testnet runs $image, not ${IMAGE}@${DIGEST}: promote what testnet runs"; exit 1; }
+          hours=$(( ($(date -u +%s) - at) / 3600 ))
+          [ "$hours" -ge "$SOAK" ] ||
+            { echo "::error::that digest has run on testnet for $hours h, the minimum is $SOAK h"; exit 1; }
+          echo "testnet has run $image for $hours h"
+          # And it is healthy right now.
+          [ "$(curl -fsS --max-time 10 https://testnet.relay.zafe.cash/health)" = ok ] ||
+            { echo "::error::testnet is not healthy"; exit 1; }
+      - name: Copy compose files
+        run: |
+          tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh litestream.yml mainnet |
+            ssh relay 'tar -C /opt/zafe-relay -xz && install -d /opt/zafe-relay/caddy/mainnet && mv /opt/zafe-relay/mainnet/relay.caddy /opt/zafe-relay/caddy/mainnet/relay.caddy && rmdir /opt/zafe-relay/mainnet'
+      - name: Relay secrets
+        env:
+          FCM: ${{ secrets.RELAY_FCM_SERVICE_ACCOUNT_JSON }}
+          LS_KEY: ${{ secrets.LITESTREAM_ACCESS_KEY_ID }}
+          LS_SECRET: ${{ secrets.LITESTREAM_SECRET_ACCESS_KEY }}
+          LS_BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          LS_ENDPOINT: ${{ vars.LITESTREAM_ENDPOINT }}
+          LS_REGION: ${{ vars.LITESTREAM_REGION }}
+        run: |
+          # The replica is not optional on mainnet: without it a lost disk is a lost relay.
+          for v in LS_KEY LS_SECRET LS_BUCKET LS_ENDPOINT LS_REGION; do
+            [ -n "${!v}" ] || { echo "::error::missing Litestream setting $v (secrets/variables LITESTREAM_*)"; exit 1; }
+          done
+          printf 'LITESTREAM_ACCESS_KEY_ID=%s\nLITESTREAM_SECRET_ACCESS_KEY=%s\nLITESTREAM_BUCKET=%s\nLITESTREAM_ENDPOINT=%s\nLITESTREAM_REGION=%s\n' \
+            "$LS_KEY" "$LS_SECRET" "$LS_BUCKET" "$LS_ENDPOINT" "$LS_REGION" |
+            ssh relay 'umask 077 && cat > /opt/zafe-relay/litestream.env'
+          if [ -n "$FCM" ]; then
+            json=$(jq -ce . <<<"$FCM")
+            case "$json" in *"'"*) echo "::error::the FCM key contains a single quote"; exit 1;; esac
+            printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'\n" "$json" |
+              ssh relay 'umask 077 && cat > /opt/zafe-relay/secrets-mainnet.env'
+          else
+            ssh relay 'rm -f /opt/zafe-relay/secrets-mainnet.env'
+          fi
+      - name: Deploy
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_VAULTS: ${{ vars.RELAY_MAX_VAULTS }}
+        run: |
+          printf '%s' "$TOKEN" | ssh relay \
+            "RELAY_MAX_VAULTS='${MAX_VAULTS:-25}' bash /opt/zafe-relay/deploy.sh mainnet '${IMAGE}@${{ inputs.digest }}' '${{ vars.RELAY_DOMAIN }}'"
+      - name: Public health check
+        run: |
+          # The first deploy waits for Caddy's certificate.
+          for _ in $(seq 30); do
+            if [ "$(curl -fsS --max-time 10 "https://${{ vars.RELAY_DOMAIN }}/health")" = ok ]; then
+              echo "https://${{ vars.RELAY_DOMAIN }} is healthy"; exit 0
+            fi
+            sleep 10
+          done
+          echo "https://${{ vars.RELAY_DOMAIN }}/health did not answer ok (DNS? firewall?)" >&2
+          exit 1

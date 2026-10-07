@@ -8,8 +8,9 @@ use zafe_proto::{
         decode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
         InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxesRead, MailboxesResponse,
         MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove, ReplaceApproval,
-        ReplaceMember, Seal, SetThreshold, Signed, WaitRequest, WaitResponse, MAX_ACK_CURSORS,
-        MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
+        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
+        WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, QUOTA_CAPACITY, QUOTA_HEADER,
+        UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
     Envelope, Identity, LogEntry, MailboxId, ProtoError,
@@ -33,6 +34,10 @@ pub enum RelayClientError {
     /// `detail` is the relay's explanation.
     #[error("the relay's storage for this vault is full: {detail}")]
     StorageFull { detail: String },
+    /// The relay takes no more vaults for now (a capped beta, HTTP 507 with
+    /// `zafe-quota: capacity`). Existing vaults are not affected.
+    #[error("the relay is full: it takes no new vaults for now")]
+    AtCapacity,
     #[error("encoding")]
     Encoding,
     /// The relay refused this client's version of `format` (HTTP 426). `ours` newer than
@@ -83,6 +88,9 @@ fn body_format(path: &str) -> Format {
 pub struct RelayClient {
     base: String,
     http: reqwest::Client,
+    /// This device's copy of the vault logs (see [`crate::log_cache`]); `None` = the
+    /// relay is trusted to remember the log (tests, tools).
+    log_cache: Option<crate::log_cache::LogCache>,
 }
 
 /// A transport error with its causes, so "invalid peer certificate: UnknownIssuer" isn't
@@ -112,6 +120,7 @@ struct RawResponse {
     status: u16,
     retry_after: Option<String>,
     supported_version: Option<String>,
+    quota: Option<String>,
     body: Vec<u8>,
 }
 
@@ -163,6 +172,7 @@ async fn over_tor(
         status: response.status().as_u16(),
         retry_after: header("retry-after"),
         supported_version: header(UNSUPPORTED_VERSION_HEADER),
+        quota: header(QUOTA_HEADER),
         body: response.body().to_vec(),
     })
 }
@@ -189,7 +199,19 @@ impl RelayClient {
             base: base.into().trim_end_matches('/').to_owned(),
             // Only fails if the TLS backend can't initialise; fall back to the defaults.
             http: http_builder().build().unwrap_or_default(),
+            log_cache: crate::log_cache::configured(),
         }
+    }
+
+    /// Replaces the log copy this client keeps and checks the relay against (the default
+    /// is the one set with [`crate::log_cache::configure`]).
+    pub fn with_log_cache(mut self, cache: Option<crate::log_cache::LogCache>) -> Self {
+        self.log_cache = cache;
+        self
+    }
+
+    pub fn log_cache(&self) -> Option<&crate::log_cache::LogCache> {
+        self.log_cache.as_ref()
     }
 
     /// Like [`RelayClient::new`], but also trusts `root_der` (a DER CA certificate) on top
@@ -207,6 +229,7 @@ impl RelayClient {
         Ok(Self {
             base: base.into().trim_end_matches('/').to_owned(),
             http,
+            log_cache: crate::log_cache::configured(),
         })
     }
 
@@ -291,13 +314,17 @@ impl RelayClient {
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned)
         };
-        let (retry_after, supported_version) =
-            (header("retry-after"), header(UNSUPPORTED_VERSION_HEADER));
+        let (retry_after, supported_version, quota) = (
+            header("retry-after"),
+            header(UNSUPPORTED_VERSION_HEADER),
+            header(QUOTA_HEADER),
+        );
         let body = response.bytes().await.map_err(transport)?.to_vec();
         Ok(RawResponse {
             status,
             retry_after,
             supported_version,
+            quota,
             body,
         })
     }
@@ -334,6 +361,9 @@ impl RelayClient {
             return Err(RelayClientError::RateLimited { retry_after_secs });
         }
         let bytes = response.body;
+        if status == 507 && response.quota.as_deref() == Some(QUOTA_CAPACITY) {
+            return Err(RelayClientError::AtCapacity);
+        }
         if status == 507 {
             return Err(RelayClientError::StorageFull {
                 detail: String::from_utf8_lossy(&bytes).into_owned(),
@@ -576,6 +606,16 @@ impl RelayClient {
     pub async fn append_log(&self, entry: &LogEntry) -> Result<AppendResult, RelayClientError> {
         let body = entry.to_bytes().map_err(|_| RelayClientError::Encoding)?;
         decode_body(&self.post("/v1/log/append", body).await?).map_err(decoding)
+    }
+
+    /// Restores a vault on this relay from a saved copy of its log (see [`Reseed`]).
+    pub async fn reseed(
+        &self,
+        who: &Identity,
+        mut request: Reseed,
+    ) -> Result<ReseedResponse, RelayClientError> {
+        request.timestamp = now();
+        self.signed("/v1/mailbox/reseed", who, request).await
     }
 
     pub async fn read_log(

@@ -21,6 +21,14 @@ const SIGNATURE_DOMAIN: &[u8] = b"Zafe relay request v1";
 /// the relay supports.
 pub const UNSUPPORTED_VERSION_HEADER: &str = "zafe-supported-version";
 
+/// Response header of a 507 (storage quota): which cap was hit, as a machine-readable
+/// token (see [`QUOTA_CAPACITY`]); the body says it in words.
+pub const QUOTA_HEADER: &str = "zafe-quota";
+
+/// [`QUOTA_HEADER`] value: the relay has reached the number of vaults it takes in total
+/// (a capped beta), so a new vault can't be created on it right now.
+pub const QUOTA_CAPACITY: &str = "capacity";
+
 /// Read requests must be at most this old (and not from the future) when they arrive.
 pub const MAX_REQUEST_SKEW_SECS: u64 = 300;
 
@@ -191,6 +199,46 @@ pub struct ReplaceMember {
     pub approval: ReplaceApproval,
     /// `(approver sig_pk, signature)`.
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
+}
+
+/// Restores a vault on a relay that lost it (wiped database, or moving to another relay)
+/// from a member's saved copy of the log (`POST /v1/mailbox/reseed`; a newer route: a relay
+/// without it answers 404). Signed by one of `members`.
+///
+/// The first request creates the mailbox with `members` and `threshold` (the vault's
+/// membership as of the end of the log). Each request appends `entries` (as
+/// [`LogEntry::to_bytes`]) at log position `from`; the relay checks their index, mailbox
+/// and hash chain and each author's signature, but not that the authors are current
+/// members (seats move: earlier entries were signed by earlier keys; members verify
+/// authorship against the replayed membership as always). The last request sets `finish`,
+/// which opens the mailbox for normal use. Until then only the signer, who made the
+/// mailbox, can continue it, and it can't be joined (it has no join token). On a mailbox
+/// that is already open the request changes nothing and the answer says where its log is:
+/// catch up with ordinary appends instead.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reseed {
+    pub mailbox: MailboxId,
+    pub members: Vec<IdentityPublic>,
+    pub threshold: u16,
+    pub from: u64,
+    pub entries: Vec<Vec<u8>>,
+    pub finish: bool,
+    /// Unix seconds; refused when older than [`MAX_REQUEST_SKEW_SECS`], so a recorded
+    /// request can't be replayed to give a restored mailbox an outdated member list.
+    pub timestamp: u64,
+}
+
+/// Where the relay's log for a [`Reseed`] stands after the request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReseedResponse {
+    /// Entries the relay holds now. Differs from `from + entries.len()` when `from` didn't
+    /// match (continue from `len`).
+    pub len: u64,
+    /// The mailbox is open for normal use (it was, or this request finished it).
+    pub open: bool,
+    /// This request built the mailbox (it created it or continued its restore); `false`
+    /// when the mailbox was already open before the request and nothing changed.
+    pub restored: bool,
 }
 
 /// Lists the mailboxes the signer is a member of (`POST /v1/mailboxes`): a device that

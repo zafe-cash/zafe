@@ -2,6 +2,8 @@ name: Relay deploy
 
 # Builds the relay image, pushes it to GHCR with build provenance, and deploys that exact
 # digest to the testnet VPS (infra/relay/vps/), which rolls back if /health fails.
+# Mainnet never deploys from here: .github/workflows/relay-mainnet.yml promotes a digest
+# that has been running on testnet, after a reviewer approves.
 #
 # Needs a GitHub environment `relay-testnet` (deploys from main only) with:
 #   secret   RELAY_SSH_KEY       private key of the VPS `deploy` user (bootstrap.sh)
@@ -116,7 +118,7 @@ jobs:
           printf 'Host relay\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n' \
             "${{ vars.RELAY_HOST }}" > ~/.ssh/config
       - name: Copy compose files
-        run: tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh | ssh relay 'tar -C /opt/zafe-relay -xz'
+        run: tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh litestream.yml | ssh relay 'tar -C /opt/zafe-relay -xz'
       - name: Relay secrets
         env:
           FCM: ${{ secrets.RELAY_FCM_SERVICE_ACCOUNT_JSON }}
@@ -135,7 +137,7 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$TOKEN" | ssh relay \
-            "bash /opt/zafe-relay/deploy.sh '${{ env.IMAGE }}@${{ needs.image.outputs.digest }}' '${{ vars.RELAY_DOMAIN }}'"
+            "bash /opt/zafe-relay/deploy.sh testnet '${{ env.IMAGE }}@${{ needs.image.outputs.digest }}' '${{ vars.RELAY_DOMAIN }}'"
       - name: Public health check
         run: |
           # The first deploy waits for Caddy's certificate.

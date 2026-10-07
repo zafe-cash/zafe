@@ -1,0 +1,14 @@
+# The mainnet relay's site block. Copied to /opt/zafe-relay/caddy/mainnet/ by
+# .github/workflows/relay-mainnet.yml; the Caddyfile imports every *.caddy file there, so
+# a server that never deployed mainnet has no such block (and no certificate request).
+
+{$RELAY_MAINNET_DOMAIN} {
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy relay-mainnet:8080 {
+		lb_try_duration 10s
+		lb_try_interval 250ms
+	}
+	# No access log, as for testnet.
+}

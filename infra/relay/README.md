@@ -37,6 +37,9 @@ Runtime contract (both paths):
   IP (burst 10; `429`), and 8 per signing key (`507`; the app uses a fresh key per
   vault, so one is normal). Tune with `ZAFE_RELAY_CREATES_PER_DAY` and
   `ZAFE_RELAY_MAX_VAULTS_PER_KEY` (`0` = off).
+- A **total** cap on vaults for a capped beta: `ZAFE_RELAY_MAX_VAULTS` (default: no
+  limit). Over it, new vaults (and restores of vaults the relay doesn't know) get `507`
+  with `zafe-quota: capacity`; the app says the beta is full. Existing vaults keep working.
 - Request bodies are capped at 1 MiB (`413` above it).
 - Long polls (`POST /v1/wait`): an open app holds one request for up to **25 s** so other
   members' activity reaches it at once. Any proxy in front must let a response take
@@ -158,9 +161,45 @@ from the `relay-testnet` environment secret `RELAY_FCM_SERVICE_ACCOUNT_JSON`, wh
 deploy writes on every run (removing the secret removes the file). The app must be built
 with the matching Firebase project's `google-services.json` (`docs/releasing.md`).
 
-**Mainnet** (later): a second relay service with its own volume, backup sidecar and
-backup directory, a second Caddy site block (`relay.zafe.cash`), and a `relay-mainnet`
-environment with required reviewers that promotes a digest already running on testnet.
+**Mainnet** (`relay.zafe.cash`, a capped beta): the same VPS runs a second relay
+(`relay-mainnet`, compose profile `mainnet`) with its own volume, its nightly backup
+(`backup-mainnet`, `/var/backups/zafe-relay/mainnet`), **Litestream** streaming the
+database to object storage (`litestream-mainnet`; `restore-mainnet` brings the database
+back from it when the volume is empty) and its own Caddy site block
+(`vps/mainnet/relay.caddy`, copied in by the mainnet deploy). It never deploys from a push:
+**Actions > Relay mainnet > Run workflow** with the digest testnet runs. The workflow
+waits for a **required reviewer** (the `relay-mainnet` environment), then checks on the
+server that testnet runs exactly that digest and has for `min_soak_hours` (24), verifies
+the image's build provenance, writes the Litestream and FCM secrets, and runs
+`deploy.sh mainnet`, which backs up, switches, health-checks and rolls back like testnet.
+One-time setup (not done by CI):
+
+```bash
+# 1. DNS: an A record relay.zafe.cash -> the VPS, DNS only (no CDN proxy), like testnet
+# 2. an S3-compatible bucket for the replica (Backblaze B2, R2, S3...), versioning off,
+#    encryption at rest on, and a key that can only read and write that bucket
+# 3. the GitHub environment `relay-mainnet`: required reviewers (not the person who
+#    triggers the run, when there are two), deployment branches = main only
+gh api -X PUT repos/zafe-cash/zafe/environments/relay-mainnet   # then set reviewers in the UI
+gh secret set RELAY_SSH_KEY --env relay-mainnet < relay-ci
+ssh-keyscan -t ed25519 <host> | gh secret set RELAY_KNOWN_HOSTS --env relay-mainnet
+gh variable set RELAY_HOST --env relay-mainnet --body <host>
+gh variable set RELAY_DOMAIN --env relay-mainnet --body relay.zafe.cash
+gh variable set RELAY_MAX_VAULTS --env relay-mainnet --body 25      # the beta cap
+gh secret set LITESTREAM_ACCESS_KEY_ID --env relay-mainnet
+gh secret set LITESTREAM_SECRET_ACCESS_KEY --env relay-mainnet
+gh variable set LITESTREAM_BUCKET --env relay-mainnet --body <bucket>
+gh variable set LITESTREAM_ENDPOINT --env relay-mainnet --body https://<s3 endpoint>
+gh variable set LITESTREAM_REGION --env relay-mainnet --body <region>
+# 4. the first promotion: the digest testnet runs (/opt/zafe-relay/deployed/testnet.json)
+gh workflow run relay-mainnet.yml -f digest=sha256:<digest>
+curl https://relay.zafe.cash/health     # ok
+```
+
+The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; a mainnet build shows the beta
+label and the per-vault cap (`ZAFE_BETA`, `ZAFE_BETA_CAP_ZAT`, `app/lib/src/core/config/beta.dart`).
+After the first deploy, check a restore on a scratch machine before real funds arrive
+(see "Backups").
 
 Operations (as `ubuntu` or `deploy`, in `/opt/zafe-relay`):
 
@@ -168,27 +207,39 @@ Operations (as `ubuntu` or `deploy`, in `/opt/zafe-relay`):
 docker compose ps
 docker compose logs -f relay-testnet
 docker compose exec backup-testnet sh /backup.sh once          # backup now
-bash deploy.sh ghcr.io/zafe-cash/zafe-relay@sha256:<old> testnet.relay.zafe.cash </dev/null   # manual rollback
+bash deploy.sh testnet ghcr.io/zafe-cash/zafe-relay@sha256:<old> testnet.relay.zafe.cash </dev/null   # manual rollback
+# mainnet: the same with `mainnet`, relay-mainnet / backup-mainnet and relay.zafe.cash
 ```
 
 ## Backups
 
 What's lost with the database: mailboxes, member lists, undelivered envelopes and the
 encrypted vault logs. Members keep their keys (funds are safe), but the relay holds the
-only copy of each vault's log (one relay per vault by design, no re-seeding), so a lost
-database means vaults stop coordinating. The database is the thing to protect: back it
-up here, and use a managed database with point-in-time recovery once the relay scales out
-(Postgres). Apps don't yet detect a relay that serves an older log (a restored backup);
-that check comes before mainnet (`docs/tracker.md`).
+only copy of each vault's log that the members share, so a lost database means vaults
+stop coordinating until a member restores it. The database is the thing to protect:
+back it up here, and use a managed database with point-in-time recovery once the relay
+scales out (Postgres). **A restored (older) database is detected:** every phone keeps its
+own copy of each vault's log and refuses a relay that no longer holds its last entry
+(`RelayRolledBack` / `RelayForked` / `RelayLostVault` in the app). A member whose phone
+has the longest copy then taps "Restore vault on the relay" (Home > sync status): the
+relay is recreated or caught up from that phone (`POST /v1/mailbox/reseed`; CLI:
+`zafe restore-relay`; spec §6.3). So an old backup loses at most the messages in flight
+(signing requests, which are asked for again) and push tokens, not the vault. Still
+restore the newest backup you have.
 
 - **Nightly `sqlite3 .backup`** (VPS: the `backup-testnet` sidecar, `vps/backup.sh`):
   an online, consistent copy through SQLite's backup API, checked with
   `integrity_check`, gzipped, kept 14 days in `/var/backups/zafe-relay/testnet`. One
   runs at 03:17 UTC, one whenever the sidecar starts, and one before every deploy. Ship
   that directory off the machine too (restic, rclone, the provider's backups).
-- **Litestream** (planned for mainnet, either path): streams the WAL to S3-compatible
-  storage continuously, with point-in-time restore. Run it as another sidecar with
-  `litestream replicate /data/relay.sqlite s3://bucket/relay`. Not wired up here.
+- **Litestream** (mainnet on the VPS: `litestream-mainnet`, config `vps/litestream.yml`):
+  streams the WAL to S3-compatible storage about every second, snapshots every 6 hours,
+  keeps two weeks, and `restore-mainnet` restores the database on a fresh volume before
+  the relay starts. Point-in-time restore by hand: stop the relay, then
+  `docker compose run --rm --no-deps restore-mainnet restore -config /etc/litestream.yml -timestamp <RFC3339> -o /data/relay.sqlite /data/relay.sqlite`
+  (move the old file away first; delete stale `-wal`/`-shm`). The relay's nightly
+  `sqlite3 .backup` stays as a second, independent copy. Not wired on Fly; use its
+  volume snapshots there.
 
 Restore (VPS, in `/opt/zafe-relay`): stop the relay, replace `relay.sqlite` in the volume
 (deleting stale `-wal`/`-shm`), start it. Backups are readable by root only:

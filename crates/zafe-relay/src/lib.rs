@@ -46,9 +46,9 @@ use zafe_proto::{
     relay::{
         encode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
         InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxesRead, MailboxesResponse,
-        MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove, ReplaceMember, Seal,
-        SetThreshold, Signed, WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS,
-        MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
+        MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove, ReplaceMember, Reseed,
+        ReseedResponse, Seal, SetThreshold, Signed, WaitRequest, WaitResponse, MAX_ACK_CURSORS,
+        MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -174,6 +174,14 @@ impl IntoResponse for RelayError {
             RelayError::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
             RelayError::QuotaExceeded(_) => StatusCode::INSUFFICIENT_STORAGE,
         };
+        if let RelayError::QuotaExceeded(quota) = self {
+            return (
+                status,
+                [(zafe_proto::relay::QUOTA_HEADER, quota.token())],
+                self.to_string(),
+            )
+                .into_response();
+        }
         (status, self.to_string()).into_response()
     }
 }
@@ -387,6 +395,7 @@ impl Relay {
             .route("/v1/mailbox/members", post(members))
             .route("/v1/mailbox/threshold", post(set_threshold))
             .route("/v1/mailbox/replace", post(replace_member))
+            .route("/v1/mailbox/reseed", post(reseed))
             .route("/v1/mailboxes", post(mailboxes))
             .route("/v1/push/register", post(register_push))
             .route("/v1/envelope", post(post_envelope))
@@ -654,6 +663,7 @@ async fn create(
             return Err(RelayError::QuotaExceeded(Quota::Mailboxes));
         }
     }
+    check_capacity(&relay, &tx)?;
     tx.execute(
         "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
         params![
@@ -664,6 +674,17 @@ async fn create(
     )?;
     tx.commit()?;
     ok(&())
+}
+
+/// Refuses a new mailbox (already inserted in `tx`) when the relay is over its total.
+fn check_capacity(relay: &Relay, tx: &rusqlite::Transaction) -> Result<(), RelayError> {
+    if let Some(max) = relay.quotas.mailboxes_total {
+        let all: i64 = tx.query_row("SELECT COUNT(*) FROM mailboxes", [], |r| r.get(0))?;
+        if all as u64 > max {
+            return Err(RelayError::QuotaExceeded(Quota::Capacity));
+        }
+    }
+    Ok(())
 }
 
 async fn join(State(relay): State<Relay>, body: Bytes) -> RelayResult {
@@ -814,6 +835,174 @@ async fn replace_member(State(relay): State<Relay>, body: Bytes) -> RelayResult 
     drop(db);
     relay.waiters.signal(&a.mailbox);
     ok(&())
+}
+
+/// Most members a reseeded mailbox may list (the same order as any real vault).
+const MAX_RESEED_MEMBERS: usize = 64;
+
+/// Restores a vault from a member's saved copy of its log (see [`Reseed`]). The relay is
+/// blind: it can check chaining and signatures, not what the entries say, and it doesn't
+/// require their authors to be current members (seats move). Members verify the log
+/// themselves, and their own saved copies must agree with whatever is restored.
+async fn reseed(
+    State(relay): State<Relay>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
+    body: Bytes,
+) -> RelayResult {
+    let req = verified::<Reseed>(&relay, &body)?;
+    let p = &req.payload;
+    relay.check_fresh(p.timestamp)?;
+    let signer = req.signer.sig_pk;
+    let mut seen = std::collections::BTreeSet::new();
+    if p.members.len() < 2
+        || p.members.len() > MAX_RESEED_MEMBERS
+        || !p.members.iter().any(|m| m.sig_pk == signer)
+        || !p.members.iter().all(|m| seen.insert(m.sig_pk))
+        || p.threshold == 0
+        || usize::from(p.threshold) > p.members.len()
+    {
+        return Err(RelayError::BadRequest);
+    }
+    let mut db = relay.db.lock().expect("lock");
+    let tx = db.transaction()?;
+    let count = |tx: &rusqlite::Transaction| -> Result<u64, RelayError> {
+        Ok(tx.query_row(
+            "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
+            params![&p.mailbox[..]],
+            |r| r.get::<_, i64>(0),
+        )? as u64)
+    };
+    match mailbox(&tx, &p.mailbox) {
+        Err(RelayError::NotFound) => {
+            if let (Some(buckets), Some(ip)) = (&relay.creates_per_ip, ip) {
+                buckets
+                    .take(ip, relay.now())
+                    .map_err(RelayError::RateLimited)?;
+            }
+            // No join token (its hash is all zeros: nothing hashes to it), so nobody can
+            // join; the members are listed by the signer, who alone may continue.
+            tx.execute(
+                "INSERT INTO mailboxes (id, creator, join_token_hash, max_members, created_at, threshold)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    &p.mailbox[..],
+                    &signer[..],
+                    &[0u8; 32][..],
+                    p.members.len() as i64,
+                    relay.now() as i64,
+                    p.threshold
+                ],
+            )?;
+            if let Some(max) = relay.quotas.mailboxes_per_key {
+                let created: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM mailboxes WHERE creator = ?1",
+                    params![&signer[..]],
+                    |r| r.get(0),
+                )?;
+                if created as u64 > max {
+                    return Err(RelayError::QuotaExceeded(Quota::Mailboxes));
+                }
+            }
+            check_capacity(&relay, &tx)?;
+            for m in &p.members {
+                tx.execute(
+                    "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
+                    params![&p.mailbox[..], &m.sig_pk[..], &m.enc_pk[..]],
+                )?;
+            }
+        }
+        Err(e) => return Err(e),
+        Ok(mb) if mb.sealed => {
+            // Already open: a member learns where its log is, nothing changes.
+            member(&tx, &p.mailbox, &signer)?.ok_or(RelayError::Forbidden)?;
+            let len = count(&tx)?;
+            return ok(&ReseedResponse {
+                len,
+                open: true,
+                restored: false,
+            });
+        }
+        Ok(mb) => {
+            // A restore in progress: only its maker continues it. A mailbox that is still
+            // being set up by a keygen (it has a join token) is not ours to fill.
+            if mb.creator != signer || mb.join_token_hash != [0u8; 32] {
+                return Err(RelayError::Forbidden);
+            }
+        }
+    }
+
+    let mut len = count(&tx)?;
+    if p.from != len {
+        // Out of step (a request was lost or repeated): say where to continue.
+        tx.commit()?;
+        return ok(&ReseedResponse {
+            len,
+            open: false,
+            restored: true,
+        });
+    }
+    let mut head: [u8; 32] = match tx
+        .query_row(
+            "SELECT hash FROM log_entries WHERE mailbox = ?1 ORDER BY idx DESC LIMIT 1",
+            params![&p.mailbox[..]],
+            |r| r.get::<_, Vec<u8>>(0),
+        )
+        .optional()?
+    {
+        Some(h) => arr32(h)?,
+        None => GENESIS_PREV_HASH,
+    };
+    let mut used: i64 = tx.query_row(
+        "SELECT log_bytes FROM mailboxes WHERE id = ?1",
+        params![&p.mailbox[..]],
+        |r| r.get(0),
+    )?;
+    for bytes in &p.entries {
+        let entry = LogEntry::from_bytes(bytes).map_err(bad_request)?;
+        let h = &entry.header;
+        if h.mailbox != p.mailbox || h.index != len || h.prev_hash != head {
+            return Err(RelayError::BadRequest);
+        }
+        // Only the author's key is needed to check a signature.
+        entry
+            .verify_signature(&IdentityPublic {
+                sig_pk: h.author,
+                enc_pk: [0; 32],
+            })
+            .map_err(|_| RelayError::Unauthenticated)?;
+        if let Some(cap) = relay.quotas.log_bytes {
+            if (used as u64).saturating_add(bytes.len() as u64) > cap {
+                return Err(RelayError::QuotaExceeded(Quota::Log));
+            }
+        }
+        let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
+        tx.execute(
+            "INSERT INTO log_entries (mailbox, idx, entry, hash) VALUES (?1, ?2, ?3, ?4)",
+            params![&p.mailbox[..], len as i64, &bytes[..], &hash[..]],
+        )?;
+        used += bytes.len() as i64;
+        len += 1;
+        head = hash;
+    }
+    tx.execute(
+        "UPDATE mailboxes SET log_bytes = ?2 WHERE id = ?1",
+        params![&p.mailbox[..], used],
+    )?;
+    let open = p.finish && len > 0;
+    if open {
+        tx.execute(
+            "UPDATE mailboxes SET sealed = 1 WHERE id = ?1",
+            params![&p.mailbox[..]],
+        )?;
+    }
+    tx.commit()?;
+    drop(db);
+    relay.waiters.signal(&p.mailbox);
+    ok(&ReseedResponse {
+        len,
+        open,
+        restored: true,
+    })
 }
 
 async fn mailboxes(State(relay): State<Relay>, body: Bytes) -> RelayResult {

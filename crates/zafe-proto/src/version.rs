@@ -25,7 +25,11 @@ pub const LOG_ENTRY: u16 = 1;
 /// 4 (2026-10-01): moving a lost member's seat (`VaultEvent::ReplaceApproval`), appended.
 /// 5 (2026-10-01): retrying a stalled key repair and marking it done (`RepairRetry`,
 /// `RepairDone`), appended.
-pub const VAULT_EVENT: u16 = 5;
+/// 6 (2026-10-07): no new variant. A proposal written with version 6 gets one-tap
+/// commitments for every signer group whose members all have pool commitments, instead
+/// of all-or-nothing. An older app skips such events (unsupported version) rather than
+/// computing another assignment; proposals written with versions 1-5 replay as before.
+pub const VAULT_EVENT: u16 = 6;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).
@@ -52,6 +56,8 @@ pub const POOL_NONCE: u16 = 1;
 pub const OWN_SHARES: u16 = 1;
 /// The leader's set of commitment sets already used in requests (`used_commitments.bin`).
 pub const USED_COMMITMENTS: u16 = 1;
+/// This device's copy of a vault's log (`log_cache::LogCache`, `<mailbox>.log`).
+pub const LOG_CACHE: u16 = 1;
 /// Encrypted vault backups (`ZAFEBAK`; the tag is a single byte there). 2 added signer
 /// names (2026-09-30); version 1 still decrypts and is migrated.
 pub const BACKUP: u16 = 2;
@@ -83,6 +89,7 @@ pub enum Format {
     PoolNonce,
     OwnShares,
     UsedCommitments,
+    LogCache,
     Backup,
     RelayDb,
     Repair,
@@ -107,6 +114,7 @@ impl Format {
             Format::PoolNonce => POOL_NONCE,
             Format::OwnShares => OWN_SHARES,
             Format::UsedCommitments => USED_COMMITMENTS,
+            Format::LogCache => LOG_CACHE,
             Format::Backup => BACKUP,
             Format::RelayDb => RELAY_DB,
             Format::Repair => REPAIR,
@@ -131,6 +139,7 @@ impl Format {
             Format::PoolNonce => "pool nonce file",
             Format::OwnShares => "own signature shares",
             Format::UsedCommitments => "used commitments",
+            Format::LogCache => "log copy",
             Format::Backup => "backup",
             Format::RelayDb => "relay database",
             Format::Repair => "share repair message",

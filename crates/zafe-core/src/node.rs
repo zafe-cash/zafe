@@ -55,6 +55,22 @@ pub enum NodeError {
     /// The event is not valid on top of the current log (every member would ignore it).
     #[error("event no longer valid: {0}")]
     Invalid(crate::vault::VaultError),
+    /// The relay has fewer log entries than this device already saw (an older database
+    /// restored, or lost data): `local_len` entries are saved here. Nothing it says about
+    /// the vault can be trusted until a member restores the log from a device copy.
+    #[error("the relay lost part of the vault log: this device has {local_len} entries")]
+    RelayRolledBack { local_len: u64 },
+    /// The relay served another entry than the one this device saved at `index`: the log
+    /// it shows has forked from the history this device has seen.
+    #[error("the relay's vault log differs from this device's copy at entry {index}")]
+    RelayForked { index: u64 },
+    /// The relay doesn't know this vault any more (wiped database) although this device
+    /// saved `local_len` entries of its log.
+    #[error("the relay no longer has this vault: this device has {local_len} log entries")]
+    RelayLostVault { local_len: u64 },
+    /// This device's copy of the log can't be read or written.
+    #[error(transparent)]
+    LogCopy(#[from] crate::log_cache::LogCacheError),
     /// Data or a message in a version this build doesn't read (see
     /// [`UnsupportedVersion::is_newer`]: newer means "update the app").
     #[error(transparent)]
@@ -84,6 +100,8 @@ fn vault_err(e: crate::vault::VaultError) -> NodeError {
 
 fn chain_err(e: zafe_proto::ChainError) -> NodeError {
     match e {
+        // An entry that doesn't extend the head we hold: the relay forked the history.
+        zafe_proto::ChainError::Fork(index) => NodeError::RelayForked { index },
         zafe_proto::ChainError::Invalid {
             source: ProtoError::UnsupportedVersion(v),
             ..
@@ -758,6 +776,7 @@ pub async fn read_inbox(
 
 /// Reads new log entries after the chain's head (following pagination), verifying each
 /// against the membership as of that entry (seats can move) and applying it to `state`.
+/// Saves the longer chain to this device's copy.
 async fn catch_up(
     relay: &RelayClient,
     me: &Identity,
@@ -765,12 +784,13 @@ async fn catch_up(
     chain: &mut Chain,
     state: &mut VaultState,
 ) -> Result<(), NodeError> {
+    let before = chain.len();
     loop {
         let batch = relay
             .read_log(me, state.descriptor.vault_id, chain.len())
             .await?;
         if batch.is_empty() {
-            return Ok(());
+            break;
         }
         for entry in batch {
             chain
@@ -779,6 +799,78 @@ async fn catch_up(
             state.apply_entry(&entry, key);
         }
     }
+    if chain.len() > before {
+        save_copy(relay, chain);
+    }
+    Ok(())
+}
+
+/// Saves the verified chain to this device's log copy, when there is one. Best effort: a
+/// failed write leaves the older (shorter) anchor in place, and the log itself is safe on
+/// the relay.
+fn save_copy(relay: &RelayClient, chain: &Chain) {
+    if let Some(cache) = relay.log_cache() {
+        if let Err(e) = cache.write(&chain.mailbox(), chain.entries()) {
+            eprintln!("log copy: {e}");
+        }
+    }
+}
+
+/// Starts a chain and replay from `first`, which must be the vault's `Created` entry.
+fn start_chain(
+    first: &LogEntry,
+    mailbox: MailboxId,
+    key: &LogKey,
+) -> Result<(Chain, VaultState), NodeError> {
+    let state = VaultState::replay(std::slice::from_ref(first), key).map_err(vault_err)?;
+    if state.descriptor.vault_id != mailbox {
+        return Err(NodeError::Protocol(
+            "the vault log belongs to another vault".into(),
+        ));
+    }
+    let mut chain = Chain::new(mailbox);
+    chain
+        .append(first.clone(), &state.member_identities())
+        .map_err(chain_err)?;
+    Ok((chain, state))
+}
+
+/// Verifies `entries` on top of `chain` and applies them to `state`.
+fn extend_chain(
+    chain: &mut Chain,
+    state: &mut VaultState,
+    entries: impl IntoIterator<Item = LogEntry>,
+    key: &LogKey,
+) -> Result<(), NodeError> {
+    for entry in entries {
+        chain
+            .append(entry.clone(), &state.member_identities())
+            .map_err(chain_err)?;
+        state.apply_entry(&entry, key);
+    }
+    Ok(())
+}
+
+/// The chain and state rebuilt from the entries this device saved, verified like entries
+/// from the relay. `None` when there is no usable copy.
+fn load_copy(
+    relay: &RelayClient,
+    mailbox: MailboxId,
+    key: &LogKey,
+) -> Result<Option<(Chain, VaultState)>, NodeError> {
+    let Some(cache) = relay.log_cache() else {
+        return Ok(None);
+    };
+    let saved = cache.read(&mailbox)?;
+    let Some((first, rest)) = saved.split_first() else {
+        return Ok(None);
+    };
+    // A copy that no longer verifies (a different key, damage) is not an anchor.
+    let rebuilt = start_chain(first, mailbox, key).and_then(|(mut chain, mut state)| {
+        extend_chain(&mut chain, &mut state, rest.iter().cloned(), key)?;
+        Ok((chain, state))
+    });
+    Ok(rebuilt.ok())
 }
 
 /// Reads and verifies the whole log, returning the chain and the replayed state.
@@ -817,28 +909,168 @@ pub async fn load_log(
     mailbox: MailboxId,
     key: &LogKey,
 ) -> Result<(Chain, VaultState), NodeError> {
-    let mut chain = Chain::new(mailbox);
-    let first_page = relay.read_log(me, mailbox, 0).await?;
-    let first = first_page.first().ok_or(NodeError::Invalid(
-        crate::vault::VaultError::NotCreatedFirst,
-    ))?;
-    let mut state = VaultState::replay(std::slice::from_ref(first), key).map_err(vault_err)?;
-    if state.descriptor.vault_id != mailbox {
-        return Err(NodeError::Protocol(
-            "the vault log belongs to another vault".into(),
-        ));
-    }
-    chain
-        .append(first.clone(), &state.member_identities())
-        .map_err(chain_err)?;
-    for entry in first_page.into_iter().skip(1) {
-        chain
-            .append(entry.clone(), &state.member_identities())
-            .map_err(chain_err)?;
-        state.apply_entry(&entry, key);
-    }
+    let (mut chain, mut state, saved_len) = match load_copy(relay, mailbox, key)? {
+        Some((mut chain, mut state)) => {
+            let saved_len = chain.len();
+            // The copy is the anchor: the relay must still hold its last entry, and the
+            // same one. Everything after it is new and verified on top.
+            let last = chain.entries().last().expect("a saved copy has entries");
+            let last_hash = last.hash().map_err(proto)?;
+            let from = saved_len - 1;
+            let page = match relay.read_log(me, mailbox, from).await {
+                Err(RelayClientError::Status { status: 404, .. }) => {
+                    return Err(NodeError::RelayLostVault {
+                        local_len: saved_len,
+                    })
+                }
+                other => other?,
+            };
+            let Some(first) = page.first() else {
+                return Err(NodeError::RelayRolledBack {
+                    local_len: saved_len,
+                });
+            };
+            if first.header.index != from || first.hash().map_err(proto)? != last_hash {
+                return Err(NodeError::RelayForked { index: from });
+            }
+            extend_chain(&mut chain, &mut state, page.into_iter().skip(1), key)?;
+            (chain, state, saved_len)
+        }
+        None => {
+            let first_page = relay.read_log(me, mailbox, 0).await?;
+            let first = first_page.first().ok_or(NodeError::Invalid(
+                crate::vault::VaultError::NotCreatedFirst,
+            ))?;
+            let (mut chain, mut state) = start_chain(first, mailbox, key)?;
+            extend_chain(&mut chain, &mut state, first_page.into_iter().skip(1), key)?;
+            (chain, state, 0)
+        }
+    };
     catch_up(relay, me, key, &mut chain, &mut state).await?;
+    if saved_len == 0 || chain.len() > saved_len {
+        save_copy(relay, &chain);
+    }
     Ok((chain, state))
+}
+
+/// What [`reseed_relay`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reseeded {
+    /// The relay had no such vault: it was recreated with this many log entries.
+    Restored { entries: u64 },
+    /// The relay had an older part of the log: this many entries were appended to it.
+    CaughtUp { appended: u64 },
+    /// The relay's log is as long as, or longer than, this device's copy and agrees with it.
+    Current,
+}
+
+/// Roughly how much log goes into one reseed request (the relay's body limit is 1 MiB).
+const RESEED_BATCH_BYTES: usize = 512 * 1024;
+
+/// Restores the vault's log on the relay from this device's copy (spec §6.3): after the
+/// relay lost its database (or was rolled back to an older one), or when the members move
+/// to another relay (change the URL in Settings, then restore from the member whose copy
+/// is longest). A relay that doesn't know the vault is recreated with the membership
+/// the log ends with and the whole log; one that holds an older part of the same log gets
+/// the missing entries appended. Pending messages (signing requests, repair messages) are
+/// not restored: they are asked for again. The device re-registers its push token after.
+///
+/// Never makes the relay agree with a log it doesn't already match: a relay whose entries
+/// differ from the copy is [`NodeError::RelayForked`].
+pub async fn reseed_relay(
+    relay: &RelayClient,
+    me: &Identity,
+    mailbox: MailboxId,
+    key: &LogKey,
+) -> Result<Reseeded, NodeError> {
+    use zafe_proto::relay::Reseed;
+    let (chain, state) = load_copy(relay, mailbox, key)?.ok_or_else(|| {
+        NodeError::Protocol("this device has no copy of the vault log to restore from".into())
+    })?;
+    let total = chain.len();
+    let raw: Vec<Vec<u8>> = chain
+        .entries()
+        .iter()
+        .map(|e| e.to_bytes().map_err(proto))
+        .collect::<Result<_, _>>()?;
+    let members = state.member_identities();
+    let threshold = u16::from(state.descriptor.threshold);
+
+    let mut from = 0usize;
+    for _ in 0..(raw.len() + 8) {
+        let mut bytes = 0;
+        let mut end = from;
+        while end < raw.len() && (end == from || bytes + raw[end].len() <= RESEED_BATCH_BYTES) {
+            bytes += raw[end].len();
+            end += 1;
+        }
+        let request = Reseed {
+            mailbox,
+            members: members.clone(),
+            threshold,
+            from: from as u64,
+            entries: raw[from..end].to_vec(),
+            finish: end == raw.len(),
+            timestamp: 0, // set by the client when it signs
+        };
+        let answer = relay.reseed(me, request).await?;
+        if !answer.restored {
+            // The relay had the vault already: check it against our copy and catch it up.
+            return catch_relay_up(relay, me, mailbox, &chain, answer.len).await;
+        }
+        if answer.open {
+            return Ok(Reseeded::Restored { entries: total });
+        }
+        // Continue where the relay says its log ends (it differs from `end` only when a
+        // request was lost or repeated).
+        from = usize::try_from(answer.len)
+            .ok()
+            .filter(|n| *n <= raw.len())
+            .ok_or_else(|| NodeError::Protocol("the relay holds more than we sent".into()))?;
+    }
+    Err(NodeError::Protocol(
+        "could not restore the log on the relay".into(),
+    ))
+}
+
+/// The relay holds `relay_len` entries of the vault's log: checks that they are this
+/// device's, and appends what's missing.
+async fn catch_relay_up(
+    relay: &RelayClient,
+    me: &Identity,
+    mailbox: MailboxId,
+    chain: &Chain,
+    relay_len: u64,
+) -> Result<Reseeded, NodeError> {
+    let ours = chain.entries();
+    let shared = relay_len.min(chain.len());
+    if shared > 0 {
+        let at = shared - 1;
+        let page = relay.read_log(me, mailbox, at).await?;
+        let theirs = page.first().ok_or(NodeError::RelayRolledBack {
+            local_len: chain.len(),
+        })?;
+        let same = theirs.header.index == at
+            && theirs.hash().map_err(proto)? == ours[at as usize].hash().map_err(proto)?;
+        if !same {
+            return Err(NodeError::RelayForked { index: at });
+        }
+    }
+    if relay_len >= chain.len() {
+        return Ok(Reseeded::Current);
+    }
+    let mut appended = 0;
+    for entry in &ours[relay_len as usize..] {
+        match relay.append_log(entry).await? {
+            AppendResult::Appended { .. } => appended += 1,
+            AppendResult::Conflict { .. } => {
+                return Err(NodeError::Protocol(
+                    "the relay's log changed while it was being restored".into(),
+                ))
+            }
+        }
+    }
+    Ok(Reseeded::CaughtUp { appended })
 }
 
 /// Appends `event` on top of an already-loaded chain and state. The event is checked
@@ -876,6 +1108,7 @@ pub async fn append_event<R: RngCore + CryptoRng>(
                     .append(entry.clone(), &state.member_identities())
                     .map_err(proto)?;
                 state.apply_entry(&entry, &key);
+                save_copy(relay, chain);
                 return Ok(index);
             }
             AppendResult::Conflict { .. } => catch_up(relay, me, &key, chain, state).await?,

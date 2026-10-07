@@ -1,0 +1,30 @@
+# Litestream (compose.yml, mainnet): continuous replication of the relay's SQLite database
+# to S3-compatible object storage, with point-in-time restore. Values come from
+# litestream.env, written by CI from the `relay-mainnet` environment:
+#
+#   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY   keys for the bucket only
+#   LITESTREAM_BUCKET     e.g. zafe-relay-mainnet
+#   LITESTREAM_ENDPOINT   e.g. https://s3.eu-central-003.backblazeb2.com (any S3 API)
+#   LITESTREAM_REGION     e.g. eu-central-003
+#
+# The bucket sees the encrypted vault log, public keys and metadata, like the relay
+# itself: enable server-side encryption at rest, versioning off, and use a key that can
+# only read and write this bucket.
+#
+# Restore by hand (the compose `restore-mainnet` service does it when the volume is
+# empty): `litestream restore -config /etc/litestream.yml -timestamp <RFC3339> /data/relay.sqlite`.
+# A restore rewinds the relay to that moment; members' apps notice the missing log
+# entries and one of them restores them from its own copy (spec §6.3).
+dbs:
+  - path: /data/relay.sqlite
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: relay-mainnet
+        endpoint: ${LITESTREAM_ENDPOINT}
+        region: ${LITESTREAM_REGION}
+        force-path-style: true
+        # Snapshot every 6 hours, keep two weeks of history.
+        snapshot-interval: 6h
+        retention: 336h
+        sync-interval: 1s

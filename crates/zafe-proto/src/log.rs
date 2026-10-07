@@ -214,6 +214,10 @@ impl Chain {
         self.head
     }
 
+    pub fn mailbox(&self) -> MailboxId {
+        self.mailbox
+    }
+
     pub fn entries(&self) -> &[LogEntry] {
         &self.entries
     }

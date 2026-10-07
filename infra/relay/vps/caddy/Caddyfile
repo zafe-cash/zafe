@@ -19,3 +19,7 @@
 	# No access log on purpose: the relay keeps as little metadata as it can, and client
 	# IPs with timestamps would undo part of that. Add a `log` block only to debug.
 }
+
+# The mainnet site (relay.zafe.cash) is added by the mainnet deploy as
+# caddy/mainnet/relay.caddy; with no such file this imports nothing.
+import /etc/caddy/mainnet/*.caddy

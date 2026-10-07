@@ -25,6 +25,8 @@ const INVITE_FILE: &str = "invite.txt";
 const VAULT_FILE: &str = "vault.bin";
 const WALLET_DB_FILE: &str = "wallet.sqlite";
 const WALLET_KEY_FILE: &str = "wallet.key";
+/// This member's copy of the vault log (`zafe_core::log_cache`).
+const LOG_DIR: &str = "log";
 /// The leader's signing requests and used commitments.
 const REQUESTS_DIR: &str = "requests";
 use zafe_proto::{Identity, IdentitySeeds};
@@ -86,6 +88,10 @@ enum Command {
         #[arg(long)]
         passphrase: String,
     },
+    /// Restore the vault's log on the relay from this member's saved copy: a relay that was
+    /// wiped (or moved to another URL) is recreated, one rewound to an older backup gets
+    /// the missing entries.
+    RestoreRelay,
     /// List proposals.
     Proposals,
     /// Set this member's display name for the other members (empty clears it).
@@ -255,6 +261,8 @@ async fn main() -> Result<()> {
     let _ = NETWORK.set(net);
     let home = Home(cli.home.clone());
     fs::create_dir_all(&home.0)?;
+    // Keep a copy of the vault log: a relay that loses or rewinds it is then refused.
+    zafe_core::log_cache::configure(home.path(LOG_DIR));
     let relay = RelayClient::new(&cli.relay);
     let mut rng = OsRng;
 
@@ -309,6 +317,17 @@ async fn main() -> Result<()> {
             )
             .await?;
             println!("proposal {}", hex::encode(id));
+        }
+        Command::RestoreRelay => {
+            let material = home.material()?;
+            let out = node::reseed_relay(
+                &relay,
+                &home.identity()?,
+                material.descriptor.vault_id,
+                &material.log_key(),
+            )
+            .await?;
+            println!("{out:?}");
         }
         Command::Proposals => {
             let material = home.material()?;

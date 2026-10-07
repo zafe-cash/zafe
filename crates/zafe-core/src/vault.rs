@@ -400,11 +400,18 @@ impl VaultEvent {
     /// Reads the current version and every older one: version 2 only appended a variant,
     /// so a version 1 body decodes as the same event.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, VaultError> {
+        Self::from_bytes_versioned(bytes).map(|(event, _)| event)
+    }
+
+    /// Like [`VaultEvent::from_bytes`], also returning the version the author's app wrote
+    /// the event with (replay rules that changed in a version are keyed by it).
+    pub fn from_bytes_versioned(bytes: &[u8]) -> Result<(Self, u16), VaultError> {
         let (found, body) = version::split(Format::VaultEvent, bytes)?;
         if found == 0 || found > version::VAULT_EVENT {
             version::check(Format::VaultEvent, found)?;
         }
-        postcard::from_bytes(body).map_err(|_| VaultError::Encoding)
+        let event = postcard::from_bytes(body).map_err(|_| VaultError::Encoding)?;
+        Ok((event, found))
     }
 }
 
@@ -538,8 +545,10 @@ impl VaultState {
         let result = entry
             .decrypt(key)
             .map_err(|_| VaultError::Undecryptable(index))
-            .and_then(|bytes| VaultEvent::from_bytes(&bytes))
-            .and_then(|event| self.apply(index, entry.header.author, event));
+            .and_then(|bytes| VaultEvent::from_bytes_versioned(&bytes))
+            .and_then(|(event, found)| {
+                self.apply_versioned(index, entry.header.author, event, found)
+            });
         if let Err(e) = result {
             self.ignored.push((index, e));
         }
@@ -567,6 +576,20 @@ impl VaultState {
         index: u64,
         author: [u8; 32],
         event: VaultEvent,
+    ) -> Result<(), VaultError> {
+        self.apply_versioned(index, author, event, version::VAULT_EVENT)
+    }
+
+    /// [`VaultState::apply`] for an event its author's app wrote with `event_version`.
+    /// Replay rules that changed in a version of the event format apply only to events
+    /// written with it or later, so old logs replay exactly as before and an app that
+    /// doesn't know the version skips those events instead of computing another state.
+    pub fn apply_versioned(
+        &mut self,
+        index: u64,
+        author: [u8; 32],
+        event: VaultEvent,
+        event_version: u16,
     ) -> Result<(), VaultError> {
         if self.descriptor.member(&author).is_none() {
             return Err(VaultError::NotAMember(index));
@@ -607,7 +630,7 @@ impl VaultState {
                 }) {
                     return Err(VaultError::NotesInUse(index));
                 }
-                let preprocessed = self.assign_commitments(signing_spends);
+                let preprocessed = self.assign_commitments(signing_spends, event_version);
                 self.proposals.insert(
                     id,
                     ProposalState {
@@ -931,7 +954,7 @@ impl VaultState {
     /// next unused pool commitment. Deterministic from the log, so every member computes the
     /// same assignment; each commitment is assigned at most once. `None` (interactive
     /// signing) if the vault has too many groups or any pool is short.
-    fn assign_commitments(&mut self, spends: u16) -> Option<Preprocessed> {
+    fn assign_commitments(&mut self, spends: u16, event_version: u16) -> Option<Preprocessed> {
         let members: Vec<[u8; 32]> = self
             .descriptor
             .members
@@ -944,13 +967,41 @@ impl VaultState {
         if spends == 0 || groups.is_empty() || groups.len() > MAX_PREPROCESSED_SUBSETS {
             return None;
         }
-        let per_member = groups.iter().filter(|g| g.contains(&0)).count() * spends;
-        if members
-            .iter()
-            .any(|m| self.pools.get(m).map_or(0, Pool::available) < per_member)
-        {
-            return None;
-        }
+        let groups = if event_version < PARTIAL_GROUPS_FROM {
+            // Before version 6: every member's pool had to cover every group, or the
+            // whole proposal fell back to interactive signing.
+            let per_member = groups.iter().filter(|g| g.contains(&0)).count() * spends;
+            if members
+                .iter()
+                .any(|m| self.pools.get(m).map_or(0, Pool::available) < per_member)
+            {
+                return None;
+            }
+            groups
+        } else {
+            // Version 6 on: only groups whose members all still have enough commitments
+            // are assigned (in group order, so every member computes the same set). A
+            // member without a pool (a new device, a CLI member) no longer takes
+            // everyone else's one-tap signing away; it is just in no assigned group and
+            // signs interactively.
+            let mut taken = vec![0usize; members.len()];
+            let covered: Vec<Vec<usize>> = groups
+                .into_iter()
+                .filter(|group| {
+                    let ok = group.iter().all(|&i| {
+                        self.pools.get(&members[i]).map_or(0, Pool::available) >= taken[i] + spends
+                    });
+                    if ok {
+                        group.iter().for_each(|&i| taken[i] += spends);
+                    }
+                    ok
+                })
+                .collect();
+            if covered.is_empty() {
+                return None;
+            }
+            covered
+        };
         let mut commitments = Vec::with_capacity(groups.len());
         for group in &groups {
             let mut per_spend = Vec::with_capacity(spends);
@@ -974,6 +1025,10 @@ impl VaultState {
         })
     }
 }
+
+/// First `VAULT_EVENT` version whose proposals are assigned commitments group by group
+/// (see [`VaultState::assign_commitments`]).
+const PARTIAL_GROUPS_FROM: u16 = 6;
 
 fn check_descriptor_signatures(
     descriptor: &VaultDescriptor,

@@ -95,6 +95,8 @@ pub enum VerifyError {
     MissingPayments(usize),
     #[error("outputs exceed inputs")]
     NegativeFee,
+    #[error("the transaction's values overflow")]
+    ValueOverflow,
     #[error("fee {actual} zat does not equal the ZIP 317 fee {expected} zat")]
     WrongFee { expected: u64, actual: u64 },
     #[error("{0}")]
@@ -174,7 +176,10 @@ pub fn verify_pczt(
                     spend
                         .verify_nullifier(Some(vault_fvk))
                         .map_err(|_| custom(VerifyError::BadSpendNote(i)))?;
-                    input_total += spend_value.ok_or(custom(VerifyError::BadSpendNote(i)))?;
+                    let value = spend_value.ok_or(custom(VerifyError::BadSpendNote(i)))?;
+                    input_total = input_total
+                        .checked_add(value)
+                        .ok_or(custom(VerifyError::ValueOverflow))?;
                 } else {
                     // A padding (dummy) spend: zero value, already signed by the IO
                     // Finalizer with its own random key, and internally consistent.
@@ -206,7 +211,9 @@ pub fn verify_pczt(
                 if value == 0 {
                     continue; // dummy or zero-value output: moves no funds
                 }
-                output_total += value;
+                output_total = output_total
+                    .checked_add(value)
+                    .ok_or(custom(VerifyError::ValueOverflow))?;
 
                 let domain = IronwoodDomain::for_pczt_action(action);
                 if let Some(scope) = vault_fvk.scope_for_address(&recipient) {
@@ -218,7 +225,9 @@ pub fn verify_pczt(
                     if address != recipient || note.value().inner() != value {
                         return Err(custom(VerifyError::UndecryptableChange(i)));
                     }
-                    change_total += value;
+                    change_total = change_total
+                        .checked_add(value)
+                        .ok_or(custom(VerifyError::ValueOverflow))?;
                     continue;
                 }
 

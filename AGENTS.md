@@ -54,7 +54,9 @@ Claude-Session when present). Never commit unless the user asked for the work.
 ```
 crates/zafe-core    keys (ZIP 2005), keygen (DKG + sk), signing, tx (PCZT), verify (§9.3),
                     session (approve/sign/leader), vault (descriptor, events, replay),
-                    wallet (zcash_client_backend/sqlite), relay_client, node (orchestration)
+                    wallet (zcash_client_backend/sqlite), relay_client, node (orchestration),
+                    log_cache (this device's copy of each vault log), spend_watch
+                    (unapproved-spend alert)
 crates/zafe-proto   identities, signed/HPKE envelopes, vault log, relay API types
                     (no Zcash deps, so the relay can use it)
 crates/zafe-relay   blind axum relay on SQLite (ZAFE_RELAY_DB), push hook, pruning
@@ -170,8 +172,12 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   outstanding); published first at the end of keygen (bridge `run_keygen` takes the vault's
   `state_dir`; CLI `vault keygen`), while every member is present, so the first payment
   is one tap (it used to wait for each member's first refresh; the harness's CLI members
-  never published, and the app fell back to interactive); `assign_commitments` needs
-  **every** member's pool, not just t of them; refilled when below half by `top_up_pool`, which the bridge's
+  never published, and the app fell back to interactive); `assign_commitments` assigns a
+  signer group only when **all of its members** have pool commitments (event version 6,
+  2026-10-07; before it, one member without a pool made the whole proposal interactive,
+  and proposals written with versions 1-5 still replay that way: the rule is keyed by the
+  version of the author's app, `VaultState::apply_versioned`). A member in no assigned
+  group approves interactively; refilled when below half by `top_up_pool`, which the bridge's
   `list_proposals` runs on every refresh (app poll, after approving/proposing, and each
   background check). Pools drain when a proposal **enters the log**, for every member,
   approving or not. Security reading of ePrint 2024/436 is in
@@ -220,7 +226,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
     nonce files (an unreadable version counts as missing: never used), leader `.own`
     (`OWN_SHARES`) and `used_commitments.bin` (`USED_COMMITMENTS`; unreadable is an
     **error**, never "empty", or a commitment set could be reused), backups (`ZAFEBAK`
-    byte = `BACKUP`, text `zafe-backup-v1:`; the text prefix is not the format version).
+    byte = `BACKUP`, text `zafe-backup-v1:`; the text prefix is not the format version),
+    the log copy (`log_cache`, `<vault id hex>.log`, `LOG_CACHE`: an unparsable file is
+    "no anchor", a newer version is an error).
   - Not ours to version: FROST serializations (frost-core header with ciphersuite id),
     PCZTs (own magic + version), Zcash encodings (UFVK, addresses, memos), the wallet DB
     (zcash_client_sqlite migrations), the app's JSON caches (`seen.json`,
@@ -256,6 +264,14 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `RepairDelta`/`RepairSigma` were appended (older apps drop envelopes they can't decode).
   `VAULT_EVENT` 4 → 5 (2026-10-01, `RepairRetry`, `RepairDone`) and `REPAIR` 1 → 2 (deltas
   and sigmas carry the attempt); same gate as 4.
+  `VAULT_EVENT` 5 → 6 (2026-10-07, no new variant): proposals written with version 6 get
+  one-tap commitments per fully covered signer group (see "One-tap signing"). **Gate by
+  construction**: the rule applies to events *tagged* 6, so an app that doesn't know 6
+  skips them (`newer_version_entries`, "Update Zafe") instead of computing another
+  assignment, and old logs replay as before. Cost: every event a version-6 app writes
+  (votes, names too) is invisible to older apps, so members must update together.
+  `LOG_CACHE` 1 (new, device file). `RELAY_API` unchanged: `POST /v1/mailbox/reseed`
+  is a new route (404 on an older relay) and 507 now carries `zafe-quota: <token>`.
   **Pre-release: nothing reads the unversioned bytes from before 2026-09-30**; reset
   test devices (`adb shell pm clear xyz.zafe.zafe`), the harness
   (`scripts/app-harness.sh stop`) and relay DBs after pulling this change.
@@ -293,6 +309,33 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   though they're scrubbed.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
+- **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):
+  every device keeps the verified entries of each vault's log (`<dir>/<vault id>.log`,
+  grows only, atomic writes; never shrinks even when two isolates race). `load_log`
+  rebuilds the chain from it (re-verifying), asks the relay for the copy's **last entry**
+  and refuses a relay that has no such entry (`NodeError::RelayRolledBack`), another
+  entry there (`RelayForked`, also any `ChainError::Fork`) or no mailbox (404 on
+  `/v1/log/read`: `RelayLostVault`); typed through the bridge (`ZafeErrorKind::
+  RelayRolledBack/RelayForked/RelayLostVault`, Dart `SyncFailureKind`, sync sheet
+  "Restore vault on the relay"). No copy (first load, new install, restored backup) = the
+  first log is trusted once. The directory is set once per process/isolate:
+  `log_cache::configure` (CLI: `<home>/log`; app: `init_log_cache(ZafePaths.logDir)` in
+  `main()` and in the background isolate's `_ensureRust`); `RelayClient::new` picks it up,
+  tests use `RelayClient::with_log_cache`. The bridge's `identity()` fails closed when it
+  isn't configured, so bridge tests call `init_log_cache` first. Restore
+  (`reseed_relay`, bridge `restore_relay`, CLI `zafe restore-relay`): `POST
+  /v1/mailbox/reseed` (`Reseed`, timestamped, no schema change: the mailbox stays
+  unsealed with a zero join-token hash until the last batch sets `finish`, and only its
+  maker can continue it) recreates a relay-lost vault from the copy; a relay that holds a
+  prefix of the same log is caught up with ordinary appends; a relay whose entry at the
+  shared tip differs is refused (`RelayForked`). The relay doesn't require entry authors
+  to be current members (seats move; clients verify). Do **not** build anything that
+  changes the replay of an entry already in a log without an event-version gate.
+- **Unapproved-spend alert** (`spend_watch::unapproved_spends`, `VaultWallet::
+  vault_spends`, bridge `unapproved_spends`, Home card + notification): a vault spend
+  the log doesn't account for (no proposal logged as sent with that txid, and not a
+  recent spend of a logged proposal's notes within `GRACE_BLOCKS`). Reads the wallet's
+  `ironwood_received_note_spends`; the alert never blocks anything.
 
 ## Dependency gotchas
 
@@ -464,6 +507,21 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   named volume (Docker copies the image's `/data` ownership into a new named volume, so
   the entrypoint's chown isn't needed and `cap_drop: ALL` works); Docker-published ports
   bypass ufw, so publish nothing but Caddy's.
+- **Hosted relay (mainnet, prepared 2026-10-07, not deployed)**: `relay.zafe.cash`, same
+  VPS, compose profile `mainnet` (`relay-mainnet`, `backup-mainnet`, `litestream-mainnet`
+  to S3-compatible storage, `restore-mainnet` for an empty volume), site block
+  `vps/mainnet/relay.caddy` copied in by the mainnet workflow. `deploy.sh <testnet|mainnet>
+  <image@digest> <domain>` edits only its network's lines of `.env` and writes
+  `deployed/<network>.json`. Only `.github/workflows/relay-mainnet.yml` deploys it
+  (manual, environment `relay-mainnet` with required reviewers): it promotes the digest
+  testnet runs (record + `min_soak_hours`, build provenance verified); never build or
+  deploy mainnet from a push. A compose variable without a default breaks the file even
+  when its profile is off: mainnet variables have defaults. Capped beta: relay
+  `ZAFE_RELAY_MAX_VAULTS` (507 + `zafe-quota: capacity` → `RelayClientError::AtCapacity`
+  → `ZafeErrorKind::RelayAtCapacity`) and the app's `core/config/beta.dart` (beta label
+  and per-vault cap on mainnet builds, `ZAFE_BETA`, `ZAFE_BETA_CAP_ZAT`).
+  `kMainnetRelayUrl` = `https://relay.zafe.cash`. Steps only the user can do:
+  `infra/relay/README.md` "Mainnet"; audit scope: `docs/audit-scope.md`.
 - **Public testnet lightwalletd**: `https://testnet.zec.rocks:443` (Ironwood-aware;
   Ironwood live on testnet since block 4,134,000). Mainnet: `https://zec.rocks:443`.
 - **A `CARGO_TARGET_DIR` shared between worktrees races** when their workspace crates
