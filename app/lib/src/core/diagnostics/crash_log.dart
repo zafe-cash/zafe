@@ -12,12 +12,42 @@ import 'scrub.dart';
 /// Entries are scrubbed (`scrubDiagnostics`) before they are written, and the file keeps
 /// only the latest [maxEntries] entries / [maxBytes] bytes.
 class CrashLog {
-  CrashLog(this.file, {DateTime Function()? now}) : _now = now ?? DateTime.now;
+  CrashLog(
+    this.file, {
+    this.peers = const [],
+    this.panicFile,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
+
+  /// The log of the app (`isBackground: false`) or of the background engine, both in
+  /// [dir] (`<support>/diagnostics`): each writes its own file and reads the other's, and
+  /// the Rust panic hook's `rust-panics.log` is part of the report.
+  factory CrashLog.forDir(String dir, {required bool isBackground}) {
+    final mine = File(
+      '$dir/${isBackground ? 'crashes-bg.log' : 'crashes.log'}',
+    );
+    final other = File(
+      '$dir/${isBackground ? 'crashes.log' : 'crashes-bg.log'}',
+    );
+    return CrashLog(
+      mine,
+      peers: [other],
+      panicFile: File('$dir/rust-panics.log'),
+    );
+  }
 
   /// The log of this process, set by `main()` (null in tests and before startup).
   static CrashLog? instance;
 
+  /// Where this isolate appends. Each isolate (the app, the WorkManager/FCM background
+  /// engine) writes only its own file, so two isolates never race on one file.
   final File file;
+
+  /// The other isolates' files: read, merged by time and cleared, never written here.
+  final List<File> peers;
+
+  /// One line per Rust panic (file:line only), written by the bridge's panic hook.
+  final File? panicFile;
   final DateTime Function() _now;
 
   static const maxEntries = 20;
@@ -65,45 +95,84 @@ class CrashLog {
     await file.writeAsString(text, flush: true);
   }
 
-  Future<List<String>> _entries() async {
+  Future<List<String>> _entries([File? from]) async {
     try {
-      final text = await file.readAsString();
+      final text = await (from ?? file).readAsString();
       return text.isEmpty ? <String>[] : text.split(_separator);
     } on FileSystemException {
       return <String>[];
     }
   }
 
-  /// The entries, newest last. Empty when there are none or the file can't be read.
+  /// The entries of every isolate, oldest first (each starts with a UTC timestamp).
+  /// Empty when there are none or the files can't be read.
   Future<List<String>> read() async {
     await _tail;
-    return _entries();
+    final all = [
+      ...await _entries(),
+      for (final p in peers) ...await _entries(p),
+    ];
+    // Stable for equal stamps, so one isolate's order is kept.
+    final indexed = all.indexed.toList()
+      ..sort((a, b) {
+        final c = a.$2.compareTo(b.$2);
+        return c != 0 ? c : a.$1.compareTo(b.$1);
+      });
+    return [for (final e in indexed) e.$2];
+  }
+
+  /// The Rust panic notes, scrubbed again here. Empty when there are none.
+  Future<List<String>> readPanics() async {
+    final f = panicFile;
+    if (f == null) return <String>[];
+    try {
+      return [
+        for (final l in (await f.readAsString()).split('\n'))
+          if (l.trim().isNotEmpty) scrubDiagnostics(l.trim()),
+      ];
+    } on FileSystemException {
+      return <String>[];
+    }
   }
 
   Future<void> clear() async {
     await _tail;
-    try {
-      await file.delete();
-    } on FileSystemException {
-      // Already gone.
+    for (final f in [file, ...peers, ?panicFile]) {
+      try {
+        await f.delete();
+      } on FileSystemException {
+        // Already gone.
+      }
     }
   }
 
   /// What the user can share: a header with no identifiers, then the entries.
   Future<String> report({required String network}) async {
     final entries = await read();
+    final panics = await readPanics();
     final b = StringBuffer()
       ..writeln('Zafe diagnostic report')
       ..writeln('Network: $network')
       ..writeln(
-        'Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+        'Platform: ${Platform.operatingSystem} ${_short(Platform.operatingSystemVersion)}',
       )
       ..writeln('Entries: ${entries.length}')
       ..writeln()
       ..writeln(
         entries.isEmpty ? 'No errors recorded.' : entries.join(_separator),
       );
+    if (panics.isNotEmpty) {
+      b
+        ..writeln()
+        ..writeln('Rust panics (location only): ${panics.length}')
+        ..writeln(panics.join('\n'));
+    }
     return scrubDiagnostics(b.toString());
+  }
+
+  static String _short(String v) {
+    final line = v.split('\n').first;
+    return line.length > 48 ? line.substring(0, 48) : line;
   }
 
   /// Routes Flutter and uncaught async errors here, after whoever was installed before.

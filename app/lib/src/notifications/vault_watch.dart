@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
 import '../core/config/endpoints.dart';
+import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/network/tor_setting.dart';
 import '../core/storage/member_names.dart';
@@ -232,6 +233,7 @@ Future<void> _ensureRust() async {
 /// The background check: sync, read the vault log, answer interactive signing requests,
 /// finish an auto-send this member owes, and notify about changes. Never throws.
 Future<void> checkVaultAndNotify() async {
+  await installBackgroundCrashLog();
   // One check at a time: the periodic task, the one-off after backgrounding and a push can
   // fire together (seen on the emulator); a lock older than 5 minutes is stale.
   final lock = File(
@@ -248,11 +250,36 @@ Future<void> checkVaultAndNotify() async {
   } catch (_) {}
   try {
     await _check();
+  } catch (e, st) {
+    await _logBackgroundError('check', e, st);
   } finally {
     try {
       await lock.delete();
     } catch (_) {}
   }
+}
+
+/// Background engines are separate isolates with their own memory: install the scrubbed
+/// local log there too (its own file, `crashes-bg.log`; the app's report merges both).
+/// A check that runs on the main engine keeps the app's log. Never throws.
+Future<void> installBackgroundCrashLog() async {
+  if (CrashLog.instance != null) return;
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    CrashLog.instance = CrashLog.forDir(
+      (await ZafePaths.get()).diagnosticsDir,
+      isBackground: true,
+    )..install();
+  } catch (_) {}
+}
+
+Future<void> _logBackgroundError(
+  String source,
+  Object error,
+  StackTrace stack,
+) async {
+  debugPrint('vault check $source failed: ${describeError(error)}');
+  await CrashLog.instance?.record('background-$source', error, stack);
 }
 
 Future<void> _check() async {
@@ -319,7 +346,7 @@ Future<void> _checkVault(
         balanceZat: balance.totalZat,
         syncedAt: DateTime.now(),
       );
-    } catch (_) {}
+    } catch (_) {} // offline is routine: not logged
     List<rust_received.ReceivedInfo>? received;
     try {
       received = await rust_received.listReceived(
@@ -434,7 +461,8 @@ Future<void> _checkVault(
     debugPrint(
       'vault check: ${summary.name}: ${updates.length} notification(s)',
     );
-  } catch (e) {
+  } catch (e, st) {
     debugPrint('vault check failed for ${v.id}: ${describeError(e)}');
+    await _logBackgroundError('vault', e, st);
   }
 }

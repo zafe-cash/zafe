@@ -73,5 +73,53 @@ void main() {
       final log = CrashLog(File('/proc/nope/crashes.log'));
       await log.record('uncaught', StateError('x'));
     });
+
+    test(
+      'two isolates write their own files and the report merges both',
+      () async {
+        final app = CrashLog.forDir(dir.path, isBackground: false);
+        final bg = CrashLog.forDir(dir.path, isBackground: true);
+        // Interleaved, concurrent appends from both "isolates".
+        await Future.wait([
+          for (var i = 0; i < 6; i++)
+            app.record('flutter', StateError('app$i')),
+          for (var i = 0; i < 6; i++)
+            bg.record('background-check', StateError('bg$i')),
+        ]);
+        for (final log in [app, bg]) {
+          final entries = await log.read();
+          expect(entries, hasLength(12));
+          expect(
+            entries.where((e) => e.contains('background-check')),
+            hasLength(6),
+          );
+        }
+        expect(File('${dir.path}/crashes.log').existsSync(), isTrue);
+        expect(File('${dir.path}/crashes-bg.log').existsSync(), isTrue);
+        await app.clear();
+        expect(await bg.read(), isEmpty);
+      },
+    );
+
+    test(
+      'the report lists Rust panics, scrubbed, and clear removes them',
+      () async {
+        final log = CrashLog.forDir(dir.path, isBackground: false);
+        File('${dir.path}/rust-panics.log').writeAsStringSync(
+          '2026-10-07T10:00:00Z panic at crates/zafe-core/src/node.rs:42:9 '
+          'on utest1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n',
+        );
+        final report = await log.report(network: 'test');
+        expect(report, contains('Rust panics'));
+        expect(report, contains('node.rs:42'));
+        expect(report, isNot(contains('utest1')));
+        await log.clear();
+        expect(File('${dir.path}/rust-panics.log').existsSync(), isFalse);
+        expect(
+          await log.report(network: 'test'),
+          isNot(contains('Rust panics')),
+        );
+      },
+    );
   });
 }

@@ -742,9 +742,10 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 
 - [x] **No telemetry + local diagnostic report** (2026-10-07): CI guard
       `scripts/check-no-telemetry.sh`; scrubbed on-device crash log with Settings > "Diagnostic report"
-      (view, share, copy, clear). Open: record errors from background engines and Rust panics; mention
-      "no telemetry" in the privacy docs and on the site (claim only once the guard is in main); preview
-      render of the sheet; check on a device.
+      (view, share, copy, clear). Done 2026-10-07: background-engine errors (own file, merged on read),
+      Rust panic notes (`app/rust/src/diag.rs`), "No telemetry" in README + site FAQ/Security,
+      render preview (`tool/screens/diagnostics_render_test.dart`). Open: the Rust hook and the
+      bridge wiring are unverified (no cargo run); check a panic and a background error on a device.
 
 ## Ideas (not decided)
 

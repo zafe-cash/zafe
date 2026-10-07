@@ -304,9 +304,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   **local diagnostic log** (`core/diagnostics`: `CrashLog` hooks `FlutterError.onError` and
   `PlatformDispatcher.onError` in `main()`, `scrubDiagnostics` strips addresses, hex, links, amounts, vault
   ids and app paths before writing, 20 entries / 64 KiB in `<support>/diagnostics/crashes.log`); Settings >
-  Privacy > "Diagnostic report" shows it in full and the user shares it by hand. Not covered yet: errors in
-  background engines (WorkManager/FCM) and Rust panics. New log lines must never include secrets, even
-  though they're scrubbed.
+  Privacy > "Diagnostic report" shows it in full and the user shares it by hand. Each isolate appends
+  **only to its own file** (`CrashLog.forDir`: app `crashes.log`, WorkManager/FCM engine `crashes-bg.log`,
+  installed by `installBackgroundCrashLog()` at the start of `checkVaultAndNotify`; routine offline sync
+  failures are not logged, so they can't evict real errors) and `read()` merges both by timestamp; clear
+  deletes all. Rust panics: `app/rust/src/diag.rs` (not in `api/`, so no FRB surface) installs a hook from
+  `init_app` writing `<ts> panic at file:line:col` (never the message) to `diagnostics/rust-panics.log`;
+  the directory is learned from the first `wallet_path(db_dir)` call (db dir = support dir), so a panic
+  before the first wallet call leaves no note. The report adds a "Rust panics" section. The site says "no
+  telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
+  secrets, even though they're scrubbed.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):

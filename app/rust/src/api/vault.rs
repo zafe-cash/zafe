@@ -305,6 +305,7 @@ pub(crate) fn sent_txs(db_dir: &str, m: &VaultMaterial) -> node::SentTxs {
 }
 
 pub(crate) fn wallet_path(db_dir: &str, m: &VaultMaterial) -> PathBuf {
+    crate::diag::remember_support_dir(db_dir);
     PathBuf::from(db_dir).join(format!(
         "vault-{}.sqlite",
         hex::encode(m.descriptor.vault_id)
