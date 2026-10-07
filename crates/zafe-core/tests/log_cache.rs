@@ -76,3 +76,21 @@ fn damaged_files_are_no_anchor_and_newer_ones_are_an_error() {
     );
     assert!(cache.write(&MAILBOX, &entries(3)).is_err());
 }
+
+#[test]
+fn concurrent_writers_never_leave_a_shorter_copy() {
+    // Audit fix: the length check and the rename in `write` were not atomic together, so a
+    // slower thread holding a shorter chain could replace a longer copy.
+    let dir = tempfile::tempdir().unwrap();
+    let cache = LogCache::in_dir(dir.path());
+    let all = entries(12);
+    std::thread::scope(|s| {
+        for n in 1..=12usize {
+            let (cache, all) = (&cache, &all);
+            s.spawn(move || {
+                cache.write(&MAILBOX, &all[..n]).unwrap();
+            });
+        }
+    });
+    assert_eq!(cache.read(&MAILBOX).unwrap().len(), 12);
+}

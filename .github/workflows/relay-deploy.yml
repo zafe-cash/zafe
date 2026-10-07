@@ -55,6 +55,9 @@ jobs:
   image:
     name: Build and push the image
     needs: test
+    # Only main builds are pushed (and attested): a manual run from a branch must not
+    # produce an image the mainnet promotion's provenance check would accept, or move :main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

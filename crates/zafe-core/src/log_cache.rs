@@ -22,7 +22,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        RwLock,
+        Mutex, RwLock,
     },
 };
 
@@ -47,6 +47,12 @@ pub struct LogCache {
 
 static DEFAULT: RwLock<Option<LogCache>> = RwLock::new(None);
 static TMP: AtomicU64 = AtomicU64::new(0);
+/// Serializes the check-then-replace in [`LogCache::write`] between threads of this
+/// process (the app calls `load_log` from several bridge threads at once): without it a
+/// slower writer could pass the length check, then rename its shorter copy over a longer
+/// one. Other processes (a background isolate) can still race; the next `load_log`
+/// rewrites the longer chain, so the effect there is a briefly weaker anchor.
+static WRITE: Mutex<()> = Mutex::new(());
 
 /// Makes `dir` the log copy every [`crate::relay_client::RelayClient::new`] picks up from
 /// now on (the app bridge and the CLI call this once at startup). Tests build their own
@@ -96,6 +102,7 @@ impl LogCache {
     /// e.g. a background check, may have saved a longer one meanwhile): the copy never
     /// shrinks. Returns whether it wrote.
     pub fn write(&self, mailbox: &MailboxId, entries: &[LogEntry]) -> Result<bool, LogCacheError> {
+        let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
         if self.read(mailbox)?.len() >= entries.len() {
             return Ok(false);
         }

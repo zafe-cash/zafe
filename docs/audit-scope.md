@@ -238,3 +238,69 @@ Observed, not changed (for the auditors to weigh):
   every isolate). A caller that forgets to configure gets no rollback protection and no
   error. Worth a look when reviewing `app/lib/main.dart` and
   `app/lib/src/notifications/vault_watch.dart`.
+
+## 9. Adversarial review of b980c35 / 3163051 (2026-10-07, read-only, nothing run)
+
+Fixed on branch `audit-fixes` (regression tests written, **not run**):
+- **Log copy could shrink under concurrent writers (low).** `LogCache::write` checked the
+  stored length and renamed in two steps; two bridge threads could leave the shorter chain,
+  a transiently weaker rollback anchor. Now serialized per process (`WRITE` mutex); another
+  process can still race, and the next `load_log` rewrites the longer chain. Test
+  `concurrent_writers_never_leave_a_shorter_copy`.
+- **Mainnet promotion provenance not pinned to `main` (low).** `gh attestation verify` only
+  checked the signer workflow; `relay-deploy.yml`'s image job also ran on a manual dispatch
+  from any branch (pushing `:main` and an attested image). The image job now needs
+  `refs/heads/main`; the verify step adds `--source-ref refs/heads/main` and the OIDC issuer.
+- **Soak check could pass on a bad record (low).** `at=null` read as 0 in bash arithmetic;
+  now must be numeric. `RELAY_MAX_VAULTS` is validated before it reaches the remote shell
+  command; Litestream env values are single-quoted (a `$` in a secret broke Compose
+  interpolation); unused `id-token: write` dropped.
+
+Confirmed, not fixed (design or needs the build agent):
+- **App wiring is not on main.** `log_cache::configure` / `init_log_cache`, the bridge error
+  kinds and `restore_relay` live on `origin/audit-prep-app` (457fff7), not in b980c35. On
+  main the app builds `RelayClient::new` with no copy, so there is no rollback protection
+  in the app, while AGENTS.md describes it as shipped. Merge that branch before the audit
+  commit is named. Never ship a path that skips `configure` silently (consider failing
+  closed in `RelayClient::new` outside tests).
+- **Reseed lets the restorer pick `members`, `threshold` and `enc_pk`s (medium, availability
+  only).** A single malicious member restoring a wiped relay can omit honest members (they
+  get 403), add keys of its own, or set `threshold = 1` so the relay's `replace` route moves
+  seats on the relay with one signature. Clients ignore all of it (membership comes from the
+  replayed log; entries by unknown keys are rejected), so funds are unaffected, but honest
+  members are locked out of that relay and must move to another one. Mitigation to build: a
+  client check after a restore that `relay.members()` equals the replayed membership.
+- **`catch_relay_up` cannot append entries by former seat keys (low).** The normal append
+  route requires the author to be a current relay member; across a seat move a rolled-back
+  relay with the old member table rejects them, and the new key is not a member there.
+  Restoring such a vault needs the wipe path (reseed on an unknown mailbox), not catch-up.
+- **A fork is a dead end for the losing device (low-medium, availability).** After
+  `RelayForked` nothing clears that device's copy (`LogCache::remove` has no caller), so a
+  member on the minority branch of an equivocating relay is refused on every relay until
+  reinstall or restore from backup. Add an explicit, confirmed "discard my copy" action.
+- **Capped-beta slots can be filled by anyone (low).** `ZAFE_RELAY_MAX_VAULTS` counts every
+  mailbox, including unsealed ones from abandoned keygens or reseeds; a few fresh keys per
+  IP exhaust 25 slots. No pruning of never-sealed mailboxes exists.
+- **Same SSH key / VPS for testnet and mainnet defeats the reviewer gate (medium, process).**
+  The `relay-testnet` environment has no required reviewers, and the `deploy` user (docker
+  group) controls the mainnet compose, `.env` and `litestream.env`. Anyone who can push to
+  `main` can therefore act on mainnet without the `relay-mainnet` approval. Use a separate
+  key with a forced command, or a separate host.
+- **Image pinning:** `litestream/litestream:0.3.13` and `caddy:2.11-alpine` are tags, not digests.
+- **`Broadcast` is not checked against the PCZT (pre-existing, low).** Any member can log
+  `Broadcast { txid }` with any txid for an Approved proposal; it sets status Broadcast
+  (releasing the log's note reservation) and makes that txid count as "logged as sent" for
+  the unapproved-spend alert. The txid of a v6 transaction is computable from the PCZT:
+  compare at replay (gate with an event version).
+- **Unapproved-spend grace** also shelters notes of cancelled/rejected proposals for 24
+  blocks (code accepts any proposal, docs say "logged proposal"); narrow to live proposals.
+
+Reviewed, no issue found: one-tap partial groups (`assign_commitments` v6: cumulative
+`taken` check matches the draw loop, every commitment drawn once, deterministic order,
+old-version events keep the old rule, a v6-only log is skipped whole by v5 apps so pool state
+cannot diverge into a double assignment; nonce safety still rests on delete-before-share);
+`verify_pczt` checked arithmetic (all `u64` sums; fee and expiry use checked/guarded math);
+`vault_spends` SQL (typed `[u8; 32]` reads error, not panic); `reseed` replay (idempotent by
+`from`, timestamp window, signer-only continuation, quotas and capacity roll back with the
+transaction); `load_log` anchor checks (index and hash of the last saved entry, 404 vs empty
+page vs fork) and atomic cache writes.
