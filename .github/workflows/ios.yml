@@ -30,7 +30,7 @@ env:
 jobs:
   ios:
     name: Build for iOS (${{ matrix.name }})
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -44,6 +44,11 @@ jobs:
             build_args: --debug --simulator
     steps:
       - uses: actions/checkout@v5
+
+      # workmanager_apple uses BGContinuedProcessingTask, which only exists in the iOS 26 SDK.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - uses: dtolnay/rust-toolchain@stable
         with:
