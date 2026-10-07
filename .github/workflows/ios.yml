@@ -1,0 +1,84 @@
+name: iOS build
+
+# Builds the app for iOS on a macOS runner: an unsigned device build (arm64) and a simulator
+# build. No signing secrets are used; this only proves the app, the Rust bridge and the
+# CocoaPods plugins compile for iOS. Signed IPAs / TestFlight come later (docs/tracker.md).
+#
+# Run it by hand (Actions > iOS build > Run workflow) or by touching app/ios, the bridge or
+# this file on a pull request.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ios.yml'
+      - 'app/ios/**'
+      - 'app/rust/**'
+      - 'app/rust_builder/**'
+      - 'app/pubspec.yaml'
+      - 'app/pubspec.lock'
+      - 'crates/**'
+      - 'Cargo.lock'
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ios:
+    name: Build for iOS (${{ matrix.name }})
+    runs-on: macos-15
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: device (unsigned)
+            rust_target: aarch64-apple-ios
+            build_args: --release --no-codesign
+          - name: simulator
+            rust_target: aarch64-apple-ios-sim
+            build_args: --debug --simulator
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build for each pod build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> app/build/rust_lib_zafe/build'
+          key: ios-${{ matrix.rust_target }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.6
+          channel: stable
+          cache: true
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build ios ${{ matrix.build_args }} \
+            --dart-define=ZAFE_NETWORK=test \
+            --build-name=0.0.0 --build-number=${{ github.run_number }}
+
+      - name: Package the device build
+        if: matrix.rust_target == 'aarch64-apple-ios'
+        run: |
+          mkdir dist
+          ditto -c -k --keepParent app/build/ios/iphoneos/Runner.app dist/Zafe-unsigned.app.zip
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.rust_target == 'aarch64-apple-ios'
+        with:
+          name: zafe-ios-unsigned
+          path: dist/Zafe-unsigned.app.zip
+          retention-days: 7
