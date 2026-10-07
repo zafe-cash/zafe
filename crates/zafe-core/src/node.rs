@@ -994,7 +994,7 @@ pub async fn reseed_relay(
         .map(|e| e.to_bytes().map_err(proto))
         .collect::<Result<_, _>>()?;
     let members = state.member_identities();
-    let threshold = u16::from(state.descriptor.threshold);
+    let threshold = state.descriptor.threshold;
 
     let mut from = 0usize;
     for _ in 0..(raw.len() + 8) {

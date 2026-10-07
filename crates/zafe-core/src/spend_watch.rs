@@ -30,6 +30,9 @@ pub struct UnapprovedSpend {
     pub mined_height: Option<u32>,
 }
 
+/// Per transaction: the height it was mined at (if any) and the nullifiers it spends.
+type SpendsByTx = BTreeMap<[u8; 32], (Option<u32>, Vec<[u8; 32]>)>;
+
 /// Vault spends in `spends` (what the wallet saw) that `state` (the replayed log) doesn't
 /// account for. `tip` is the wallet's synced height.
 pub fn unapproved_spends(
@@ -38,7 +41,7 @@ pub fn unapproved_spends(
     tip: u32,
 ) -> Vec<UnapprovedSpend> {
     // One entry per transaction: all the notes it spends.
-    let mut txs: BTreeMap<[u8; 32], (Option<u32>, Vec<[u8; 32]>)> = BTreeMap::new();
+    let mut txs = SpendsByTx::new();
     for s in spends {
         let entry = txs.entry(s.txid).or_insert((s.mined_height, Vec::new()));
         entry.1.extend_from_slice(&s.nullifiers);
