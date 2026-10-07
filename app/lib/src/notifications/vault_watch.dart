@@ -19,8 +19,10 @@ import '../core/storage/zafe_paths.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../providers/privacy_mode_provider.dart' show kPrivacyModeKey;
+import '../rust/api/app.dart' show initLogCache;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/received.dart' as rust_received;
+import '../rust/api/spends.dart' as rust_spends;
 import '../rust/api/tor.dart';
 import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
@@ -184,6 +186,7 @@ Future<void> recordSeen(
   List<rust.ProposalInfo>? proposals, {
   List<rust_received.ReceivedInfo>? received,
   List<rust.SeatMove>? seatMoves,
+  List<rust_spends.UnapprovedSpendInfo>? unapprovedSpends,
 }) {
   final write = _seenWrites.then((_) async {
     final f = await _seenFile(vaultId);
@@ -197,6 +200,7 @@ Future<void> recordSeen(
             proposals,
             received: received,
             seatMoves: seatMoves,
+            unapprovedSpends: unapprovedSpends,
             previous: previous,
           ),
         ),
@@ -226,6 +230,8 @@ Future<void> _ensureRust() async {
   } catch (_) {
     // Already initialized on this isolate (one-off tasks can run on the main engine).
   }
+  // Every isolate that talks to the relay checks it against this phone's log copy.
+  initLogCache(dir: (await ZafePaths.get()).logDir);
   _rustReady = true;
 }
 
@@ -328,6 +334,16 @@ Future<void> _checkVault(
         material: material,
       );
     } catch (_) {}
+    List<rust_spends.UnapprovedSpendInfo>? unapproved;
+    try {
+      unapproved = await rust_spends.unapprovedSpends(
+        relayUrl: endpoints.relayUrl,
+        dbDir: paths.dbDir,
+        dbKey: dbKey,
+        seeds: seeds,
+        material: material,
+      );
+    } catch (_) {}
     var list = await rust.listProposals(
       relayUrl: endpoints.relayUrl,
       stateDir: stateDir,
@@ -397,6 +413,7 @@ Future<void> _checkVault(
       hideAmounts: hideAmounts,
       received: received ?? const [],
       seatMoves: list.seatMoves,
+      unapprovedSpends: unapproved ?? const [],
       me: rust_vault.identityPublicKey(seeds: seeds),
       // Read here: this may run in a background isolate without the app's providers.
       names: MemberNames.merge({
@@ -430,6 +447,7 @@ Future<void> _checkVault(
       proposals,
       received: received,
       seatMoves: list.seatMoves,
+      unapprovedSpends: unapproved,
     );
     debugPrint(
       'vault check: ${summary.name}: ${updates.length} notification(s)',

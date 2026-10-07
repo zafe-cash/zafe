@@ -34,6 +34,20 @@ String zafeErrorMessage(
       'The relay\'s storage for this vault is full, so it can\'t take new messages '
           'right now. Old messages expire after 30 days; if this keeps happening, ask '
           'whoever runs the relay to raise the vault\'s limit.',
+    ZafeErrorKind.relayAtCapacity =>
+      'The Zafe beta is full for now, so this relay takes no new vaults. Vaults '
+          'that already exist keep working. Try again later, or use your own relay '
+          'in Settings.',
+    ZafeErrorKind.relayRolledBack =>
+      'The relay lost part of this vault\'s history, so Zafe isn\'t using it. A '
+          'member whose phone has the full history can restore it from the sync '
+          'status on Home.',
+    ZafeErrorKind.relayLostVault =>
+      'The relay no longer has this vault. A member can restore it from the sync '
+          'status on Home.',
+    ZafeErrorKind.relayForked =>
+      'The relay shows a different history than this phone saw, so Zafe isn\'t '
+          'using it. Check with the other members before doing anything.',
     ZafeErrorKind.tls =>
       'Couldn\'t connect securely to the ${_server(error.endpoint)}. '
           'Check its address in Settings.',

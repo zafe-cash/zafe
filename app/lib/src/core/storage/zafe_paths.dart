@@ -23,6 +23,12 @@ class ZafePaths {
     return dir.path;
   }
 
+  /// This phone's copy of every vault's log (`<vault id>.log`): what lets the app notice
+  /// a relay that lost or rewound it. Entries are stored as the relay holds them
+  /// (encrypted with the vault's log key), so it needs no more protection than the relay's
+  /// own storage.
+  String get logDir => '$_support/log';
+
   /// Tor's state (guards, directory cache) when "Use Tor" is on. Covered by the app-wide
   /// backup exclusion: a restored copy would carry this phone's guard choice elsewhere.
   String get torDir => '$_support/tor';
@@ -57,6 +63,8 @@ class ZafePaths {
   Future<void> deleteVault(String vaultId) async {
     final dir = Directory(vaultDir(vaultId));
     if (await dir.exists()) await dir.delete(recursive: true);
+    final log = File('$logDir/$vaultId.log');
+    if (await log.exists()) await log.delete();
     final db = File('$dbDir/vault-$vaultId.sqlite');
     for (final f in [db, File('${db.path}-wal'), File('${db.path}-shm')]) {
       if (await f.exists()) await f.delete();

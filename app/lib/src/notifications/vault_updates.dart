@@ -4,6 +4,7 @@ import '../core/privacy/amount_display.dart';
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/received.dart' as rust;
+import '../rust/api/spends.dart' as rust;
 
 /// A notification to show for a change in the vault.
 class VaultUpdate {
@@ -46,6 +47,13 @@ const kSeatMoveMarker = 'mv:*';
 String seatMoveKey(rust.SeatMove m) =>
     '$kSeatMovePrefix${m.oldKeyHex}:${m.newKeyHex}';
 
+/// Snapshot keys of unapproved spends (vault money that left with no approved payment in
+/// the log; spec §10.4.4) start with this, and so does the [VaultUpdate.proposalId] of
+/// their notification (opens the activity list).
+const kUnapprovedPrefix = 'sp:';
+
+String unapprovedKey(String txid) => '$kUnapprovedPrefix$txid';
+
 /// Present while this member has to approve a proposal again (its signature went into an
 /// unfinished signing round), so the request is announced once.
 String reapprovalKey(String proposalId) => 're:$proposalId';
@@ -69,6 +77,7 @@ List<VaultUpdate> vaultUpdates({
   List<rust.ReceivedInfo> received = const [],
   Map<String, String> names = const {},
   List<rust.SeatMove> seatMoves = const [],
+  List<rust.UnapprovedSpendInfo> unapprovedSpends = const [],
   String? me,
 }) {
   String? nameOf(String keyHex) {
@@ -76,8 +85,22 @@ List<VaultUpdate> vaultUpdates({
     return n == null || n.isEmpty ? null : n;
   }
 
-  if (previous == null) return const [];
   final out = <VaultUpdate>[];
+  // Never held back: not by privacy mode, and not by a missing snapshot (a fresh install
+  // must still hear that money left the vault).
+  for (final s in unapprovedSpends) {
+    if (previous?.containsKey(unapprovedKey(s.txid)) ?? false) continue;
+    out.add(
+      VaultUpdate(
+        proposalId: unapprovedKey(s.txid),
+        title: '$vaultName: money left without approval',
+        body:
+            'A transaction spent this vault\'s funds with no approved payment. '
+            'Open Zafe and check with the other members now.',
+      ),
+    );
+  }
+  if (previous == null) return out;
   if (previous.containsKey(kReceivedMarker)) {
     for (final r in received) {
       if (previous.containsKey(receivedKey(r.txid))) continue;
@@ -205,13 +228,20 @@ SeenSnapshot snapshotOf(
   List<rust.ProposalInfo>? proposals, {
   List<rust.ReceivedInfo>? received,
   List<rust.SeatMove>? seatMoves,
+  List<rust.UnapprovedSpendInfo>? unapprovedSpends,
   SeenSnapshot previous = const {},
 }) => {
   if (proposals == null)
     for (final e in previous.entries)
       if (!e.key.startsWith(kReceivedPrefix) &&
-          !e.key.startsWith(kSeatMovePrefix))
+          !e.key.startsWith(kSeatMovePrefix) &&
+          !e.key.startsWith(kUnapprovedPrefix))
         e.key: e.value,
+  if (unapprovedSpends == null)
+    for (final e in previous.entries)
+      if (e.key.startsWith(kUnapprovedPrefix)) e.key: e.value,
+  if (unapprovedSpends != null)
+    for (final s in unapprovedSpends) unapprovedKey(s.txid): '',
   if (seatMoves == null)
     for (final e in previous.entries)
       if (e.key.startsWith(kSeatMovePrefix)) e.key: e.value,

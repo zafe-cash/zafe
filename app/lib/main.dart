@@ -13,6 +13,8 @@ import 'src/core/storage/zafe_paths.dart';
 import 'src/notifications/vault_watch.dart';
 import 'src/providers/vault_provider.dart';
 import 'src/services/invite_links.dart';
+import 'src/core/storage/zafe_paths.dart';
+import 'src/rust/api/app.dart';
 import 'src/rust/api/tor.dart';
 import 'src/rust/frb_generated.dart';
 
@@ -40,6 +42,9 @@ Future<void> main() async {
     }
   });
   await RustLib.init();
+  // This phone's copy of each vault's log, before anything can reach the relay: a relay
+  // that lost or rewound the log is refused against it.
+  initLogCache(dir: (await ZafePaths.get()).logDir);
   // "Use Tor": switch the route before anything can connect (fail-closed). Bootstrapping
   // starts later (`torLifecycleProvider`); nothing waits for it here.
   if ((await SharedPreferences.getInstance()).getBool(kUseTorKey) ?? false) {
