@@ -27,6 +27,7 @@ import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../home/rename_sheet.dart';
 import 'endpoint_sheet.dart';
+import 'diagnostics_sheet.dart';
 import 'tor_sheet.dart';
 
 const _rowHeight = 44.0;
@@ -202,6 +203,13 @@ class SettingsScreen extends ConsumerWidget {
                           value: tor.statusLabel,
                           chevron: true,
                           onTap: () => showTorSheet(context),
+                        ),
+                        row(
+                          icon: AppIcons.help,
+                          label: 'Diagnostic report',
+                          value: 'Stays on this phone',
+                          chevron: true,
+                          onTap: () => showDiagnosticsSheet(context),
                         ),
                       ],
                     ),

@@ -27,6 +27,9 @@ class ZafePaths {
   /// backup exclusion: a restored copy would carry this phone's guard choice elsewhere.
   String get torDir => '$_support/tor';
 
+  /// The local crash log (`core/diagnostics`). Never uploaded; the user shares it by hand.
+  String get diagnosticsDir => '$_support/diagnostics';
+
   static ZafePaths? _cached;
 
   static Future<ZafePaths> get() async {

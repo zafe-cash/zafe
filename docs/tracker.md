@@ -714,6 +714,12 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       `/v1/version` endpoint or response header so the app can warn before the first
       failing call *(idea)*
 
+- [x] **No telemetry + local diagnostic report** (2026-10-07): CI guard
+      `scripts/check-no-telemetry.sh`; scrubbed on-device crash log with Settings > "Diagnostic report"
+      (view, share, copy, clear). Open: record errors from background engines and Rust panics; mention
+      "no telemetry" in the privacy docs and on the site (claim only once the guard is in main); preview
+      render of the sheet; check on a device.
+
 ## Ideas (not decided)
 
 - *(idea, 2026-10-01)* **N-of-M ring emblem**: a ring of M segments with T filled as a

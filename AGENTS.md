@@ -282,6 +282,15 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   then. No `sqlcipher_export` migration on purpose. The CLI keeps a dev key in
   `<home>/wallet.key` (plain file, like the rest of its state). SQLCipher logs key
   failures to stderr/logcat ("hmac check failed for pgno=1"): expected on a wrong key.
+- **No telemetry** (decided 2026-10-07; Zodl is opt-in/Apple-only crash reports, Vizor has none): no analytics,
+  funnel, crash-reporting or tracking SDK, ever; privacy beats telemetry. `scripts/check-no-telemetry.sh`
+  (CI job `no-telemetry`) fails on such a package in pubspec/Gradle/Podfile/Cargo/site lockfiles. Bugs: the
+  **local diagnostic log** (`core/diagnostics`: `CrashLog` hooks `FlutterError.onError` and
+  `PlatformDispatcher.onError` in `main()`, `scrubDiagnostics` strips addresses, hex, links, amounts, vault
+  ids and app paths before writing, 20 entries / 64 KiB in `<support>/diagnostics/crashes.log`); Settings >
+  Privacy > "Diagnostic report" shows it in full and the user shares it by hand. Not covered yet: errors in
+  background engines (WorkManager/FCM) and Rust panics. New log lines must never include secrets, even
+  though they're scrubbed.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 
