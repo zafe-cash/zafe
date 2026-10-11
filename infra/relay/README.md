@@ -170,17 +170,9 @@ host, and a root exploit from the testnet container would reach mainnet. Protect
 (required reviews) and, for stronger separation, give mainnet its own host. To change the
 wrapper, re-run `bootstrap.sh` (it is idempotent).
 
-**Migrating a running server** (one time; until it is done the testnet workflow falls back
-to the old shared `deploy` key from the secret `RELAY_SSH_KEY`, with a warning, and keeps
-working): generate the two keys and run `bootstrap.sh` as in step 2 above (it also retires
-the old `deploy` user and makes `/opt/zafe-relay` root-owned), then
-`gh secret set RELAY_TESTNET_SSH_KEY --env relay-testnet < relay-testnet`, re-run
-Actions > Relay deploy, and when it is green delete the old secret:
-`gh secret delete RELAY_SSH_KEY --env relay-testnet` (and from `relay-mainnet` if set),
-`ssh ubuntu@<host> sudo userdel -r deploy`, and `shred -u relay-testnet relay-mainnet
-relay-testnet.pub relay-mainnet.pub` after the secrets are set. Then remove the legacy
-branch from `relay-deploy.yml` (tracker). Between running `bootstrap.sh` and setting the new
-secret a testnet deploy fails (the old key is gone): set the secret right away.
+**Changing the wrapper or keys on a running server:** re-run `bootstrap.sh` as in step 2
+above (idempotent; it also retires any old shared `deploy` user and makes `/opt/zafe-relay`
+root-owned), then set the new key secrets. A testnet deploy fails between the two.
 
 **Self-hosting without CI:** copy `vps/` to the server, write `.env` with
 `RELAY_TESTNET_IMAGE=ghcr.io/zafe-cash/zafe-relay:main` and

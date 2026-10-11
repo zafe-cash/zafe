@@ -538,15 +538,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   named volume (Docker copies the image's `/data` ownership into a new named volume, so
   the entrypoint's chown isn't needed and `cap_drop: ALL` works); Docker-published ports
   bypass ufw, so publish nothing but Caddy's.
-- **Deploy access (prepared 2026-10-07; active after the operator's migration, README
-  "Migrating a running server")**: testnet and mainnet have separate unix users
+- **Deploy access (active since 2026-10-11)**: testnet and mainnet have separate unix users
   (`zafe-testnet`/`zafe-mainnet`) and keys (`RELAY_TESTNET_SSH_KEY` in `relay-testnet`,
   `RELAY_MAINNET_SSH_KEY` only in `relay-mainnet`), each pinned to a forced command
   `sudo -n /usr/local/sbin/zafe-deploy <network>` (`vps/zafe-deploy`, installed only by
   `bootstrap.sh`; commands `sync|secrets|check|deploy`; files come from a `main` commit
-  downloaded by the server, never from CI). No docker group for CI. Until migrated,
-  `relay-deploy.yml` falls back to the old `RELAY_SSH_KEY`/`deploy` user (remove that
-  branch afterwards). Change the wrapper by re-running bootstrap, not by deploying.
+  downloaded by the server, never from CI). No docker group for CI. Migrated
+  2026-10-11 (old `deploy` user and `RELAY_SSH_KEY` gone, fallback removed). Change the wrapper by re-running bootstrap, not by deploying.
   Residual: one host/Docker daemon, root code from `main`; see `docs/audit-scope.md` §10.
 - **Hosted relay (mainnet, prepared 2026-10-07, not deployed)**: `relay.zafe.cash`, same
   VPS, compose profile `mainnet` (`relay-mainnet`, `backup-mainnet`, `litestream-mainnet`

@@ -524,9 +524,10 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] Mainnet relay: second compose service + `relay.zafe.cash` + Litestream to object
       storage + a `relay-mainnet` environment with required reviewers that promotes a
       digest already on testnet
-- [ ] Deploy-key split (files prepared 2026-10-07): the user runs the migration in
-      `infra/relay/README.md` ("Migrating a running server"); then delete the legacy
-      `RELAY_SSH_KEY` fallback in `relay-deploy.yml`. Consider a separate host for mainnet.
+- [x] Deploy-key split (2026-10-11): `bootstrap.sh` run on the VPS, `RELAY_TESTNET_SSH_KEY`
+      set, testnet deploy green on it, old `deploy` user and `RELAY_SSH_KEY` deleted, legacy
+      branch removed from `relay-deploy.yml`. Left: delete the local key copies in
+      `~/.config/zafe/relay-keys` (`shred -u`); consider a separate host for mainnet.
 - [x] Mainnet beta: "beta" label only, no cap (decided 2026-10-07: no relay vault limit, no
       per-vault fund limit)
 
