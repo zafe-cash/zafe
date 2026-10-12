@@ -37,7 +37,7 @@ no waitlist or address collected.
    ```
 3. **GitHub settings** of the repo (Settings > Secrets and variables > Actions):
    - Variables: `ZAFE_RELAY_URL` = `https://testnet.relay.zafe.cash` (set 2026-10-06). `ZAFE_LINK_HOST` =
-     `zafe.cash` (set 2026-10-01; the site serves `assetlinks.json` with this key's
+     `zafe.cash` (mainnet builds) and `ZAFE_TESTNET_LINK_HOST` = `testnet.zafe.cash` (testnet builds; same site on a second domain, so links are separate; set 2026-10-12) (set 2026-10-01; the site serves `assetlinks.json` with this key's
      fingerprint). Without it, invites are `zafe://` links, which only work where Zafe
      is installed.
    - Environment `android-release` (set 2026-10-06): deployment policy **tags `v*` only**,

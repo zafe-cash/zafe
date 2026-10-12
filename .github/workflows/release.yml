@@ -7,7 +7,8 @@ name: Release (Android)
 # Needs, see docs/releasing.md:
 #   repository variables
 #     ZAFE_RELAY_URL             the deployed testnet relay (https://testnet.relay.zafe.cash)
-#     ZAFE_LINK_HOST             optional: host of the invite landing site (infra/site/),
+#     ZAFE_TESTNET_LINK_HOST     optional: host of the invite landing site for testnet builds
+#                                (testnet.zafe.cash: the same site, a second domain; infra/site/),
 #                                e.g. zafe.cash; without it invites are zafe:// links
 #   secrets of the environment `android-release` (only v* tags may use it, so no branch or
 #   pull-request workflow can read the signing key)
@@ -39,7 +40,7 @@ jobs:
     environment: android-release
     env:
       ZAFE_RELAY_URL: ${{ vars.ZAFE_RELAY_URL }}
-      ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+      ZAFE_LINK_HOST: ${{ vars.ZAFE_TESTNET_LINK_HOST }}
     steps:
       - uses: actions/checkout@v5
 
