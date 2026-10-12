@@ -107,6 +107,8 @@ enum Command {
     Approve { proposal: String },
     /// Reject a proposal.
     Reject { proposal: String },
+    /// Cancel a proposal this member authored (open or approved, not yet sent).
+    Cancel { proposal: String },
     /// Leader: send signing requests for an approved proposal.
     Request { proposal: String },
     /// Answer pending signing requests.
@@ -443,6 +445,17 @@ async fn main() -> Result<()> {
             .await?;
             node::SentTxs::in_dir(home.path(state_dir::SENT)).put(&sent);
             println!("broadcast txid {}", hex_txid(&sent.txid));
+        }
+        Command::Cancel { proposal } => {
+            node::cancel(
+                &relay,
+                &home.identity()?,
+                &home.material()?,
+                parse_proposal(&proposal)?,
+                &mut rng,
+            )
+            .await?;
+            println!("cancelled");
         }
         Command::Reject { proposal } => {
             node::reject(

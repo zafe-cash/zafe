@@ -556,7 +556,7 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - Gate
   - [ ] **(you)** Engage the external audit (`docs/audit-scope.md`); record the audit commit here
 - Validation
-  - [ ] Mainnet dry run with real funds (see the release plan below): create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
+  - [x] Mainnet dry run with real funds (done 2026-10-12, see the release plan below): create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
   - [ ] Device run of seat move and share repair
   - [ ] Check the Verdigris colours on a device
 - Release
@@ -580,15 +580,19 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 
 - [x] `mainnet-v0.1.1` published (pre-release; stall fix, low-rate animation, derived wallet key, secure storage 11.2.0,
       cancel-setup UI); mainnet relay promoted to digest `85153e1b` (cancel route), soak bypassed to 3 h.
-- [ ] **Mainnet dry run with real funds (you, small amount; I act as CLI co-signer on mainnet)**: install `0.1.1` over
-      `0.1.0` (the wallet DB resyncs once), create a 2-of-2 vault, receive, propose, approve, send, restore from a
-      backup, check the first sync time. Mainnet sends work until NU7 activates.
-- [x] **Restore wedged signing (found by the mainnet restore test, 2026-10-12): fixed in code** with
-      `VAULT_EVENT` 8 `PoolReset` (AGENTS.md "Restore vs one-tap"). Still to do: ship it (all members must
-      update first), then re-run the dry run: restore the phone, propose, approve, send. The `dry-run` vault
-      (mainnet, 0.0004 ZEC) has an Approved but unsendable proposal (77afa62f) holding its note until expiry
-      (7 days); the CLI has no cancel. Restore itself works (same vault, address, signer key; ~6 s).
-- [ ] **Guard release `mainnet-v0.1.2` (small, this week)**: at *propose* time compare the server's
+- [x] **Mainnet dry run with real funds (2026-10-12, done)**: release-signed `0.1.1` updated in place from `0.1.0`
+      (then `0.1.2`), 2-of-2 vault with the CLI as co-signer. Keygen ~10 s, first sync ~11 s, receive, propose,
+      push notification (~5 s), approve, broadcast, mined (twice); backup, remove, restore (same vault, address,
+      signer key); after the `PoolReset` fix a restored phone signs again. **Not covered, say so in announcements:**
+      two real phones (the co-signer was the CLI), seat moves / share repair on a device, a larger vault (3-of-5),
+      sending through Tor on mainnet, iOS (never built), an external audit (none yet, disclosed in the FAQ and
+      release notes), a device restored with a pre-0.1.2 build (keeps its dead pool).
+- [x] **Restore wedged signing (found by the mainnet restore test, 2026-10-12): fixed and verified on mainnet.**
+      `VAULT_EVENT` 8 `PoolReset` (AGENTS.md "Restore vs one-tap"), shipped as `mainnet-v0.1.2`. Re-test with the
+      release APK: backup, remove, restore, CLI approved first, the restored phone approved, sent (txid 75b60fd6...
+      mined). Not covered: a device restored with an *older* build keeps its dead pool (nobody outside the team
+      has restored yet); the reset only runs on a restore by a version 8 app. Dry run vault now empty.
+- [ ] **Guard release `mainnet-v0.1.3` (`mainnet-v0.1.2` shipped as the restore fix, without the guard)**: at *propose* time compare the server's
       `consensus_branch_id` (GetLightdInfo) with the branch the app would build; on a mismatch refuse with "Update Zafe"
       (also as a sync-status notice) instead of failing at broadcast after two approvals; refuse proposals whose expiry
       would cross a known NU7 activation height; mark open proposals "needs a new proposal" once the branch changed;
