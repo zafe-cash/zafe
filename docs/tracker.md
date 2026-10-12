@@ -593,6 +593,10 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).
       Dates: 2026-10-20 mainnet height decision; ~10-27 release candidate on testnet; ~10-28..31 tag `v…` then
       `mainnet-v…` on the same commit; announce on the site and X, message early users; 11-05 activation.
+- [x] Mainnet push (2026-10-12): `relay-mainnet` had no `RELAY_FCM_SERVICE_ACCOUNT_JSON`, so `relay.zafe.cash` couldn't push
+      (members would only get background-check notifications, up to ~15 min late). Key added from the same
+      Firebase project (zafe-18c4d), relay redeployed (digest 85153e1b): log "FCM pushes enabled", a push reached the
+      phone ~1 s after a log entry (FLTFireMsg -> `vault check`). Still to see: a real "needs your approval" notification.
 - [ ] Heads-up copy for early users (site FAQ/banner + release notes): "an update is required before Nov 5; funds are
       never at risk, sending pauses until you update".
 - [ ] Re-run the release-signed in-place update test for the NU7 release (v0.1.8 -> v0.1.10 passed on 2026-10-12).
