@@ -28,6 +28,7 @@ import '../rust/api/tor.dart';
 import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
 import 'vault_updates.dart';
+import '../core/storage/wallet_key.dart';
 
 /// Vault notifications (spec §6.1). The relay is blind: a push (FCM) or a periodic
 /// background check (WorkManager) only wakes the app; it then reads the encrypted vault
@@ -332,7 +333,7 @@ Future<void> _checkVault(
     final material = v.material!;
     final paths = await ZafePaths.get();
     final stateDir = await paths.stateDir(v.id);
-    final dbKey = await ZafeSecureStore.instance.walletKey(v.id);
+    final dbKey = walletKeyFor(seeds, v.id);
     final summary = rust_vault.vaultSummary(material: material);
     debugPrint('vault check: ${summary.name}');
 

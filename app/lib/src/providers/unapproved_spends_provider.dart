@@ -3,11 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/errors/zafe_error_copy.dart';
 import '../core/storage/zafe_paths.dart';
-import '../core/storage/zafe_secure_store.dart';
 import '../notifications/vault_watch.dart' show recordSeen;
 import '../rust/api/spends.dart' as rust;
 import 'endpoints_provider.dart';
 import 'vault_provider.dart';
+import '../core/storage/wallet_key.dart';
 
 /// Vault spends the log doesn't account for (spec §10.4.4): money that left without an
 /// approved payment, so keys were used outside Zafe. Empty when all is well. Reloads after
@@ -44,7 +44,7 @@ class UnapprovedSpendsNotifier
       final items = await rust.unapprovedSpends(
         relayUrl: ref.read(endpointsProvider).relayUrl,
         dbDir: paths.dbDir,
-        dbKey: await ZafeSecureStore.instance.walletKey(vaultId),
+        dbKey: walletKeyFor(seeds, vaultId),
         seeds: seeds,
         material: material,
       );

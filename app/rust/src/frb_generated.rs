@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1137207289;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1778545243;
 
 // Section: executor
 
@@ -2170,6 +2170,38 @@ fn wire__crate__api__vault__vault_viewing_key_impl(
         },
     )
 }
+fn wire__crate__api__vault__wallet_db_key_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "wallet_db_key",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_vault_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok =
+                    Result::<_, ()>::Ok(crate::api::vault::wallet_db_key(api_seeds, api_vault_id))?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__mempool__watch_mempool_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3311,9 +3343,9 @@ fn pde_ffi_dispatcher_primary_impl(
         50 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
         54 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
         55 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3348,6 +3380,7 @@ fn pde_ffi_dispatcher_sync_impl(
         53 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
         56 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
         57 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

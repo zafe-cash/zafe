@@ -81,7 +81,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1137207289;
+  int get rustContentHash => 1778545243;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -394,6 +394,11 @@ abstract class RustLibApi extends BaseApi {
   VaultSummary crateApiVaultVaultSummary({required List<int> material});
 
   String crateApiVaultVaultViewingKey({required List<int> material});
+
+  Uint8List crateApiVaultWalletDbKey({
+    required List<int> seeds,
+    required String vaultId,
+  });
 
   Stream<MempoolEvent> crateApiMempoolWatchMempool({
     required int watchId,
@@ -2457,6 +2462,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Uint8List crateApiVaultWalletDbKey({
+    required List<int> seeds,
+    required String vaultId,
+  }) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(seeds, serializer);
+          sse_encode_String(vaultId, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiVaultWalletDbKeyConstMeta,
+        argValues: [seeds, vaultId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiVaultWalletDbKeyConstMeta => const TaskConstMeta(
+    debugName: "wallet_db_key",
+    argNames: ["seeds", "vaultId"],
+  );
+
+  @override
   Stream<MempoolEvent> crateApiMempoolWatchMempool({
     required int watchId,
     required String lightwalletdUrl,
@@ -2479,7 +2513,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 58,
+              funcId: 59,
               port: port_,
             );
           },
@@ -2530,7 +2564,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 59,
+              funcId: 60,
               port: port_,
             );
           },
@@ -2561,7 +2595,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 61,
             port: port_,
           );
         },

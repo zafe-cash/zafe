@@ -118,6 +118,15 @@ VaultSummary vaultSummary({required List<int> material}) =>
 String vaultViewingKey({required List<int> material}) =>
     RustLib.instance.api.crateApiVaultVaultViewingKey(material: material);
 
+/// The vault's wallet database key (32 random bytes the app keeps in secure storage).
+/// The key that encrypts a vault's wallet database, derived from this device's identity
+/// seeds and the vault id. Nothing is stored (see `WalletKey::derive`).
+Uint8List walletDbKey({required List<int> seeds, required String vaultId}) =>
+    RustLib.instance.api.crateApiVaultWalletDbKey(
+      seeds: seeds,
+      vaultId: vaultId,
+    );
+
 /// The chain tip lightwalletd reports: one cheap call. The app runs `sync_vault` only
 /// when it moved since the last successful sync (or when something else changed).
 Future<int> chainTip({required String lightwalletdUrl}) => RustLib.instance.api

@@ -6,11 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/feedback/payment_feedback.dart';
 import '../core/storage/zafe_paths.dart';
-import '../core/storage/zafe_secure_store.dart';
 import '../notifications/vault_watch.dart' show recordSeen;
 import '../rust/api/received.dart' as rust;
 import 'payment_sounds_provider.dart';
 import 'vault_provider.dart';
+import '../core/storage/wallet_key.dart';
 
 class ReceivedState {
   const ReceivedState({this.items = const [], this.loaded = false});
@@ -60,7 +60,7 @@ class ReceivedNotifier extends Notifier<ReceivedState> {
       final paths = await ZafePaths.get();
       final items = await rust.listReceived(
         dbDir: paths.dbDir,
-        dbKey: await ZafeSecureStore.instance.walletKey(vaultId),
+        dbKey: walletKeyFor(ref.read(vaultProvider).identity!, vaultId),
         material: material,
       );
       // The vault may have changed while reading.

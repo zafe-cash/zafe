@@ -295,10 +295,18 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `WalletDb::for_path` can't take a key, so `open_wallet_db` opens the connection itself,
   loads `rusqlite::vtab::array` (what `for_path` does) and uses `WalletDb::from_connection`.
   The received-payments read-only connection takes the same key. The key (`WalletKey`) is
-  32 random bytes per vault in `ZafeSecureStore` (`zafe_vault_<id>_walletKey`, made on
-  first use by `walletKey(id)`), passed to every wallet bridge call as `dbKey`. **Not in
+  **derived, not stored** (2026-10-12): `WalletKey::derive(identity_seeds, vault_id)` (BLAKE3
+  `derive_key` "Zafe wallet database key v1", length-prefixed), bridge `wallet_db_key`, Dart
+  `walletKeyFor(seeds, vaultId)`, passed to every wallet bridge call as `dbKey`. It used to be 32
+  random bytes per vault in `ZafeSecureStore` (`zafe_vault_<id>_walletKey`, made on first use),
+  but that put a secure-storage call on the sync path, and on Android such a call can go
+  unanswered for a minute right after key generation (a background engine using the same
+  storage): the first sync of a new vault stalled on it (report entry "sync failed at wallet key
+  after 45s", fresh vault on a Nothing phone, 2026-10-12). Derived from the seeds the app already
+  holds, every isolate gets the same key and nothing waits on storage. A database made with an
+  old stored key can't be opened and is handled like any unreadable one. **Not in
   backups**: the wallet is a chain-data cache; a DB the key can't open (plain DB from before
-  encryption, lost key, another isolate's racing key) is deleted by the bridge's
+  encryption, an older stored key) is deleted by the bridge's
   `open_wallet` and resynced from the birthday; `list_received` reads it as empty until
   then. No `sqlcipher_export` migration on purpose. The CLI keeps a dev key in
   `<home>/wallet.key` (plain file, like the rest of its state). SQLCipher logs key

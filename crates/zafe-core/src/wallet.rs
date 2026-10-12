@@ -108,6 +108,20 @@ impl WalletKey {
         Ok(Self::from_bytes(bytes))
     }
 
+    /// The key for one vault's wallet database, derived from this device's identity seeds
+    /// for that vault (BLAKE3 `derive_key`, domain-separated, length-prefixed). Nothing
+    /// is stored: a stored random key needed secure storage on the sync path, and on
+    /// Android that call can go unanswered for a minute right after key generation (a
+    /// background engine using the same storage). The seeds are what unlock the vault
+    /// anyway, so the key adds no exposure, and every isolate derives the same key.
+    pub fn derive(identity_seeds: &[u8], vault_id: &str) -> Self {
+        let mut hasher = blake3::Hasher::new_derive_key("Zafe wallet database key v1");
+        hasher.update(&(identity_seeds.len() as u64).to_le_bytes());
+        hasher.update(identity_seeds);
+        hasher.update(vault_id.as_bytes());
+        Self::from_bytes(*hasher.finalize().as_bytes())
+    }
+
     pub fn random() -> Self {
         let mut bytes = [0u8; 32];
         rand::RngCore::fill_bytes(&mut OsRng, &mut bytes);
@@ -1187,6 +1201,32 @@ impl Parameters for ZafeNetwork {
 mod tests {
     use super::*;
     use crate::keys::{VaultKeys, VaultSecret};
+
+    #[test]
+    fn the_wallet_key_is_derived_not_stored() {
+        let seeds = [7u8; 66];
+        let a = WalletKey::derive(&seeds, "vault-a");
+        // The same inputs give the same key in every isolate and after a restore.
+        assert_eq!(
+            a.as_bytes(),
+            WalletKey::derive(&seeds, "vault-a").as_bytes()
+        );
+        // Another vault or another identity gets another key.
+        assert_ne!(
+            a.as_bytes(),
+            WalletKey::derive(&seeds, "vault-b").as_bytes()
+        );
+        assert_ne!(
+            a.as_bytes(),
+            WalletKey::derive(&[8u8; 66], "vault-a").as_bytes()
+        );
+        // Moving bytes between the seeds and the id can't collide (length-prefixed).
+        assert_ne!(
+            WalletKey::derive(&[1, 2, 3], "x").as_bytes(),
+            WalletKey::derive(&[1, 2], "\x03x").as_bytes()
+        );
+    }
+
     use orchard::keys::{FullViewingKey, SpendingKey};
     use zcash_client_backend::data_api::chain::ChainState;
     use zcash_primitives::block::BlockHash;

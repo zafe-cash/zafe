@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -104,31 +103,6 @@ class ZafeSecureStore {
       _writeBytes(_recoveryKey, seeds);
 
   Future<void> deleteRecoveryIdentity() => _storage.delete(key: _recoveryKey);
-
-  final Map<String, Future<Uint8List>> _creatingWalletKey = {};
-
-  /// The key that encrypts this vault's wallet database (SQLCipher), made on first use.
-  /// Not part of backups: the wallet only caches chain data, so a restored vault (or one
-  /// whose key is lost) gets a new key and a fresh database that resyncs from the
-  /// birthday. Read from storage on every call (never cached): if the app and a
-  /// background isolate both create one, the stored key wins on the next call and the
-  /// wallet resyncs once.
-  Future<Uint8List> walletKey(String id) async {
-    final stored = await _readBytes(_key(id, 'walletKey'));
-    if (stored != null && stored.length == 32) return stored;
-    return _creatingWalletKey[id] ??= _createWalletKey(
-      id,
-    ).whenComplete(() => _creatingWalletKey.remove(id));
-  }
-
-  Future<Uint8List> _createWalletKey(String id) async {
-    final random = Random.secure();
-    final key = Uint8List.fromList(
-      List<int>.generate(32, (_) => random.nextInt(256)),
-    );
-    await _writeBytes(_key(id, 'walletKey'), key);
-    return await _readBytes(_key(id, 'walletKey')) ?? key;
-  }
 
   /// Last known balance in zatoshis, for the vault switcher (kept here rather than in
   /// the summary file so it isn't readable outside the keystore-backed storage).

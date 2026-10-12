@@ -11,7 +11,6 @@ import '../../core/errors/zafe_error_copy.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/zafe_paths.dart';
-import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
@@ -24,6 +23,7 @@ import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
 import '../../rust/api/history.dart' as rust_history;
 import 'activity_feed.dart';
+import '../../core/storage/wallet_key.dart';
 
 /// Exports the vault history as CSV (spec §11.3) through the share sheet. It lists every
 /// payment and memo, so it asks for an unlock first.
@@ -41,7 +41,7 @@ Future<void> exportHistory(BuildContext context, WidgetRef ref) async {
     final csv = await rust_history.exportHistoryCsv(
       relayUrl: ref.read(endpointsProvider).relayUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       names: MemberNames.toSigners(

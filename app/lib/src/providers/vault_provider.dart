@@ -12,6 +12,7 @@ import '../core/errors/zafe_error_copy.dart';
 import '../core/network/tor_setting.dart' show kUseTorKey;
 import '../core/storage/vault_summaries.dart';
 import '../core/storage/zafe_paths.dart';
+import '../core/storage/wallet_key.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../rust/api/vault.dart' as rust;
 import '../core/security/app_lock.dart';
@@ -466,9 +467,7 @@ class VaultNotifier extends Notifier<VaultState> {
         final paths = await ZafePaths.get().timeout(_preSyncStepTimeout);
         lap('paths');
         step = 'wallet key';
-        final dbKey = await ZafeSecureStore.instance
-            .walletKey(vaultId)
-            .timeout(_preSyncStepTimeout);
+        final dbKey = walletKeyFor(seeds, vaultId);
         lap('wallet key');
         step = 'rust sync';
         return rust.syncVault(

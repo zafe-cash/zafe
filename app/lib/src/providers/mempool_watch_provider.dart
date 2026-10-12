@@ -5,12 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/errors/zafe_error_copy.dart';
 import '../core/storage/zafe_paths.dart';
-import '../core/storage/zafe_secure_store.dart';
 import '../rust/api/mempool.dart' as rust;
 import 'endpoints_provider.dart';
 import 'mempool_watch_policy.dart';
 import 'received_provider.dart';
 import 'vault_provider.dart';
+import '../core/storage/wallet_key.dart';
 
 /// Watches lightwalletd's mempool for the active vault while the app is in the foreground,
 /// so an incoming payment shows as pending before it is mined (Rust stores it in the
@@ -34,7 +34,7 @@ final mempoolWatchProvider = Provider<MempoolWatchController>((ref) {
       }
       await previous?.cancel();
       final paths = await ZafePaths.get();
-      final dbKey = await ZafeSecureStore.instance.walletKey(target.vaultId);
+      final dbKey = walletKeyFor(vault.identity!, target.vaultId);
       if (disposed) return;
       final stream = rust.watchMempool(
         watchId: watchId,

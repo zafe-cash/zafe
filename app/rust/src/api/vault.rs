@@ -305,6 +305,13 @@ pub(crate) fn wallet_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 /// The vault's wallet database key (32 random bytes the app keeps in secure storage).
+/// The key that encrypts a vault's wallet database, derived from this device's identity
+/// seeds and the vault id. Nothing is stored (see `WalletKey::derive`).
+#[flutter_rust_bridge::frb(sync)]
+pub fn wallet_db_key(seeds: Vec<u8>, vault_id: String) -> Vec<u8> {
+    WalletKey::derive(&seeds, &vault_id).as_bytes().to_vec()
+}
+
 pub(crate) fn wallet_key(db_key: &[u8]) -> Result<WalletKey, ZafeError> {
     WalletKey::from_slice(db_key).map_err(|_| ZafeError::invalid("wallet key must be 32 bytes"))
 }

@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/config/endpoints.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/storage/zafe_paths.dart';
-import '../core/storage/zafe_secure_store.dart';
 import '../core/storage/vault_summaries.dart';
 import '../notifications/vault_updates.dart' show actionableCount;
 import '../notifications/vault_watch.dart' show recordSeen, reregisterPush;
@@ -17,6 +16,7 @@ import '../rust/api/relay_log.dart' as rust_relay_log;
 import '../rust/api/repair.dart' as rust_repair;
 import 'endpoints_provider.dart';
 import 'vault_provider.dart';
+import '../core/storage/wallet_key.dart';
 
 /// A send in progress (or just failed) on this device.
 class SendState {
@@ -267,7 +267,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         relayUrl: _endpoints.relayUrl,
         lightwalletdUrl: _endpoints.lightwalletdUrl,
         dbDir: paths.dbDir,
-        dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+        dbKey: walletKeyFor(vault.identity!, vault.activeId!),
         stateDir: await paths.stateDir(vault.activeId!),
         seeds: vault.identity!,
         material: vault.material!,
@@ -289,7 +289,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       payments: payments,
@@ -306,7 +306,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       proposalId: id,
@@ -322,7 +322,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       stateDir: await paths.stateDir(vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
@@ -460,7 +460,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       proposalId: id,
@@ -495,7 +495,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
           relayUrl: _endpoints.relayUrl,
           lightwalletdUrl: _endpoints.lightwalletdUrl,
           dbDir: paths.dbDir,
-          dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+          dbKey: walletKeyFor(vault.identity!, vault.activeId!),
           stateDir: await paths.stateDir(vault.activeId!),
           seeds: vault.identity!,
           material: vault.material!,
