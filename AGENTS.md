@@ -1024,14 +1024,20 @@ Learned while studying it:
   `ZafeErrorKind::{Network, Tls, NetworkTimeout, ServerBehind, WrongNetwork,
   WalletDatabase}` plus `ZafeError.endpoint` (`Relay`/`Lightwalletd`/`None`). The relay
   client now has a 10 s connect / 60 s request timeout (it had none).
-- **Sync status animation** (2026-10-12): the shimmer + breathing glow in `MobileTopNav` is
-  Vizor's code unchanged, but Vizor animates only a real catch-up while ours ran for every
-  `vault.syncing` (minutes on a stall or over Tor) and re-blurs a shadow per frame (raster thread
-  ~60% of a core on a Nothing phone). It now runs 10 s per syncing episode (`_SyncStatusMotion.budget`),
-  inside a `RepaintBoundary`, then the label stays still. **First-sync stall**: a new vault's first
-  sync sat 6 min (= `_syncTimeout`) before Rust was called (Rust itself: ~9 s over Tor, see
-  "Slow steps"); the steps before the Rust call (paths, wallet key) now time out in 45 s and a stuck or
-  slow (>45 s) sync is recorded in the report as `slow-sync` / `sync` entries naming the step.
+- **Sync status animation** (2026-10-12): the shimmer + breathing glow in `MobileTopNav` is Vizor's
+  widget, but it ran an `AnimationController` (a frame per vsync, ~120/s on a 120 Hz phone) for the
+  whole sync. Profiled with `flutter run --profile`/`flutter attach` + the VM-service timeline on a
+  Nothing phone: every frame costs ~5 ms of raster time (Impeller re-encodes the whole screen), so a
+  continuous animation held the raster thread at 70-78% of a core. Bisecting the Home scene (vault
+  card, tab-bar backdrop blur, scroll fade) showed **no single widget is the cost**: with all three
+  hidden a frame still cost 3.3 ms, and the shimmer/glow added only ~1 ms. So the fix is the frame
+  rate, not the widget: a `Timer` steps the sweep and glow every 60 ms (~16/s,
+  `_SyncStatusMotion.frameInterval`), no ticker, so the engine draws ~16 frames/s: raster ~15% of a
+  core (measured), no cap needed. Any new indeterminate animation should do the same (or be short):
+  Impeller has no partial repaint, so anything that animates redraws the whole screen. Tests:
+  `test/mobile_top_nav_motion_test.dart` (no frame scheduled between ticks). **First-sync stall**
+  (separate cause): see the wallet-key note under "Wallet DB is encrypted"; the steps before the Rust
+  call time out in 45 s and a slow/stuck sync is recorded in the report as `slow-sync` / `sync` entries.
 - **Sync status**: "First sync..." while the first sync of a vault on this device runs (`VaultState.firstSync`:
   no saved sync time); the
   sync sheet says "First sync" / "Syncing" while a sync runs (it used to say "Vault in sync"

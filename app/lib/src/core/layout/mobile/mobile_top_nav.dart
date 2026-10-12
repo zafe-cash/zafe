@@ -403,11 +403,12 @@ class _AvatarPlaceholder extends StatelessWidget {
 abstract final class _SyncStatusMotion {
   static const period = Duration(milliseconds: 1400);
 
-  /// A sync can last minutes (a slow network, Tor), and the shimmer and the breathing
-  /// glow re-mask and re-blur every frame (the raster thread sat at ~60% of a core on a
-  /// phone). So the motion runs this long per syncing episode, then the label stays
-  /// still; the text keeps saying what is happening.
-  static const budget = Duration(seconds: 10);
+  /// How often the sweep and the glow move. Not every vsync: any change redraws the whole
+  /// screen (about 5 ms of raster time per frame on a phone, measured with the profiler:
+  /// the cost is the redraw itself, whatever the widget), and a display runs at 60-120 Hz,
+  /// so a per-vsync animation held a core at ~70% for as long as a sync lasted. A 1.4 s
+  /// sweep stays smooth at ~16 updates a second and costs about a seventh of that.
+  static const frameInterval = Duration(milliseconds: 60);
 
   /// Half-width of the shimmer highlight band as a gradient-stop fraction.
   /// Kept narrow for a gentle, low-contrast sparkle.
@@ -436,8 +437,8 @@ abstract final class _SyncStatusMotion {
 
 /// The right-aligned sync status: the label plus the edge glow bar.
 ///
-/// While [animated] (the live syncing state, reduced-motion off) a single
-/// [AnimationController] drives a bright shimmer band sweeping across
+/// While [animated] (the live syncing state, reduced-motion off) a timer steps a bright
+/// shimmer band sweeping across
 /// the label and a slow breathing pulse on the edge bar, so the two
 /// read as one "actively working" affordance. Otherwise — synced, failed,
 /// or reduced-motion — it renders the same static label + bar as before.
@@ -462,23 +463,14 @@ class _SyncStatus extends StatefulWidget {
   State<_SyncStatus> createState() => _SyncStatusState();
 }
 
-class _SyncStatusState extends State<_SyncStatus>
-    with SingleTickerProviderStateMixin {
-  AnimationController? _controller;
-
-  /// Ends the motion once [_SyncStatusMotion.budget] is used up.
-  Timer? _budget;
-  bool _spent = false;
-
-  AnimationController get _activeController {
-    return _controller ??= AnimationController(
-      vsync: this,
-      duration: _SyncStatusMotion.period,
-    );
-  }
+class _SyncStatusState extends State<_SyncStatus> {
+  /// 0..1 through one [_SyncStatusMotion.period], stepped by [_ticker].
+  final _progress = ValueNotifier<double>(0);
+  final _clock = Stopwatch();
+  Timer? _ticker;
 
   bool get _shouldAnimate {
-    if (!widget.animated || _spent) {
+    if (!widget.animated) {
       return false;
     }
     return !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
@@ -500,35 +492,30 @@ class _SyncStatusState extends State<_SyncStatus>
   }
 
   void _syncAnimation() {
-    if (!widget.animated) {
-      // The episode is over: the next one gets a fresh budget.
-      _budget?.cancel();
-      _budget = null;
-      _spent = false;
-    }
     if (_shouldAnimate) {
-      if (!_activeController.isAnimating) {
-        _activeController.repeat();
+      if (_ticker == null) {
+        _clock
+          ..reset()
+          ..start();
+        _ticker = Timer.periodic(_SyncStatusMotion.frameInterval, (_) {
+          _progress.value =
+              (_clock.elapsedMilliseconds %
+                  _SyncStatusMotion.period.inMilliseconds) /
+              _SyncStatusMotion.period.inMilliseconds;
+        });
       }
-      _budget ??= Timer(_SyncStatusMotion.budget, () {
-        if (!mounted) return;
-        setState(() => _spent = true);
-        _syncAnimation();
-      });
     } else {
-      final controller = _controller;
-      if (controller != null) {
-        controller
-          ..stop()
-          ..value = 0;
-      }
+      _ticker?.cancel();
+      _ticker = null;
+      _clock.stop();
+      _progress.value = 0;
     }
   }
 
   @override
   void dispose() {
-    _budget?.cancel();
-    _controller?.dispose();
+    _ticker?.cancel();
+    _progress.dispose();
     super.dispose();
   }
 
@@ -557,9 +544,9 @@ class _SyncStatusState extends State<_SyncStatus>
     }
 
     return AnimatedBuilder(
-      animation: _activeController,
+      animation: _progress,
       builder: (context, _) {
-        final t = _activeController.value;
+        final t = _progress.value;
         final glow = _SyncStatusMotion.glowFor(t);
         return Row(
           mainAxisSize: MainAxisSize.min,
