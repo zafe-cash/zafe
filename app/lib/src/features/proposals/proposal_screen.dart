@@ -413,6 +413,18 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
               style: note,
             ),
           ],
+          // A payment that can't be sent (it fails the check, for example after a network
+          // upgrade) must still be cancellable by its author, or it holds its notes until it
+          // expires.
+          if (p.isMine) ...[
+            const SizedBox(height: AppSpacing.s),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: _cancelling || _voting ? null : () => _cancel(p),
+              child: Text(_cancelling ? 'Cancelling...' : 'Cancel payment'),
+            ),
+          ],
         ],
       ];
     }
