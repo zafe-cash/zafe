@@ -407,6 +407,17 @@ pub struct SeatMove {
     pub code: String,
 }
 
+/// A device restored from a backup has no signing nonces, so its next refresh retires the
+/// commitments the previous device published and publishes a fresh pool (see
+/// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the
+/// vault's signing state directory, which backups never contain.
+pub fn mark_pool_reset(state_dir: String) -> Result<(), ZafeError> {
+    fs::create_dir_all(&state_dir).map_err(anyhow::Error::from)?;
+    fs::write(PathBuf::from(&state_dir).join(state_dir::POOL_RESET), b"1")
+        .map_err(anyhow::Error::from)?;
+    Ok(())
+}
+
 /// Every proposal in the vault log, newest first. Also keeps this device ready for
 /// one-tap signing: tops up its pre-published commitments when they run low, and deletes
 /// nonces of proposals that closed or expired (as of `tip_height`, the synced tip, when
@@ -422,9 +433,16 @@ pub fn list_proposals(
     let m = self::material(&material)?;
     let relay = RelayClient::new(relay_url);
     let mut pool = pool_store(&state_dir);
+    // A device just restored from a backup retires the commitments its previous device
+    // published (see `node::top_up_pool`); the marker is removed once that is logged.
+    let reset_marker = PathBuf::from(&state_dir).join(state_dir::POOL_RESET);
+    let reset = reset_marker.exists();
     let mut watch = crate::diag::Stopwatch::new("proposals");
     let state = runtime().block_on(async {
-        node::top_up_pool(&relay, &me, &m, &mut pool, &mut OsRng).await?;
+        node::top_up_pool(&relay, &me, &m, &mut pool, reset, &mut OsRng).await?;
+        if reset {
+            let _ = std::fs::remove_file(&reset_marker);
+        }
         watch.lap("pool");
         let (_, state) = node::load_state(&relay, &me, &m).await?;
         watch.lap("log");

@@ -1209,3 +1209,92 @@ fn broadcast_txid_must_match_the_pczt() {
     assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Broadcast);
     assert!(s.ignored.is_empty());
 }
+
+// --- Pool reset (VAULT_EVENT 8): a restored device retires its dead commitments ----------
+
+/// The commitments of a `commitments(..)` event.
+fn batch_of(event: &VaultEvent) -> Vec<Vec<u8>> {
+    match event {
+        VaultEvent::Commitments { batch } => batch.clone(),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn a_pool_reset_retires_only_the_unassigned_commitments() {
+    let mut log = pooled_log(4);
+    log.push(0, &proposal(1));
+    let before = log.replay().unwrap();
+    let m1 = log.ids[1].public().sig_pk;
+    assert_eq!(before.pools[&m1].commitments.len(), 4);
+    let assigned = before.pools[&m1].next;
+    assert!(assigned > 0, "the proposal took some of m1's commitments");
+
+    // m1's device is restored from a backup: it has no nonces, so it retires the rest.
+    log.push(1, &VaultEvent::PoolReset);
+    let after = log.replay().unwrap();
+    assert!(after.ignored.is_empty());
+    assert_eq!(after.pools[&m1].commitments.len(), assigned);
+    assert_eq!(after.pools[&m1].available(), 0);
+    // Proposals already assigned keep their commitments; other members' pools are untouched.
+    assert_eq!(
+        after.proposals[&[1; 16]].preprocessed,
+        before.proposals[&[1; 16]].preprocessed
+    );
+    for m in [0, 2] {
+        let pk = log.ids[m].public().sig_pk;
+        assert_eq!(after.pools[&pk], before.pools[&pk]);
+    }
+
+    // With no pool, m1 is in no assigned group (it signs interactively) ...
+    log.push(0, &proposal(2));
+    let s = log.replay().unwrap();
+    let pre = s.proposals[&[2; 16]].preprocessed.as_ref().unwrap();
+    assert!(
+        pre.groups_of(&m1).is_empty(),
+        "no dead commitment is assigned"
+    );
+    assert_eq!(pre.subsets.len(), 1, "only the group without m1 is one-tap");
+
+    // ... and the fresh pool it publishes next is what gets assigned, not the old one.
+    let mut rng = StdRng::seed_from_u64(1234);
+    let fresh = commitments(&mut rng, 4);
+    log.push(1, &fresh);
+    log.push(0, &proposal(3));
+    let s = log.replay().unwrap();
+    let pre = s.proposals[&[3; 16]].preprocessed.as_ref().unwrap();
+    let groups = pre.groups_of(&m1);
+    assert!(!groups.is_empty(), "m1 is back in one-tap groups");
+    let published = batch_of(&fresh);
+    for g in groups {
+        let c = pre.commitment(g, 0, &m1).unwrap();
+        assert!(published.iter().any(|f| f.as_slice() == c));
+    }
+}
+
+#[test]
+fn a_pool_reset_is_only_valid_in_a_version_8_event() {
+    let mut log = pooled_log(4);
+    let m1 = log.ids[1].public().sig_pk;
+    let mut bytes = VaultEvent::PoolReset.to_bytes().unwrap();
+    assert_eq!(&bytes[..2], &version::VAULT_EVENT.to_le_bytes());
+    // The same event under an older tag (a forged or corrupted entry) is ignored.
+    bytes[..2].copy_from_slice(&7u16.to_le_bytes());
+    log.push_raw(1, &bytes);
+    let s = log.replay().unwrap();
+    assert!(s.ignored.iter().any(|(_, e)| *e == VaultError::Encoding));
+    assert_eq!(s.pools[&m1].available(), 4, "nothing was retired");
+}
+
+#[test]
+fn a_pool_reset_without_a_pool_is_harmless() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push(2, &VaultEvent::PoolReset);
+    let s = log.replay().unwrap();
+    assert!(s.ignored.is_empty());
+    assert!(s
+        .pools
+        .get(&log.ids[2].public().sig_pk)
+        .is_none_or(|p| p.available() == 0));
+}

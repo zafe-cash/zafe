@@ -15,6 +15,7 @@ import '../core/storage/zafe_paths.dart';
 import '../core/storage/wallet_key.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../rust/api/vault.dart' as rust;
+import '../rust/api/proposals.dart' as proposals_api;
 import '../core/security/app_lock.dart';
 import 'device_lock_provider.dart' show kAppLockKey, kRequireUnlockKey;
 import 'endpoints_provider.dart';
@@ -339,7 +340,8 @@ class VaultNotifier extends Notifier<VaultState> {
   }
 
   /// Adds a vault restored from a backup and shows it. This device starts with no signing
-  /// nonces (backups never carry them) and publishes a fresh pool on its first refresh.
+  /// nonces (backups never carry them), so its first refresh retires the commitments the
+  /// previous device published (they can't be signed with) and publishes a fresh pool.
   Future<void> addRestoredVault({
     required String vaultId,
     required List<int> identity,
@@ -351,6 +353,9 @@ class VaultNotifier extends Notifier<VaultState> {
     }
     await _store.add(id: vaultId, identity: identity, invite: invite);
     await _store.writeMaterial(vaultId, material);
+    await proposals_api.markPoolReset(
+      stateDir: await (await ZafePaths.get()).stateDir(vaultId),
+    );
     state = state.copyWith(clearReturnTo: true);
     await _reload(activeId: vaultId);
     unawaited(sync());

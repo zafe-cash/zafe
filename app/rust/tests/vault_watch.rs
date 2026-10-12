@@ -118,6 +118,7 @@ fn vault_watch_reports_activity_and_stops() {
         &ids[1],
         &materials[1],
         &mut pool,
+        false,
         &mut rng,
     ))
     .unwrap();

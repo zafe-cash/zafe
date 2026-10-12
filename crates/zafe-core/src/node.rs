@@ -1850,14 +1850,41 @@ fn binomial(n: usize, k: usize) -> usize {
 
 /// Publishes fresh commitments when this member's pool is below half its target. Nonces
 /// are stored before the commitments are logged. Returns how many were published.
+///
+/// `reset`: this device was just restored from a backup, which carries no nonces. The
+/// commitments the previous device published and no proposal has used are dead (nothing
+/// here can sign with them), yet proposals would be assigned them one by one, and an
+/// approval that already carries shares is final, so a vault that needs this member could
+/// not complete a proposal for as long as they last. So the unassigned ones are retired
+/// first (`VaultEvent::PoolReset`) and a full fresh pool follows. Only the restore asks
+/// for it: two devices of one member (the advised way to move to a new phone) must not
+/// retire each other's pools.
 pub async fn top_up_pool<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,
     pool: &mut impl PoolStore,
+    reset: bool,
     rng: &mut R,
 ) -> Result<usize, NodeError> {
     let (mut chain, mut state) = load_state(relay, me, material).await?;
+    if reset
+        && state
+            .pools
+            .get(&me.public().sig_pk)
+            .is_some_and(|p| p.available() > 0)
+    {
+        append_event(
+            relay,
+            me,
+            material,
+            &mut chain,
+            &mut state,
+            &VaultEvent::PoolReset,
+            rng,
+        )
+        .await?;
+    }
     let available = state
         .pools
         .get(&me.public().sig_pk)

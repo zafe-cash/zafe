@@ -79,7 +79,12 @@ enum Command {
         auto_send: bool,
     },
     /// Publish fresh commitments so proposals can be signed at approval time (one tap).
-    Pool,
+    Pool {
+        /// First retire this member's unassigned commitments (use after this member's
+        /// nonces were lost, e.g. a state directory restored without its `pool` folder).
+        #[arg(long)]
+        reset: bool,
+    },
     /// Send a proposal whose approvals already carry every signature (one tap).
     Send { proposal: String },
     /// Export this member's seat as an encrypted backup (text form, as the app's "Copy as
@@ -407,11 +412,18 @@ async fn main() -> Result<()> {
             node::set_name(&relay, &home.identity()?, &material, &name, &mut rng).await?;
             println!("name set");
         }
-        Command::Pool => {
+        Command::Pool { reset } => {
             let material = home.material()?;
             let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
-            let n = node::top_up_pool(&relay, &home.identity()?, &material, &mut pool, &mut rng)
-                .await?;
+            let n = node::top_up_pool(
+                &relay,
+                &home.identity()?,
+                &material,
+                &mut pool,
+                reset,
+                &mut rng,
+            )
+            .await?;
             println!("published {n} commitment(s)");
         }
         Command::Send { proposal } => {
@@ -719,7 +731,7 @@ async fn vault(
             // Like the app: publish the one-tap commitment pool while every member is
             // present, so the first payment can be one tap.
             let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
-            let n = node::top_up_pool(relay, &me, &material, &mut pool, rng).await?;
+            let n = node::top_up_pool(relay, &me, &material, &mut pool, false, rng).await?;
             println!("published {n} commitment(s)");
         }
         VaultCmd::Show => {

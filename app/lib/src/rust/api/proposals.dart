@@ -40,6 +40,13 @@ BigInt? parseZec({required String text}) =>
 int memoLength({required String memo}) =>
     RustLib.instance.api.crateApiProposalsMemoLength(memo: memo);
 
+/// A device restored from a backup has no signing nonces, so its next refresh retires the
+/// commitments the previous device published and publishes a fresh pool (see
+/// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the
+/// vault's signing state directory, which backups never contain.
+Future<void> markPoolReset({required String stateDir}) =>
+    RustLib.instance.api.crateApiProposalsMarkPoolReset(stateDir: stateDir);
+
 /// Every proposal in the vault log, newest first. Also keeps this device ready for
 /// one-tap signing: tops up its pre-published commitments when they run low, and deletes
 /// nonces of proposals that closed or expired (as of `tip_height`, the synced tip, when

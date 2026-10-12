@@ -227,7 +227,9 @@ pub fn run_keygen(
         // Best effort: list_proposals tops up again on every refresh.
         if let Some(dir) = state_dir {
             let mut pool = FilePoolStore::new(PathBuf::from(dir).join(state_dir::POOL));
-            if let Err(e) = node::top_up_pool(&relay, &me, &material, &mut pool, &mut OsRng).await {
+            if let Err(e) =
+                node::top_up_pool(&relay, &me, &material, &mut pool, false, &mut OsRng).await
+            {
                 eprintln!("commitment pool after keygen: {e}");
             }
         }

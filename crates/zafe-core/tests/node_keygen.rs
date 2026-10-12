@@ -266,3 +266,86 @@ async fn a_full_relay_gets_a_typed_error() {
         "{err:?}"
     );
 }
+
+/// A device restored from a backup has no nonces: `top_up_pool(reset)` retires the pool the
+/// old device published and publishes a fresh one, so proposals are assigned commitments
+/// this device can sign with (found by the mainnet restore test).
+#[tokio::test]
+async fn a_restored_device_replaces_its_dead_pool() {
+    use zafe_core::{
+        node::top_up_pool,
+        session::{MemoryPoolStore, PoolStore},
+    };
+
+    let (relay, ids, invite, number) = setup().await;
+    let net = regtest_network();
+    let timeout = Duration::from_secs(60);
+    let (mut r0, mut r1, mut r2) = (
+        StdRng::seed_from_u64(11),
+        StdRng::seed_from_u64(12),
+        StdRng::seed_from_u64(13),
+    );
+    let (a, b, c) = tokio::join!(
+        run_keygen(
+            &relay,
+            &ids[0],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            Some(2),
+            None,
+            &mut r0,
+            timeout
+        ),
+        run_keygen(
+            &relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout
+        ),
+        run_keygen(
+            &relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout
+        ),
+    );
+    let (material, _, _) = (a.unwrap(), b.unwrap(), c.unwrap());
+    let me = ids[0].public().sig_pk;
+
+    // The original device publishes its pool.
+    let mut rng = StdRng::seed_from_u64(5);
+    let mut old_device = MemoryPoolStore::default();
+    let published = top_up_pool(&relay, &ids[0], &material, &mut old_device, false, &mut rng)
+        .await
+        .unwrap();
+    assert!(published > 0);
+    let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
+    let old: Vec<Vec<u8>> = state.pools[&me].commitments.clone();
+    assert_eq!(old.len(), published);
+
+    // The restored device has an empty store. Without a reset the log still counts the
+    // dead commitments as available, so nothing is published.
+    let mut restored = MemoryPoolStore::default();
+    assert_eq!(
+        top_up_pool(&relay, &ids[0], &material, &mut restored, false, &mut rng)
+            .await
+            .unwrap(),
+        0
+    );
+
+    // With the reset, the old ones are retired and a full fresh pool follows, all of it
+    // signable here.
+    let n = top_up_pool(&relay, &ids[0], &material, &mut restored, true, &mut rng)
+        .await
+        .unwrap();
+    assert_eq!(n, published);
+    let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
+    let pool = &state.pools[&me];
+    assert_eq!(pool.available(), published);
+    assert!(pool.commitments.iter().all(|c| !old.contains(c)));
+    assert!(pool.commitments.iter().all(|c| restored.contains(c)));
+    assert!(state.ignored.is_empty());
+
+    // Running the reset again right away only retires and republishes: still a full pool.
+    top_up_pool(&relay, &ids[0], &material, &mut restored, true, &mut rng)
+        .await
+        .unwrap();
+    let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
+    assert_eq!(state.pools[&me].available(), published);
+}

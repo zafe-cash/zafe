@@ -14,6 +14,10 @@ pub const REPAIR: &str = "repair";
 pub const SENT: &str = "sent";
 /// Commitment sets a leader already used (`node::encode_used_commitments`).
 pub const USED_COMMITMENTS: &str = "used_commitments.bin";
+/// Marker file: this device was restored from a backup, so its next refresh retires the
+/// commitments the previous device published and publishes a fresh pool
+/// (`node::top_up_pool` with `reset`). Written by the restore, removed after the reset.
+pub const POOL_RESET: &str = "pool-reset";
 /// Extension of a leader's saved signing request.
 pub const REQUEST_EXT: &str = "req";
 /// Extension of a leader's saved own signature shares.

@@ -7,7 +7,11 @@ use zcash_protocol::consensus::{BlockHeight, BranchId};
 #[tokio::main]
 async fn main() {
     for (name, url, net) in [
-        ("testnet", "https://testnet.zec.rocks:443", ZafeNetwork::Test),
+        (
+            "testnet",
+            "https://testnet.zec.rocks:443",
+            ZafeNetwork::Test,
+        ),
         ("mainnet", "https://zec.rocks:443", ZafeNetwork::Main),
     ] {
         let mut c = match connect(url).await {
@@ -17,7 +21,11 @@ async fn main() {
                 continue;
             }
         };
-        let info = c.get_lightd_info(service::Empty {}).await.unwrap().into_inner();
+        let info = c
+            .get_lightd_info(service::Empty {})
+            .await
+            .unwrap()
+            .into_inner();
         let h = info.block_height as u32;
         let ours = BranchId::for_height(&net, BlockHeight::from_u32(h + 1));
         println!(

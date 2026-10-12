@@ -33,7 +33,11 @@ pub const LOG_ENTRY: u16 = 1;
 /// txid the proposal's PCZT determines (the shielded sighash equals the v6 txid, which
 /// excludes signatures and proofs), else it is ignored. Version 1-6 broadcasts replay as
 /// before; an older app skips version 7 events.
-pub const VAULT_EVENT: u16 = 7;
+/// 8 (2026-10-12): `VaultEvent::PoolReset` (appended): the author retires its unassigned
+/// one-tap commitments, which a restore from a backup needs (a backup carries no nonces,
+/// so the old pool is dead). A reset is only valid in a version 8 event; an older app
+/// skips every version 8 event, so members must update together before anyone restores.
+pub const VAULT_EVENT: u16 = 8;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).

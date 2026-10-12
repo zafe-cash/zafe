@@ -91,6 +91,11 @@ impl Pool {
     pub fn available(&self) -> usize {
         self.commitments.len() - self.next
     }
+
+    /// Drops every unassigned commitment ([`VaultEvent::PoolReset`]).
+    pub fn reset(&mut self) {
+        self.commitments.truncate(self.next);
+    }
 }
 
 /// One-tap signing for a proposal: every signer group (t-subset of members, in descriptor
@@ -328,6 +333,13 @@ pub enum VaultEvent {
     RepairDone {
         replacement: u64,
     },
+    /// The author retires every one-tap commitment of theirs that no proposal has been
+    /// assigned yet, so the next ones they publish are the next ones assigned. Logged by a
+    /// device restored from a backup: the backup has no nonces, so the commitments the
+    /// previous device published can never be signed with, yet proposals would be assigned
+    /// them one by one. Proposals already assigned keep theirs (re-propose those). Event
+    /// version 8.
+    PoolReset,
 }
 
 /// Approvals collected so far for moving `old`'s seat to `new`.
@@ -873,6 +885,16 @@ impl VaultState {
                     .ok_or(VaultError::BadRepair(index))?;
                 r.done = true;
             }
+            VaultEvent::PoolReset => {
+                // Only a version 8 app can write it (older apps don't know the variant), so
+                // an older tag here is a forged or corrupted entry.
+                if event_version < POOL_RESET_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                if let Some(pool) = self.pools.get_mut(&author) {
+                    pool.reset();
+                }
+            }
         }
         Ok(())
     }
@@ -1051,6 +1073,9 @@ const PARTIAL_GROUPS_FROM: u16 = 6;
 
 /// First `VAULT_EVENT` version whose `Broadcast` txid is checked against the PCZT.
 const BROADCAST_CHECKED_FROM: u16 = 7;
+
+/// First `VAULT_EVENT` version that has [`VaultEvent::PoolReset`].
+const POOL_RESET_FROM: u16 = 8;
 
 fn check_descriptor_signatures(
     descriptor: &VaultDescriptor,
