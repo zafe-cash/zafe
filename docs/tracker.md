@@ -538,12 +538,12 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - Relay
   - [x] DNS `relay.zafe.cash`, R2 bucket `zafe-mainnet`, `relay-mainnet` environment with a required reviewer
   - [x] Server bootstrap, separate deploy keys, legacy key and `deploy` user removed (2026-10-11)
-  - [ ] **(you)** R2 token (Object Read & Write, scoped to the bucket) -> `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` (environment secrets)
-  - [ ] **(you)** Cloudflare account id -> `LITESTREAM_ENDPOINT` variable
-  - [ ] Push `d279413` (drops the legacy deploy fallback); testnet redeploys and the 24 h soak (`min_soak_hours`) starts
-  - [ ] Run `relay-mainnet.yml` with the digest testnet runs; reviewer approves
-  - [ ] `https://relay.zafe.cash/health` ok; Litestream uploads to R2 (never run against R2 yet)
-  - [ ] Test a restore on a scratch machine before real funds
+  - [x] R2 token -> `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` (environment secrets)
+  - [x] `LITESTREAM_ENDPOINT` = the EU-jurisdiction R2 host (`<account id>.eu.r2.cloudflarestorage.com`, no bucket in the URL)
+  - [x] Pushed (2026-10-12); soak bypassed with `min_soak_hours=0` for the first mainnet deploy (user's call)
+  - [x] `relay-mainnet.yml` run 38237861311 promoted testnet's digest `sha256:4aaf63b3...` (2026-10-12)
+  - [x] `https://relay.zafe.cash/health` ok; Litestream wrote snapshot + WAL to R2 (checked in its logs)
+  - [x] Restore from R2 checked (2026-10-12): `litestream restore` rebuilt the DB from snapshot + 2 WAL segments in a throwaway container on the VPS. Not yet on another machine, and the restored DB wasn't opened (no sqlite3 in the image)
 - Gate
   - [ ] **(you)** Engage the external audit (`docs/audit-scope.md`); record the audit commit here
 - Validation
