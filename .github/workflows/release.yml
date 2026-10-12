@@ -159,6 +159,11 @@ jobs:
             echo "0.125 TAZ per request, one payout per IP address every 24 hours. More in the"
             echo "[Zcash testnet guide](https://zcash.readthedocs.io/en/latest/rtd_pages/testnet_guide.html)."
             echo
+            echo "**Known issue: sending is blocked on testnet.** The testnet moved to the NU7 network upgrade on"
+            echo "2026-10-04 and this build doesn't support NU7 yet, so the network rejects payments (nothing is sent,"
+            echo "funds don't move). Creating a vault, receiving, proposing and approving work. Mainnet is not affected"
+            echo "until NU7 activates there (targeted 2026-11-05); Zafe will update before then."
+            echo
             echo "Relay: \`$ZAFE_RELAY_URL\` · size $size"
             echo
             echo "Verify: \`sha256sum -c $apk.sha256\`; signing certificate SHA-256:"
