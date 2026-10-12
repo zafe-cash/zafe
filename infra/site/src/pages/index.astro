@@ -15,6 +15,7 @@ import { downloadUrl, getLabel, getNote, getUrl, sourceUrl, specUrl, testnetUrl,
 
 const faq = [
   { q: 'Is Zafe safe to use?', a: 'Zafe is in beta on Zcash mainnet and hasn’t had an external audit yet. The app, the relay and the spec are open source, and the key is never in one place. Start with an amount you’re comfortable with, or try the testnet build first.' },
+  { q: 'Will I need to update?', a: 'Yes, before Zcash’s next network upgrade (NU7), planned for November 5. We’ll release a Zafe update that supports it; without it, payments are rejected by the network. Your funds stay safe either way. Everyone in a vault should run the same version, so update together.' },
   { q: 'Is it really a multisig?', a: 'Yes, just not on-chain. Each phone holds a key share (FROST), and enough shares make one ordinary signature.' },
   { q: 'What can the relay see?', a: 'Who messages whom, and when. Never amounts, addresses or keys. It can’t sign or move funds.' },
   { q: 'Does Zafe track me?', a: 'No. There are no analytics, no crash reports and no third-party SDKs, in the app or on this site. If something breaks, the app keeps a scrubbed error log on your phone, and it leaves only if you share it.' },
