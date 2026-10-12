@@ -1356,6 +1356,21 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   re-run regtest/bridge e2e (`ths` must run NU7) and the testnet end-to-end send, then ship a mainnet release
   that users install before activation. Until then testnet sends can't be tested; use regtest.
 
+- **NU7 port (branch `nu7-migration`, 2026-10-12; not on `main` yet)**: orchard 0.16, pczt 0.10.0-pre.1,
+  zcash_primitives 0.31.0-pre.1, zcash_protocol 0.11.0-pre.0, zcash_keys 0.17.0-pre.1, zcash_client_backend
+  0.25.0-pre.1, zcash_client_sqlite 0.23.0-pre.1, zip321 0.10.0-pre.1, zcash_address 0.14.0-pre.1,
+  incrementalmerkletree 0.9, shardtree 0.8. These carry the real NU7 branch id `0x77190AD9` and testnet height
+  4,465,026; **mainnet's NU7 height is still `None`** in them (a later pre-release will set it; if none carries
+  it by the release date, set it ourselves). Changes it forced: the Zcash APIs take `rand_core` 0.10 (a second
+  `rand10` for those calls only, `zafe_core::zrng`: stateless OS generator, `Clone` because the wallet migrator
+  needs it; our own crypto stays on 0.6); `UnifiedFullViewingKey::encode` is fallible; `from_receivers` and
+  `create_pczt_from_proposal` take extra args; `alpha` moves between pasta_curves 0.5 (reddsa/FROST) and 0.6
+  (orchard) through its canonical bytes; `LocalNetwork` has `nu7` (regtest keeps `None`: ths 0.3.0 has no NU7).
+  The ZIP 2005 vectors still pass, so key and address encoding did not change. v6 transactions stay valid under
+  NU7 (v4 is disabled); the ZIP 233 fee change is behind an unstable flag, so the ZIP 317 fee check is unchanged.
+  **`VaultWallet::open` now runs `init_wallet_db`**: it used to migrate only in `create`, which was harmless until a
+  library bump changed the schema ("no such table: transparent_spend_locator_map" on an old wallet DB). A failed
+  migration makes `exists` false and the bridge recreates the wallet. Checked on the old testnet CLI wallet.
 - **Upstream gates cleared (2026-10-01, frost#1094, conradoplg)**: U1 (vaults derived per
   ZIP 2005 § 4.2.3 from our own `sk` agreement: change "very unlikely", "if you have your
   own system that will also work"), U5 (builder-chosen `alpha` fine; keep it secret) and U3

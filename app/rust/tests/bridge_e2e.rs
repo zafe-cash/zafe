@@ -83,7 +83,7 @@ fn outside_address() -> String {
         .unwrap();
     let keys = VaultKeys::derive(&VaultSecret::from_bytes([1; 32]), &ak).unwrap();
     let address = keys.fvk().address_at(0u32, Scope::External);
-    zcash_keys::address::UnifiedAddress::from_receivers(Some(address), None, None)
+    zcash_keys::address::UnifiedAddress::from_receivers(Some(address), None, None, None, None)
         .unwrap()
         .encode(&zafe_core::wallet::regtest_network())
 }

@@ -23,3 +23,4 @@ pub mod tx;
 pub mod vault;
 pub mod verify;
 pub mod wallet;
+pub mod zrng;

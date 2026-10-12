@@ -92,12 +92,12 @@ fn vault_spends_ironwood_note_with_frost() {
     let signed = tx::apply_signatures(pczt, &signatures).unwrap();
     assert!(tx::spends_to_sign(&signed, &vault_fvk).unwrap().is_empty());
     let proved = Prover::new(signed)
-        .create_ironwood_proof(proving_key())
+        .create_ironwood_proof(zafe_core::zrng::zrng(), proving_key())
         .unwrap()
         .finish();
     let transaction = TransactionExtractor::new(proved)
         .with_orchard(verifying_key())
-        .extract()
+        .extract(zafe_core::zrng::zrng())
         .expect("fully authorized, valid Ironwood transaction");
     assert!(transaction.ironwood_bundle().is_some());
 }

@@ -90,7 +90,6 @@ use pczt::{
     roles::{creator::Creator, io_finalizer::IoFinalizer},
     Pczt,
 };
-use rand_core::OsRng;
 use shardtree::{store::memory::MemoryShardStore, ShardTree};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
@@ -129,6 +128,7 @@ pub fn nu6_3_network() -> LocalNetwork {
         nu6_1: Some(BlockHeight::from_u32(8)),
         nu6_2: Some(BlockHeight::from_u32(9)),
         nu6_3: Some(BlockHeight::from_u32(10)),
+        nu7: None,
     }
 }
 
@@ -160,7 +160,10 @@ pub fn receive_ironwood_note(fvk: &FullViewingKey, recipient: Address, value: u6
             Memo::Empty.encode().into_bytes(),
         )
         .unwrap();
-    let (bundle, meta) = builder.build::<i64>(&mut OsRng).unwrap().unwrap();
+    let (bundle, meta) = builder
+        .build::<i64>(&mut zafe_core::zrng::zrng())
+        .unwrap()
+        .unwrap();
     let action = &bundle.actions()[meta.output_action_index(0).unwrap()];
     let ivk = fvk.to_ivk(Scope::External).prepare();
     let (note, _, _) =
@@ -242,17 +245,17 @@ pub fn build_pczt_with_fee(
     }
     let PcztResult { pczt_parts, .. } = match fixed_fee {
         None => builder
-            .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+            .build_for_pczt(zafe_core::zrng::zrng(), &zip317::FeeRule::standard())
             .unwrap(),
         Some(fee) => builder
             .build_for_pczt(
-                OsRng,
+                zafe_core::zrng::zrng(),
                 &fixed::FeeRule::non_standard(Zatoshis::const_from_u64(fee)),
             )
             .unwrap(),
     };
     IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
-        .finalize_io()
+        .finalize_io(zafe_core::zrng::zrng())
         .unwrap()
 }
 

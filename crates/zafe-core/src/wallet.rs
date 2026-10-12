@@ -186,10 +186,15 @@ fn open_wallet_db<P: Parameters>(
     path: &Path,
     key: &WalletKey,
     params: P,
-) -> Result<WalletDb<rusqlite::Connection, P, SystemClock, OsRng>, WalletError> {
+) -> Result<WalletDb<rusqlite::Connection, P, SystemClock, crate::zrng::ZRng>, WalletError> {
     let conn = open_connection(path, key, false)?;
     rusqlite::vtab::array::load_module(&conn).map_err(db_err)?;
-    Ok(WalletDb::from_connection(conn, params, SystemClock, OsRng))
+    Ok(WalletDb::from_connection(
+        conn,
+        params,
+        SystemClock,
+        crate::zrng::zrng(),
+    ))
 }
 
 /// A regtest network with every upgrade through NU6.3 active at height 1, matching
@@ -207,6 +212,8 @@ pub fn regtest_network() -> LocalNetwork {
         nu6_1: one,
         nu6_2: one,
         nu6_3: one,
+        // ths 0.3.0 runs NU5..NU6.3 only; set this when regtest runs NU7.
+        nu7: None,
     }
 }
 
@@ -422,7 +429,7 @@ pub struct VaultBalance {
 }
 
 pub struct VaultWallet<P: Parameters + Clone + Send + 'static> {
-    db: WalletDb<rusqlite::Connection, P, SystemClock, OsRng>,
+    db: WalletDb<rusqlite::Connection, P, SystemClock, crate::zrng::ZRng>,
     params: P,
     account: AccountUuid,
     cache: MemBlockCache,
@@ -531,7 +538,12 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             // Opening would create an empty database.
             return Err(WalletError::Db("no wallet database".into()));
         }
-        let db = open_wallet_db(path, key, params.clone())?;
+        let mut db = open_wallet_db(path, key, params.clone())?;
+        // A database made by an older build may need the schema of the current
+        // zcash_client_sqlite (a library bump changes it). The migrations are no-ops on a
+        // current database; a failed one makes `exists` say no, and the caller recreates
+        // the wallet (it only caches chain data).
+        init_wallet_db(&mut db, None).map_err(db_err)?;
         let ids = db.get_account_ids().map_err(db_err)?;
         let [account] = ids.as_slice() else {
             return Err(WalletError::Db(format!(
@@ -838,6 +850,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         >(
             &mut self.db,
             &self.params,
+            &SystemClock,
+            &mut crate::zrng::zrng(),
             self.account,
             OvkPolicy::Sender,
             &proposal,
@@ -953,6 +967,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         >(
             &mut self.db,
             &self.params,
+            &SystemClock,
+            &mut crate::zrng::zrng(),
             self.account,
             OvkPolicy::Sender,
             &proposal,

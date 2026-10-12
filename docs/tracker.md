@@ -592,6 +592,16 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       release APK: backup, remove, restore, CLI approved first, the restored phone approved, sent (txid 75b60fd6...
       mined). Not covered: a device restored with an *older* build keeps its dead pool (nobody outside the team
       has restored yet); the reset only runs on a restore by a version 8 app. Dry run vault now empty.
+- [x] **NU7 port verified on testnet (2026-10-13, branch `nu7-migration`, testnet builds `v0.1.12`/`v0.1.13`)**: the
+      phone's testnet app updated in place (vault, balance kept; its old wallet DB migrated), flagged a proposal built
+      for NU6.3 as "consensus branch ID 0x37a5165b does not match expected 0x77190ad9", and a new 0.01 TAZ payment
+      (CLI co-signer + phone) was broadcast and mined on NU7 testnet (txid 8cfb8247...). Live regtest suites
+      (`regtest_e2e`, `bridge_e2e`) also pass on the new stack (ths 0.3.0 has no NU7: PR zcashlabs/thus-spoke-zakura#132 is
+      open; bump the pin and set `nu7` in `regtest_network` when it ships). **Still open before a mainnet release:**
+      mainnet's NU7 height is `None` in the pre-releases (set it ourselves if no crate has it by ~Oct 27); merge the
+      branch to `main`; the guard items below; a release-signed in-place update test on the mainnet app.
+- [x] A payment that fails the device check (e.g. built for the old network) can now be cancelled by its author, and the
+      proposal page leaves the stale failed-send state and goes back after cancelling (found on the phone 2026-10-13).
 - [ ] **Guard release `mainnet-v0.1.3` (`mainnet-v0.1.2` shipped as the restore fix, without the guard)**: at *propose* time compare the server's
       `consensus_branch_id` (GetLightdInfo) with the branch the app would build; on a mismatch refuse with "Update Zafe"
       (also as a sync-status notice) instead of failing at broadcast after two approvals; refuse proposals whose expiry

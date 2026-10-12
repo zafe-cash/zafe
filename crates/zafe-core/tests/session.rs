@@ -127,12 +127,12 @@ impl Fixture {
     fn finalize(&self, signatures: &[(usize, [u8; 64])]) {
         let signed = tx::apply_signatures(self.pczt.clone(), signatures).unwrap();
         let proved = Prover::new(signed)
-            .create_ironwood_proof(proving_key())
+            .create_ironwood_proof(zafe_core::zrng::zrng(), proving_key())
             .unwrap()
             .finish();
         TransactionExtractor::new(proved)
             .with_orchard(verifying_key())
-            .extract()
+            .extract(zafe_core::zrng::zrng())
             .expect("valid transaction");
     }
 }

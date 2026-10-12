@@ -278,7 +278,8 @@ pub fn vault_viewing_key(material: Vec<u8>) -> Result<String, ZafeError> {
         .vault_keys()?
         .ufvk()
         .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?
-        .encode(&net);
+        .encode(&net)
+        .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?;
     if ufvk != m.descriptor.ufvk {
         return Err(ZafeError::new(
             ZafeErrorKind::Verification,
