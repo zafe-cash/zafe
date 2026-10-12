@@ -182,6 +182,19 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   background check). Pools drain when a proposal **enters the log**, for every member,
   approving or not. Security reading of ePrint 2024/436 is in
   spec §9.5.1; confirmed by Daira-Emma Hopwood and conradoplg 2026-10-01 (U5).
+- **Restore vs one-tap (found 2026-10-12, mainnet dry run; OPEN, fix needs a VAULT_EVENT version)**: a backup never
+  carries nonces, but the member's published pool stays in the log: `VaultEvent::Commitments` only *extends*
+  `VaultState.pools[author]` (no reset), and `assign_commitments` takes each member's next commitment in log order.
+  After a restore (or any loss of the nonce store) the next proposals are assigned that member's **dead**
+  commitments until the old pool is used up (the app only tops up below half). If the other signer approves
+  one-tap first, its approval is **final** ("an approval with shares is final"), the restored member can only
+  approve interactively, and the interactive fallback needs fresh commitments from *both* approvers: the proposal can
+  never complete ("1 of 2 signers are ready"), and in a **2-of-2** every proposal wedges for ~15 proposals (a 2-of-3
+  whose third member is fine completes through the other group). Funds are safe (nothing is sent). Seen: phone
+  removed and restored from its backup, the CLI co-signer approved, the phone's send failed. Fix options: a
+  pool-reset event (the author retires its unassigned commitments; the restore flow publishes it with a fresh pool),
+  or let a member that already one-tap approved add interactive commitments when the group can't complete. Either
+  changes replay: gate by event version, and note old open proposals need re-proposing.
 - **Sweeps**: a `Proposal` with **no payments** spends a cancelled proposal's notes back
   to the vault (`node::invalidate`, `VaultWallet::propose_sweep`) so a fully signed
   cancelled transaction can never be mined. UI code must handle `payments.isEmpty`

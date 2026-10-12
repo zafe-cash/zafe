@@ -583,6 +583,14 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [ ] **Mainnet dry run with real funds (you, small amount; I act as CLI co-signer on mainnet)**: install `0.1.1` over
       `0.1.0` (the wallet DB resyncs once), create a 2-of-2 vault, receive, propose, approve, send, restore from a
       backup, check the first sync time. Mainnet sends work until NU7 activates.
+- [ ] **P0 (found by the mainnet restore test, 2026-10-12): restore wedges signing.** After restoring a backup the
+      restored member's old pool commitments stay in the log with no nonces; proposals get assigned them, the other
+      signer's one-tap approval is final, so a 2-of-2 can't complete a proposal until ~15 dead commitments are used
+      (see AGENTS.md "Restore vs one-tap"). Fix: a pool-reset event published by the restore flow together with a
+      fresh pool (VAULT_EVENT 8, gate), plus a test of restore -> propose -> approve -> send; ship in the guard
+      release or before telling anyone to rely on backups. The dry-run vault `dry-run` (mainnet, 0.0004 ZEC) has
+      an Approved but unsendable proposal (77afa62f) holding its note until expiry (7 days); the CLI has no cancel.
+      Restore itself works (same vault, address, signer key; ~6 s).
 - [ ] **Guard release `mainnet-v0.1.2` (small, this week)**: at *propose* time compare the server's
       `consensus_branch_id` (GetLightdInfo) with the branch the app would build; on a mismatch refuse with "Update Zafe"
       (also as a sync-status notice) instead of failing at broadcast after two approvals; refuse proposals whose expiry
