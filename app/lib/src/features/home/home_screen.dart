@@ -396,7 +396,9 @@ class BalanceCard extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      'VAULT BALANCE',
+                      kNetworkBadge.isEmpty
+                          ? 'VAULT BALANCE'
+                          : 'VAULT BALANCE · $kNetworkBadge',
                       style: AppTypography.labelSmall.copyWith(
                         color: card.textSecondary,
                         letterSpacing: 1.6,

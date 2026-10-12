@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # start the site workflow so its download links follow this release
 
 concurrency:
   group: release-${{ github.ref }}
@@ -149,6 +150,9 @@ jobs:
             echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
             echo "installing from your browser or files app when Android asks."
             echo
+            echo "**You need testnet coins (TAZ) to make a payment.** They have no value; see the"
+            echo "[Zcash testnet guide](https://zcash.readthedocs.io/en/latest/rtd_pages/testnet_guide.html)."
+            echo
             echo "Relay: \`$ZAFE_RELAY_URL\` · size $size"
             echo
             echo "Verify: \`sha256sum -c $apk.sha256\`; signing certificate SHA-256:"
@@ -166,6 +170,13 @@ jobs:
           files: |
             dist/${{ steps.package.outputs.apk }}
             dist/${{ steps.package.outputs.apk }}.sha256
+
+      # The site's download links are the newest release of each kind; rebuild it now.
+      - name: Refresh the site links
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run site.yml --repo "$GITHUB_REPOSITORY" --ref main
 
       - name: Remove the key
         if: always()

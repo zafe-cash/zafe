@@ -43,10 +43,6 @@ jobs:
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       ZAFE_ANDROID_CERT_SHA256: ${{ vars.ZAFE_ANDROID_CERT_SHA256 }}
       ZAFE_IOS_APP_IDS: ${{ vars.ZAFE_IOS_APP_IDS }}
-      # "Get Zafe": the exact mainnet beta release (pre-releases never show under
-      # /releases/latest, so bump these two when a new APK is published; docs/releasing.md).
-      ZAFE_DOWNLOAD_URL: https://github.com/zafe-cash/zafe/releases/tag/mainnet-v0.1.0
-      ZAFE_TESTNET_URL: https://github.com/zafe-cash/zafe/releases/tag/v0.1.0
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -55,6 +51,24 @@ jobs:
           cache: npm
           cache-dependency-path: infra/site/package-lock.json
       - run: npm ci --no-audit --no-fund
+
+      # "Get Zafe" and "Try the testnet build" point at the newest release of each kind
+      # (pre-releases never show under /releases/latest). The release workflows start this
+      # workflow after publishing, so the links follow every new APK.
+      - name: Latest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="${{ github.repository }}"
+          newest() { # <jq filter on tagName>
+            gh release list --repo "$repo" --limit 100 --json tagName,createdAt \
+              --jq "[.[] | select(.tagName | $1)] | sort_by(.createdAt) | last | .tagName // empty"
+          }
+          mainnet=$(newest 'test("^mainnet-v[0-9]")')
+          testnet=$(newest 'test("^v[0-9]")')
+          [ -z "$mainnet" ] || echo "ZAFE_DOWNLOAD_URL=https://github.com/$repo/releases/tag/$mainnet" >> "$GITHUB_ENV"
+          [ -z "$testnet" ] || echo "ZAFE_TESTNET_URL=https://github.com/$repo/releases/tag/$testnet" >> "$GITHUB_ENV"
+          echo "mainnet: ${mainnet:-none}, testnet: ${testnet:-none}"
       - run: ./build.sh
       - run: ./vercel-output.sh
 

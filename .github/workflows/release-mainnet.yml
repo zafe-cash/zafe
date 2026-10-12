@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # start the site workflow so its download links follow this release
 
 concurrency:
   group: release-mainnet-${{ github.ref }}
@@ -55,12 +56,19 @@ jobs:
       # Never publish a mainnet APK while the mainnet relay is down, or one signed with a debug key.
       - name: Check configuration
         env:
+          GH_TOKEN: ${{ github.token }}
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           missing=0
+          # Testnet is the staging step: a mainnet APK is cut from a commit that already
+          # went out as a testnet build (tag v*), i.e. the one the dry run used.
+          sha=$(git rev-parse HEAD)
+          staged=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" \
+            --jq ".[] | select(.ref | test(\"^refs/tags/v[0-9]\")) | select(.object.sha == \"$sha\") | .ref")
+          [ -n "$staged" ] || { echo "::error::No testnet tag (v*) on this commit. Tag it v<version> first, try it, then tag mainnet-v<version> on the same commit."; missing=1; }
           [ "$(curl -fsS --max-time 15 https://relay.zafe.cash/health || true)" = ok ] \
             || { echo "::error::https://relay.zafe.cash/health did not answer ok"; missing=1; }
           case "$ZAFE_LINK_HOST" in
@@ -165,6 +173,13 @@ jobs:
           files: |
             dist/${{ steps.package.outputs.apk }}
             dist/${{ steps.package.outputs.apk }}.sha256
+
+      # The site's download links are the newest release of each kind; rebuild it now.
+      - name: Refresh the site links
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run site.yml --repo "$GITHUB_REPOSITORY" --ref main
 
       - name: Remove the key
         if: always()

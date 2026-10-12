@@ -555,6 +555,9 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
   - [x] Site (2026-10-12): mainnet beta tag, "Get Zafe" -> the exact release, Google Play / App Store "Soon" chips with brand icons and a follow-on-X line (@zafecash; the mailto waitlist was dropped), X + GitHub icons in the footer, testnet link; the audit status is in the FAQ only, and in the release notes
   - [x] Site phone screens regenerated with ZEC and `u1` data, no dollar line (`HOME_FIAT=0`, `--dart-define=ZAFE_NETWORK=main`; `infra/site/assets.py` docstring)
   - [ ] When a store listing is live: swap its "Soon" chip for a link (`index.astro`)
+  - [x] Testnet app (2026-10-12): invite links on `testnet.zafe.cash` (`ZAFE_TESTNET_LINK_HOST`); testnet-first gate in `release-mainnet.yml`; site links follow the newest release (`site.yml` + release workflows); "· TESTNET" on the vault card; coins line in the testnet notes
+  - [ ] **(you)** `testnet.zafe.cash`: add the domain in Vercel (project Settings > Domains) and a DNS-only `testnet` CNAME in Cloudflare; check `https://testnet.zafe.cash/.well-known/assetlinks.json`
+  - [ ] Offer testers testnet coins: no verified faucet found (the Valar faucet of 2026-09-30 isn't documented); decide whether to hand out TAZ ourselves
   - [ ] **(you)** Play Store listing (in progress); then an AAB build for the upload
 - Follow-ups
   - [ ] `catch_relay_up` across seat moves
