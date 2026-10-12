@@ -631,8 +631,10 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [ ] **Testnet app's own link scheme** (`zafe-testnet://`): app side done 2026-10-13 (manifest placeholder
       `zafeScheme`, both builds read both schemes), **but the site half is held back**: the `/join` page's "Open in
       Zafe" must switch to `zafe-testnet://` (`data-scheme` on `#open` in `JoinPage.astro`, read by `join.js`) only
-      once a testnet build with the scheme is released, or testers on `0.1.13` lose the button. Patch: reapply the
-      two-line change (see git history of this entry) in the same push as that site deploy.
+      once a testnet build with the scheme is released, or testers on `0.1.13` lose the button. The change: in
+      `JoinPage.astro` add `data-scheme={testnet ? 'zafe-testnet' : 'zafe'}` to `<a id="open">`; in `join.js` replace
+      `'zafe://join?invite=' + value` with `scheme + '://join?invite=' + value`, where `scheme` is that attribute
+      (`'zafe-testnet'` or else `'zafe'`). Ship it in the same push as the release that has the scheme.
 - [ ] Debug-signed builds (`flutter run`/profile) never get verified app links, and `flutter run` silently uninstalls and
       reinstalls on a signature mismatch (wipes the app's data): use `adb install -r` with the release key when
       data matters.
