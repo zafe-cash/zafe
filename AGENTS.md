@@ -1250,7 +1250,7 @@ Learned while studying it:
   Cache headers live in `public/_headers` (`/assets/...` blocks; `vercel-output.sh`
   turns each into a Vercel route). The **static fallback** (no GPU, reduced motion, no
   JS) shows stills of the world rendered by `infra/site/stills.sh` (capture mode
-  `/showcase?still`; also writes the social image `og.png`); re-run it after changing the world
+  `/showcase?still`; also writes the social image `og-mainnet.png`); re-run it after changing the world
   or the story. `public/assets/boot.js` adds `html.js` before the first paint so the
   world's visitors never fetch the stills; anything only for the fallback goes under
   `:is(html:not(.js), html.stills)`.
@@ -1265,7 +1265,7 @@ Learned while studying it:
   IndexNow (`indexnow.sh`, key file `public/<key>.txt`, public by design; failures only
   warn).
   Head tags live in `Base.astro` (props `title`, `description`, `socialTitle`, `jsonLd`,
-  `noindex`); social image `/assets/og.png` (1200×630) in `config.ts`. `/join` stays
+  `noindex`); social image `/assets/og-mainnet.png` (1200×630) in `config.ts`. Chat apps and X cache a link's card image by its URL, so when the picture changes, give the file a new name (it was `og.png`, which kept showing the testnet card). `/join` stays
   `noindex`, out of the sitemap and **not** disallowed in robots.txt (Google must fetch
   it to see the noindex). JSON-LD on `/` (Organization, WebSite, MobileApplication,
   FAQPage from the same `faq` array as the page) is the one inline `<script>`
