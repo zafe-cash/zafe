@@ -70,6 +70,10 @@ pub enum WalletError {
     /// catching up, or follows another chain).
     #[error("lightwalletd is at block {server_tip}, behind this wallet ({wallet_tip})")]
     ServerBehind { server_tip: u32, wallet_tip: u32 },
+    /// The chain is on another consensus branch than this app builds transactions for (a
+    /// network upgrade this version doesn't know): a payment built here would be rejected.
+    #[error("this version of Zafe doesn't support the network's current rules: {0}")]
+    AppOutdated(String),
     #[error("sync: {0}")]
     Sync(String),
     #[error("proposal: {0}")]
@@ -340,6 +344,60 @@ pub async fn check_server(
         }
     }
     Ok(tip)
+}
+
+/// The expiry height of a proposal targeting `target`: [`crate::vault::expiry_height`], but
+/// never past the block before the next network upgrade whose height is known. A
+/// transaction built (and signed) for the rules before an upgrade can't be mined after it,
+/// so it must not stay sendable across it; the payment is proposed again under the new
+/// rules instead. Without a known upgrade ahead, nothing changes.
+pub fn proposal_expiry<P: Parameters>(params: &P, target: u32, window: u32) -> u32 {
+    use zcash_protocol::consensus::NetworkUpgrade;
+    let expiry = crate::vault::expiry_height(target, window);
+    match params.activation_height(NetworkUpgrade::Nu7).map(u32::from) {
+        Some(nu7) if target < nu7 && expiry >= nu7 => nu7 - 1,
+        _ => expiry,
+    }
+}
+
+/// Fails with [`WalletError::AppOutdated`] when lightwalletd's chain is on a consensus
+/// branch other than the one this app would build transactions for at that height (a
+/// network upgrade this version doesn't know). Called before proposing: a transaction built
+/// for the wrong branch is rejected by every node, so say so up front. Not part of
+/// `check_server`: an outdated app can still sync and show balances.
+pub async fn ensure_current_branch<P: Parameters>(
+    client: &mut Client,
+    params: &P,
+) -> Result<(), WalletError> {
+    let info = client
+        .get_lightd_info(service::Empty {})
+        .await
+        .map_err(|e| status_error(&e))?
+        .into_inner();
+    let tip = u32::try_from(info.block_height).map_err(|_| server_error("height out of range"))?;
+    check_branch(&info.consensus_branch_id, tip, params)
+}
+
+/// The comparison behind [`ensure_current_branch`]: `server_branch` is lightwalletd's hex
+/// branch id for the block at `tip`. An id the server doesn't give (or in a form we can't
+/// read) is not held against the app.
+pub fn check_branch<P: Parameters>(
+    server_branch: &str,
+    tip: u32,
+    params: &P,
+) -> Result<(), WalletError> {
+    use zcash_protocol::consensus::BranchId;
+    let hex = server_branch.trim().trim_start_matches("0x");
+    let Ok(server) = u32::from_str_radix(hex, 16) else {
+        return Ok(());
+    };
+    let ours = u32::from(BranchId::for_height(params, BlockHeight::from_u32(tip)));
+    if server != ours {
+        return Err(WalletError::AppOutdated(format!(
+            "the network is on branch {server:08x}, this app builds for {ours:08x}"
+        )));
+    }
+    Ok(())
 }
 
 /// How far lightwalletd may trail the wallet before `check_server` calls it behind.
@@ -855,7 +913,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             self.account,
             OvkPolicy::Sender,
             &proposal,
-            Some(BlockHeight::from(crate::vault::expiry_height(
+            Some(BlockHeight::from(proposal_expiry(
+                &self.params,
                 u32::from(BlockHeight::from(proposal.min_target_height())),
                 expiry_blocks,
             ))),
@@ -972,7 +1031,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             self.account,
             OvkPolicy::Sender,
             &proposal,
-            Some(BlockHeight::from(crate::vault::expiry_height(
+            Some(BlockHeight::from(proposal_expiry(
+                &self.params,
                 u32::from(BlockHeight::from(proposal.min_target_height())),
                 expiry_blocks,
             ))),
@@ -1217,6 +1277,53 @@ impl Parameters for ZafeNetwork {
 mod tests {
     use super::*;
     use crate::keys::{VaultKeys, VaultSecret};
+
+    /// The guard against a network upgrade this version doesn't know: the server's branch
+    /// must be the one this app builds for at the server's tip.
+    #[test]
+    fn an_unknown_network_upgrade_is_reported_as_an_outdated_app() {
+        use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
+        // Mainnet today: NU6.3, which this app knows.
+        assert!(check_branch("37a5165b", 3_515_000, &MAIN_NETWORK).is_ok());
+        assert!(check_branch("0x37A5165B", 3_515_000, &MAIN_NETWORK).is_ok());
+        // Testnet after NU7 (height 4,465,026): known, so fine ...
+        assert!(check_branch("77190ad9", 4_493_000, &TEST_NETWORK).is_ok());
+        // ... and a chain that moved to NU7 while these rules say NU6.3 is not.
+        let before_nu7 = LocalNetwork {
+            nu7: None,
+            ..regtest_network()
+        };
+        let err = check_branch("77190ad9", 10, &before_nu7).unwrap_err();
+        assert!(matches!(err, WalletError::AppOutdated(_)), "{err}");
+        // A server that gives no id, or one we can't read, is not held against the app.
+        assert!(check_branch("", 10, &before_nu7).is_ok());
+        assert!(check_branch("nonsense", 10, &before_nu7).is_ok());
+    }
+
+    /// A proposal built under the rules before a known upgrade expires before it.
+    #[test]
+    fn a_proposal_does_not_outlive_a_known_network_upgrade() {
+        let ahead = LocalNetwork {
+            nu7: Some(BlockHeight::from_u32(2_000)),
+            ..regtest_network()
+        };
+        // 1,500 + 1,152 rounds up to 2,592, past the upgrade: cut to the block before it.
+        assert_eq!(proposal_expiry(&ahead, 1_500, 1_152), 1_999);
+        // Already on the new rules, or the window ends before it: unchanged.
+        assert_eq!(
+            proposal_expiry(&ahead, 2_500, 1_152),
+            crate::vault::expiry_height(2_500, 1_152)
+        );
+        assert_eq!(
+            proposal_expiry(&ahead, 100, 1_152),
+            crate::vault::expiry_height(100, 1_152)
+        );
+        // No upgrade ahead (height unknown): unchanged.
+        assert_eq!(
+            proposal_expiry(&regtest_network(), 1_500, 1_152),
+            crate::vault::expiry_height(1_500, 1_152)
+        );
+    }
 
     #[test]
     fn the_wallet_key_is_derived_not_stored() {

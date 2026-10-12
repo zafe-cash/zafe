@@ -602,12 +602,12 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       branch to `main`; the guard items below; a release-signed in-place update test on the mainnet app.
 - [x] A payment that fails the device check (e.g. built for the old network) can now be cancelled by its author, and the
       proposal page leaves the stale failed-send state and goes back after cancelling (found on the phone 2026-10-13).
-- [ ] **Guard release `mainnet-v0.1.3` (`mainnet-v0.1.2` shipped as the restore fix, without the guard)**: at *propose* time compare the server's
-      `consensus_branch_id` (GetLightdInfo) with the branch the app would build; on a mismatch refuse with "Update Zafe"
-      (also as a sync-status notice) instead of failing at broadcast after two approvals; refuse proposals whose expiry
-      would cross a known NU7 activation height; mark open proposals "needs a new proposal" once the branch changed;
-      convert the expiry window to blocks with the post-NU7 25 s block time (7 days is 8,064 blocks at 75 s but ~2.3
-      days at 25 s).
+- [x] **NU7 guards (2026-10-13, in `main`; not released)**: propose-time server-branch check ("Update Zafe"),
+      broadcast rejection mapped to the same error, expiry cut at a known NU7 height, 25 s-block time estimate, cancel for a
+      payment that fails the check. See AGENTS.md "NU7 guards". **Still to do for the release:** mainnet's NU7 height
+      (not in the crates yet; set it ourselves ~Oct 27 if needed, then the expiry cap and the time estimate
+      switch on by themselves), a release-signed in-place update test on the mainnet app, tag `v0.1.14` then
+      `mainnet-v0.1.3` (same commit), the testnet site/scheme change, tell early users to update.
 - [ ] **NU7 migration (before 2026-11-05)** on a branch: librustzcash NU7 line, height-based branch selection, `verify`
       vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).
       Dates: 2026-10-20 mainnet height decision; ~10-27 release candidate on testnet; ~10-28..31 tag `v…` then

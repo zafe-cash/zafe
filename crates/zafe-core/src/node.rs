@@ -1441,6 +1441,9 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
             .into());
         }
     }
+    // A network upgrade this version doesn't know would get the payment rejected after
+    // everyone approved it: refuse up front.
+    crate::wallet::ensure_current_branch(lightwalletd, wallet.params()).await?;
     let (mut chain, mut state) = load_state(relay, me, material).await?;
     for _ in 0..3 {
         reserve_notes(&state, wallet, lightwalletd, sent).await?;
@@ -2102,9 +2105,14 @@ async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, Node
         .map_err(proto)?;
     let mut raw = Vec::new();
     transaction.write(&mut raw).map_err(proto)?;
-    send_raw(&raw, lightwalletd)
-        .await?
-        .map_err(|m| NodeError::Protocol(format!("broadcast rejected: {m}")))?;
+    send_raw(&raw, lightwalletd).await?.map_err(|m| {
+        // A node on a newer branch rejects a transaction built for the old one.
+        if m.to_ascii_lowercase().contains("consensus branch id") {
+            NodeError::Wallet(crate::wallet::WalletError::AppOutdated(m))
+        } else {
+            NodeError::Protocol(format!("broadcast rejected: {m}"))
+        }
+    })?;
     Ok(Sent {
         txid: *transaction.txid().as_ref(),
         raw,

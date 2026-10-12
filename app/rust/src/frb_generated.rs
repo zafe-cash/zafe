@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1709884515;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 480932954;
 
 // Section: executor
 
@@ -1089,6 +1089,37 @@ fn wire__crate__api__proposals__memo_length_impl(
             deserializer.end();
             transform_result_sse::<_, ()>((move || {
                 let output_ok = Result::<_, ()>::Ok(crate::api::proposals::memo_length(api_memo))?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__proposals__nu7_activation_height_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "nu7_activation_height",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_network = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok =
+                    Result::<_, ()>::Ok(crate::api::proposals::nu7_activation_height(api_network))?;
                 Ok(output_ok)
             })())
         },
@@ -3362,24 +3393,24 @@ fn pde_ffi_dispatcher_primary_impl(
         25 => wire__crate__api__proposals__list_proposals_impl(port, ptr, rust_vec_len, data_len),
         26 => wire__crate__api__received__list_received_impl(port, ptr, rust_vec_len, data_len),
         27 => wire__crate__api__proposals__mark_pool_reset_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__vault__run_keygen_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__vault__seal_vault_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__vault__run_keygen_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__vault__seal_vault_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3399,22 +3430,23 @@ fn pde_ffi_dispatcher_sync_impl(
         19 => wire__crate__api__vault__identity_public_key_impl(ptr, rust_vec_len, data_len),
         22 => wire__crate__api__app__init_log_cache_impl(ptr, rust_vec_len, data_len),
         28 => wire__crate__api__proposals__memo_length_impl(ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__vault__parse_invite_impl(ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__proposals__nu7_activation_height_impl(ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__vault__parse_invite_impl(ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

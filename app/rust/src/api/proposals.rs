@@ -407,6 +407,16 @@ pub struct SeatMove {
     pub code: String,
 }
 
+/// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
+/// Zcash libraries this build uses know it. Blocks come every 75 s before it and every 25 s
+/// from it on, which the app needs to turn a block count into a time.
+#[flutter_rust_bridge::frb(sync)]
+pub fn nu7_activation_height(network: String) -> Option<u32> {
+    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+    let net = super::vault::network(&network).ok()?;
+    net.activation_height(NetworkUpgrade::Nu7).map(u32::from)
+}
+
 /// A device restored from a backup has no signing nonces, so its next refresh retires the
 /// commitments the previous device published and publishes a fresh pool (see
 /// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the

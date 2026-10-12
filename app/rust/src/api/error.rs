@@ -209,6 +209,7 @@ impl From<WalletError> for ZafeError {
             WalletError::Remote { failure, .. } => net_kind(*failure),
             WalletError::WrongNetwork { .. } => ZafeErrorKind::WrongNetwork,
             WalletError::ServerBehind { .. } => ZafeErrorKind::ServerBehind,
+            WalletError::AppOutdated(_) => ZafeErrorKind::UpdateRequired,
             WalletError::Db(_) | WalletError::WrongKey => ZafeErrorKind::WalletDatabase,
             WalletError::Payment(_) => ZafeErrorKind::InvalidInput,
             WalletError::FundsReserved => ZafeErrorKind::FundsReserved,

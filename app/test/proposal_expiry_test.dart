@@ -47,6 +47,20 @@ void main() {
       expect(expiresIn(week, 0), 'about 7 days');
     });
 
+    test('blocks are 75 s before the NU7 upgrade and 25 s from it on', () {
+      // 1,152 blocks a day before the upgrade, 3,456 after.
+      expect(blocksToSeconds(0, 1152), 86400);
+      expect(blocksToSeconds(0, 1152, nu7Height: 5000), 86400);
+      expect(blocksToSeconds(5000, 5000 + 3456, nu7Height: 5000), 86400);
+      // Across it: 1,000 blocks at 75 s, then 1,000 at 25 s.
+      expect(blocksToSeconds(4000, 6000, nu7Height: 5000), 75000 + 25000);
+      // Nothing left, or the chain already past it.
+      expect(blocksToSeconds(10, 10, nu7Height: 5), 0);
+      expect(blocksToSeconds(20, 10), 0);
+      final week = proposal('p', expiryHeight: 8064);
+      expect(expiresIn(week, 0, nu7Height: 0), 'about 2 days');
+    });
+
     test('expired proposals need no action', () {
       final items = [
         proposal('a', expiryHeight: 1000),

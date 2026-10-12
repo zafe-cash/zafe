@@ -40,6 +40,12 @@ BigInt? parseZec({required String text}) =>
 int memoLength({required String memo}) =>
     RustLib.instance.api.crateApiProposalsMemoLength(memo: memo);
 
+/// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
+/// Zcash libraries this build uses know it. Blocks come every 75 s before it and every 25 s
+/// from it on, which the app needs to turn a block count into a time.
+int? nu7ActivationHeight({required String network}) =>
+    RustLib.instance.api.crateApiProposalsNu7ActivationHeight(network: network);
+
 /// A device restored from a backup has no signing nonces, so its next refresh retires the
 /// commitments the previous device published and publishes a fresh pool (see
 /// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the

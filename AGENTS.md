@@ -1371,6 +1371,16 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   **`VaultWallet::open` now runs `init_wallet_db`**: it used to migrate only in `create`, which was harmless until a
   library bump changed the schema ("no such table: transparent_spend_locator_map" on an old wallet DB). A failed
   migration makes `exists` false and the bridge recreates the wallet. Checked on the old testnet CLI wallet.
+- **NU7 guards (2026-10-13)**: (1) `wallet::ensure_current_branch` (pure part `check_branch`) compares
+  lightwalletd's `consensus_branch_id` with `BranchId::for_height(params, tip)` and fails with
+  `WalletError::AppOutdated` -> `ZafeErrorKind::UpdateRequired` ("needs a newer version of Zafe"); called by
+  `node::propose` only, **not** by `check_server`, so an outdated app can still sync and show balances. (2) A
+  broadcast rejected with "consensus branch id" in the node's message maps to the same error. (3)
+  `wallet::proposal_expiry` cuts a proposal's expiry to the block before the NU7 activation height when that height
+  is known and falls inside the window (a transaction signed for the old rules can't be mined after the upgrade); with
+  no known height (mainnet, until a crate release or our own override has it) nothing changes. (4) The app turns
+  blocks into time with 75 s blocks before NU7 and 25 s after (`blocksToSeconds`, bridge `nu7_activation_height`).
+  A proposal that fails the device check (e.g. built for the old branch) can be cancelled by its author.
 - **Upstream gates cleared (2026-10-01, frost#1094, conradoplg)**: U1 (vaults derived per
   ZIP 2005 § 4.2.3 from our own `sk` agreement: change "very unlikely", "if you have your
   own system that will also work"), U5 (builder-chosen `alpha` fine; keep it secret) and U3

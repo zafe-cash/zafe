@@ -10,6 +10,19 @@ import '../../rust/api/proposals.dart' as rust;
 /// Seconds per block (Zcash target spacing since Blossom).
 const _blockSeconds = 75;
 
+/// Seconds per block from the NU7 network upgrade on.
+const _blockSecondsNu7 = 25;
+
+/// Seconds the chain takes to go from block `from` to block `to`: 75 s blocks before the
+/// NU7 upgrade at `nu7Height` (null: not known, so every block counts 75 s) and 25 s after.
+int blocksToSeconds(int from, int to, {int? nu7Height}) {
+  if (to <= from) return 0;
+  if (nu7Height == null) return (to - from) * _blockSeconds;
+  final before = (nu7Height.clamp(from, to) - from) * _blockSeconds;
+  final after = (to - nu7Height.clamp(from, to)) * _blockSecondsNu7;
+  return before + after;
+}
+
 /// Whether an unsent proposal can no longer be mined: the chain (`height`, the synced
 /// tip) has reached its transaction's expiry height. Unknown height: not expired.
 bool proposalExpired(rust.ProposalInfo p, int? height) =>
@@ -20,8 +33,8 @@ bool proposalExpired(rust.ProposalInfo p, int? height) =>
     height >= p.expiryHeight;
 
 /// "about 6 days" until an unsent proposal expires, from the synced tip `height`.
-String expiresIn(rust.ProposalInfo p, int height) {
-  final seconds = (p.expiryHeight - height) * _blockSeconds;
+String expiresIn(rust.ProposalInfo p, int height, {int? nu7Height}) {
+  final seconds = blocksToSeconds(height, p.expiryHeight, nu7Height: nu7Height);
   final minutes = (seconds / 60).round();
   final hours = (seconds / 3600).round();
   final days = (seconds / 86400).round();

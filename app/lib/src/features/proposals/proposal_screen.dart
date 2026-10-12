@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/feedback/payment_feedback.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/config/network_upgrade.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
@@ -463,7 +464,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       if (height != null && p.expiryHeight > 0) ...[
         const SizedBox(height: AppSpacing.sm),
         Text(
-          'Expires in ${expiresIn(p, height)} if it isn\'t sent.',
+          'Expires in ${expiresIn(p, height, nu7Height: nu7ActivationHeight())} if it isn\'t sent.',
           textAlign: TextAlign.center,
           style: note,
         ),
