@@ -43,8 +43,10 @@ jobs:
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       ZAFE_ANDROID_CERT_SHA256: ${{ vars.ZAFE_ANDROID_CERT_SHA256 }}
       ZAFE_IOS_APP_IDS: ${{ vars.ZAFE_IOS_APP_IDS }}
-      # "Get Zafe": the testnet APKs are pre-releases, so /releases/latest would 404.
-      ZAFE_DOWNLOAD_URL: https://github.com/zafe-cash/zafe/releases
+      # "Get Zafe": the exact mainnet beta release (pre-releases never show under
+      # /releases/latest, so bump these two when a new APK is published; docs/releasing.md).
+      ZAFE_DOWNLOAD_URL: https://github.com/zafe-cash/zafe/releases/tag/mainnet-v0.1.0
+      ZAFE_TESTNET_URL: https://github.com/zafe-cash/zafe/releases/tag/v0.1.0
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6

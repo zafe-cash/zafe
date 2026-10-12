@@ -13,6 +13,12 @@ The external audit is still open (`docs/tracker.md`, M2).
 git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
 ```
 
+The site's "Get Zafe" button points at the exact release page: after each new APK, set
+`ZAFE_DOWNLOAD_URL` (mainnet tag) and `ZAFE_TESTNET_URL` (testnet tag) in
+`.github/workflows/site.yml` (pre-releases never show under `/releases/latest`). The Google
+Play waitlist is `mailto:waitlist@zafe.cash` (`src/config.ts`), forwarded by Cloudflare
+Email Routing.
+
 ## One-time setup (you)
 
 1. **Deploy the relay** (`infra/relay/README.md`) and note its `https://` URL.

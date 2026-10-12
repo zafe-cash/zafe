@@ -547,11 +547,13 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - Gate
   - [ ] **(you)** Engage the external audit (`docs/audit-scope.md`); record the audit commit here
 - Validation
-  - [ ] Mainnet dry run with real funds: create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
+  - [ ] Mainnet dry run with real funds (first APK is out: do it before sharing widely): create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
   - [ ] Device run of seat move and share repair
   - [ ] Check the Verdigris colours on a device
 - Release
-  - [x] Mainnet beta APK workflow `release-mainnet.yml` (tag `mainnet-v*`, 2026-10-12); [ ] first tag once the relay is live
+  - [x] Mainnet beta APK workflow `release-mainnet.yml` (tag `mainnet-v*`, 2026-10-12); [x] `mainnet-v0.1.0` published (2026-10-12, pre-release, arm64 APK + sha256)
+  - [x] Site (2026-10-12): mainnet beta tag, "Get Zafe" -> the exact release, Play waitlist (`mailto:waitlist@zafe.cash`, check Cloudflare Email Routing delivers), iPhone "coming soon", testnet link; the audit status is in the FAQ only, and in the release notes
+  - [ ] Site phone screens still show testnet data (TAZ, `utest1`): regenerate with mainnet-style data
   - [ ] **(you)** Play Store listing (in progress); then an AAB build for the upload
 - Follow-ups
   - [ ] `catch_relay_up` across seat moves

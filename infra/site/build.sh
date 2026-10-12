@@ -19,6 +19,7 @@ out="$here/dist"
 packages=(xyz.zafe.zafe xyz.zafe.zafe.testnet)
 repo="https://github.com/zafe-cash/zafe"
 download="${ZAFE_DOWNLOAD_URL:-}"
+testnet="${ZAFE_TESTNET_URL:-}"
 source_url="${ZAFE_SOURCE_URL:-$repo}"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -28,6 +29,7 @@ plain_https() {
 }
 
 [[ -z "$download" ]] || plain_https "$download" || die "ZAFE_DOWNLOAD_URL must be a plain https:// URL"
+[[ -z "$testnet" ]] || plain_https "$testnet" || die "ZAFE_TESTNET_URL must be a plain https:// URL"
 plain_https "$source_url" || die "ZAFE_SOURCE_URL must be a plain https:// URL"
 
 # Fingerprints → "AA:BB:...", upper case, exactly 32 bytes.
@@ -55,7 +57,7 @@ join_quoted() { local IFS=,; local q=(); for v in "$@"; do q+=("\"$v\""); done; 
 
 cd "$here"
 [[ -d node_modules ]] || npm ci --no-audit --no-fund
-ZAFE_DOWNLOAD_URL="$download" ZAFE_SOURCE_URL="$source_url" ASTRO_TELEMETRY_DISABLED=1 \
+ZAFE_DOWNLOAD_URL="$download" ZAFE_TESTNET_URL="$testnet" ZAFE_SOURCE_URL="$source_url" ASTRO_TELEMETRY_DISABLED=1 \
   npx --no-install astro build --silent
 touch "$out/.nojekyll" # GitHub Pages: serve .well-known
 

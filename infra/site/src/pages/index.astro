@@ -10,16 +10,16 @@ import Icon from '../components/Icon.astro';
 import Mark from '../components/Mark.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
-import { downloadUrl, getLabel, getNote, getUrl, sourceUrl, specUrl } from '../config';
+import { downloadUrl, getLabel, getNote, getUrl, sourceUrl, specUrl, testnetUrl, waitlistUrl } from '../config';
 
 const faq = [
-  { q: 'Is Zafe safe to use?', a: 'It’s on testnet and not yet audited. Everything is open source. Don’t use real funds yet.' },
+  { q: 'Is Zafe safe to use?', a: 'Zafe is in beta on Zcash mainnet and hasn’t had an external audit yet. The app, the relay and the spec are open source, and the key is never in one place. Start with an amount you’re comfortable with, or try the testnet build first.' },
   { q: 'Is it really a multisig?', a: 'Yes, just not on-chain. Each phone holds a key share (FROST), and enough shares make one ordinary signature.' },
   { q: 'What can the relay see?', a: 'Who messages whom, and when. Never amounts, addresses or keys. It can’t sign or move funds.' },
   { q: 'Does Zafe track me?', a: 'No. There are no analytics, no crash reports and no third-party SDKs, in the app or on this site. If something breaks, the app keeps a scrubbed error log on your phone, and it leaves only if you share it.' },
   { q: 'What if someone loses their phone?', a: 'The vault keeps working while enough members have theirs, and the share comes back from its encrypted backup. Lose too many, and the funds are gone for good.' },
   { q: 'Can we remove a member?', a: 'Not yet. Make a new vault and move the funds.' },
-  { q: 'Which platforms?', a: 'Android. iPhone later.' },
+  { q: 'Which platforms?', a: 'Android today, as a direct download from GitHub. Google Play is coming (join the waitlist) and iPhone after that.' },
 ];
 
 // SEO (docs/seo.md): <title> carries the search terms, the share cards the tagline.
@@ -90,7 +90,7 @@ const jsonLd = {
     <!-- Hero: the headline, and the app itself (real renders, assets.py). -->
     <section class="lp-hero">
       <div class="lp-hero-copy">
-        <p class="tag">Now on testnet</p>
+        <p class="tag">Now on mainnet · beta</p>
         <h1>The multisig<br />nobody can see</h1>
         <p class="sub">One private vault for your team. Nothing moves until enough of you approve.</p>
         <div class="lp-actions">
@@ -195,7 +195,6 @@ const jsonLd = {
       <header class="lp-sec-head">
         <p class="tag">Security</p>
         <h2>Nothing to take<br />on trust</h2>
-        <p class="lp-warn"><Icon name="warning" /><span><strong>Testnet only, for now.</strong> Zafe hasn&rsquo;t been audited yet. Don&rsquo;t use real funds.</span></p>
       </header>
       <ul class="lp-rows">
         <li>
@@ -257,6 +256,13 @@ const jsonLd = {
           <h2>Open your vault</h2>
           <p>{getNote}</p>
           <a class="pill" href={getUrl} target="_blank" rel="noopener noreferrer">{getLabel}</a>
+          {downloadUrl && (
+            <ul class="lp-stores" aria-label="Other ways to get Zafe">
+              <li><a href={waitlistUrl}>Google Play: join the waitlist</a></li>
+              <li><span>iPhone: coming soon</span></li>
+              {testnetUrl && <li><a href={testnetUrl} target="_blank" rel="noopener noreferrer">Try the testnet build</a></li>}
+            </ul>
+          )}
         </div>
         <div class="lp-cta-art" aria-hidden="true"><img class="lp-phone" src="/assets/screens/story_bob_home_dark.webp" width="780" height="1688" alt="" loading="lazy" decoding="async" /></div>
       </div>
