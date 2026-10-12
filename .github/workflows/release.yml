@@ -151,7 +151,9 @@ jobs:
             echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
             echo "installing from your browser or files app when Android asks."
             echo
-            echo "**You need testnet coins (TAZ) to make a payment.** They have no value; see the"
+            echo "**You need testnet coins (TAZ) to make a payment.** They have no value. Paste your"
+            echo "vault's address (Receive) into the [Valar testnet faucet](https://faucet.testnet.valargroup.dev/):"
+            echo "0.125 TAZ per request, one payout per IP address every 24 hours. More in the"
             echo "[Zcash testnet guide](https://zcash.readthedocs.io/en/latest/rtd_pages/testnet_guide.html)."
             echo
             echo "Relay: \`$ZAFE_RELAY_URL\` · size $size"

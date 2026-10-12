@@ -19,7 +19,7 @@ propose, sign, send, restore), and only then tag `mainnet-v<version>` on the **s
 `release-mainnet.yml` refuses a commit that has no `v*` tag. The testnet app shows
 "VAULT BALANCE · TESTNET" on its vault card so it can't be mistaken for the mainnet one, and its
 release notes tell testers they need testnet coins (TAZ) and link the Zcash testnet guide
-(no verified public faucet, 2026-10-12).
+(the Valar faucet, https://faucet.testnet.valargroup.dev/: 0.125 TAZ per request, one per IP per 24 h; its payout reached an Ironwood vault on 2026-09-30; each open proposal locks a whole note, so a test with two proposals at once needs two payouts).
 
 **Invite page per host.** `testnet.zafe.cash/join` serves `join-testnet.html` (a TESTNET badge,
 "test coins with no value", the testnet download) and `zafe.cash/join` the mainnet page: one

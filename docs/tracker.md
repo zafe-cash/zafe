@@ -560,7 +560,7 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
   - [ ] When a store listing is live: swap its "Soon" chip for a link (`index.astro`)
   - [x] Testnet app (2026-10-12): invite links on `testnet.zafe.cash` (`ZAFE_TESTNET_LINK_HOST`); testnet-first gate in `release-mainnet.yml`; site links follow the newest release (`site.yml` + release workflows); "· TESTNET" on the vault card; coins line in the testnet notes
   - [ ] **(you)** `testnet.zafe.cash`: add the domain in Vercel (project Settings > Domains) and a DNS-only `testnet` CNAME in Cloudflare; check `https://testnet.zafe.cash/.well-known/assetlinks.json`
-  - [ ] Offer testers testnet coins: no verified faucet found (the Valar faucet of 2026-09-30 isn't documented); decide whether to hand out TAZ ourselves
+  - [x] Testnet coins: the Valar faucet (https://faucet.testnet.valargroup.dev/, 0.125 TAZ per request, one per IP per 24 h, confirmed by the user 2026-10-12) is in the testnet release notes
   - [ ] **(you)** Play Store listing (in progress); then an AAB build for the upload
 - Follow-ups
   - [ ] `catch_relay_up` across seat moves
