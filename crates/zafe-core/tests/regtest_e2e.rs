@@ -126,6 +126,8 @@ async fn vault_pays_on_regtest() {
         Some(vault_fvk.address_at(0u32, Scope::External)),
         None,
         None,
+        None,
+        None,
     )
     .unwrap()
     .encode(&network);
@@ -176,7 +178,7 @@ async fn vault_pays_on_regtest() {
     // 4. Member 0 proposes paying 1 ZEC with a memo to an outside recipient.
     let recipient_fvk = FullViewingKey::from(&SpendingKey::from_bytes([77; 32]).unwrap());
     let recipient = recipient_fvk.address_at(0u32, Scope::External);
-    let recipient_ua = UnifiedAddress::from_receivers(Some(recipient), None, None)
+    let recipient_ua = UnifiedAddress::from_receivers(Some(recipient), None, None, None, None)
         .unwrap()
         .encode(&network);
     let memo = Memo::from_bytes(b"Grant milestone 1").unwrap().encode();
@@ -310,12 +312,12 @@ async fn vault_pays_on_regtest() {
     let pk = ProvingKey::build(OrchardCircuitVersion::PostNu6_3);
     let vk = VerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
     let proved = Prover::new(signed)
-        .create_ironwood_proof(&pk)
+        .create_ironwood_proof(zafe_core::zrng::zrng(), &pk)
         .unwrap()
         .finish();
     let transaction = TransactionExtractor::new(proved)
         .with_orchard(&vk)
-        .extract()
+        .extract(zafe_core::zrng::zrng())
         .expect("valid transaction");
     let mut raw = Vec::new();
     transaction.write(&mut raw).unwrap();

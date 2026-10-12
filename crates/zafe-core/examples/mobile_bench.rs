@@ -78,7 +78,7 @@ fn main() {
             let keygen_ms = t.elapsed().as_millis();
             let t = Instant::now();
             let _proved = Prover::new(pczt)
-                .create_ironwood_proof(&pk)
+                .create_ironwood_proof(zafe_core::zrng::zrng(), &pk)
                 .unwrap()
                 .finish();
             let prove_ms = t.elapsed().as_millis();

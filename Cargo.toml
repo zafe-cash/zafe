@@ -66,8 +66,8 @@ anyhow = "1"
 reqwest = { version = "0.12", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = "1"
-incrementalmerkletree = "0.8"
-shardtree = "0.7"
+incrementalmerkletree = "0.9"
+shardtree = "0.8"
 zcash_note_encryption = "0.5"
 
 # Halo 2 proving and key generation are unusably slow unoptimized; optimize

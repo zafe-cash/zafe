@@ -50,7 +50,7 @@ fn generate() -> Value {
                 "default_address_raw": hex::encode(
                     keys.fvk().address_at(0u32, Scope::External).to_raw_address_bytes()
                 ),
-                "ufvk_testnet": keys.ufvk().unwrap().encode(&Network::TestNetwork),
+                "ufvk_testnet": keys.ufvk().unwrap().encode(&Network::TestNetwork).unwrap(),
             })
         })
         .collect();
