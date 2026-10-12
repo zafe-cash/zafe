@@ -538,7 +538,12 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             // Opening would create an empty database.
             return Err(WalletError::Db("no wallet database".into()));
         }
-        let db = open_wallet_db(path, key, params.clone())?;
+        let mut db = open_wallet_db(path, key, params.clone())?;
+        // A database made by an older build may need the schema of the current
+        // zcash_client_sqlite (a library bump changes it). The migrations are no-ops on a
+        // current database; a failed one makes `exists` say no, and the caller recreates
+        // the wallet (it only caches chain data).
+        init_wallet_db(&mut db, None).map_err(db_err)?;
         let ids = db.get_account_ids().map_err(db_err)?;
         let [account] = ids.as_slice() else {
             return Err(WalletError::Db(format!(
