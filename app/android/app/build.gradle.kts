@@ -61,6 +61,8 @@ android {
     defaultConfig {
         applicationId = if (zafeTestnet) "xyz.zafe.zafe.testnet" else "xyz.zafe.zafe"
         manifestPlaceholders["zafeAppLabel"] = if (zafeTestnet) "Zafe Testnet" else "Zafe"
+        // Invite links (zafe://join): the testnet app has its own scheme so both can be installed.
+        manifestPlaceholders["zafeScheme"] = if (zafeTestnet) "zafe-testnet" else "zafe"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

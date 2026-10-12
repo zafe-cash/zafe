@@ -159,6 +159,16 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     unawaited(refresh());
   }
 
+  /// Like [refresh], but never returns early. Called after an action of this device
+  /// (propose, approve, cancel...): a refresh already running may have read the relay
+  /// before the action landed, so wait for it and run a full one after it.
+  Future<void> refreshFresh() async {
+    while (_refreshing) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    await refresh();
+  }
+
   Future<void> refresh() async {
     final vault = _vault;
     if (!vault.hasVault || _refreshing) return;
@@ -295,7 +305,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       payments: payments,
       autoSend: autoSend,
     );
-    await refresh();
+    await refreshFresh();
     return id;
   }
 
@@ -332,7 +342,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     if (state.sends[id] case final send? when !send.running) {
       state = state.copyWith(sends: {...state.sends}..remove(id));
     }
-    await refresh();
+    await refreshFresh();
     return result;
   }
 
@@ -344,7 +354,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       proposalId: id,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Vaults this session already tried to attest a backup for.
@@ -380,7 +390,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     );
     // A restored relay has forgotten this phone's push token.
     unawaited(reregisterPush());
-    await refresh();
+    await refreshFresh();
     return restored;
   }
 
@@ -394,7 +404,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       seeds: vault.identity!,
       material: vault.material!,
     );
-    await refresh();
+    await refreshFresh();
     return dropped;
   }
 
@@ -409,7 +419,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       oldKeyHex: oldKeyHex,
       code: code,
     );
-    await refresh();
+    await refreshFresh();
     return moved;
   }
 
@@ -424,7 +434,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       replacement: replacement,
       stalledKeyHex: stalledKeyHex,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Sets this member's name for the other members (empty clears it).
@@ -436,7 +446,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       name: name,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Cancels a proposal this member authored.
@@ -448,7 +458,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       proposalId: id,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Proposes moving a cancelled payment's funds back to the vault so it can never be
@@ -465,7 +475,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       proposalId: id,
     );
-    await refresh();
+    await refreshFresh();
     return newId;
   }
 

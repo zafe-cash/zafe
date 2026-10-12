@@ -29,8 +29,8 @@ Future<void> showRenameSignerSheet(
     builder: (sheet) => _RenameSheet(
       title: 'Name this signer',
       body:
-          'Key ${shortKey(keyHex)}. The name stays on this phone; other '
-          'members don\'t see it.',
+          'Key ${shortKey(keyHex)}. Only you see this label. Without one, '
+          'you see the name they gave themselves, if any.',
       hint: 'e.g. Alice (treasurer)',
       maxLength: MemberNames.maxLength,
       current: current,

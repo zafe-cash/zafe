@@ -622,22 +622,17 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 
 ### UX issues found while testing on a phone (2026-10-12, v0.1.10)
 
-- [ ] Amount screen: "X TAZ available" is read once when the screen opens; it showed "0.00 TAZ available" until the
-      screen was reopened after the coins became spendable. Make it follow the wallet.
-- [ ] **Say why funds aren't spendable yet** (found 2026-10-12, mainnet dry run): received funds need 10 confirmations
-      and the vault's own change 3 (ZIP 315 default, `ConfirmationsPolicy::default()`; Vizor relaxes received funds to
-      6 and only explains confirmations in its migration and gift-card flows). Zafe never says so: Home counts them in
-      the total, the activity row says "Pending", and a payment fails as "insufficient funds" for ~12 min (~4 min once
-      NU7's 25 s blocks arrive). Show "X ZEC is confirming, spendable in about N blocks" on the amount screen and under
-      the balance (the wallet knows the pending amount and confirmations). Also decide whether to relax to 6 like Vizor.
-- [ ] Right after "Propose payment" the proposal page says "Proposal not found" for a few seconds (list not yet
-      refreshed): show a loading state or load the proposal it just created.
-- [ ] Signers tab copy says "Names stay on this phone; other members don't see them", but members can share their own
-      name (shown on other phones). Reword.
+- [x] (done 2026-10-13) Amount screen "available" now follows the wallet; "Proposal not found" flash fixed
+      (`ProposalsNotifier.refreshFresh`: actions wait for a running refresh instead of returning early, which also
+      kept the page stale after cancelling); Signers copy reworded (your labels stay on your phone, members' own names
+      are shared); "X confirming" on Home and the amount screen.
 - [ ] "Proposals" refresh takes 6-11 s each over Tor (3-5 s pool top-up + 3-5 s log read, sequential round trips):
       batch or parallelise the relay requests.
-- [ ] The `/join` page's "Open in Zafe" button uses `zafe://`, which both the mainnet and testnet apps register
-      (a chooser, or the wrong app, when both are installed): give the testnet app its own scheme.
+- [ ] **Testnet app's own link scheme** (`zafe-testnet://`): app side done 2026-10-13 (manifest placeholder
+      `zafeScheme`, both builds read both schemes), **but the site half is held back**: the `/join` page's "Open in
+      Zafe" must switch to `zafe-testnet://` (`data-scheme` on `#open` in `JoinPage.astro`, read by `join.js`) only
+      once a testnet build with the scheme is released, or testers on `0.1.13` lose the button. Patch: reapply the
+      two-line change (see git history of this entry) in the same push as that site deploy.
 - [ ] Debug-signed builds (`flutter run`/profile) never get verified app links, and `flutter run` silently uninstalls and
       reinstalls on a signature mismatch (wipes the app's data): use `adb install -r` with the release key when
       data matters.

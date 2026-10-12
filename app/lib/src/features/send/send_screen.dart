@@ -293,6 +293,12 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   BigInt get _spendable =>
       ref.read(vaultProvider).balance?.spendableZat ?? BigInt.zero;
 
+  /// Received money and the vault's own change that are not spendable yet.
+  BigInt get _confirming {
+    final b = ref.read(vaultProvider).balance;
+    return b == null ? BigInt.zero : b.incomingPendingZat + b.changePendingZat;
+  }
+
   String get _title => switch (_step) {
     _Step.recipient => 'Select recipient',
     _Step.amount => 'Enter amount',
@@ -368,6 +374,17 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    // Rebuild when the wallet's spendable balance changes (a sync lands while this screen
+    // is open): `_spendable` reads it with `ref.read`.
+    ref.watch(
+      vaultProvider.select(
+        (v) => (
+          v.balance?.spendableZat,
+          v.balance?.incomingPendingZat,
+          v.balance?.changePendingZat,
+        ),
+      ),
+    );
     return PopScope(
       canPop: _step == _Step.recipient && _added.isEmpty && !_busy,
       onPopInvokedWithResult: (didPop, _) {
@@ -535,6 +552,15 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                   ],
                 ),
               ),
+              if (_confirming > BigInt.zero) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  '${amountWithTicker(ZecAmount.fromZatoshi(_confirming).balance.amountText, hide: ref.watch(privacyModeProvider))} more is still confirming and can\'t be spent yet.',
+                  style: AppTypography.bodySmall.copyWith(
+                    color: colors.text.secondary,
+                  ),
+                ),
+              ],
               const SizedBox(height: AppSpacing.md),
               SizedBox(
                 height: 64,

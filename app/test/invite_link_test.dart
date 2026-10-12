@@ -36,6 +36,8 @@ void main() {
       );
       expect(from('ZAFE://JOIN?invite=$invite'), invite);
       expect(from('zafe://join/?invite=$invite'), invite);
+      // The testnet app's own scheme is read by every build.
+      expect(from('zafe-testnet://join?invite=$invite'), invite);
     });
 
     test('rejects other schemes', () {

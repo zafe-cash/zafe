@@ -8,6 +8,8 @@ import '../../core/config/beta.dart';
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
 import '../../core/formatting/zec_amount.dart';
+import '../../core/privacy/amount_display.dart';
+import '../../rust/api/vault.dart' show Balance;
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/layout/mobile/mobile_top_scroll_fade.dart';
 import '../../core/theme/app_theme.dart';
@@ -217,6 +219,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 vault.balance!.totalZat,
                                 ref.watch(zecPriceProvider),
                               ),
+                        confirmingText: _confirmingText(
+                          vault.balance,
+                          hide: ref.watch(privacyModeProvider),
+                        ),
                         hidden: ref.watch(privacyModeProvider),
                         threshold: summary.threshold,
                         members: summary.members.length,
@@ -349,6 +355,7 @@ class BalanceCard extends StatelessWidget {
     super.key,
     required this.totalZat,
     required this.fiatText,
+    this.confirmingText,
     required this.hidden,
     required this.onToggle,
     required this.threshold,
@@ -357,6 +364,9 @@ class BalanceCard extends StatelessWidget {
 
   /// The total in dollars ("$1,234.56"); null off mainnet or without a price.
   final String? fiatText;
+
+  /// Money in the total that can't be spent yet ("0.001 ZEC confirming"); null when none.
+  final String? confirmingText;
   final BigInt? totalZat;
   final bool hidden;
   final VoidCallback onToggle;
@@ -473,6 +483,18 @@ class BalanceCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: AppTypography.bodyMedium.copyWith(
                       color: card.textSecondary,
+                    ),
+                  ),
+                if (confirmingText case final confirming?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      confirming,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.bodySmall.copyWith(
+                        color: card.textSecondary,
+                      ),
                     ),
                   ),
                 const SizedBox(height: AppSpacing.sm),
@@ -779,4 +801,17 @@ class NoticeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "0.001 ZEC confirming" for money in the total that can't be spent yet (received funds
+/// and the vault's own change wait for confirmations); null when there is none.
+String? _confirmingText(Balance? balance, {required bool hide}) {
+  if (balance == null) return null;
+  final pending = balance.incomingPendingZat + balance.changePendingZat;
+  if (pending <= BigInt.zero) return null;
+  final amount = amountWithTicker(
+    ZecAmount.fromZatoshi(pending).balance.amountText,
+    hide: hide,
+  );
+  return '$amount confirming';
 }

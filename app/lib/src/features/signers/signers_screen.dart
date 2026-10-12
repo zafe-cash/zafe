@@ -142,8 +142,9 @@ class SignersScreen extends ConsumerWidget {
                       horizontal: AppSpacing.xxs,
                     ),
                     child: Text(
-                      'Tap a signer to name them on this phone. Names stay on this '
-                      'phone; other members don\'t see them.',
+                      'Tap a signer to label them on this phone: only you see your '
+                      'labels. Members can also name themselves from their own row, '
+                      'and everyone sees that name.',
                       style: AppTypography.bodySmall.copyWith(
                         color: colors.text.muted,
                       ),

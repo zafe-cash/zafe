@@ -52,7 +52,7 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="zafe" android:host="join"/>
+                <data android:scheme="${zafeScheme}" android:host="join"/>
             </intent-filter>
             <!-- ZIP 321 payment links: zcash:<address>?amount=... ("Pay with Zcash" on a
                  website or in another app). Opens the payment request screen; never pays
