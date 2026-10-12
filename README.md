@@ -9,9 +9,11 @@ threshold signatures**: members' phones jointly produce one ordinary spend signa
 chain, a Zafe vault looks exactly like a single-user wallet: no owners, no threshold,
 nothing that says "multisig".
 
-> **Status: pre-release, testnet/regtest only, not audited.** Do not use with real funds.
-> The Zcash Foundation has answered our key-derivation and signing questions (see
-> [`upstream-asks.md`](upstream-asks.md)); mainnet waits on an external audit and a hosted relay.
+> **Status: mainnet beta (Android), not externally audited.** Only use money you can afford
+> to lose. Download: [`mainnet-v0.1.0`](https://github.com/zafe-cash/zafe/releases/tag/mainnet-v0.1.0)
+> (relay `relay.zafe.cash`); testnet builds (`v0.1.x`) are also on Releases. The Zcash
+> Foundation has answered our key-derivation and signing questions (see
+> [`upstream-asks.md`](upstream-asks.md)); an external audit is still to come.
 
 Website: <https://zafe.cash> (the 3D walkthrough is at
 [`/showcase`](https://zafe.cash/showcase)).
