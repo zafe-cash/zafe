@@ -497,7 +497,8 @@ async fn recover_from(
         .vault_keys()?
         .ufvk()
         .map_err(proto)?
-        .encode(&network);
+        .encode(&network)
+        .map_err(proto)?;
     if ufvk != state.descriptor.ufvk {
         return Err(failed(
             "the vault secret doesn't give the vault's viewing key",

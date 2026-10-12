@@ -186,10 +186,15 @@ fn open_wallet_db<P: Parameters>(
     path: &Path,
     key: &WalletKey,
     params: P,
-) -> Result<WalletDb<rusqlite::Connection, P, SystemClock, OsRng>, WalletError> {
+) -> Result<WalletDb<rusqlite::Connection, P, SystemClock, crate::zrng::ZRng>, WalletError> {
     let conn = open_connection(path, key, false)?;
     rusqlite::vtab::array::load_module(&conn).map_err(db_err)?;
-    Ok(WalletDb::from_connection(conn, params, SystemClock, OsRng))
+    Ok(WalletDb::from_connection(
+        conn,
+        params,
+        SystemClock,
+        crate::zrng::zrng(),
+    ))
 }
 
 /// A regtest network with every upgrade through NU6.3 active at height 1, matching
@@ -207,6 +212,8 @@ pub fn regtest_network() -> LocalNetwork {
         nu6_1: one,
         nu6_2: one,
         nu6_3: one,
+        // ths 0.3.0 runs NU5..NU6.3 only; set this when regtest runs NU7.
+        nu7: None,
     }
 }
 
@@ -422,7 +429,7 @@ pub struct VaultBalance {
 }
 
 pub struct VaultWallet<P: Parameters + Clone + Send + 'static> {
-    db: WalletDb<rusqlite::Connection, P, SystemClock, OsRng>,
+    db: WalletDb<rusqlite::Connection, P, SystemClock, crate::zrng::ZRng>,
     params: P,
     account: AccountUuid,
     cache: MemBlockCache,
@@ -838,6 +845,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         >(
             &mut self.db,
             &self.params,
+            &SystemClock,
+            &mut crate::zrng::zrng(),
             self.account,
             OvkPolicy::Sender,
             &proposal,
@@ -953,6 +962,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         >(
             &mut self.db,
             &self.params,
+            &SystemClock,
+            &mut crate::zrng::zrng(),
             self.account,
             OvkPolicy::Sender,
             &proposal,

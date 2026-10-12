@@ -609,10 +609,15 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
 
     // Descriptor: identical on every member, then signed by all.
     let fvk = output.vault_keys.fvk();
-    let address =
-        UnifiedAddress::from_receivers(Some(fvk.address_at(0u32, Scope::External)), None, None)
-            .ok_or_else(|| NodeError::Protocol("cannot build unified address".into()))?
-            .encode(network);
+    let address = UnifiedAddress::from_receivers(
+        Some(fvk.address_at(0u32, Scope::External)),
+        None,
+        None,
+        None,
+        None,
+    )
+    .ok_or_else(|| NodeError::Protocol("cannot build unified address".into()))?
+    .encode(network);
     let descriptor = VaultDescriptor {
         vault_id: invite.mailbox,
         version: version::DESCRIPTOR,
@@ -630,7 +635,12 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
             })
             .collect::<Result<_, NodeError>>()?,
         group_public_key: *output.vault_keys.ak(),
-        ufvk: output.vault_keys.ufvk().map_err(proto)?.encode(network),
+        ufvk: output
+            .vault_keys
+            .ufvk()
+            .map_err(proto)?
+            .encode(network)
+            .map_err(proto)?,
         address,
         use_qsk: true,
         proposal_expiry_blocks,
@@ -1511,6 +1521,8 @@ pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCor
         Some(fvk.address_at(0u32, orchard::keys::Scope::Internal)),
         None,
         None,
+        None,
+        None,
     )
     .ok_or_else(|| NodeError::Protocol("vault internal address".into()))?
     .encode(wallet.params());
@@ -2050,7 +2062,7 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
     let to_prove = pczt.clone();
     let proved = tokio::task::spawn_blocking(move || {
         Prover::new(to_prove)
-            .create_ironwood_proof(proving_key())
+            .create_ironwood_proof(crate::zrng::zrng(), proving_key())
             .map(|p| p.finish())
             .map_err(proto)
     })
@@ -2086,7 +2098,7 @@ pub struct Sent {
 async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, NodeError> {
     let transaction = TransactionExtractor::new(signed)
         .with_orchard(verifying_key())
-        .extract()
+        .extract(crate::zrng::zrng())
         .map_err(proto)?;
     let mut raw = Vec::new();
     transaction.write(&mut raw).map_err(proto)?;
@@ -2663,7 +2675,7 @@ pub async fn finalize<R: RngCore + CryptoRng>(
     let to_prove = pczt.clone();
     let proving = tokio::task::spawn_blocking(move || {
         Prover::new(to_prove)
-            .create_ironwood_proof(proving_key())
+            .create_ironwood_proof(crate::zrng::zrng(), proving_key())
             .map(|p| p.finish())
             .map_err(proto)
     });

@@ -41,6 +41,8 @@ async-trait.workspace = true
 # libcrypto) so every target, Android included, needs no system crypto library.
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl", "array"] }
 rand.workspace = true
+rand10.workspace = true
+ff14.workspace = true
 zcash_note_encryption.workspace = true
 argon2 = "0.5"
 chacha20poly1305.workspace = true
