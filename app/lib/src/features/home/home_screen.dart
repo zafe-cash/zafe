@@ -167,7 +167,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } else if (failure != null) {
       syncLabel = failure.statusLabel;
     } else if (vault.syncing) {
-      syncLabel = vault.balance == null ? 'First sync...' : 'Syncing...';
+      syncLabel = vault.firstSync ? 'First sync...' : 'Syncing...';
     } else if (vault.balance != null) {
       syncLabel = 'Synced';
     } else {

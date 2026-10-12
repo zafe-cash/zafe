@@ -1016,7 +1016,16 @@ Learned while studying it:
   `ZafeErrorKind::{Network, Tls, NetworkTimeout, ServerBehind, WrongNetwork,
   WalletDatabase}` plus `ZafeError.endpoint` (`Relay`/`Lightwalletd`/`None`). The relay
   client now has a 10 s connect / 60 s request timeout (it had none).
-- **Sync status**: "First sync..." while the first sync of a vault runs (no balance yet); the
+- **Sync status animation** (2026-10-12): the shimmer + breathing glow in `MobileTopNav` is
+  Vizor's code unchanged, but Vizor animates only a real catch-up while ours ran for every
+  `vault.syncing` (minutes on a stall or over Tor) and re-blurs a shadow per frame (raster thread
+  ~60% of a core on a Nothing phone). It now runs 10 s per syncing episode (`_SyncStatusMotion.budget`),
+  inside a `RepaintBoundary`, then the label stays still. **First-sync stall**: a new vault's first
+  sync sat 6 min (= `_syncTimeout`) before Rust was called (Rust itself: ~9 s over Tor, see
+  "Slow steps"); the steps before the Rust call (paths, wallet key) now time out in 45 s and a stuck or
+  slow (>45 s) sync is recorded in the report as `slow-sync` / `sync` entries naming the step.
+- **Sync status**: "First sync..." while the first sync of a vault on this device runs (`VaultState.firstSync`:
+  no saved sync time); the
   sync sheet says "First sync" / "Syncing" while a sync runs (it used to say "Vault in sync"
   whenever there was no error). While "Use Tor" is on the status line and its glow are Tor's
   purple (`AppSyncColors.torText/torGlow`), unless Tor failed (error colour). Settings'

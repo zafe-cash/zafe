@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/config/endpoints.dart';
 import '../core/config/network_config.dart';
+import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/network/tor_setting.dart' show kUseTorKey;
 import '../core/storage/vault_summaries.dart';
@@ -95,6 +96,7 @@ class VaultState {
     this.syncing = false,
     this.syncError,
     this.syncedAt = const {},
+    this.firstSync = false,
   });
 
   /// Every vault on this device, in the order added (ready and still setting up).
@@ -118,6 +120,10 @@ class VaultState {
   /// When each vault last synced successfully in this session (older ones: the vault's
   /// `summary.json`).
   final Map<String, DateTime> syncedAt;
+
+  /// The sync running now is this vault's first on this device (it has never finished
+  /// one before): that one takes a while, so the status says so.
+  final bool firstSync;
 
   StoredVault? get active {
     for (final v in vaults) {
@@ -155,6 +161,7 @@ class VaultState {
     Object? syncError,
     bool clearSyncError = false,
     Map<String, DateTime>? syncedAt,
+    bool? firstSync,
   }) => VaultState(
     vaults: vaults ?? this.vaults,
     activeId: clearActive ? null : (activeId ?? this.activeId),
@@ -164,6 +171,7 @@ class VaultState {
     syncing: syncing ?? this.syncing,
     syncError: clearSyncError ? null : (syncError ?? this.syncError),
     syncedAt: syncedAt ?? this.syncedAt,
+    firstSync: firstSync ?? this.firstSync,
   );
 }
 
@@ -171,6 +179,15 @@ class VaultState {
 /// generation), removing, and wallet sync of the active vault.
 /// Longest a sync may keep the home screen on "Syncing..." (Rust caps a pass at 5 min).
 const _syncTimeout = Duration(minutes: 6);
+
+/// What each step before the Rust call (app paths, the wallet key in secure storage) may
+/// take. The first sync of a new vault once sat ~6 minutes (the whole [_syncTimeout]) before
+/// Rust was even called; a stuck step now fails in under a minute and is named in the
+/// diagnostic report.
+const _preSyncStepTimeout = Duration(seconds: 45);
+
+/// A sync slower than this is written to the diagnostic report with its steps.
+const _slowSync = Duration(seconds: 45);
 
 class VaultNotifier extends Notifier<VaultState> {
   final _store = ZafeSecureStore.instance;
@@ -429,15 +446,30 @@ class VaultNotifier extends Notifier<VaultState> {
     _dirty = false;
     // Keep the last error on screen while retrying, so the status doesn't flicker
     // between "Syncing..." and the failure every poll.
-    state = state.copyWith(syncing: true);
+    final seen =
+        state.syncedAt.containsKey(vaultId) ||
+        (await VaultSummaries.read(vaultId)).syncedAt != null;
+    state = state.copyWith(syncing: true, firstSync: !seen);
     // Breadcrumbs: the one unexplained hang (first sync after keygen) left nothing in
     // flight in Rust or on the platform side; if it recurs, the log names the last step.
     var step = 'paths';
+    final watch = Stopwatch()..start();
+    final marks = <String, int>{}; // step -> seconds spent
+    var mark = Duration.zero;
+    void lap(String done) {
+      marks[done] = (watch.elapsed - mark).inSeconds;
+      mark = watch.elapsed;
+    }
+
     try {
       final balance = await () async {
-        final paths = await ZafePaths.get();
+        final paths = await ZafePaths.get().timeout(_preSyncStepTimeout);
+        lap('paths');
         step = 'wallet key';
-        final dbKey = await ZafeSecureStore.instance.walletKey(vaultId);
+        final dbKey = await ZafeSecureStore.instance
+            .walletKey(vaultId)
+            .timeout(_preSyncStepTimeout);
+        lap('wallet key');
         step = 'rust sync';
         return rust.syncVault(
           dbDir: paths.dbDir,
@@ -450,10 +482,21 @@ class VaultNotifier extends Notifier<VaultState> {
         // A pass is capped at 5 minutes in Rust; this guard frees `syncing` if anything
         // else never answers (seen once on the first sync after keygen, 2026-09-30).
       }().timeout(_syncTimeout);
+      lap('rust sync');
+      if (watch.elapsed >= _slowSync) {
+        unawaited(
+          CrashLog.instance?.record(
+                'slow-sync',
+                'took ${watch.elapsed.inSeconds}s: ${marks.entries.map((e) => '${e.key}=${e.value}s').join(' ')}',
+              ) ??
+              Future<void>.value(),
+        );
+      }
       final now = DateTime.now();
       state = state.copyWith(
         balances: {...state.balances, vaultId: balance},
         syncing: false,
+        firstSync: false,
         clearSyncError: true,
         syncedAt: {...state.syncedAt, vaultId: now},
       );
@@ -467,12 +510,22 @@ class VaultNotifier extends Notifier<VaultState> {
     } catch (e) {
       _dirty = true;
       debugPrint('sync failed at $step: ${describeError(e)}');
+      // A stuck step (not a plain offline failure) is worth a line in the report.
+      if (e is TimeoutException || watch.elapsed >= _slowSync) {
+        unawaited(
+          CrashLog.instance?.record(
+                'sync',
+                'failed at $step after ${watch.elapsed.inSeconds}s: ${describeError(e)}',
+              ) ??
+              Future<void>.value(),
+        );
+      }
       // A listed Zcash server that stops answering: move to the next listed one and
       // sync again (at most one attempt per few minutes, never away from a custom URL).
       final switched = await ref
           .read(serverFailoverProvider.notifier)
           .afterSyncFailure(e);
-      state = state.copyWith(syncing: false, syncError: e);
+      state = state.copyWith(syncing: false, firstSync: false, syncError: e);
       if (switched) await sync();
     }
   }

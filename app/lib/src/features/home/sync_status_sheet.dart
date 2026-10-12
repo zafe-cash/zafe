@@ -169,7 +169,7 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
     // No error is not the same as "up to date": a sync may be running, and the first one of
     // a new vault takes a while (no balance yet).
     final syncing = failure == null && (vault.syncing || _retrying);
-    final firstSync = syncing && vault.balance == null;
+    final firstSync = syncing && vault.firstSync;
     final body = <Widget>[];
     if (failure == null) {
       body.add(

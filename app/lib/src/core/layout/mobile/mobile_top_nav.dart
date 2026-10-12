@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
@@ -402,6 +403,12 @@ class _AvatarPlaceholder extends StatelessWidget {
 abstract final class _SyncStatusMotion {
   static const period = Duration(milliseconds: 1400);
 
+  /// A sync can last minutes (a slow network, Tor), and the shimmer and the breathing
+  /// glow re-mask and re-blur every frame (the raster thread sat at ~60% of a core on a
+  /// phone). So the motion runs this long per syncing episode, then the label stays
+  /// still; the text keeps saying what is happening.
+  static const budget = Duration(seconds: 10);
+
   /// Half-width of the shimmer highlight band as a gradient-stop fraction.
   /// Kept narrow for a gentle, low-contrast sparkle.
   static const _bandHalf = 0.18;
@@ -459,6 +466,10 @@ class _SyncStatusState extends State<_SyncStatus>
     with SingleTickerProviderStateMixin {
   AnimationController? _controller;
 
+  /// Ends the motion once [_SyncStatusMotion.budget] is used up.
+  Timer? _budget;
+  bool _spent = false;
+
   AnimationController get _activeController {
     return _controller ??= AnimationController(
       vsync: this,
@@ -467,7 +478,7 @@ class _SyncStatusState extends State<_SyncStatus>
   }
 
   bool get _shouldAnimate {
-    if (!widget.animated) {
+    if (!widget.animated || _spent) {
       return false;
     }
     return !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
@@ -489,10 +500,21 @@ class _SyncStatusState extends State<_SyncStatus>
   }
 
   void _syncAnimation() {
+    if (!widget.animated) {
+      // The episode is over: the next one gets a fresh budget.
+      _budget?.cancel();
+      _budget = null;
+      _spent = false;
+    }
     if (_shouldAnimate) {
       if (!_activeController.isAnimating) {
         _activeController.repeat();
       }
+      _budget ??= Timer(_SyncStatusMotion.budget, () {
+        if (!mounted) return;
+        setState(() => _spent = true);
+        _syncAnimation();
+      });
     } else {
       final controller = _controller;
       if (controller != null) {
@@ -505,12 +527,18 @@ class _SyncStatusState extends State<_SyncStatus>
 
   @override
   void dispose() {
+    _budget?.cancel();
     _controller?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Its own layer: the motion repaints only this corner, never the screen under it.
+    return RepaintBoundary(child: _content(context));
+  }
+
+  Widget _content(BuildContext context) {
     if (!_shouldAnimate) {
       return Row(
         mainAxisSize: MainAxisSize.min,
