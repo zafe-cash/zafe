@@ -133,6 +133,9 @@ jobs:
             --build-name='${{ steps.version.outputs.name }}' \
             --build-number='${{ github.run_number }}'
 
+      # The release notes are written here, at tag time, from this file as of the tagged commit:
+      # a later change to this text reaches only the next tag (fix an old release with
+      # `gh release edit <tag> --notes-file ...`).
       - name: Package
         id: package
         run: |
