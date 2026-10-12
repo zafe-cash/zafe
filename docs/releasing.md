@@ -21,6 +21,10 @@ propose, sign, send, restore), and only then tag `mainnet-v<version>` on the **s
 release notes tell testers they need testnet coins (TAZ) and link the Zcash testnet guide
 (no verified public faucet, 2026-10-12).
 
+**Invite page per host.** `testnet.zafe.cash/join` serves `join-testnet.html` (a TESTNET badge,
+"test coins with no value", the testnet download) and `zafe.cash/join` the mainnet page: one
+deployment, one Vercel route with a host match (`vercel-output.sh`, `ZAFE_TESTNET_HOST`).
+
 **Site links.** "Get Zafe" and "Try the testnet build" point at the newest `mainnet-v*` and
 `v*` release; `site.yml` reads them with `gh release list` at build time, and both release
 workflows start `site.yml` after publishing (`actions: write`). Store badges say "Soon"
