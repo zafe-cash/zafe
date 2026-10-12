@@ -239,13 +239,12 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   /// step the payment being edited stays; on the recipient step the file replaces it.
   /// Nothing is added unless every row is valid.
   Future<void> _importCsv() async {
-    FilePickerResult? picked;
+    List<int>? bytes;
     try {
-      picked = await FilePicker.pickFiles(withData: true);
+      bytes = await (await FilePicker.pickFile())?.readAsBytes();
     } catch (_) {
-      picked = null;
+      bytes = null;
     }
-    final bytes = picked?.files.singleOrNull?.bytes;
     if (bytes == null || !mounted) return;
     void fail(String message) => showAppToast(
       context,

@@ -171,8 +171,8 @@ class _QrScanScreenState extends State<QrScanScreen>
 
   /// Reads a QR code from a picture (a shared QR image or a screenshot of one).
   Future<void> _chooseImage() async {
-    final result = await FilePicker.pickFiles(type: FileType.image);
-    final path = result?.files.single.path;
+    final picked = await FilePicker.pickFile(type: FileType.image);
+    final path = picked?.path;
     if (path == null || !mounted) return;
     BarcodeCapture? capture;
     try {

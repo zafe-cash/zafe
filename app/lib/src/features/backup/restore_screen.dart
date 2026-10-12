@@ -50,11 +50,17 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       (_text.text.trim().isEmpty ? null : utf8.encode(_text.text.trim()));
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.pickFiles(withData: true);
-    final picked = result?.files.singleOrNull;
-    if (picked?.bytes == null) return;
+    final picked = await FilePicker.pickFile();
+    if (picked == null) return;
+    final List<int> bytes;
+    try {
+      bytes = await picked.readAsBytes();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
-      _file = picked!.bytes;
+      _file = bytes;
       _fileName = picked.name;
       _text.clear();
     });

@@ -1044,6 +1044,18 @@ Learned while studying it:
   whenever there was no error). While "Use Tor" is on the status line and its glow are Tor's
   purple (`AppSyncColors.torText/torGlow`), unless Tor failed (error colour). Settings'
   version comes from `--dart-define=ZAFE_VERSION` (both release workflows pass it).
+- **Secure storage plugin** (2026-10-12): `flutter_secure_storage` 11.2.0 (was 10.3.4; we have used the 10.x
+  default ciphers since the first commit, so no data used the algorithms v11 dropped). Why: 10.x probed
+  for old `EncryptedSharedPreferences` data on its first call in every engine (the "migrated" flag is only
+  set after a real migration), which threw "decryption failed" at each start (logged by the plugin, then it
+  fell back to the normal path), once per engine (app + background), on the one handler thread every storage
+  call queues behind; v11 removed that backend. Upgrade needed `file_picker` 13.1.0 and `share_plus` 13.3.1
+  (the plugin's Windows part needs `win32` ^6; a `win32` override breaks `flutter test`, which compiles
+  `file_picker`'s Windows code on the host). `file_picker` 13: `FilePicker.pickFile()` +
+  `PlatformFile.readAsBytes()` replace `pickFiles(withData: true)`. **Verified on a phone**: an app on
+  10.3.4 holding a vault was updated in place (same signing key) to 11.2.0: same vault, address and signer
+  key, zero `FlutterSecureStorage` errors, then a new vault (write path, keygen, first sync) worked. Repeat
+  that in-place test whenever the plugin changes: it guards the key shares.
 - **Unlock gate** (spec §14; `core/security/device_auth.dart` pure logic behind a
   `DeviceAuthenticator`, `core/security/unlock_gate.dart` `confirmUnlock(context, ref,
   reason:)`, `providers/device_lock_provider.dart`): approving, Send now / Collect
