@@ -556,7 +556,7 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - Gate
   - [ ] **(you)** Engage the external audit (`docs/audit-scope.md`); record the audit commit here
 - Validation
-  - [ ] Mainnet dry run with real funds (first APK is out: do it before sharing widely): create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
+  - [ ] Mainnet dry run with real funds (see the release plan below): create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
   - [ ] Device run of seat move and share repair
   - [ ] Check the Verdigris colours on a device
 - Release
@@ -575,6 +575,45 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
   - [ ] `catch_relay_up` across seat moves
   - [ ] Separate host for mainnet
   - [ ] *(idea)* relay URL per vault in the invite
+
+### Release plan after the NU7 finding (2026-10-12)
+
+- [x] `mainnet-v0.1.1` published (pre-release; stall fix, low-rate animation, derived wallet key, secure storage 11.2.0,
+      cancel-setup UI); mainnet relay promoted to digest `85153e1b` (cancel route), soak bypassed to 3 h.
+- [ ] **Mainnet dry run with real funds (you, small amount; I act as CLI co-signer on mainnet)**: install `0.1.1` over
+      `0.1.0` (the wallet DB resyncs once), create a 2-of-2 vault, receive, propose, approve, send, restore from a
+      backup, check the first sync time. Mainnet sends work until NU7 activates.
+- [ ] **Guard release `mainnet-v0.1.2` (small, this week)**: at *propose* time compare the server's
+      `consensus_branch_id` (GetLightdInfo) with the branch the app would build; on a mismatch refuse with "Update Zafe"
+      (also as a sync-status notice) instead of failing at broadcast after two approvals; refuse proposals whose expiry
+      would cross a known NU7 activation height; mark open proposals "needs a new proposal" once the branch changed;
+      convert the expiry window to blocks with the post-NU7 25 s block time (7 days is 8,064 blocks at 75 s but ~2.3
+      days at 25 s).
+- [ ] **NU7 migration (before 2026-11-05)** on a branch: librustzcash NU7 line, height-based branch selection, `verify`
+      vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).
+      Dates: 2026-10-20 mainnet height decision; ~10-27 release candidate on testnet; ~10-28..31 tag `v…` then
+      `mainnet-v…` on the same commit; announce on the site and X, message early users; 11-05 activation.
+- [ ] Heads-up copy for early users (site FAQ/banner + release notes): "an update is required before Nov 5; funds are
+      never at risk, sending pauses until you update".
+- [ ] Re-run the release-signed in-place update test for the NU7 release (v0.1.8 -> v0.1.10 passed on 2026-10-12).
+
+### UX issues found while testing on a phone (2026-10-12, v0.1.10)
+
+- [ ] Amount screen: "X TAZ available" is read once when the screen opens; it showed "0.00 TAZ available" until the
+      screen was reopened after the coins became spendable. Make it follow the wallet.
+- [ ] Right after "Propose payment" the proposal page says "Proposal not found" for a few seconds (list not yet
+      refreshed): show a loading state or load the proposal it just created.
+- [ ] Signers tab copy says "Names stay on this phone; other members don't see them", but members can share their own
+      name (shown on other phones). Reword.
+- [ ] "Proposals" refresh takes 6-11 s each over Tor (3-5 s pool top-up + 3-5 s log read, sequential round trips):
+      batch or parallelise the relay requests.
+- [ ] The `/join` page's "Open in Zafe" button uses `zafe://`, which both the mainnet and testnet apps register
+      (a chooser, or the wrong app, when both are installed): give the testnet app its own scheme.
+- [ ] Debug-signed builds (`flutter run`/profile) never get verified app links, and `flutter run` silently uninstalls and
+      reinstalls on a signature mismatch (wipes the app's data): use `adb install -r` with the release key when
+      data matters.
+- Done in this round: wrong version label ("v0.1.0" in Settings), "First sync…" on every start, the sync sheet saying
+  "in sync" mid-sync, the first-sync stall, the animation CPU cost, the secure-storage noise.
 
 ## M3 / M4 — later (spec §16)
 
