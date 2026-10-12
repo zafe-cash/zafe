@@ -154,6 +154,11 @@ jobs:
             echo "Zafe $v for **Zcash mainnet** (ZEC), **beta for early users**. The code has not had"
             echo "its external security audit yet: only use money you can afford to lose."
             echo
+            echo "**Update together:** every member of a vault must run the same version (this one"
+            echo "adds a vault event older versions skip). Zcash's next network upgrade (NU7) is"
+            echo "planned for 2026-11-05: a Zafe update that supports it will follow, and you will"
+            echo "need it before then to send. Funds are never at risk from a missed update."
+            echo
             echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
             echo "installing from your browser or files app when Android asks."
             echo
