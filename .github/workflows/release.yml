@@ -129,6 +129,7 @@ jobs:
             --dart-define=ZAFE_NETWORK=test \
             --dart-define=ZAFE_RELAY_URL="$ZAFE_RELAY_URL" \
             --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
+            --dart-define=ZAFE_VERSION='${{ steps.version.outputs.name }}' \
             --build-name='${{ steps.version.outputs.name }}' \
             --build-number='${{ github.run_number }}'
 

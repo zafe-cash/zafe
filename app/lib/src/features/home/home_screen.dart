@@ -167,7 +167,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } else if (failure != null) {
       syncLabel = failure.statusLabel;
     } else if (vault.syncing) {
-      syncLabel = 'Syncing...';
+      syncLabel = vault.balance == null ? 'First sync...' : 'Syncing...';
     } else if (vault.balance != null) {
       syncLabel = 'Synced';
     } else {
@@ -190,7 +190,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             failure != null &&
                             !failure.isTransient)
                     ? colors.sync.textError
+                    : tor.enabled
+                    ? colors.sync.torText
                     : colors.sync.text,
+                // Tor's purple while Tor is on, so the status line shows it.
+                syncIndicatorColor: tor.enabled ? colors.sync.torGlow : null,
                 syncAnimated:
                     tor.connecting ||
                     (vault.syncing && (failure?.isTransient ?? true)),

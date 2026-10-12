@@ -31,7 +31,12 @@ import 'diagnostics_sheet.dart';
 import 'tor_sheet.dart';
 
 const _rowHeight = 44.0;
-const _appVersion = '0.1.0';
+
+/// The release's version, passed by the release workflows (`--dart-define=ZAFE_VERSION`).
+const _appVersion = String.fromEnvironment(
+  'ZAFE_VERSION',
+  defaultValue: '0.1.0',
+);
 
 /// Settings: grouped surface cards of 44px rows.
 class SettingsScreen extends ConsumerWidget {

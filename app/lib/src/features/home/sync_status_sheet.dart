@@ -166,11 +166,20 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
         (vault.activeId == null ? null : vault.syncedAt[vault.activeId]) ??
         _savedSyncedAt;
 
+    // No error is not the same as "up to date": a sync may be running, and the first one of
+    // a new vault takes a while (no balance yet).
+    final syncing = failure == null && (vault.syncing || _retrying);
+    final firstSync = syncing && vault.balance == null;
     final body = <Widget>[];
     if (failure == null) {
       body.add(
         Text(
-          _retrying ? 'Trying again...' : 'Everything is up to date.',
+          firstSync
+              ? 'The first sync of a new vault can take a few minutes. It keeps going '
+                    'if you close this.'
+              : syncing
+              ? 'Checking for new activity...'
+              : 'Everything is up to date.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -277,7 +286,13 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
     ]);
 
     return MobileModalScaffold(
-      title: failure?.title ?? 'Vault in sync',
+      title:
+          failure?.title ??
+          (firstSync
+              ? 'First sync'
+              : syncing
+              ? 'Syncing'
+              : 'Vault in sync'),
       titleMaxLines: 2,
       onClose: () => Navigator.of(context).pop(),
       child: Column(

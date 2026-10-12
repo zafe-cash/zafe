@@ -387,13 +387,18 @@ pub fn sync_vault(
 ) -> Result<Balance, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
+    crate::diag::remember_support_dir(&db_dir);
+    let mut watch = crate::diag::Stopwatch::new("sync");
     let _guard = wallet_lock();
-    runtime().block_on(async {
+    watch.lap("lock");
+    let result = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
         // A server on another network or behind this wallet would fail the sync with an
         // obscure error (or none): say so instead.
         check_server(&mut client, &m.descriptor.network, wallet.chain_height()?).await?;
+        watch.lap("server");
         // One pass is capped so a stalled stream can't hold the wallet lock forever; sync is
         // incremental, so the next pass continues where this one stopped.
         tokio::time::timeout(SYNC_PASS_TIMEOUT, wallet.sync(&mut client))
@@ -405,14 +410,18 @@ pub fn sync_vault(
                 )
                 .at(ZafeEndpoint::Lightwalletd)
             })??;
+        watch.lap("scan");
         if wallet.chain_height()?.is_some() {
             // Locks persist in the wallet database, so a failure keeps the last holds.
             if let Ok((_, state)) = node::load_state(&RelayClient::new(relay_url), &me, &m).await {
+                watch.lap("relay");
                 let sent = sent_txs(&db_dir, &m);
                 let _ = node::reserve_notes(&state, &mut wallet, &mut client, &sent).await;
+                watch.lap("holds");
             }
         }
         let b = wallet.balance()?;
+        watch.lap("balance");
         // Before the vault's birthday block exists the wallet has no chain height yet.
         let height = match wallet.chain_height()? {
             Some(h) => h,
@@ -426,7 +435,9 @@ pub fn sync_vault(
             incoming_pending_zat: b.ironwood_pending,
             total_zat: b.total,
         })
-    })
+    });
+    watch.finish();
+    result
 }
 
 /// Registers this device's push token (FCM on Android, APNs on iOS) for the vault, so the

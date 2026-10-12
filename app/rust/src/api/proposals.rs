@@ -422,9 +422,12 @@ pub fn list_proposals(
     let m = self::material(&material)?;
     let relay = RelayClient::new(relay_url);
     let mut pool = pool_store(&state_dir);
+    let mut watch = crate::diag::Stopwatch::new("proposals");
     let state = runtime().block_on(async {
         node::top_up_pool(&relay, &me, &m, &mut pool, &mut OsRng).await?;
+        watch.lap("pool");
         let (_, state) = node::load_state(&relay, &me, &m).await?;
+        watch.lap("log");
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
@@ -444,7 +447,9 @@ pub fn list_proposals(
             return Ok::<_, ZafeError>(fresh);
         }
         Ok::<_, ZafeError>(state)
-    })?;
+    });
+    watch.finish();
+    let state = state?;
     node::forget_closed(&state, &me.public().sig_pk, tip_height, &mut pool);
     node::forget_closed_nonces(&state, tip_height, &mut nonce_store(&state_dir));
     Ok(ProposalList {

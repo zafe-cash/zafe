@@ -316,7 +316,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   deletes all. Rust panics: `app/rust/src/diag.rs` (not in `api/`, so no FRB surface) installs a hook from
   `init_app` writing `<ts> panic at file:line:col` (never the message) to `diagnostics/rust-panics.log`;
   the directory is learned from the first `wallet_path(db_dir)` call (db dir = support dir), so a panic
-  before the first wallet call leaves no note. The report adds a "Rust panics" section. The site says "no
+  before the first wallet call leaves no note. The report adds a "Rust panics" section and a "Slow steps" one (`timings.log`, written by `diag::Stopwatch` around `sync_vault` and `list_proposals`: step names and durations only, for calls over 1.5 s and the first of each kind per process; first-sync investigation 2026-10-12). `first_sync_timing` (zafe-core example) times a new wallet's create + first sync on a live server: ~3 s on desktop against testnet. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
 - **Cancelling a setup** (2026-10-12): before membership is locked the creator can back out
@@ -1016,6 +1016,11 @@ Learned while studying it:
   `ZafeErrorKind::{Network, Tls, NetworkTimeout, ServerBehind, WrongNetwork,
   WalletDatabase}` plus `ZafeError.endpoint` (`Relay`/`Lightwalletd`/`None`). The relay
   client now has a 10 s connect / 60 s request timeout (it had none).
+- **Sync status**: "First sync..." while the first sync of a vault runs (no balance yet); the
+  sync sheet says "First sync" / "Syncing" while a sync runs (it used to say "Vault in sync"
+  whenever there was no error). While "Use Tor" is on the status line and its glow are Tor's
+  purple (`AppSyncColors.torText/torGlow`), unless Tor failed (error colour). Settings'
+  version comes from `--dart-define=ZAFE_VERSION` (both release workflows pass it).
 - **Unlock gate** (spec §14; `core/security/device_auth.dart` pure logic behind a
   `DeviceAuthenticator`, `core/security/unlock_gate.dart` `confirmUnlock(context, ref,
   reason:)`, `providers/device_lock_provider.dart`): approving, Send now / Collect
