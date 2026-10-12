@@ -187,7 +187,15 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     setState(() => _cancelling = true);
     try {
       await ref.read(proposalsProvider.notifier).cancel(widget.id);
-      if (mounted) showAppToast(context, 'Payment cancelled');
+      if (mounted) {
+        showAppToast(context, 'Payment cancelled');
+        // Back to where the payment was opened from.
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
+        }
+      }
     } catch (e) {
       debugPrint('cancel failed: ${describeError(e)}');
       if (mounted) {
@@ -278,7 +286,11 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       );
     }
 
-    final send = proposals.sends[p.id];
+    // A leftover send state (a failed attempt) means nothing once the payment is closed.
+    final closed =
+        p.stage == rust.ProposalStage.cancelled ||
+        p.stage == rust.ProposalStage.rejected;
+    final send = closed ? null : proposals.sends[p.id];
     final progress = send?.progress;
     final sending = send?.running ?? false;
     final sent =
