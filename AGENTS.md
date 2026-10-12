@@ -1327,6 +1327,21 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
 
 ## Upstream status (check before relying on it)
 
+- **NU7 (found 2026-10-12, top mainnet risk)**: NU7 activated on **testnet at block 4,465,026 (2026-10-04)** with
+  consensus branch id **`0x77190AD9`** (ZIP 259); **mainnet is targeted for 2026-11-05** (decision due 2026-10-20). Our
+  pinned stack (`zcash_protocol` 0.10.6, `zcash_primitives` 0.30.1, `zcash_client_backend` 0.24.0, `pczt` 0.9.3, `orchard`
+  0.15.5) only has NU7 behind `--cfg zcash_unstable="nu7"`, with **no activation heights** and a **placeholder
+  branch id (`0xffff_ffff`)**: every send is built with NU6.3's `0x37a5165b`, so a NU7 node rejects it ("transaction uses
+  an incorrect consensus branch id"; seen on testnet: proposal verified, approved by both signers, then
+  `broadcast rejected`; nothing is sent, funds don't move). **Mainnet works until activation** (checked
+  `cargo run -p zafe-core --example branch_check`: mainnet server branch = ours `37a5165b`; testnet server `77190ad9`).
+  Needed before 2026-11-05: move to the librustzcash pre-release train that carries the final NU7 branch id and
+  heights (`zcash_protocol` 0.11.0-pre, `zcash_primitives` 0.31.0-pre, `zcash_client_backend` 0.25.0-pre, `pczt`
+  0.10.0-pre, `orchard` 0.16), check what NU7 changes for us (v4 txs disabled, 25 s blocks, NSM fee recycling /
+  ZIP 233 vs our "fee must equal ZIP 317" check in `verify`, expiry-in-blocks windows, wallet DB migrations),
+  re-run regtest/bridge e2e (`ths` must run NU7) and the testnet end-to-end send, then ship a mainnet release
+  that users install before activation. Until then testnet sends can't be tested; use regtest.
+
 - **Upstream gates cleared (2026-10-01, frost#1094, conradoplg)**: U1 (vaults derived per
   ZIP 2005 § 4.2.3 from our own `sk` agreement: change "very unlikely", "if you have your
   own system that will also work"), U5 (builder-chosen `alpha` fine; keep it secret) and U3

@@ -533,6 +533,15 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 
 ## Mainnet release checklist (2026-10-12)
 
+- **BLOCKER (found 2026-10-12): NU7.** Testnet has been on NU7 since block 4,465,026 (2026-10-04, branch id
+  `0x77190AD9`); mainnet is targeted for **2026-11-05** (decision 2026-10-20). Zafe's pinned librustzcash builds NU6.3
+  transactions, so **every testnet send is rejected today** (verified on a phone: "incorrect consensus branch id") and
+  **mainnet sends will be rejected from activation** unless users update first. Funds are safe (nothing is sent), but
+  vaults can't spend. See AGENTS.md "Upstream status" for the scope. Steps: [ ] upgrade to the librustzcash NU7 line;
+  [ ] fix `verify` for any NU7 fee/tx rule; [ ] regtest + bridge e2e on NU7; [ ] testnet send on a phone; [ ] mainnet
+  release + a heads-up to early users (in-app notice when the server's branch differs from the app's); [ ] ths/regtest
+  NU7 support. Mainnet launch today is possible (sends work until activation) but needs this release before 2026-11-05.
+
 Ordered; tick as done. Details in the M2 section above and `infra/relay/README.md` "Mainnet".
 
 - Relay
