@@ -614,6 +614,12 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 
 - [ ] Amount screen: "X TAZ available" is read once when the screen opens; it showed "0.00 TAZ available" until the
       screen was reopened after the coins became spendable. Make it follow the wallet.
+- [ ] **Say why funds aren't spendable yet** (found 2026-10-12, mainnet dry run): received funds need 10 confirmations
+      and the vault's own change 3 (ZIP 315 default, `ConfirmationsPolicy::default()`; Vizor relaxes received funds to
+      6 and only explains confirmations in its migration and gift-card flows). Zafe never says so: Home counts them in
+      the total, the activity row says "Pending", and a payment fails as "insufficient funds" for ~12 min (~4 min once
+      NU7's 25 s blocks arrive). Show "X ZEC is confirming, spendable in about N blocks" on the amount screen and under
+      the balance (the wallet knows the pending amount and confirmations). Also decide whether to relax to 6 like Vizor.
 - [ ] Right after "Propose payment" the proposal page says "Proposal not found" for a few seconds (list not yet
       refreshed): show a loading state or load the proposal it just created.
 - [ ] Signers tab copy says "Names stay on this phone; other members don't see them", but members can share their own
