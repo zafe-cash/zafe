@@ -1,0 +1,171 @@
+name: Release (Android, mainnet)
+
+# Builds a signed MAINNET APK (package xyz.zafe.zafe, relay https://relay.zafe.cash, beta
+# label) and publishes it as a GitHub pre-release for early users. Testnet APKs stay on
+# release.yml (tags v*).
+#
+#   git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
+#
+# Needs, see docs/releasing.md:
+#   repository variables
+#     ZAFE_LINK_HOST             optional: host of the invite landing site (infra/site/),
+#                                e.g. zafe.cash; without it invites are zafe:// links
+#   secrets of the environment `android-release` (only v* tags may use it, so no branch or
+#   pull-request workflow can read the signing key)
+#     ANDROID_KEYSTORE_BASE64    base64 of the upload keystore (.jks)
+#     ANDROID_KEYSTORE_PASSWORD
+#     ANDROID_KEY_ALIAS
+#     ANDROID_KEY_PASSWORD
+#     GOOGLE_SERVICES_JSON       optional: Firebase config for push notifications
+
+on:
+  push:
+    tags: ['mainnet-v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-mainnet-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: Build and publish the APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: android-release
+    env:
+      ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        id: version
+        run: |
+          v="${GITHUB_REF_NAME#mainnet-v}"
+          if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$'; then
+            echo "::error::Version '$v' is not like 1.2.3"; exit 1
+          fi
+          echo "name=$v" >> "$GITHUB_OUTPUT"
+
+      # Never publish a mainnet APK while the mainnet relay is down, or one signed with a debug key.
+      - name: Check configuration
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=0
+          [ "$(curl -fsS --max-time 15 https://relay.zafe.cash/health || true)" = ok ] \
+            || { echo "::error::https://relay.zafe.cash/health did not answer ok"; missing=1; }
+          case "$ZAFE_LINK_HOST" in
+            '') echo "::warning::No ZAFE_LINK_HOST: invites are zafe:// links, which need Zafe installed" ;;
+            *[!a-z0-9.-]*|.*|*.|*..*) echo "::error::ZAFE_LINK_HOST must be a bare lower-case host like zafe.example"; missing=1 ;;
+          esac
+          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!name}" ] || { echo "::error::Signing secret for $name is missing (docs/releasing.md)"; missing=1; }
+          done
+          exit $missing
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> app/build/rust_lib_zafe/build'
+          key: android-release
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.6
+          channel: stable
+          cache: true
+
+      - name: Signing key
+        working-directory: app/android
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/upload.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > key.properties
+
+      - name: Firebase config (optional, enables push)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > app/android/app/google-services.json
+          else
+            echo "::warning::No GOOGLE_SERVICES_JSON: the APK relies on background checks, no push"
+          fi
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --split-per-abi --target-platform android-arm64 \
+            --dart-define=ZAFE_NETWORK=main \
+            --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
+            --build-name='${{ steps.version.outputs.name }}' \
+            --build-number='${{ github.run_number }}'
+
+      - name: Package
+        id: package
+        run: |
+          v='${{ steps.version.outputs.name }}'
+          apk="zafe-$v-mainnet-arm64.apk"
+          mkdir dist
+          cp app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/$apk"
+          (cd dist && sha256sum "$apk" > "$apk.sha256")
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "dist/$apk" | tee dist/certs.txt
+          cert=$(grep -m1 'SHA-256 digest' dist/certs.txt | sed 's/.*: //')
+          size=$(du -h "dist/$apk" | cut -f1)
+          {
+            echo "Zafe $v for **Zcash mainnet** (ZEC), **beta for early users**. The code has not had"
+            echo "its external security audit yet: only use money you can afford to lose."
+            echo
+            echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
+            echo "installing from your browser or files app when Android asks."
+            echo
+            echo "Relay: \`https://relay.zafe.cash\` · size $size"
+            echo
+            echo "Verify: \`sha256sum -c $apk.sha256\`; signing certificate SHA-256:"
+            echo "\`$cert\` (the same for every release: an update signed otherwise is not ours)."
+          } > dist/notes.md
+          rm dist/certs.txt
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mainnet-v${{ steps.version.outputs.name }}
+          name: Zafe ${{ steps.version.outputs.name }} (mainnet beta)
+          body_path: dist/notes.md
+          prerelease: true
+          files: |
+            dist/${{ steps.package.outputs.apk }}
+            dist/${{ steps.package.outputs.apk }}.sha256
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks" app/android/key.properties

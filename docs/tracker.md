@@ -551,8 +551,8 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
   - [ ] Device run of seat move and share repair
   - [ ] Check the Verdigris colours on a device
 - Release
-  - [ ] Mainnet release build (`ZAFE_NETWORK=main`, `--split-per-abi`, signed) via `release.yml`
-  - [ ] Play Store listing and distribution
+  - [x] Mainnet beta APK workflow `release-mainnet.yml` (tag `mainnet-v*`, 2026-10-12); [ ] first tag once the relay is live
+  - [ ] **(you)** Play Store listing (in progress); then an AAB build for the upload
 - Follow-ups
   - [ ] `catch_relay_up` across seat moves
   - [ ] Separate host for mainnet

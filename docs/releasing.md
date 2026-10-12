@@ -1,8 +1,17 @@
 # Releasing the Android app
 
-Releases are testnet APKs on GitHub Releases, built and signed by
-`.github/workflows/release.yml`. Mainnet builds wait for the external audit, a hosted relay and a small mainnet dry run
-(`docs/tracker.md`, M2).
+Testnet APKs (tags `v*`) are built and signed by `.github/workflows/release.yml`.
+**Mainnet beta APKs** (tags `mainnet-v*`, package `xyz.zafe.zafe`, relay
+`https://relay.zafe.cash`) come from `.github/workflows/release-mainnet.yml`, same signing
+key and `android-release` environment (its tag policy lists both `v*` and `mainnet-v*`);
+it refuses to build unless `relay.zafe.cash/health` answers `ok`. The release notes say
+"beta, not audited". A sideloaded APK carries our upload-key signature; a Play install is
+re-signed by Play, so a sideloaded install can't be updated from Play (uninstall first).
+The external audit is still open (`docs/tracker.md`, M2).
+
+```bash
+git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
+```
 
 ## One-time setup (you)
 
