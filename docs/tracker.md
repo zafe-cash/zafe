@@ -6,7 +6,7 @@ finished ones, tick them and add the commit. Spec references are to `spec.md`.
 
 Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not yet decided
 
-Last updated: 2026-10-06 (relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
+Last updated: 2026-10-12 (mainnet release checklist; deploy-key migration; relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
 
 ---
 
@@ -530,6 +530,33 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       `~/.config/zafe/relay-keys` (`shred -u`); consider a separate host for mainnet.
 - [x] Mainnet beta: "beta" label only, no cap (decided 2026-10-07: no relay vault limit, no
       per-vault fund limit)
+
+## Mainnet release checklist (2026-10-12)
+
+Ordered; tick as done. Details in the M2 section above and `infra/relay/README.md` "Mainnet".
+
+- Relay
+  - [x] DNS `relay.zafe.cash`, R2 bucket `zafe-mainnet`, `relay-mainnet` environment with a required reviewer
+  - [x] Server bootstrap, separate deploy keys, legacy key and `deploy` user removed (2026-10-11)
+  - [ ] **(you)** R2 token (Object Read & Write, scoped to the bucket) -> `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` (environment secrets)
+  - [ ] **(you)** Cloudflare account id -> `LITESTREAM_ENDPOINT` variable
+  - [ ] Push `d279413` (drops the legacy deploy fallback); testnet redeploys and the 24 h soak (`min_soak_hours`) starts
+  - [ ] Run `relay-mainnet.yml` with the digest testnet runs; reviewer approves
+  - [ ] `https://relay.zafe.cash/health` ok; Litestream uploads to R2 (never run against R2 yet)
+  - [ ] Test a restore on a scratch machine before real funds
+- Gate
+  - [ ] **(you)** Engage the external audit (`docs/audit-scope.md`); record the audit commit here
+- Validation
+  - [ ] Mainnet dry run with real funds: create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
+  - [ ] Device run of seat move and share repair
+  - [ ] Check the Verdigris colours on a device
+- Release
+  - [ ] Mainnet release build (`ZAFE_NETWORK=main`, `--split-per-abi`, signed) via `release.yml`
+  - [ ] Play Store listing and distribution
+- Follow-ups
+  - [ ] `catch_relay_up` across seat moves
+  - [ ] Separate host for mainnet
+  - [ ] *(idea)* relay URL per vault in the invite
 
 ## M3 / M4 — later (spec §16)
 
