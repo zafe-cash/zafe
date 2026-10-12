@@ -583,8 +583,12 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [x] **Mainnet dry run with real funds (2026-10-12, done)**: release-signed `0.1.1` updated in place from `0.1.0`
       (then `0.1.2`), 2-of-2 vault with the CLI as co-signer. Keygen ~10 s, first sync ~11 s, receive, propose,
       push notification (~5 s), approve, broadcast, mined (twice); backup, remove, restore (same vault, address,
-      signer key); after the `PoolReset` fix a restored phone signs again. **Not covered, say so in announcements:**
-      two real phones (the co-signer was the CLI), seat moves / share repair on a device, a larger vault (3-of-5),
+      signer key); after the `PoolReset` fix a restored phone signs again. **Second run, two real phones (2026-10-12,
+      user, release `0.1.2`)**: a 2-of-2 mainnet vault "hello zafe" between the user's two phones (no CLI): received
+      0.0005 ZEC (23:13), then a 0.0004 ZEC payment proposed, approved by both phones and sent (23:27, txid
+      cf482572...678af5e0); checked on one phone (both signer keys show "Approved", completed 2 of 2); the other
+      phone is the user's word. **Not covered, say so in announcements:**
+      seat moves / share repair on a device, a larger vault (3-of-5),
       sending through Tor on mainnet, iOS (never built), an external audit (none yet, disclosed in the FAQ and
       release notes), a device restored with a pre-0.1.2 build (keeps its dead pool).
 - [x] **Restore wedged signing (found by the mainnet restore test, 2026-10-12): fixed and verified on mainnet.**
