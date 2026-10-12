@@ -20,7 +20,7 @@ export const specUrl = `${sourceUrl}/blob/main/spec.md`;
 // Shared by every page's social tags (Base.astro). The image is 1200x630, same-origin.
 export const siteName = 'Zafe';
 export const socialImage = {
-  path: '/assets/og.png',
+  path: '/assets/og-mainnet.png',
   width: 1200,
   height: 630,
   alt: 'Zafe: the multisig nobody can see',

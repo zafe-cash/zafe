@@ -5,7 +5,7 @@
 #
 #   ./build.sh && ./stills.sh     # needs agent-browser and Pillow (PYTHON=venv/bin/python)
 #
-# Writes public/assets/stills/*.webp and public/assets/og.png; rebuild afterwards.
+# Writes public/assets/stills/*.webp and public/assets/og-mainnet.png; rebuild afterwards.
 # Software WebGL takes seconds per frame here, so each shot waits; the whole run takes
 # a few minutes. Re-run whenever the world or the story changes.
 set -euo pipefail
@@ -74,7 +74,7 @@ $S wait 4500 >/dev/null
 $S screenshot "$raw/og.png" >/dev/null
 echo "shot og"
 
-"${PYTHON:-python3}" - "$raw" "$out" "$here/public/assets/og.png" <<'PY'
+"${PYTHON:-python3}" - "$raw" "$out" "$here/public/assets/og-mainnet.png" <<'PY'
 import sys
 from PIL import Image
 raw, out, og = sys.argv[1:4]
