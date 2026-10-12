@@ -319,6 +319,19 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   before the first wallet call leaves no note. The report adds a "Rust panics" section. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
+- **Cancelling a setup** (2026-10-12): before membership is locked the creator can back out
+  (`node::cancel_setup`, bridge `cancel_setup`, `POST /v1/mailbox/cancel`, body
+  `CancelSetup`; creator-signed, refused once sealed or when the mailbox has log entries;
+  deletes the mailbox, members, deliveries, sender seqs and push tokens; wakes waiters).
+  New route, no `RELAY_API` bump: a relay without it answers 404 and the client reports
+  `Ok(false)` (same for an already-deleted mailbox), and the app forgets the vault
+  locally anyway. Members still waiting see 404 on `/v1/mailbox/members`
+  (`ZafeErrorKind::VaultNotOnRelay`) and the setup screen says the creator cancelled.
+  App: `VaultNotifier.cancelSetup` (creator keeps the typed details in
+  `createPrefillProvider`, the create screen reads them once), "Cancel setup" / "Leave
+  setup" on the setup screen, Android back asks the same. Tests: `relay.rs`
+  (`the_creator_can_cancel_...`), `zafe-core/tests/cancel_setup.rs`,
+  `test/create_prefill_test.dart`.
 - **Relay membership check**: `reseed` lets the restorer choose members and threshold and
   the blind relay can't verify them, so `node::check_relay_membership` (route
   `POST /v1/mailbox/info`, body `MembersRead`, response `MailboxInfo`; no `RELAY_API` bump,

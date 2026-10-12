@@ -12,8 +12,9 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tower::ServiceExt;
 use zafe_proto::{
     relay::{
-        decode_body, join_token_hash, AppendResult, CreateMailbox, InboxRead, InboxResponse, Join,
-        LogRead, LogResponse, MembersRead, MembersResponse, Remove, Seal, Signed,
+        decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxRead,
+        InboxResponse, Join, LogRead, LogResponse, MembersRead, MembersResponse, Remove, Seal,
+        Signed,
     },
     Chain, Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -462,6 +463,73 @@ async fn member_cap_and_creator_removal() {
     )
     .await;
     assert_eq!(joined.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_creator_can_cancel_a_setup_before_it_is_sealed() {
+    let w = World::new(false).await;
+    let cancel = || CancelSetup { mailbox: MAILBOX };
+
+    // Not a member, not the creator: refused, and nothing is deleted.
+    for who in [1, 3] {
+        let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[who], cancel()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "identity {who}");
+    }
+    let members = |who: usize| {
+        let w = &w;
+        async move {
+            signed(
+                &w.app,
+                "/v1/mailbox/members",
+                &w.ids[who],
+                MembersRead {
+                    mailbox: MAILBOX,
+                    timestamp: NOW,
+                },
+            )
+            .await
+            .0
+        }
+    };
+    assert_eq!(members(1).await, StatusCode::OK);
+
+    // The creator cancels: the mailbox, its members and the invite are gone.
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(members(1).await, StatusCode::NOT_FOUND);
+    let join = Join {
+        mailbox: MAILBOX,
+        join_token: w.token,
+    };
+    let (status, _) = signed(&w.app, "/v1/mailbox/join", &w.ids[3], join).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the invite no longer works");
+    // A second cancel finds nothing.
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_sealed_vault_cannot_be_cancelled() {
+    let w = World::new(true).await;
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/cancel",
+        &w.ids[0],
+        CancelSetup { mailbox: MAILBOX },
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/members",
+        &w.ids[1],
+        MembersRead {
+            mailbox: MAILBOX,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "the vault is untouched");
 }
 
 #[tokio::test]

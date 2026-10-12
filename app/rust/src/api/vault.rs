@@ -155,6 +155,19 @@ pub fn vault_membership(
     })
 }
 
+/// Creator only, before membership is locked: deletes the setup on the relay so the
+/// invite stops working. `false` when the relay had nothing to delete (an older relay, or
+/// the setup is already gone); the app forgets the vault locally in every case.
+pub fn cancel_setup(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<bool, ZafeError> {
+    let me = identity(&seeds)?;
+    let invite = Invite::decode(&invite)?;
+    Ok(runtime().block_on(node::cancel_setup(
+        &RelayClient::new(relay_url),
+        &me,
+        &invite,
+    ))?)
+}
+
 /// Creator only: freezes membership once everyone has joined.
 pub fn seal_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;

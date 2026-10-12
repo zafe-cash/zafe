@@ -5,10 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{de::DeserializeOwned, Serialize};
 use zafe_proto::{
     relay::{
-        decode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo, MailboxesRead,
-        MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove,
-        ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed,
+        decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
+        InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
+        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush,
+        Remove, ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed,
         WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
@@ -442,6 +442,25 @@ impl RelayClient {
                 creator,
                 SetThreshold { mailbox, threshold },
             )
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(RelayClientError::Status { status: 404, .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Creator only, before sealing: deletes the mailbox, so the invite stops working and
+    /// members waiting in it learn the setup is gone. `Ok(false)` when there was nothing to
+    /// delete there: a relay without the route, or a mailbox that is already gone (both
+    /// answer HTTP 404).
+    pub async fn cancel_setup(
+        &self,
+        creator: &Identity,
+        mailbox: MailboxId,
+    ) -> Result<bool, RelayClientError> {
+        match self
+            .signed::<_, ()>("/v1/mailbox/cancel", creator, CancelSetup { mailbox })
             .await
         {
             Ok(()) => Ok(true),

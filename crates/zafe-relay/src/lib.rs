@@ -44,10 +44,10 @@ use wait::Waiters;
 use zafe_proto::{
     log::GENESIS_PREV_HASH,
     relay::{
-        encode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo, MailboxesRead,
-        MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove,
-        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
+        encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
+        InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
+        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush,
+        Remove, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
         WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
         UNSUPPORTED_VERSION_HEADER,
     },
@@ -385,6 +385,7 @@ impl Relay {
             .route("/v1/mailbox/join", post(join))
             .route("/v1/mailbox/seal", post(seal))
             .route("/v1/mailbox/remove", post(remove))
+            .route("/v1/mailbox/cancel", post(cancel_setup))
             .route("/v1/mailbox/members", post(members))
             .route("/v1/mailbox/info", post(mailbox_info))
             .route("/v1/mailbox/threshold", post(set_threshold))
@@ -730,6 +731,41 @@ async fn remove(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         "DELETE FROM members WHERE mailbox = ?1 AND sig_pk = ?2",
         params![&req.payload.mailbox[..], &req.payload.member[..]],
     )?;
+    ok(&())
+}
+
+/// Deletes a mailbox whose setup the creator abandoned (wrong details, changed their
+/// mind), so its invite stops working and the members waiting in it learn the setup is
+/// gone (their next read answers 404). Only before sealing and only while the log is
+/// empty: a vault that exists is never deleted by this. Byte counters live on the
+/// mailbox row, so they go with it.
+async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<CancelSetup>(&relay, &body)?;
+    let id = &req.payload.mailbox;
+    let mut db = relay.db.lock().expect("lock");
+    let mb = mailbox(&db, id)?;
+    if req.signer.sig_pk != mb.creator || mb.sealed {
+        return Err(RelayError::Forbidden);
+    }
+    let logged: i64 = db.query_row(
+        "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
+        params![&id[..]],
+        |r| r.get(0),
+    )?;
+    if logged > 0 {
+        return Err(RelayError::Forbidden);
+    }
+    let tx = db.transaction()?;
+    for table in ["members", "deliveries", "sender_seqs", "push_tokens"] {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE mailbox = ?1"),
+            params![&id[..]],
+        )?;
+    }
+    tx.execute("DELETE FROM mailboxes WHERE id = ?1", params![&id[..]])?;
+    tx.commit()?;
+    drop(db);
+    relay.waiters.signal(id);
     ok(&())
 }
 

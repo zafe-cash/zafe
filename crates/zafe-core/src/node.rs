@@ -284,6 +284,22 @@ pub async fn membership(
     Ok((response.members, response.sealed, number))
 }
 
+/// Creator only, before membership is locked: abandons the setup and deletes it on the
+/// relay, so the invite stops working. `Ok(false)` if the relay had nothing to delete
+/// (older relay, or already gone); the caller forgets the vault locally either way.
+pub async fn cancel_setup(
+    relay: &RelayClient,
+    creator: &Identity,
+    invite: &Invite,
+) -> Result<bool, NodeError> {
+    if creator.public().sig_pk != invite.creator {
+        return Err(NodeError::Verification(
+            "only the creator can cancel a setup".to_owned(),
+        ));
+    }
+    Ok(relay.cancel_setup(creator, invite.mailbox).await?)
+}
+
 /// Creator only: freezes membership once all `n` members have joined.
 pub async fn seal(
     relay: &RelayClient,

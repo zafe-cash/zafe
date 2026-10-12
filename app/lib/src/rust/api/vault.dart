@@ -54,6 +54,19 @@ Future<MembershipInfo> vaultMembership({
   invite: invite,
 );
 
+/// Creator only, before membership is locked: deletes the setup on the relay so the
+/// invite stops working. `false` when the relay had nothing to delete (an older relay, or
+/// the setup is already gone); the app forgets the vault locally in every case.
+Future<bool> cancelSetup({
+  required String relayUrl,
+  required List<int> seeds,
+  required String invite,
+}) => RustLib.instance.api.crateApiVaultCancelSetup(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  invite: invite,
+);
+
 /// Creator only: freezes membership once everyone has joined.
 Future<void> sealVault({
   required String relayUrl,

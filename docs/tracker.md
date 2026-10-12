@@ -554,6 +554,7 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
   - [x] Mainnet beta APK workflow `release-mainnet.yml` (tag `mainnet-v*`, 2026-10-12); [x] `mainnet-v0.1.0` published (2026-10-12, pre-release, arm64 APK + sha256)
   - [x] Site (2026-10-12): mainnet beta tag, "Get Zafe" -> the exact release, Google Play / App Store "Soon" chips with brand icons and a follow-on-X line (@zafecash; the mailto waitlist was dropped), X + GitHub icons in the footer, testnet link; the audit status is in the FAQ only, and in the release notes
   - [x] Site phone screens regenerated with ZEC and `u1` data, no dollar line (`HOME_FIAT=0`, `--dart-define=ZAFE_NETWORK=main`; `infra/site/assets.py` docstring)
+  - [x] Cancel a vault setup (2026-10-12): creator "Cancel setup" deletes the mailbox on the relay (`POST /v1/mailbox/cancel`) and returns to a prefilled "New vault"; joiners "Leave"; relay deploy + app build needed to ship (relay: testnet deploys on push, mainnet needs a promotion)
   - [ ] When a store listing is live: swap its "Soon" chip for a link (`index.astro`)
   - [x] Testnet app (2026-10-12): invite links on `testnet.zafe.cash` (`ZAFE_TESTNET_LINK_HOST`); testnet-first gate in `release-mainnet.yml`; site links follow the newest release (`site.yml` + release workflows); "· TESTNET" on the vault card; coins line in the testnet notes
   - [ ] **(you)** `testnet.zafe.cash`: add the domain in Vercel (project Settings > Domains) and a DNS-only `testnet` CNAME in Cloudflare; check `https://testnet.zafe.cash/.well-known/assetlinks.json`

@@ -32,6 +32,26 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   static const _expiryChoices = [1, 3, 7, 14];
 
   @override
+  void initState() {
+    super.initState();
+    // Back from "Cancel setup": the details the creator had typed.
+    final prefill = ref.read(createPrefillProvider);
+    if (prefill != null) {
+      _name.text = prefill.name;
+      _members = prefill.members;
+      _threshold = prefill.threshold;
+      if (_expiryChoices.contains(prefill.expiryDays)) {
+        _expiryDays = prefill.expiryDays;
+      }
+      // Cleared after the first frame: Riverpod forbids changing a provider while the
+      // widget tree is building.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(createPrefillProvider.notifier).set(null);
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _nameFocus.dispose();

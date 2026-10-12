@@ -85,6 +85,15 @@ pub struct Remove {
     pub member: [u8; 32],
 }
 
+/// Cancels a vault setup: deletes the mailbox, its members and anything stored for it, so
+/// the invite stops working. Signed by the creator, only before sealing (`POST
+/// /v1/mailbox/cancel`, a newer route: a relay without it answers 404 and the app just
+/// forgets the vault locally).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelSetup {
+    pub mailbox: MailboxId,
+}
+
 /// Joins a mailbox using the invite's token. Signed by the joining member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Join {

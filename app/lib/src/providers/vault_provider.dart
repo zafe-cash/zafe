@@ -258,6 +258,48 @@ class VaultNotifier extends Notifier<VaultState> {
     await _reload(activeId: vaultId);
   }
 
+  /// Abandons the vault setup on screen (before membership is locked). The creator's
+  /// setup is deleted on the relay, so the invite stops working for anyone who still has
+  /// it, and the "New vault" form comes back with the same details (see
+  /// [createPrefillProvider]); a joiner just leaves. `deleted` is false when the relay
+  /// couldn't delete the setup (older relay, or offline): the vault is forgotten here
+  /// anyway, and the old invite may keep working until the relay drops it.
+  Future<({bool creator, bool deleted})> cancelSetup() async {
+    final id = state.activeId;
+    final seeds = state.identity;
+    final invite = state.invite;
+    final info = state.inviteInfo;
+    if (id == null || seeds == null || invite == null || info == null) {
+      return (creator: false, deleted: true);
+    }
+    final creator = info.creatorHex == rust.identityPublicKey(seeds: seeds);
+    var deleted = true;
+    if (creator) {
+      final prefs = await SharedPreferences.getInstance();
+      ref
+          .read(createPrefillProvider.notifier)
+          .set(
+            CreatePrefill(
+              name: info.name,
+              threshold: info.threshold,
+              members: info.members,
+              expiryDays: prefs.getInt(_expiryDaysKey(id)) ?? 7,
+            ),
+          );
+      try {
+        deleted = await rust.cancelSetup(
+          relayUrl: _endpoints.relayUrl,
+          seeds: seeds,
+          invite: invite,
+        );
+      } catch (_) {
+        deleted = false;
+      }
+    }
+    await removeVault(id);
+    return (creator: creator, deleted: deleted);
+  }
+
   Future<void> joinVault(String invite) async {
     final trimmed = invite.trim();
     final vaultId = rust
@@ -435,6 +477,34 @@ class VaultNotifier extends Notifier<VaultState> {
     }
   }
 }
+
+/// What the creator had typed on "New vault", kept when they cancel the setup so the form
+/// comes back filled in (read once by the create screen).
+class CreatePrefill {
+  const CreatePrefill({
+    required this.name,
+    required this.threshold,
+    required this.members,
+    required this.expiryDays,
+  });
+
+  final String name;
+  final int threshold;
+  final int members;
+  final int expiryDays;
+}
+
+class CreatePrefillNotifier extends Notifier<CreatePrefill?> {
+  @override
+  CreatePrefill? build() => null;
+
+  void set(CreatePrefill? value) => state = value;
+}
+
+final createPrefillProvider =
+    NotifierProvider<CreatePrefillNotifier, CreatePrefill?>(
+      CreatePrefillNotifier.new,
+    );
 
 /// The approval window the creator chose for a vault being set up (days).
 String _expiryDaysKey(String vaultId) => 'zafe_vault_${vaultId}_expiryDays';

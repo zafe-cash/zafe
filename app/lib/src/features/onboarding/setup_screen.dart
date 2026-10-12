@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
@@ -18,6 +19,7 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
+import '../../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
 import 'onboarding_art.dart';
@@ -36,6 +38,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   bool _compared = false;
   bool _busy = false;
   bool _creatingKeys = false;
+  bool _leaving = false;
+
+  /// The relay no longer has this setup: the creator cancelled it.
+  bool _gone = false;
   String? _error;
 
   @override
@@ -52,14 +58,96 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   }
 
   Future<void> _refresh() async {
-    if (_creatingKeys) return;
+    if (_creatingKeys || _leaving) return;
     try {
       await ref.read(vaultProvider.notifier).refreshMembership();
-      if (mounted && _error != null) setState(() => _error = null);
+      if (mounted && (_error != null || _gone)) {
+        setState(() {
+          _error = null;
+          _gone = false;
+        });
+      }
     } catch (e) {
-      if (mounted) {
+      if (!mounted || _leaving) return;
+      if (e is ZafeError && e.kind == ZafeErrorKind.vaultNotOnRelay) {
+        // The relay answered, and the setup isn't there any more.
+        setState(() {
+          _gone = true;
+          _error = null;
+        });
+      } else {
         setState(() => _error = 'Can\'t reach the relay. Retrying...');
       }
+    }
+  }
+
+  /// Backs out of the setup before membership is locked. The creator's setup is deleted
+  /// on the relay (the invite stops working) and the "New vault" form comes back filled
+  /// in; a joiner just leaves.
+  Future<void> _cancel({required bool creator, bool confirm = true}) async {
+    if (_busy || _leaving) return;
+    if (confirm) {
+      final go = await showAppMobileSheet<bool>(
+        context: context,
+        builder: (sheet) {
+          final colors = sheet.colors;
+          return MobileModalScaffold(
+            title: creator ? 'Cancel this setup?' : 'Leave this setup?',
+            onClose: () => Navigator.of(sheet).pop(false),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  creator
+                      ? 'The invite stops working, and anyone who already joined will see '
+                            'that you cancelled. You can set it up again with the same '
+                            'details, and send a new invite.'
+                      : 'You\'ll need a new invite to join again.',
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: colors.text.accent,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  expand: true,
+                  variant: AppButtonVariant.destructive,
+                  onPressed: () => Navigator.of(sheet).pop(true),
+                  child: Text(creator ? 'Cancel setup' : 'Leave'),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                AppButton(
+                  expand: true,
+                  variant: AppButtonVariant.ghost,
+                  onPressed: () => Navigator.of(sheet).pop(false),
+                  child: const Text('Keep waiting'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+      if (go != true || !mounted) return;
+    }
+    setState(() => _leaving = true);
+    _poll?.cancel();
+    final notifier = ref.read(vaultProvider.notifier);
+    final result = await notifier.cancelSetup();
+    if (!mounted) return;
+    if (result.creator) {
+      // Back to "New vault", filled in. With other vaults on this device, the onboarding
+      // screens are shown the same way "Add vault" does.
+      if (ref.read(vaultProvider).hasVault) notifier.beginAddVault();
+      if (!result.deleted) {
+        showAppToast(
+          context,
+          'Cancelled here, but the relay didn\'t confirm. The old invite may still work for a while.',
+          iconName: AppIcons.warningCircle,
+        );
+      }
+      context.go('/create');
+    } else {
+      context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
     }
   }
 
@@ -117,7 +205,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     if (_creatingKeys) return const _CreatingKeys();
 
     Widget? bottom;
-    if (sealed) {
+    if (_gone && !sealed) {
+      bottom = AppButton(
+        expand: true,
+        onPressed: () => _cancel(creator: false, confirm: false),
+        child: const Text('Leave setup'),
+      );
+    } else if (sealed) {
       bottom = AppButton(
         expand: true,
         onPressed: _compared
@@ -137,45 +231,72 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       );
     }
 
-    return ZafeScreen(
-      title: info.name,
-      showBack: false,
-      bottom: bottom,
-      children: [
-        if (!sealed && isCreator) ...[
-          _InviteCard(invite: vault.invite!, vaultName: info.name),
-          const SizedBox(height: AppSpacing.md),
-        ],
-        _MembersCard(
-          members: membership?.members ?? const [],
-          expected: info.members,
-          threshold: info.threshold,
-          myKeyHex: _myKeyHex(vault),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (_error != null)
-          Text(
-            _error!,
-            style: AppTypography.bodySmall.copyWith(
-              color: context.colors.text.warning,
+    return PopScope(
+      // Android's back button backs out of the setup too (it asks first); once
+      // membership is locked there is no way back.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !sealed && !_gone) _cancel(creator: isCreator);
+      },
+      child: ZafeScreen(
+        title: info.name,
+        showBack: false,
+        bottom: bottom,
+        children: [
+          if (_gone && !sealed) ...[
+            _Hint(
+              text: isCreator
+                  ? 'This setup is no longer on the relay.'
+                  : 'The creator cancelled this setup. Ask them for a new invite.',
             ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          if (!sealed && isCreator) ...[
+            _InviteCard(invite: vault.invite!, vaultName: info.name),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          _MembersCard(
+            members: membership?.members ?? const [],
+            expected: info.members,
+            threshold: info.threshold,
+            myKeyHex: _myKeyHex(vault),
           ),
-        if (!sealed && !isCreator)
-          _Hint(
-            text: everyoneJoined
-                ? 'Everyone has joined. Waiting for the creator to lock membership.'
-                : 'Waiting for the other members to join with the invite.',
-          ),
-        if (sealed && membership != null) ...[
-          _SafetyNumberCard(number: membership.safetyNumber),
-          const SizedBox(height: AppSpacing.sm),
-          _ConfirmOption(
-            selected: _compared,
-            label: 'I compared this number with every member',
-            onTap: () => setState(() => _compared = !_compared),
-          ),
+          const SizedBox(height: AppSpacing.md),
+          if (_error != null)
+            Text(
+              _error!,
+              style: AppTypography.bodySmall.copyWith(
+                color: context.colors.text.warning,
+              ),
+            ),
+          if (!sealed && !isCreator)
+            _Hint(
+              text: everyoneJoined
+                  ? 'Everyone has joined. Waiting for the creator to lock membership.'
+                  : 'Waiting for the other members to join with the invite.',
+            ),
+          if (sealed && membership != null) ...[
+            _SafetyNumberCard(number: membership.safetyNumber),
+            const SizedBox(height: AppSpacing.sm),
+            _ConfirmOption(
+              selected: _compared,
+              label: 'I compared this number with every member',
+              onTap: () => setState(() => _compared = !_compared),
+            ),
+          ],
+          if (!sealed && !_gone) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: _busy || _leaving
+                  ? null
+                  : () => _cancel(creator: isCreator),
+              child: Text(isCreator ? 'Cancel setup' : 'Leave setup'),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
