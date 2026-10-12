@@ -6,9 +6,8 @@ const repo = 'https://github.com/zafe-cash/zafe';
 export const downloadUrl = process.env.ZAFE_DOWNLOAD_URL || '';
 // The testnet build, for trying Zafe with coins that have no value (set by site.yml).
 export const testnetUrl = process.env.ZAFE_TESTNET_URL || '';
-// Google Play waitlist: a plain mailto (the CSP allows no form posts, and an address is
-// all we ask for). Cloudflare Email Routing forwards every @zafe.cash address.
-export const waitlistUrl = 'mailto:waitlist@zafe.cash?subject=Zafe%20on%20Google%20Play';
+// Launch news goes out on X: no signup form, no address collected.
+export const xUrl = 'https://x.com/zafecash';
 export const sourceUrl = process.env.ZAFE_SOURCE_URL || repo;
 // The call to action: the app once it's downloadable, the source until then.
 export const getUrl = downloadUrl || sourceUrl;

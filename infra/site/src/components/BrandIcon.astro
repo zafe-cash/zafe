@@ -1,0 +1,19 @@
+---
+// A brand glyph (Simple Icons, CC0: Google Play, App Store, X, GitHub), inlined so it
+// takes the text colour. Presentation attributes only: the CSP forbids inline styles.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+interface Props {
+  name: 'googleplay' | 'appstore' | 'x' | 'github';
+  class?: string;
+}
+
+const { name, class: className = 'brand-icon' } = Astro.props;
+const svg = readFileSync(resolve(process.cwd(), 'src/icons', `${name}.svg`), 'utf8')
+  .replace(/<title>.*?<\/title>/, '')
+  .replace(' role="img"', '')
+  .replace('<svg ', `<svg class="${className}" aria-hidden="true" focusable="false" fill="currentColor" `);
+---
+
+<Fragment set:html={svg} />

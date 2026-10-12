@@ -15,9 +15,9 @@ git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
 
 The site's "Get Zafe" button points at the exact release page: after each new APK, set
 `ZAFE_DOWNLOAD_URL` (mainnet tag) and `ZAFE_TESTNET_URL` (testnet tag) in
-`.github/workflows/site.yml` (pre-releases never show under `/releases/latest`). The Google
-Play waitlist is `mailto:waitlist@zafe.cash` (`src/config.ts`), forwarded by Cloudflare
-Email Routing.
+`.github/workflows/site.yml` (pre-releases never show under `/releases/latest`). Store
+badges say "Soon" until the listings exist; launch news goes out on X (@zafecash, `src/config.ts`),
+no waitlist or address collected.
 
 ## One-time setup (you)
 

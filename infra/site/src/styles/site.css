@@ -1219,9 +1219,20 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 }
 .lp-cta-copy { padding: 88px 0; align-self: center; }
 .lp-cta-copy h2 { font-size: clamp(40px, 5vw, 64px); line-height: 1.02; margin: 16px 0 12px; }
-.lp-stores { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 8px; font-size: 15px; color: var(--text-secondary); }
-.lp-stores a { color: var(--brand); font-weight: 500; text-decoration: none; }
-.lp-stores a:hover { text-decoration: underline; }
+.lp-stores { margin-top: 36px; display: grid; gap: 14px; }
+.lp-stores-label { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); }
+.lp-stores ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.lp-stores li { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px 10px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); font-weight: 500; font-size: 15px; background: rgba(255, 255, 255, 0.55); }
+.lp-stores li em { font-style: normal; font-weight: 500; font-size: 12px; color: var(--brand); background: var(--card); border-radius: 999px; padding: 2px 8px; }
+.lp-stores .brand-icon { width: 18px; height: 18px; }
+.lp-stores-links { margin: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; }
+.lp-stores-links a { display: inline-flex; align-items: center; gap: 8px; color: var(--brand); font-weight: 500; text-decoration: none; }
+.lp-stores-links a:hover { text-decoration: underline; }
+.lp-stores-links .brand-icon { width: 14px; height: 14px; }
+.foot-social { list-style: none; margin: 0; padding: 0; display: flex; gap: 18px; align-items: center; }
+.foot-social a { display: inline-flex; color: inherit; opacity: 0.75; transition: opacity 0.2s ease; }
+.foot-social a:hover { opacity: 1; }
+.foot-social .brand-icon { width: 20px; height: 20px; }
 .lp-cta-copy > p:not(.tag) { color: var(--text-secondary); margin-bottom: 32px; font-size: 18px; }
 .lp-cta-art { height: 400px; padding-top: 56px; overflow: hidden; }
 .lp-cta-art .lp-phone { width: min(300px, 100%); margin: 0 auto; box-shadow: 0 0 0 1px rgba(9, 14, 14, 0.08); }

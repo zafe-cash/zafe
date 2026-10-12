@@ -7,10 +7,11 @@
 // door to /showcase. The chain card is the real testnet payment from the 2026-09-30 dry run.
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
+import BrandIcon from '../components/BrandIcon.astro';
 import Mark from '../components/Mark.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
-import { downloadUrl, getLabel, getNote, getUrl, sourceUrl, specUrl, testnetUrl, waitlistUrl } from '../config';
+import { downloadUrl, getLabel, getNote, getUrl, sourceUrl, specUrl, testnetUrl, xUrl } from '../config';
 
 const faq = [
   { q: 'Is Zafe safe to use?', a: 'Zafe is in beta on Zcash mainnet and hasn’t had an external audit yet. The app, the relay and the spec are open source, and the key is never in one place. Start with an amount you’re comfortable with, or try the testnet build first.' },
@@ -19,7 +20,7 @@ const faq = [
   { q: 'Does Zafe track me?', a: 'No. There are no analytics, no crash reports and no third-party SDKs, in the app or on this site. If something breaks, the app keeps a scrubbed error log on your phone, and it leaves only if you share it.' },
   { q: 'What if someone loses their phone?', a: 'The vault keeps working while enough members have theirs, and the share comes back from its encrypted backup. Lose too many, and the funds are gone for good.' },
   { q: 'Can we remove a member?', a: 'Not yet. Make a new vault and move the funds.' },
-  { q: 'Which platforms?', a: 'Android today, as a direct download from GitHub. Google Play is coming (join the waitlist) and iPhone after that.' },
+  { q: 'Which platforms?', a: 'Android today, as a direct download from GitHub. Google Play and the App Store are coming; we’ll announce them on X (@zafecash).' },
 ];
 
 // SEO (docs/seo.md): <title> carries the search terms, the share cards the tagline.
@@ -36,7 +37,7 @@ const jsonLd = {
       name: 'Zafe',
       url: home,
       logo: new URL('/assets/icons/icon-512.png', home).href,
-      sameAs: [sourceUrl],
+      sameAs: [sourceUrl, xUrl],
     },
     {
       '@type': 'WebSite',
@@ -257,11 +258,17 @@ const jsonLd = {
           <p>{getNote}</p>
           <a class="pill" href={getUrl} target="_blank" rel="noopener noreferrer">{getLabel}</a>
           {downloadUrl && (
-            <ul class="lp-stores" aria-label="Other ways to get Zafe">
-              <li><a href={waitlistUrl}>Google Play: join the waitlist</a></li>
-              <li><span>iPhone: coming soon</span></li>
-              {testnetUrl && <li><a href={testnetUrl} target="_blank" rel="noopener noreferrer">Try the testnet build</a></li>}
-            </ul>
+            <div class="lp-stores">
+              <p class="lp-stores-label">Also coming to</p>
+              <ul>
+                <li aria-label="Google Play, coming soon"><BrandIcon name="googleplay" /><span>Google Play</span><em>Soon</em></li>
+                <li aria-label="App Store, coming soon"><BrandIcon name="appstore" /><span>App Store</span><em>Soon</em></li>
+              </ul>
+              <p class="lp-stores-links">
+                <a href={xUrl} target="_blank" rel="noopener noreferrer"><BrandIcon name="x" />Follow @zafecash for launch news</a>
+                {testnetUrl && <a href={testnetUrl} target="_blank" rel="noopener noreferrer">Try the testnet build</a>}
+              </p>
+            </div>
           )}
         </div>
         <div class="lp-cta-art" aria-hidden="true"><img class="lp-phone" src="/assets/screens/story_bob_home_dark.webp" width="780" height="1688" alt="" loading="lazy" decoding="async" /></div>
