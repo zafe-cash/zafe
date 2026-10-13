@@ -995,8 +995,17 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
   `onboarding/create/account_persona_generator.dart`)
 - *(idea)* Small mobile fixes: Android back-exit guard (`lib/src/core/navigation/mobile_exit_back_guard.dart`)
   and iOS number-pad Done bar (`lib/src/core/widgets/mobile/mobile_numeric_keyboard_toolbar.dart`)
-- *(idea)* Private transaction-detail lookups via PIR once available for Ironwood
-  (`lib/src/providers/enhance_pir_provider.dart`, `rust/src/wallet/sync_engine/enhancement/`)
+- *(deferred, checked 2026-10-14)* Private transaction-detail lookups via PIR
+  (`lib/src/providers/enhance_pir_provider.dart`, `rust/src/wallet/sync_engine/enhancement/`).
+  Ironwood Enhance PIR exists in Vizor (#601) and Vizor added transparent PIR (#971, #977; useless
+  to us: vaults hold only Ironwood). Not adopted because: it sits on the Zakura wallet-libraries
+  forks (`zakura-client-backend`/`-sqlite`), not our crates.io librustzcash pins (a stack move, after
+  NU7); it needs a third-party hosted service (`enhance-pir.valargroup.dev`, wallet-pir); Vizor's
+  own PRs still list release qualification as open. Our `sync::run` (backend 0.24) never looks up
+  a txid and the mempool watch avoids it, so nothing leaks today (not traced end to end); what we
+  lack is memos / recipient details on received and outgoing notes. Revisit when wallet-libraries
+  publishes releases or the Enhance client can be used alone, or if the vault needs those memos.
+  Details: `docs/vizor-reference.md` 12.6.
 - *(idea)* Design review tooling: Widgetbook galleries + headless PNG renders
   (`lib/widgetbook/`, `lib/figma_compare.dart`, `scripts/figma-compare.sh`)
 - *(idea)* iOS Keychain `first_unlock_this_device` for shares from day one (Vizor migrated to
