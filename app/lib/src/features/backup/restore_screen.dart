@@ -163,6 +163,7 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
         ),
         const SizedBox(height: AppSpacing.s),
         MobileTextField(
+          secret: true,
           controller: _text,
           focusNode: _textFocus,
           hintText: 'zafe-backup-v1:...',
@@ -198,6 +199,7 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _pass,
           focusNode: _passFocus,
           hintText: 'The passphrase you chose when backing up',

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/layout/mobile/app_mobile_sheet.dart';
+import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/mobile/zafe_detail.dart';
@@ -18,7 +19,18 @@ Future<void> showTorSheet(BuildContext context) => showAppMobileSheet<void>(
 class TorSheet extends ConsumerWidget {
   const TorSheet({super.key});
 
-  Future<void> _set(WidgetRef ref, bool enabled) async {
+  Future<void> _set(BuildContext context, WidgetRef ref, bool enabled) async {
+    // Turning Tor off shows this phone's address to the servers: ask the owner.
+    if (!enabled &&
+        ref.read(vaultProvider).vaults.isNotEmpty &&
+        !await confirmUnlock(
+          context,
+          ref,
+          reason: 'Confirm it\'s you to stop using Tor',
+          always: true,
+        )) {
+      return;
+    }
     await ref.read(torProvider.notifier).setEnabled(enabled);
     await _refreshVault(ref);
   }
@@ -78,7 +90,7 @@ class TorSheet extends ConsumerWidget {
           if (!tor.enabled)
             AppButton(
               expand: true,
-              onPressed: () => _set(ref, true),
+              onPressed: () => _set(context, ref, true),
               child: const Text('Turn on Tor'),
             )
           else ...[
@@ -100,7 +112,7 @@ class TorSheet extends ConsumerWidget {
             AppButton(
               expand: true,
               variant: AppButtonVariant.ghost,
-              onPressed: () => _set(ref, false),
+              onPressed: () => _set(context, ref, false),
               child: const Text('Turn off Tor'),
             ),
           ],

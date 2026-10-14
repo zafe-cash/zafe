@@ -513,6 +513,9 @@ pub struct VaultState {
     /// Seat moves that happened, in log order. `descriptor.members` already holds the new
     /// keys: the state's descriptor is the current membership, not the signed original.
     pub replacements: Vec<Replacement>,
+    /// Identities whose seat moved away. Their log entries still chain (see
+    /// [`VaultState::log_authors`]) and replay ignores them as `NotAMember`.
+    pub former_members: Vec<IdentityPublic>,
 }
 
 impl VaultState {
@@ -550,6 +553,7 @@ impl VaultState {
             backups: BTreeMap::new(),
             pending_replacements: BTreeMap::new(),
             replacements: Vec::new(),
+            former_members: Vec::new(),
         };
         for entry in rest {
             state.apply_entry(entry, key);
@@ -906,6 +910,17 @@ impl VaultState {
         self.descriptor.members.iter().map(|m| m.identity).collect()
     }
 
+    /// Keys whose signed entries may extend the log: current members and every key whose
+    /// seat moved away. A lost (possibly stolen) device keeps its old key, and the relay
+    /// may still accept its appends until it learns of the move; if such an entry stopped
+    /// the chain, nobody could read the log any more. It chains like any other entry and
+    /// replay ignores it (`NotAMember`), the same way on every member's device.
+    pub fn log_authors(&self) -> Vec<IdentityPublic> {
+        let mut authors = self.member_identities();
+        authors.extend(self.former_members.iter().copied());
+        authors
+    }
+
     /// The seat move that gave `new` its seat, if any (the latest one).
     pub fn replacement_to(&self, new: &[u8; 32]) -> Option<&Replacement> {
         self.replacements
@@ -933,6 +948,7 @@ impl VaultState {
         let mut frost_id = Vec::new();
         for m in &mut self.descriptor.members {
             if m.identity.sig_pk == old {
+                self.former_members.push(m.identity);
                 m.identity = new;
                 frost_id = m.frost_id.clone();
             }

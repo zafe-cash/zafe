@@ -10,6 +10,7 @@ import '../../core/config/network_config.dart';
 import '../../core/errors/sync_failure.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
+import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
@@ -205,12 +206,12 @@ class LightwalletdServerList extends StatelessWidget {
             value: busyUrl == preset.url
                 ? 'Connecting...'
                 : (probes[preset.url] ?? ServerProbe.checking).label,
-            valueColor: switch ((probes[preset.url] ?? ServerProbe.checking)
-                .check) {
-              ServerCheck.unavailable ||
-              ServerCheck.wrongNetwork => colors.text.destructive,
-              _ => colors.text.secondary,
-            },
+            valueColor:
+                switch ((probes[preset.url] ?? ServerProbe.checking).check) {
+                  ServerCheck.unavailable ||
+                  ServerCheck.wrongNetwork => colors.text.destructive,
+                  _ => colors.text.secondary,
+                },
             minRowHeight: 48,
             onTap: onSelect == null ? null : () => onSelect!(preset),
           ),
@@ -370,6 +371,18 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
       return;
     }
     final url = check.url!;
+    // A server of someone else's choosing sees this phone's activity (and a relay is
+    // where the vault's messages go): with a vault on the phone, ask the owner.
+    if (ref.read(vaultProvider).vaults.isNotEmpty &&
+        !await confirmUnlock(
+          context,
+          ref,
+          reason: 'Confirm it\'s you to change the server',
+          always: true,
+        )) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _error = null;

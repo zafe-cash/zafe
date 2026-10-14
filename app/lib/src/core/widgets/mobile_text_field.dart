@@ -38,6 +38,7 @@ class MobileTextField extends StatefulWidget {
     this.height,
     this.radius,
     this.enabled = true,
+    this.secret = false,
     super.key,
   });
 
@@ -87,6 +88,10 @@ class MobileTextField extends StatefulWidget {
 
   /// Whether the field and its outer tap target accept input.
   final bool enabled;
+
+  /// Holds a secret (backup passphrase, backup or invite text): no suggestions,
+  /// autocorrect or keyboard learning, so the keyboard doesn't remember it.
+  final bool secret;
 
   @override
   State<MobileTextField> createState() => _MobileTextFieldState();
@@ -227,6 +232,9 @@ class _MobileTextFieldState extends State<MobileTextField> {
                     textInputAction: widget.textInputAction,
                     keyboardType: widget.keyboardType,
                     inputFormatters: widget.inputFormatters,
+                    enableSuggestions: !widget.secret,
+                    autocorrect: !widget.secret,
+                    enableIMEPersonalizedLearning: !widget.secret,
                     style: textStyle,
                     cursorColor: colors.text.accent,
                     decoration: InputDecoration.collapsed(

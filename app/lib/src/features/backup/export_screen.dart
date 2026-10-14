@@ -109,7 +109,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   /// The backup left the app (saved or sent): stop the reminder and tell the other
   /// members (the next refresh attests it in the vault log).
   Future<void> _saved() async {
-    await VaultSummaries.write(ref.read(vaultProvider).activeId!, backedUp: true);
+    await VaultSummaries.write(
+      ref.read(vaultProvider).activeId!,
+      backedUp: true,
+    );
     ref.invalidate(backupStatusProvider);
     unawaited(ref.read(proposalsProvider.notifier).refresh());
   }
@@ -220,6 +223,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _pass,
           focusNode: _passFocus,
           hintText: '12 words, or a long unique phrase',
@@ -243,6 +247,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _confirm,
           focusNode: _confirmFocus,
           hintText: 'Type it again',

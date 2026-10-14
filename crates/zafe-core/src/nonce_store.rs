@@ -144,4 +144,39 @@ impl PoolStore for FilePoolStore {
     fn forget(&mut self, commitment: &[u8]) {
         let _ = fs::remove_file(self.file(commitment));
     }
+
+    fn keep_vote(
+        &mut self,
+        proposal: &ProposalId,
+        pczt_hash: &[u8; 32],
+        event: &[u8],
+    ) -> Result<(), SessionError> {
+        let storage = |e: &dyn std::fmt::Debug| SessionError::Storage(format!("{e:?}"));
+        fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
+        // The event bytes carry their own version tag (`VAULT_EVENT`).
+        let path = self.vote_file(proposal, pczt_hash);
+        let tmp = path.with_extension("tmp");
+        fs::write(&tmp, event).map_err(|e| storage(&e))?;
+        fs::rename(&tmp, &path).map_err(|e| storage(&e))
+    }
+
+    fn kept_vote(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<u8>> {
+        fs::read(self.vote_file(proposal, pczt_hash)).ok()
+    }
+
+    fn drop_vote(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) {
+        let _ = fs::remove_file(self.vote_file(proposal, pczt_hash));
+    }
+}
+
+impl FilePoolStore {
+    /// A kept one-tap vote ([`PoolStore::keep_vote`]); `.vote`, so [`FilePoolStore::len`]
+    /// doesn't count it as a nonce.
+    fn vote_file(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> PathBuf {
+        self.0.join(format!(
+            "{}-{}.vote",
+            hex::encode(proposal),
+            hex::encode(pczt_hash)
+        ))
+    }
 }

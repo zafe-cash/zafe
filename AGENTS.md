@@ -367,6 +367,21 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   copy and reports the local-only entries dropped. Always behind a dialog + unlock.
 - **Unapproved-spend grace** (`spend_watch`) only covers Approved/Broadcast proposals and
   the txid their PCZT fixes; cancelled, rejected and open ones get none.
+- **One-tap retries and races (2026-10-15, docs/tracker.md "Security audit")**: signing a
+  one-tap vote consumes the pool nonces, so `node::approve` keeps the encoded vote
+  (`PoolStore::keep_vote`, `<state>/pool/<id>-<pczt hash>.vote`, not counted as a nonce)
+  **before** appending and posts the same bytes on the next approve; my shares already in
+  the log = done. Never fall back to interactive for a member whose shares are lost: a
+  one-tap vote is final for the others (`VoteFinal`) and the leader skips approvals
+  without commitments, so it deadlocks a 2-of-2; `approve` refuses an interactive vote
+  when fewer than t members are without logged shares. `send_ready` tries every complete
+  group (one bad share set can't stall it). A broadcast the node rejects counts as sent
+  when our txid is in lightwalletd's mempool (whole-mempool read): the app and a
+  background check, or two members, may send the same proposal at once. `respond`
+  re-seals with a fresh seq on a relay 409 (the relay wants strictly increasing seqs per
+  sender; two isolates of one member race on it). Log chains accept entries signed by
+  former members (`VaultState::log_authors`): after a seat move the old key can still
+  append until the relay updates, and replay ignores it (`NotAMember`).
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):

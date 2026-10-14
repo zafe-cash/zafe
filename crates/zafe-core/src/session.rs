@@ -120,13 +120,51 @@ pub trait PoolStore {
     fn take(&mut self, commitment: &[u8]) -> Option<SigningNonces>;
     /// Deletes a nonce that will never be used (its proposal closed).
     fn forget(&mut self, commitment: &[u8]);
+
+    /// Keeps a one-tap vote (its encoded `VaultEvent`) until it is in the vault log.
+    /// Signing consumed the nonces, so if the append fails these bytes are the only way to
+    /// post the same shares again; without them the member could only approve
+    /// interactively, and its group could never complete. The shares are public once
+    /// logged, so this file holds nothing secret.
+    fn keep_vote(
+        &mut self,
+        _proposal: &ProposalId,
+        _pczt_hash: &[u8; 32],
+        _event: &[u8],
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
+    /// The vote kept by [`PoolStore::keep_vote`], if any.
+    fn kept_vote(&self, _proposal: &ProposalId, _pczt_hash: &[u8; 32]) -> Option<Vec<u8>> {
+        None
+    }
+    /// Deletes a kept vote (it is in the log, or its proposal closed).
+    fn drop_vote(&mut self, _proposal: &ProposalId, _pczt_hash: &[u8; 32]) {}
 }
 
 /// In-memory pool store (tests).
 #[derive(Default)]
-pub struct MemoryPoolStore(BTreeMap<Vec<u8>, SigningNonces>);
+pub struct MemoryPoolStore(
+    BTreeMap<Vec<u8>, SigningNonces>,
+    BTreeMap<(ProposalId, [u8; 32]), Vec<u8>>,
+);
 
 impl PoolStore for MemoryPoolStore {
+    fn keep_vote(
+        &mut self,
+        proposal: &ProposalId,
+        pczt_hash: &[u8; 32],
+        event: &[u8],
+    ) -> Result<(), SessionError> {
+        self.1.insert((*proposal, *pczt_hash), event.to_vec());
+        Ok(())
+    }
+    fn kept_vote(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<u8>> {
+        self.1.get(&(*proposal, *pczt_hash)).cloned()
+    }
+    fn drop_vote(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) {
+        self.1.remove(&(*proposal, *pczt_hash));
+    }
     fn put(&mut self, commitment: &[u8], nonces: SigningNonces) -> Result<(), SessionError> {
         self.0.insert(commitment.to_vec(), nonces);
         Ok(())

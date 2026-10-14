@@ -826,7 +826,7 @@ async fn catch_up(
         }
         for entry in batch {
             chain
-                .append(entry.clone(), &state.member_identities())
+                .append(entry.clone(), &state.log_authors())
                 .map_err(chain_err)?;
             state.apply_entry(&entry, key);
         }
@@ -876,7 +876,7 @@ fn extend_chain(
 ) -> Result<(), NodeError> {
     for entry in entries {
         chain
-            .append(entry.clone(), &state.member_identities())
+            .append(entry.clone(), &state.log_authors())
             .map_err(chain_err)?;
         state.apply_entry(&entry, key);
     }
@@ -1271,7 +1271,7 @@ pub async fn append_event<R: RngCore + CryptoRng>(
         match relay.append_log(&entry).await? {
             AppendResult::Appended { index } => {
                 chain
-                    .append(entry.clone(), &state.member_identities())
+                    .append(entry.clone(), &state.log_authors())
                     .map_err(proto)?;
                 state.apply_entry(&entry, &key);
                 save_copy(relay, chain);
@@ -1730,6 +1730,47 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     let p = &state.proposals[&proposal];
     let (pczt_hash, auto_send, signing_spends) = (p.pczt_hash, p.auto_send, p.signing_spends);
 
+    // An earlier one-tap approval signed (consuming the nonces) but may not have reached
+    // the log: the relay timed out, the app was closed, or the reply was lost after the
+    // append. Its vote was kept, so post the very same shares instead of falling back to
+    // interactive signing (a one-tap vote is final for the other members, so in a 2-of-2
+    // an interactive approval here could never be completed).
+    if p.shares.contains_key(&my_pk) {
+        pool.drop_vote(&proposal, &pczt_hash);
+        let verified = verify_pczt(&pczt, keys.fvk(), &expected)
+            .map_err(|e| NodeError::Verification(e.to_string()))?;
+        return Ok(Approved {
+            verified,
+            signed: true,
+            completed: p.completed_by == Some(my_pk),
+            auto_send,
+        });
+    }
+    if let Some(bytes) = pool.kept_vote(&proposal, &pczt_hash) {
+        let event = VaultEvent::from_bytes(&bytes).map_err(proto)?;
+        let kept_ok = matches!(
+            &event,
+            VaultEvent::Vote { proposal: id, pczt_hash: h, approve: true, shares, .. }
+                if *id == proposal && *h == pczt_hash && !shares.is_empty()
+        );
+        if kept_ok {
+            // Verified again: the same check as when the shares were made.
+            let verified = verify_pczt(&pczt, keys.fvk(), &expected)
+                .map_err(|e| NodeError::Verification(e.to_string()))?;
+            check_signing_spends(&verified, signing_spends)?;
+            append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+            pool.drop_vote(&proposal, &pczt_hash);
+            let p = &state.proposals[&proposal];
+            return Ok(Approved {
+                verified,
+                signed: true,
+                completed: p.completed_by == Some(my_pk),
+                auto_send,
+            });
+        }
+        pool.drop_vote(&proposal, &pczt_hash);
+    }
+
     // One-tap path: every commitment assigned to us must still have its nonce here.
     let one_tap = match &p.preprocessed {
         Some(pre) => {
@@ -1771,8 +1812,27 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
             commitments: vec![],
             shares,
         };
+        // Before the append: the nonces are gone, so these bytes are the only copy.
+        if let Err(e) = pool.keep_vote(&proposal, &pczt_hash, &event.to_bytes().map_err(proto)?) {
+            tracing::warn!("could not keep the one-tap vote: {e}");
+        }
         (event, verified, true)
     } else {
+        // Interactive signing needs t approvers with fresh commitments, and members whose
+        // one-tap shares are logged can't add any (their vote is final). If too few others
+        // remain, this approval could never be used: say so instead of logging it.
+        if p.preprocessed.is_some() {
+            let members = state.descriptor.members.len();
+            let open = members.saturating_sub(p.shares.len());
+            if open < usize::from(state.descriptor.threshold) {
+                return Err(NodeError::NotReady(
+                    "this phone no longer holds the one-tap signing keys for this payment, and \
+                     too many signers have already signed it the one-tap way to finish it \
+                     interactively. Ask the proposer to cancel it and propose it again"
+                        .into(),
+                ));
+            }
+        }
         let (approval, verified) = member
             .approve(proposal, &pczt, &expected, store, rng)
             .map_err(approve_error)?;
@@ -1792,6 +1852,9 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
         (event, verified, false)
     };
     append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+    if signed {
+        pool.drop_vote(&proposal, &pczt_hash);
+    }
     let p = &state.proposals[&proposal];
     Ok(Approved {
         verified,
@@ -1949,6 +2012,7 @@ pub fn forget_closed(
         let Some(pre) = p.preprocessed.as_ref().filter(|_| closed) else {
             continue;
         };
+        pool.drop_vote(&p.id, &p.pczt_hash);
         for g in pre.groups_of(me) {
             for j in 0..usize::from(p.signing_spends) {
                 if let Some(c) = pre.commitment(g, j, me) {
@@ -2016,12 +2080,24 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
         .proposals
         .get(&proposal)
         .ok_or_else(|| NodeError::Protocol("unknown proposal".into()))?;
-    let (Some(group), Some(pre)) = (p.ready_group, p.preprocessed.as_ref()) else {
+    let (Some(ready), Some(pre)) = (p.ready_group, p.preprocessed.as_ref()) else {
         return Err(NodeError::NotReady(
             "no signer group is complete yet".into(),
         ));
     };
-    let group = usize::from(group);
+    // Every complete group, the first one first. Shares are only length-checked when they
+    // are logged, so one member's bad shares could make the first group fail; another
+    // complete group must still be able to send.
+    let complete: Vec<usize> = std::iter::once(usize::from(ready))
+        .chain((0..pre.subsets.len()).filter(|g| {
+            *g != usize::from(ready)
+                && pre.subsets[*g].iter().all(|m| {
+                    p.shares
+                        .get(m)
+                        .is_some_and(|gs| gs.iter().any(|s| usize::from(s.group) == *g))
+                })
+        }))
+        .collect();
     let (pczt, payments) = proposal_pczt(&state, &proposal)?;
     // The sender verifies the transaction like any signer before broadcasting it.
     let keys = material.vault_keys()?;
@@ -2036,31 +2112,51 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
         )?,
     )
     .map_err(|e| NodeError::Verification(e.to_string()))?;
-    let ids = pre.subsets[group]
-        .iter()
-        .map(|pk| frost_id_of(&state.descriptor, pk))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut shares = BTreeMap::new();
-    for (pk, id) in pre.subsets[group].iter().zip(&ids) {
-        let gs = p.shares[pk]
+    let public_key_package = material.public_key_package()?;
+    let aggregate = |group: usize| -> Result<Vec<(usize, [u8; 64])>, NodeError> {
+        let ids = pre.subsets[group]
             .iter()
-            .find(|s| usize::from(s.group) == group)
-            .ok_or_else(|| NodeError::Protocol("group shares missing".into()))?;
-        let parsed = gs
-            .shares
-            .iter()
-            .map(|b| SignatureShare::deserialize(b).map_err(proto))
+            .map(|pk| frost_id_of(&state.descriptor, pk))
             .collect::<Result<Vec<_>, _>>()?;
-        shares.insert(*id, parsed);
+        let mut shares = BTreeMap::new();
+        for (pk, id) in pre.subsets[group].iter().zip(&ids) {
+            let gs = p.shares[pk]
+                .iter()
+                .find(|s| usize::from(s.group) == group)
+                .ok_or_else(|| NodeError::Protocol("group shares missing".into()))?;
+            let parsed = gs
+                .shares
+                .iter()
+                .map(|b| SignatureShare::deserialize(b).map_err(proto))
+                .collect::<Result<Vec<_>, _>>()?;
+            shares.insert(*id, parsed);
+        }
+        crate::session::aggregate_group(
+            &ids,
+            &pre.commitments[group],
+            &shares,
+            &verified,
+            &public_key_package,
+        )
+        .map_err(proto)
+    };
+    let mut first_error = None;
+    let mut signatures = None;
+    for group in complete {
+        match aggregate(group) {
+            Ok(s) => {
+                signatures = Some(s);
+                break;
+            }
+            Err(e) => {
+                tracing::warn!("signer group {group} did not aggregate: {e}");
+                first_error.get_or_insert(e);
+            }
+        }
     }
-    let signatures = crate::session::aggregate_group(
-        &ids,
-        &pre.commitments[group],
-        &shares,
-        &verified,
-        &material.public_key_package()?,
-    )
-    .map_err(proto)?;
+    let Some(signatures) = signatures else {
+        return Err(first_error.expect("at least the ready group was tried"));
+    };
 
     let to_prove = pczt.clone();
     let proved = tokio::task::spawn_blocking(move || {
@@ -2105,18 +2201,26 @@ async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, Node
         .map_err(proto)?;
     let mut raw = Vec::new();
     transaction.write(&mut raw).map_err(proto)?;
-    send_raw(&raw, lightwalletd).await?.map_err(|m| {
+    let txid = *transaction.txid().as_ref();
+    if let Err(m) = send_raw(&raw, lightwalletd).await? {
         // A node on a newer branch rejects a transaction built for the old one.
         if m.to_ascii_lowercase().contains("consensus branch id") {
-            NodeError::Wallet(crate::wallet::WalletError::AppOutdated(m))
-        } else {
-            NodeError::Protocol(format!("broadcast rejected: {m}"))
+            return Err(NodeError::Wallet(crate::wallet::WalletError::AppOutdated(
+                m,
+            )));
         }
-    })?;
-    Ok(Sent {
-        txid: *transaction.txid().as_ref(),
-        raw,
-    })
+        // Another member (or this member's other process: the app and a background check)
+        // sent the same proposal first. The txid leaves out signatures and proof, so both
+        // copies have the same id and the node refuses the second: that is a success.
+        // The whole mempool is read, never this txid (privacy, as in `reserve_notes`).
+        let already = crate::wallet::mempool_txids(lightwalletd)
+            .await
+            .is_ok_and(|txids| txids.contains(&txid));
+        if !already {
+            return Err(NodeError::Protocol(format!("broadcast rejected: {m}")));
+        }
+    }
+    Ok(Sent { txid, raw })
 }
 
 /// Submits raw transaction bytes. `Ok(Err(message))` when the node refused it.
@@ -2338,10 +2442,15 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
             .member(author)
             .ok_or_else(|| NodeError::Protocol("approval from non-member".into()))?;
         let member = Identifier::deserialize(&info.frost_id).map_err(proto)?;
-        let parsed = commitments
+        // A member's malformed commitments must not block everyone's signing: skip that
+        // approval (one-tap approvals carry none and are skipped by `add_approval`).
+        let Ok(parsed) = commitments
             .iter()
-            .map(|c| SigningCommitments::deserialize(c).map_err(proto))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|c| SigningCommitments::deserialize(c))
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            continue;
+        };
         leader.add_approval(crate::session::Approval {
             member,
             proposal,
@@ -2503,17 +2612,29 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
         })();
         match result {
             Ok(reply) => {
-                let env = Envelope::sealed(
-                    me,
-                    &leader,
-                    material.descriptor.vault_id,
-                    seq.next_seq(),
-                    Kind::SignatureShares,
-                    &reply,
-                    rng,
-                )
-                .map_err(proto)?;
-                relay.send(&env).await?;
+                // The nonces are spent: these shares must get out. The app and a background
+                // check of the same member can send at nearly the same time, and the relay
+                // refuses a sequence number not above the last one it saw from us (409);
+                // seal again with a fresh one rather than lose the shares.
+                let mut attempt = 0;
+                loop {
+                    let env = Envelope::sealed(
+                        me,
+                        &leader,
+                        material.descriptor.vault_id,
+                        seq.next_seq(),
+                        Kind::SignatureShares,
+                        &reply,
+                        rng,
+                    )
+                    .map_err(proto)?;
+                    match relay.send(&env).await {
+                        Err(RelayClientError::Status { status: 409, .. }) if attempt < 3 => {
+                            attempt += 1;
+                        }
+                        result => break result?,
+                    }
+                }
                 report.answered.push(msg.proposal);
                 done.push(cursor);
             }

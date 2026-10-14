@@ -429,6 +429,23 @@ fn a_seat_moves_at_the_threshold() {
     );
     assert_eq!(state.names[&pk[3]], "Alice 2");
 
+    // Devices verify the chain against the membership as of each entry. The old key's
+    // entry after the move (a stolen phone racing the relay's member update) must not
+    // stop the chain for everyone: it chains as a former member's and replay ignores it.
+    let entries = log.chain.entries();
+    let mut state = VaultState::replay(&entries[..1], &log.key).unwrap();
+    let mut chain = Chain::new(MAILBOX);
+    chain
+        .append(entries[0].clone(), &state.member_identities())
+        .unwrap();
+    for e in &entries[1..] {
+        chain.append(e.clone(), &state.log_authors()).unwrap();
+        state.apply_entry(e, &log.key);
+    }
+    assert_eq!(chain.len(), 13);
+    assert_eq!(state.former_members, vec![*log.ids[0].public()]);
+    assert!(state.ignored.contains(&(11, VaultError::NotAMember(11))));
+
     // An approval that arrives after the move is moot.
     forged = VaultEvent::Name { name: "x".into() };
     log.push(3, &forged);

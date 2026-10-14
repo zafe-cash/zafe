@@ -186,6 +186,7 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _code,
           focusNode: _codeFocus,
           hintText: 'zafe-recover-v1:...',

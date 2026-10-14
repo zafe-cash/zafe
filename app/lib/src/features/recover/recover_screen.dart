@@ -208,10 +208,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
               leading: const AppIcon(AppIcons.share, size: 20),
               onPressed: () => SharePlus.instance.share(
                 ShareParams(
+                  // No safety code here: it must reach the co-signer by voice, or
+                  // anyone who can swap this message can swap both.
                   text:
                       'Please move my Zafe seat to my new phone: open Zafe, Signers, '
-                      '"Replace a lost phone", and paste this code. Safety code: '
-                      '${code.safetyCode}\n\n${code.code}',
+                      '"Replace a lost phone", and paste this code. I\'ll call you '
+                      'to read out the safety code.\n\n${code.code}',
                 ),
               ),
               child: const Text('Send code to a co-signer'),

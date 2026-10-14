@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
@@ -104,7 +105,7 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
       if (mounted) {
         showAppToast(
           context,
-          'Couldn\'t join. $e',
+          zafeErrorMessage(e, fallback: 'Couldn\'t join. Try again.'),
           iconName: AppIcons.warningCircle,
           tone: AppToastTone.destructive,
         );
@@ -137,6 +138,7 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _invite,
           focusNode: _focus,
           hintText: 'Paste the invite or link you received',

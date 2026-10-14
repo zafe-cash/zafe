@@ -19,6 +19,7 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
+import '../../core/errors/zafe_error_copy.dart';
 import '../../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
@@ -159,7 +160,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       if (mounted) {
         showAppToast(
           context,
-          'Couldn\'t lock membership. $e',
+          zafeErrorMessage(
+            e,
+            fallback: 'Couldn\'t lock membership. Try again.',
+          ),
           iconName: AppIcons.warningCircle,
           tone: AppToastTone.destructive,
         );
@@ -181,7 +185,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         setState(() => _creatingKeys = false);
         showAppToast(
           context,
-          'Key generation failed. $e',
+          zafeErrorMessage(e, fallback: 'Key generation failed. Try again.'),
           iconName: AppIcons.warningCircle,
           tone: AppToastTone.destructive,
         );

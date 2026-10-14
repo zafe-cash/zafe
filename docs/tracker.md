@@ -6,7 +6,7 @@ finished ones, tick them and add the commit. Spec references are to `spec.md`.
 
 Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not yet decided
 
-Last updated: 2026-10-12 (mainnet release checklist; deploy-key migration; relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
+Last updated: 2026-10-15 (security audit + one-tap/race fixes; onboarding design in docs/onboarding.md; mainnet release checklist; deploy-key migration; relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
 
 ---
 
@@ -667,6 +667,85 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [ ] dApp SDK: proposal requests from third-party apps
 - [ ] Hardware members (Keystone/Ledger) if they gain FROST support
 - [ ] Payment disclosures (ZIP 311-style proofs for auditors)
+
+## Security audit and races (2026-10-14)
+
+Read-only audit of the Rust crates, the bridge and the Flutter app, plus a review of
+one-tap and races between members' apps and between one phone's app and background
+check. Fixed in the same change unless open:
+
+- [x] **One-tap vote lost after signing** (deadlock in 2-of-2): signing consumes the pool
+      nonces, so if the append failed (relay timeout, app closed) the member could only
+      approve interactively, and a one-tap vote is final for the others: the proposal could
+      never complete. `node::approve` now keeps the vote (`PoolStore::keep_vote`,
+      `<pool>/<id>-<pczt hash>.vote`) before appending, posts it again on the next approve,
+      treats "my shares are already logged" as done, and refuses an interactive approval
+      that can never reach t (`NotReady`). Test: `tests/one_tap_retry.rs`.
+- [x] **Duplicate send** (app + background check, or two members): the second broadcast
+      was reported as "broadcast rejected" though the payment went out. `broadcast` now
+      reads the whole mempool on a rejection and counts our txid there as sent; the bridge
+      reports a proposal already logged as sent as `Sent`.
+- [x] **Envelope seq race** between the app and a background check (relay 409 on a
+      non-increasing seq): `respond` re-seals the shares with a fresh seq (up to 3 times)
+      instead of losing them.
+- [x] **H1 seat move lockout**: the old (stolen) key could append one entry before the
+      relay learned of the move and stop every member's chain (`UnknownAuthor`). Chains
+      now accept former members' signed entries (`VaultState::log_authors`,
+      `former_members`); replay ignores them as before. Test: `vault.rs`
+      `a_seat_moves_at_the_threshold`.
+- [x] **M4** one member's bad one-tap shares stalled the ready group: `send_ready` tries
+      every complete group. **M5-A** a malformed interactive commitment aborted every
+      leader's request: skipped now.
+- [x] App: platform `route` intent extra ignored (`overridePlatformDefaultLocation`), the
+      app lock now applies after > 2 min away behind an unlock prompt, passphrase/backup/
+      invite fields turn off suggestions and keyboard learning (`MobileTextField.secret`),
+      custom server URLs and turning Tor off need an unlock, notifications are private on
+      the lock screen, invite links wait for unlock / setup / a running send, the recovery
+      share text no longer carries the safety code, shared names that look like "You",
+      duplicate another member's, or hide bidi/zero-width characters are not shown
+      (bridge `shared_names`, display only), typed error copy in the setup toasts.
+- [ ] **M1** setup safety number (~40 bits) can be ground by a malicious relay; **M2**
+      8-digit seat-recovery code in seconds. Fix with a commit-then-reveal short code
+      (docs/onboarding.md §5.4); needs spec + version bumps.
+- [ ] **M3** version-gated replay rules (v7 Broadcast txid check) can be skipped by an
+      author tagging an event with an older version. Fix by log position or a per-vault
+      minimum event version; changes replay, gate it.
+- [ ] **M5-B** the leader always picks the first t approvers by identifier: a member who
+      sorts first can stall rounds by never answering. Rotate or exclude timed-out signers.
+- [ ] **L5** proposals whose PCZT doesn't parse still drain every pool; reject at replay
+      (gated) or cap `signing_spends`.
+- [ ] One-tap pool depth: a proposal with more spends than a member's pool covers
+      (2-of-3: > 16 spends at a full pool, > 8 at half) loses one-tap for that member's
+      groups. Size the pool to the vault's note count, or top up before proposing.
+- [ ] One-tap and interactive don't mix: members whose one-tap shares are logged can't add
+      interactive commitments (VoteFinal). A gated replay rule allowing it would make every
+      mixed state completable.
+- [ ] Low: fsync nonce files and their directory (L1); atomic leader files (L2); persist
+      interactive replies until sent (L3); `respond` skips closed proposals (L4); cap relay
+      response bodies (L6); verify before answering `Conflict{len}` (L7); joiners check the
+      creator's birthday (L8); a local log copy that fails to verify is an error, not
+      TOFU (L9); redact `VaultKeys` Debug (L10).
+- [ ] App, low: Strong biometrics only; sensitive clipboard flag + auto-clear; share_plus
+      cache cleanup; `filterTouchesWhenObscured`; require `ZAFE_LINK_HOST` in release
+      builds (custom scheme can be claimed); encrypt nonce files; strip bidi from memos and
+      link labels; show the short key next to shared names in "Proposed by" and
+      notifications.
+
+## Onboarding (designed 2026-10-15, docs/onboarding.md)
+
+- [x] Typed error copy in create/join/lock/keygen toasts (was raw `$e`).
+- [ ] P0: exit after membership is locked + keygen timeout screen naming who didn't take
+      part (today one absent member strands everyone on `/setup`).
+- [ ] P0: backup card first once the vault holds funds; acknowledgement on "Later".
+- [ ] P0: notification primer before the OS prompt, and a denied state.
+- [ ] P0: empty-state copy (no "propose your first payment" at zero balance).
+- [ ] P1: commit-then-reveal safety code as words, per-member confirmation, QR in the
+      same room (fixes M1/M2).
+- [ ] P1: waiting room with per-seat status, setup-time push, invite expiry.
+- [ ] P1: threshold presets, t = n confirmation, name in setup, "before you invite" brief.
+- [ ] P1: readiness card, Receive interstitial without a backup, passphrase recall check.
+- [ ] P2: guided test payment, one-time tips + Help hub, Welcome simplification,
+      practice vault (test with users first).
 
 ## One-tap follow-ups
 

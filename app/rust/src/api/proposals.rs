@@ -561,15 +561,54 @@ fn backed_up(state: &VaultState) -> Vec<String> {
         .collect()
 }
 
+/// Names members gave themselves, minus any that could pass for someone else: a member
+/// writes its own name, so it could call itself "You" (every other phone shows that for
+/// its owner), take another member's name, or hide text behind bidi or zero-width
+/// characters. Those are left out and that member shows as its short key. Display only:
+/// replay keeps every `Name` event as it is.
 fn shared_names(state: &VaultState) -> Vec<SignerName> {
+    let folded = |name: &str| name.trim().to_lowercase();
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    for name in state.names.values() {
+        *seen.entry(folded(name)).or_default() += 1;
+    }
     state
         .names
         .iter()
+        .filter(|(_, name)| plain_name(name) && seen[&folded(name)] == 1)
         .map(|(pk, name)| SignerName {
             key_hex: hex::encode(pk),
             name: name.clone(),
         })
         .collect()
+}
+
+/// No invisible or direction-changing characters, and not "You" (with anything after).
+fn plain_name(name: &str) -> bool {
+    let hidden = |c: char| {
+        matches!(c,
+            '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}')
+    };
+    let lower = name.trim().to_lowercase();
+    let you = lower == "you" || lower.starts_with("you ") || lower.starts_with("you(");
+    !you && !name.chars().any(hidden)
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::plain_name;
+
+    #[test]
+    fn names_that_could_pass_for_someone_else_are_not_plain() {
+        assert!(plain_name("Alice"));
+        assert!(plain_name("Younes"));
+        assert!(!plain_name("You"));
+        assert!(!plain_name(" you (CFO)"));
+        assert!(!plain_name("Al\u{202E}ecila"));
+        assert!(!plain_name("Ali\u{200B}ce"));
+    }
 }
 
 // --- Proposing and reviewing ------------------------------------------------------------
@@ -1020,6 +1059,21 @@ pub fn send_with_progress(
 
     // One tap: the approvals already carry every signature; aggregate and send alone.
     let (_, state) = runtime().block_on(node::load_state(&relay, &me, &m))?;
+    // Already sent by another member, or by this app's other process (a background check
+    // finishing an auto-send while the app sent it too): nothing left to do.
+    if let Some(p) = state.proposals.get(&id) {
+        if let (ProposalStatus::Broadcast, Some(mut display)) = (p.status, p.txid) {
+            display.reverse();
+            on_progress(SendProgress {
+                stage: SendStage::Sent,
+                received: u32::from(m.descriptor.threshold),
+                needed: u32::from(m.descriptor.threshold),
+                txid: Some(hex::encode(display)),
+                error: None,
+            });
+            return Ok(());
+        }
+    }
     if node::is_ready(&state, &id) {
         on_progress(SendProgress {
             stage: SendStage::Collecting,

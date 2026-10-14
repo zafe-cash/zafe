@@ -39,6 +39,7 @@ import 'features/settings/viewing_key_screen.dart';
 import 'providers/device_lock_provider.dart';
 import 'providers/tor_provider.dart';
 import 'providers/mempool_watch_provider.dart';
+import 'providers/proposals_provider.dart';
 import 'providers/server_failover_provider.dart';
 import 'providers/theme_mode_provider.dart';
 import 'notifications/vault_updates.dart'
@@ -100,8 +101,12 @@ final _routerProvider = Provider<GoRouter>((ref) {
   void openInviteLink() {
     final invite = inviteLinks.value;
     if (invite == null) return;
+    // Like payment links: nothing moves while the app is locked, and a link never pulls
+    // the owner out of a setup in progress or a payment that is being sent.
+    if (ref.read(appLockedProvider)) return;
     final vaults = ref.read(vaultProvider);
-    if (vaults.isSettingUp && (vaults.membership?.sealed ?? false)) return;
+    if (vaults.isSettingUp) return;
+    if (ref.read(proposalsProvider).sends.values.any((s) => s.running)) return;
     final here = router.routerDelegate.currentConfiguration.uri.path;
     if (here == '/backup-prompt') return;
     inviteLinks.value = null;
@@ -165,7 +170,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
 
   paymentLinks.addListener(openPaymentLink);
   ref.onDispose(() => paymentLinks.removeListener(openPaymentLink));
-  ref.listen(appLockedProvider, (_, _) => scheduleMicrotask(openPaymentLink));
+  ref.listen(appLockedProvider, (_, _) {
+    scheduleMicrotask(openPaymentLink);
+    scheduleMicrotask(openInviteLink);
+  });
   // Sync moved to another listed Zcash server: say so once.
   ref.listen(serverFailoverProvider, (_, moved) {
     final context = router.routerDelegate.navigatorKey.currentContext;
@@ -186,6 +194,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
 
   return router = GoRouter(
     initialLocation: initial,
+    // Ignore the platform's start route: on Android any app can start this activity
+    // with a `route` extra, which would otherwise open any screen (e.g. the viewing key)
+    // straight away. Links arrive through `app_links` and are checked there.
+    overridePlatformDefaultLocation: true,
     redirect: (context, state) {
       final vault = ref.read(vaultProvider);
       final loc = state.matchedLocation;
@@ -313,9 +325,13 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/payment-request',
-        pageBuilder: (_, state) => page(
-          PaymentRequestScreen(link: state.extra! as PendingPaymentLink),
-        ),
+        pageBuilder: (_, state) => switch (state.extra) {
+          final PendingPaymentLink link => page(
+            PaymentRequestScreen(link: link),
+          ),
+          // Only `openPaymentLink` opens this route, with the link as `extra`.
+          _ => page(const SizedBox.shrink()),
+        },
       ),
       GoRoute(
         path: '/send',

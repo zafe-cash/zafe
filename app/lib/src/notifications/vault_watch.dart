@@ -464,6 +464,9 @@ Future<void> _checkVault(
             // The Z from the app icon (scripts/brand/brand.py), tinted brand verdigris.
             icon: 'ic_notification',
             color: Color(0xFF00736C),
+            // Amounts and recipients stay off the lock screen (Android shows the app
+            // name and "Contents hidden" until the phone is unlocked).
+            visibility: NotificationVisibility.private,
           ),
           iOS: DarwinNotificationDetails(),
         ),

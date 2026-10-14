@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
@@ -74,7 +75,10 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
       if (mounted) {
         showAppToast(
           context,
-          'Couldn\'t create the vault. $e',
+          zafeErrorMessage(
+            e,
+            fallback: 'Couldn\'t create the vault. Try again.',
+          ),
           iconName: AppIcons.warningCircle,
           tone: AppToastTone.destructive,
         );
