@@ -1131,10 +1131,11 @@ Learned while studying it:
   `SendPrefill` has no `autoSend`). Confirmation sheets only for what can't be undone
   (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline, backup
   "Later" just leaves.
-- **Needs you** (Home, 2026-10-16): payments where `needsMyAction` (`proposal_status.dart`; the same rule
-  counts notifications) and seat moves this member can approve, titled by the action (`actionTitle`:
-  "Approve payment" / "Send payment" / "Approve again"), above every notice except "Money left without
-  approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
+- **Needs you** (Home, 2026-10-16, `features/home/needs_you.dart`): payments where `needsMyAction`
+  (`proposal_status.dart`; the same rule counts notifications) and seat moves this member can approve, as
+  `RequestCard`s (proposer tile, name, message or "Ready to send", amount, a Review/Send/Check pill) in an
+  `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms), above every notice except "Money left
+  without approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
   wants attention asked for only when the member must act.
 - **Privacy mode is app-wide** (`privacyModeProvider`, persisted in prefs, read in the
   bootstrap): every amount goes through `amountWithTicker(text, hide:)`. Vizor's

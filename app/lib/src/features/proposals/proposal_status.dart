@@ -61,13 +61,6 @@ String _soon(rust.ProposalInfo p, int? height) {
       : '';
 }
 
-/// What this member has to do with a payment that [needsMyAction].
-String actionTitle(rust.ProposalInfo p) => p.needsReapproval
-    ? 'Approve again'
-    : p.stage == rust.ProposalStage.approved
-    ? 'Send payment'
-    : 'Approve payment';
-
 /// Title for a proposal from this member's point of view (sentence case).
 String proposalTitle(rust.ProposalInfo p, {int? height}) =>
     proposalExpired(p, height) ? 'Expired' : _title(p);
@@ -183,14 +176,10 @@ class ProposalRow extends StatelessWidget {
     required this.onTap,
     this.hideAmount = false,
     this.height,
-    this.asAction = false,
   });
   final rust.ProposalInfo proposal;
   final bool hideAmount;
   final VoidCallback onTap;
-
-  /// Titled with what to do ("Approve payment"), for Home's "Needs you".
-  final bool asAction;
 
   /// Synced chain tip, to show expiry.
   final int? height;
@@ -244,9 +233,7 @@ class ProposalRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      asAction
-                          ? actionTitle(p)
-                          : proposalTitle(p, height: height),
+                      proposalTitle(p, height: height),
                       style: AppTypography.labelLarge.copyWith(
                         color: colors.text.accent,
                       ),

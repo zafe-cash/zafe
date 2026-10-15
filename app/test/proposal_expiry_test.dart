@@ -126,14 +126,6 @@ void main() {
     expect(needsMyAction(send), isTrue);
     expect(needsMyAction(autoSending), isFalse);
     expect(needsMyAction(expired, height: 10), isFalse);
-    expect(actionTitle(vote), 'Approve payment');
-    expect(actionTitle(send), 'Send payment');
-    expect(
-      actionTitle(
-        proposal('f', myVote: MyVote.approved, needsReapproval: true),
-      ),
-      'Approve again',
-    );
   });
 
   test('propose again fills the amount field with plain decimal ZEC', () {

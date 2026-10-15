@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/config/beta.dart';
-import '../../core/formatting/member_label.dart';
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
 import '../../core/formatting/zec_amount.dart';
@@ -20,8 +19,6 @@ import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../notifications/notification_primer.dart';
 import '../../notifications/vault_watch.dart';
-import '../../providers/member_names_provider.dart';
-import '../signers/signers_screen.dart' show SeatMoveCard;
 import '../../providers/endpoints_provider.dart';
 import '../../services/live_vault_watch.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
@@ -29,6 +26,7 @@ import '../vaults/vault_emblem.dart';
 import '../vaults/vault_switcher_sheet.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/vault_names_provider.dart';
+import 'needs_you.dart';
 import 'sync_status_sheet.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/received_provider.dart';
@@ -36,7 +34,7 @@ import '../../providers/tor_provider.dart';
 import '../../providers/unapproved_spends_provider.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../proposals/activity_feed.dart';
-import '../proposals/proposal_status.dart' show ProposalRow, needsMyAction;
+import '../proposals/proposal_status.dart' show needsMyAction;
 import '../../providers/vault_provider.dart';
 import '../../providers/zec_price_provider.dart';
 import '../../services/app_update.dart';
@@ -300,7 +298,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         const SizedBox(height: AppSpacing.md),
                       ],
                       // What the group is waiting on this member for, before any notice.
-                      _NeedsYou(height: vault.balance?.height),
+                      NeedsYou(height: vault.balance?.height),
                       // Once the vault holds money, a missing backup outranks every
                       // other notice (a lost phone could cost the group its funds).
                       if (needsBackup && funded) ...[
@@ -644,73 +642,6 @@ class _VaultDialPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _VaultDialPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.opacity != opacity;
-}
-
-/// "Needs you": payments waiting for this member's vote or send, and seat moves it can
-/// approve. Shown only when there is something; each opens where the action happens.
-class _NeedsYou extends ConsumerWidget {
-  const _NeedsYou({this.height});
-  final int? height;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final colors = context.colors;
-    final proposals = ref.watch(proposalsProvider);
-    final me = ref.watch(vaultProvider).myKeyHex;
-    final names = ref.watch(signerNamesProvider);
-    final hide = ref.watch(privacyModeProvider);
-    final payments = [
-      for (final p in proposals.items)
-        if (needsMyAction(p, height: height)) p,
-    ];
-    final moves = [
-      for (final m in proposals.seatMoves)
-        if (m.oldKeyHex != me && !m.approvals.contains(me)) m,
-    ];
-    if (payments.isEmpty && moves.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.xs,
-        AppSpacing.s,
-        AppSpacing.xs,
-        AppSpacing.md,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Needs you',
-            style: AppTypography.labelLarge.copyWith(
-              color: colors.text.brand,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          for (var i = 0; i < payments.length; i++) ...[
-            if (i > 0) const SizedBox(height: AppSpacing.s),
-            ProposalRow(
-              proposal: payments[i],
-              hideAmount: hide,
-              height: height,
-              asAction: true,
-              onTap: () => context.push('/proposal/${payments[i].id}'),
-            ),
-          ],
-          for (final m in moves) ...[
-            if (payments.isNotEmpty || m != moves.first)
-              const SizedBox(height: AppSpacing.s),
-            SeatMoveCard(
-              who: memberLabel(m.oldKeyHex, me: me, names: names),
-              approvals: m.approvals.length,
-              needed: m.needed,
-              onApprove: () =>
-                  context.push('/replace-signer', extra: (m.oldKeyHex, m.code)),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 /// Rows shown on Home; everything else is one tap away under "See all".
