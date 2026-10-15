@@ -181,12 +181,17 @@ impl SeqCounter {
             .map(|d| d.as_micros() as u64)
             .unwrap_or(0);
         let floor = self.0;
-        let next = |last: u64| last.max(floor).saturating_add(1).max(now);
-        let last = LAST_SEQ
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |last| Some(next(last)))
-            .expect("the update always succeeds");
-        self.0 = next(last);
-        self.0
+        let mut last = LAST_SEQ.load(Ordering::SeqCst);
+        loop {
+            let next = last.max(floor).saturating_add(1).max(now);
+            match LAST_SEQ.compare_exchange_weak(last, next, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => {
+                    self.0 = next;
+                    return next;
+                }
+                Err(current) => last = current,
+            }
+        }
     }
 }
 

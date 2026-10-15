@@ -18,6 +18,9 @@ the same change.
 
 ```bash
 cargo fmt --all && cargo clippy --workspace --all-targets     # must be clean
+# CI uses the latest stable (dtolnay/rust-toolchain@stable) with -D warnings; the local
+# default is pinned older (1.97), so check new deprecations before pushing:
+CARGO_TARGET_DIR=target/stable-check cargo +stable clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                                        # ~68 tests, 3 ignored
 
 # ZIP 2005 vectors: regenerate, then check independently in Python
