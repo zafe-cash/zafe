@@ -1089,6 +1089,13 @@ Learned while studying it:
   `vault_viewing_key(material)` derives the UFVK and refuses if it differs from the
   descriptor's `ufvk` (`Verification`).
 - Pushed-page titles are 24 px and left-aligned (room for ~20 characters); keep them short.
+- **Copy and layout rules (user, 2026-10-16)**: minimal text: delete lines that restate the screen,
+  show exact values (bridge `estimate_fee`, never "at least"), explanations only in help sheets.
+  Check UI on a 360x640 phone at 1.0 and 2.0x text (`adb shell wm size 720x1280; wm density 320;
+  settings put system font_scale 2.0`, reset after) and run `flutter test
+  tool/screens/size_sweep_test.dart` (fails on any overflow); test proposer **and** approver flows.
+  No dead ends: "Sent!" returns Home by itself (`kSentHoldTime`), reject/cancel/non-final approve
+  go back; Tx IDs open ZecBlock (`core/config/block_explorer.dart`).
 - **Privacy mode is app-wide** (`privacyModeProvider`, persisted in prefs, read in the
   bootstrap): every amount goes through `amountWithTicker(text, hide:)`. Vizor's
   `hideAmountIfPrivacyMode` only appends the unit to the *mask*, so passing a bare amount
