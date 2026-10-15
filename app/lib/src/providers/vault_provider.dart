@@ -283,6 +283,14 @@ class VaultNotifier extends Notifier<VaultState> {
   /// [createPrefillProvider]); a joiner just leaves. `deleted` is false when the relay
   /// couldn't delete the setup (older relay, or offline): the vault is forgotten here
   /// anyway, and the old invite may keep working until the relay drops it.
+  /// Gives up on a setup whose membership is locked but whose keys were never made (a
+  /// member never took part). Only forgets it on this phone: no keys or funds exist yet,
+  /// and the relay keeps a locked setup until it expires.
+  Future<void> abandonSetup() async {
+    final id = state.activeId;
+    if (id != null) await removeVault(id);
+  }
+
   Future<({bool creator, bool deleted})> cancelSetup() async {
     final id = state.activeId;
     final seeds = state.identity;

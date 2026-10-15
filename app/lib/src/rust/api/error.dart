@@ -17,14 +17,20 @@ class ZafeError implements FrbException {
   final String message;
   final ZafeEndpoint endpoint;
 
+  /// Members the error is about (signing keys, hex): `KeygenIncomplete` lists those
+  /// who never took part. Empty otherwise.
+  final List<String> members;
+
   const ZafeError({
     required this.kind,
     required this.message,
     required this.endpoint,
+    required this.members,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ message.hashCode ^ endpoint.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ message.hashCode ^ endpoint.hashCode ^ members.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -33,7 +39,8 @@ class ZafeError implements FrbException {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           message == other.message &&
-          endpoint == other.endpoint;
+          endpoint == other.endpoint &&
+          members == other.members;
 }
 
 enum ZafeErrorKind {
@@ -114,4 +121,7 @@ enum ZafeErrorKind {
   /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
   vaultNotOnRelay,
   other,
+
+  /// Key generation timed out because some members never took part (`members`).
+  keygenIncomplete,
 }

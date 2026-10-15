@@ -13,7 +13,12 @@ void main() {
         ZafeErrorKind.relayMembership,
       ]) {
         final text = zafeErrorMessage(
-          ZafeError(kind: kind, message: 'x', endpoint: ZafeEndpoint.relay),
+          ZafeError(
+            kind: kind,
+            message: 'x',
+            endpoint: ZafeEndpoint.relay,
+            members: const [],
+          ),
           fallback: 'FALLBACK',
         );
         expect(text, isNot('FALLBACK'), reason: '$kind');

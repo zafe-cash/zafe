@@ -5,7 +5,12 @@ import 'package:zafe/src/rust/api/error.dart';
 ZafeError err(
   ZafeErrorKind kind, [
   ZafeEndpoint endpoint = ZafeEndpoint.none,
-]) => ZafeError(kind: kind, message: 'detail', endpoint: endpoint);
+]) => ZafeError(
+  kind: kind,
+  message: 'detail',
+  endpoint: endpoint,
+  members: const [],
+);
 
 void main() {
   group('classifySyncFailure', () {
@@ -181,6 +186,7 @@ void main() {
         kind: ZafeErrorKind.relayMembership,
         message: 'x',
         endpoint: ZafeEndpoint.relay,
+        members: const [],
       ),
     );
     expect(c.kind, SyncFailureKind.relayMembership);

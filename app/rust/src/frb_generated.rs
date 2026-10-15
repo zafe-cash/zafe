@@ -3427,10 +3427,12 @@ impl SseDecode for crate::api::error::ZafeError {
         let mut var_kind = <crate::api::error::ZafeErrorKind>::sse_decode(deserializer);
         let mut var_message = <String>::sse_decode(deserializer);
         let mut var_endpoint = <crate::api::error::ZafeEndpoint>::sse_decode(deserializer);
+        let mut var_members = <Vec<String>>::sse_decode(deserializer);
         return crate::api::error::ZafeError {
             kind: var_kind,
             message: var_message,
             endpoint: var_endpoint,
+            members: var_members,
         };
     }
 }
@@ -3464,6 +3466,7 @@ impl SseDecode for crate::api::error::ZafeErrorKind {
             21 => crate::api::error::ZafeErrorKind::TorFailed,
             22 => crate::api::error::ZafeErrorKind::VaultNotOnRelay,
             23 => crate::api::error::ZafeErrorKind::Other,
+            24 => crate::api::error::ZafeErrorKind::KeygenIncomplete,
             _ => unreachable!("Invalid variant for ZafeErrorKind: {}", inner),
         };
     }
@@ -4420,6 +4423,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::error::ZafeError {
             self.kind.into_into_dart().into_dart(),
             self.message.into_into_dart().into_dart(),
             self.endpoint.into_into_dart().into_dart(),
+            self.members.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4460,6 +4464,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::error::ZafeErrorKind {
             Self::TorFailed => 21.into_dart(),
             Self::VaultNotOnRelay => 22.into_dart(),
             Self::Other => 23.into_dart(),
+            Self::KeygenIncomplete => 24.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5208,6 +5213,7 @@ impl SseEncode for crate::api::error::ZafeError {
         <crate::api::error::ZafeErrorKind>::sse_encode(self.kind, serializer);
         <String>::sse_encode(self.message, serializer);
         <crate::api::error::ZafeEndpoint>::sse_encode(self.endpoint, serializer);
+        <Vec<String>>::sse_encode(self.members, serializer);
     }
 }
 
@@ -5240,6 +5246,7 @@ impl SseEncode for crate::api::error::ZafeErrorKind {
                 crate::api::error::ZafeErrorKind::TorFailed => 21,
                 crate::api::error::ZafeErrorKind::VaultNotOnRelay => 22,
                 crate::api::error::ZafeErrorKind::Other => 23,
+                crate::api::error::ZafeErrorKind::KeygenIncomplete => 24,
                 _ => {
                     unimplemented!("");
                 }

@@ -44,6 +44,13 @@ pub enum NodeError {
     EchoMismatch,
     #[error("timed out waiting for {0}")]
     Timeout(&'static str),
+    /// Key generation gave up waiting for `stage` from these members (they never opened
+    /// the setup, or left it): a screen names them, offers to try again or abandon.
+    #[error("key generation timed out waiting for {stage} from {} member(s)", missing.len())]
+    KeygenStalled {
+        stage: &'static str,
+        missing: Vec<[u8; 32]>,
+    },
     /// This member's independent check of a proposal failed: do not approve or sign it.
     #[error("verification failed: {0}")]
     Verification(String),
@@ -561,7 +568,14 @@ impl Inbox<'_> {
                 return Ok(got);
             }
             if Instant::now() > deadline {
-                return Err(NodeError::Timeout(what));
+                return Err(NodeError::KeygenStalled {
+                    stage: what,
+                    missing: from
+                        .iter()
+                        .filter(|pk| !got.contains_key(*pk))
+                        .copied()
+                        .collect(),
+                });
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }

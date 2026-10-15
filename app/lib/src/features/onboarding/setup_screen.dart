@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/formatting/member_label.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_copy_feedback.dart';
@@ -44,6 +45,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// The relay no longer has this setup: the creator cancelled it.
   bool _gone = false;
   String? _error;
+
+  /// Key generation timed out: the members (keys) who never took part.
+  List<String>? _stalled;
 
   @override
   void initState() {
@@ -173,8 +177,60 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     }
   }
 
+  /// After membership is locked: leaves the setup on this phone (a member never took
+  /// part, or the group gave up). Everyone else has to do the same.
+  Future<void> _abandon() async {
+    if (_busy || _leaving) return;
+    final go = await showAppMobileSheet<bool>(
+      context: context,
+      builder: (sheet) {
+        final colors = sheet.colors;
+        return MobileModalScaffold(
+          title: 'Abandon this setup?',
+          onClose: () => Navigator.of(sheet).pop(false),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Nothing is lost: no keys or funds exist yet. Tell the other members, '
+                'so they abandon it too, then start again with a new invite.',
+                style: AppTypography.bodyMedium.copyWith(
+                  color: colors.text.accent,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppButton(
+                expand: true,
+                variant: AppButtonVariant.destructive,
+                onPressed: () => Navigator.of(sheet).pop(true),
+                child: const Text('Abandon setup'),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              AppButton(
+                expand: true,
+                variant: AppButtonVariant.ghost,
+                onPressed: () => Navigator.of(sheet).pop(false),
+                child: const Text('Keep waiting'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (go != true || !mounted) return;
+    setState(() => _leaving = true);
+    _poll?.cancel();
+    await ref.read(vaultProvider.notifier).abandonSetup();
+    if (!mounted) return;
+    context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
+  }
+
   Future<void> _createKeys(String safetyNumber) async {
-    setState(() => _creatingKeys = true);
+    setState(() {
+      _creatingKeys = true;
+      _stalled = null;
+    });
     _poll?.cancel();
     try {
       await ref.read(vaultProvider.notifier).createKeys(safetyNumber);
@@ -182,13 +238,20 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       if (mounted) context.go('/backup-prompt');
     } catch (e) {
       if (mounted) {
-        setState(() => _creatingKeys = false);
-        showAppToast(
-          context,
-          zafeErrorMessage(e, fallback: 'Key generation failed. Try again.'),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
+        final stalled =
+            e is ZafeError && e.kind == ZafeErrorKind.keygenIncomplete;
+        setState(() {
+          _creatingKeys = false;
+          _stalled = stalled ? e.members : null;
+        });
+        if (!stalled) {
+          showAppToast(
+            context,
+            zafeErrorMessage(e, fallback: 'Key generation failed. Try again.'),
+            iconName: AppIcons.warningCircle,
+            tone: AppToastTone.destructive,
+          );
+        }
         _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
       }
     }
@@ -221,7 +284,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         expand: true,
         onPressed: _compared && words != null ? () => _createKeys(words) : null,
         leading: const AppIcon(AppIcons.key, size: 20),
-        child: const Text('Create vault keys'),
+        child: Text(_stalled == null ? 'Create vault keys' : 'Try again'),
       );
     } else if (isCreator) {
       bottom = AppButton(
@@ -292,6 +355,19 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 onTap: () => setState(() => _compared = !_compared),
               ),
             ],
+          ],
+          if (sealed && _stalled != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            _Hint(text: stalledText(_stalled!, me: _myKeyHex(vault))),
+          ],
+          if (sealed) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: _busy || _leaving ? null : _abandon,
+              child: const Text('Abandon setup'),
+            ),
           ],
           if (!sealed && !_gone) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -728,4 +804,16 @@ class _CreatingKeys extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What the setup screen says after key generation timed out waiting for `missing`.
+String stalledText(List<String> missing, {String? me}) {
+  final who = missing.where((k) => k != me).map(shortKey).toList();
+  final names = switch (who.length) {
+    0 => 'some members',
+    1 => who.single,
+    _ => '${who.sublist(0, who.length - 1).join(', ')} and ${who.last}',
+  };
+  return 'Key generation stopped: $names never took part. Ask them to open Zafe and keep '
+      'this screen open, then try again together. Or abandon this setup and start over.';
 }

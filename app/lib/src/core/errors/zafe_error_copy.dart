@@ -15,6 +15,9 @@ String zafeErrorMessage(
           : 'Can\'t reach the ${_server(error.endpoint)}. Check your connection '
                 'and try again.',
     ZafeErrorKind.notReady => _sentence(error.message),
+    ZafeErrorKind.keygenIncomplete =>
+      'Key generation stopped: some members never took part. Ask them to open Zafe, '
+          'then try again together.',
     ZafeErrorKind.timeout =>
       'Other signers haven\'t answered yet. Ask them to open Zafe, then try again.',
     ZafeErrorKind.verification =>

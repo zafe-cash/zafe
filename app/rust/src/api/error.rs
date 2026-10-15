@@ -64,6 +64,8 @@ pub enum ZafeErrorKind {
     /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
     VaultNotOnRelay,
     Other,
+    /// Key generation timed out because some members never took part (`members`).
+    KeygenIncomplete,
 }
 
 /// Which server an error came from, when it came from one.
@@ -79,6 +81,9 @@ pub struct ZafeError {
     pub kind: ZafeErrorKind,
     pub message: String,
     pub endpoint: ZafeEndpoint,
+    /// Members the error is about (signing keys, hex): `KeygenIncomplete` lists those
+    /// who never took part. Empty otherwise.
+    pub members: Vec<String>,
 }
 
 impl ZafeError {
@@ -87,6 +92,7 @@ impl ZafeError {
             kind,
             message: message.into(),
             endpoint: ZafeEndpoint::None,
+            members: Vec::new(),
         }
     }
 
@@ -175,13 +181,21 @@ impl From<NodeError> for ZafeError {
             NodeError::RelayLostVault { .. } => ZafeErrorKind::RelayLostVault,
             NodeError::NotReady(_) => ZafeErrorKind::NotReady,
             NodeError::Timeout(_) => ZafeErrorKind::Timeout,
+            NodeError::KeygenStalled { .. } => ZafeErrorKind::KeygenIncomplete,
             NodeError::Verification(_)
             | NodeError::SafetyNumberMismatch { .. }
             | NodeError::EchoMismatch => ZafeErrorKind::Verification,
             NodeError::BadInvite => ZafeErrorKind::InvalidInput,
             _ => ZafeErrorKind::Other,
         };
-        Self::new(kind, e.to_string()).at(endpoint)
+        let members = match &e {
+            NodeError::KeygenStalled { missing, .. } => missing.iter().map(hex::encode).collect(),
+            _ => Vec::new(),
+        };
+        Self {
+            members,
+            ..Self::new(kind, e.to_string()).at(endpoint)
+        }
     }
 }
 

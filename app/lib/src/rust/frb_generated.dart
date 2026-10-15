@@ -3486,12 +3486,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ZafeError dco_decode_zafe_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return ZafeError(
       kind: dco_decode_zafe_error_kind(arr[0]),
       message: dco_decode_String(arr[1]),
       endpoint: dco_decode_zafe_endpoint(arr[2]),
+      members: dco_decode_list_String(arr[3]),
     );
   }
 
@@ -4336,10 +4337,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_kind = sse_decode_zafe_error_kind(deserializer);
     var var_message = sse_decode_String(deserializer);
     var var_endpoint = sse_decode_zafe_endpoint(deserializer);
+    var var_members = sse_decode_list_String(deserializer);
     return ZafeError(
       kind: var_kind,
       message: var_message,
       endpoint: var_endpoint,
+      members: var_members,
     );
   }
 
@@ -5058,6 +5061,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_zafe_error_kind(self.kind, serializer);
     sse_encode_String(self.message, serializer);
     sse_encode_zafe_endpoint(self.endpoint, serializer);
+    sse_encode_list_String(self.members, serializer);
   }
 
   @protected

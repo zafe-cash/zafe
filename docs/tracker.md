@@ -741,13 +741,19 @@ check. Fixed in the same change unless open:
 ## Onboarding (designed 2026-10-15, docs/onboarding.md)
 
 - [x] Typed error copy in create/join/lock/keygen toasts (was raw `$e`).
-- [ ] P0: exit after membership is locked + keygen timeout screen naming who didn't take
-      part (today one absent member strands everyone on `/setup`).
-- [ ] P0: backup card first once the vault holds funds; acknowledgement on "Later".
-- [ ] P0: notification primer before the OS prompt, and a denied state.
-- [ ] P0: empty-state copy (no "propose your first payment" at zero balance).
-- [ ] P1: commit-then-reveal safety code as words, per-member confirmation, QR in the
-      same room (fixes M1/M2).
+- [x] P0: exit after membership is locked + keygen timeout naming who didn't take part
+      (2026-10-15: "Abandon setup" for any member once sealed, local only; keygen
+      timeout = `NodeError::KeygenStalled` → `ZafeErrorKind::KeygenIncomplete` with
+      `ZafeError.members`; the setup screen names them and offers "Try again"). Still to
+      do from §5.5: make keys automatically once everyone confirmed, setup-time push.
+- [x] P0: backup card first once the vault holds funds; acknowledgement on "Later"
+      (2026-10-16: `confirmSkipBackup`, wording per t/n in `skipBackupRisk`).
+- [x] P0: notification primer before the OS prompt, and a denied state (2026-10-16:
+      `notification_primer.dart`, shown once on Home; "Notifications are off" card with
+      "Turn on" = system prompt or app settings). Not yet on the Signers tab.
+- [x] P0: empty-state copy (2026-10-16: "Receive funds first" at zero balance).
+- [ ] P1: per-member confirmation of the safety words, QR in the same room. (Done
+      2026-10-15: commit-then-reveal words for setup and seat recovery, M1/M2.)
 - [ ] P1: waiting room with per-seat status, setup-time push, invite expiry.
 - [ ] P1: threshold presets, t = n confirmation, name in setup, "before you invite" brief.
 - [ ] P1: readiness card, Receive interstitial without a backup, passphrase recall check.

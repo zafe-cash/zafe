@@ -387,6 +387,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   before the first wallet call leaves no note. The report adds a "Rust panics" section and a "Slow steps" one (`timings.log`, written by `diag::Stopwatch` around `sync_vault` and `list_proposals`: step names and durations only, for calls over 1.5 s and the first of each kind per process; first-sync investigation 2026-10-12). `first_sync_timing` (zafe-core example) times a new wallet's create + first sync on a live server: ~3 s on desktop against testnet. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
+- **Abandoning a locked setup** (2026-10-15, onboarding P0): once sealed the relay refuses
+  `cancel_setup`, so any member's "Abandon setup" (`VaultNotifier.abandonSetup`) only
+  forgets the vault on this phone (no keys or funds exist yet); the others must abandon
+  too. Keygen's waits fail with `NodeError::KeygenStalled { stage, missing }` →
+  `ZafeErrorKind::KeygenIncomplete`, and `ZafeError.members` (hex keys, empty for other
+  kinds) lists who never took part; the setup screen names them (`stalledText`) and the
+  key button becomes "Try again".
 - **Cancelling a setup** (2026-10-12): before membership is locked the creator can back out
   (`node::cancel_setup`, bridge `cancel_setup`, `POST /v1/mailbox/cancel`, body
   `CancelSetup`; creator-signed, refused once sealed or when the mailbox has log entries;

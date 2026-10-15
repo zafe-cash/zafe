@@ -221,6 +221,41 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
     }
 }
 
+/// A member who never takes part is named when key generation gives up, so the others
+/// know whom to ask (or to abandon the setup).
+#[tokio::test]
+async fn keygen_names_the_member_who_never_took_part() {
+    let (relay, ids, invite, number) = setup().await;
+    let net = regtest_network();
+    let timeout = Duration::from_secs(3);
+    let (mut r0, mut r1) = (StdRng::seed_from_u64(1), StdRng::seed_from_u64(2));
+    let (a, b) = tokio::join!(
+        run_keygen(
+            &relay,
+            &ids[0],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            Some(2),
+            None,
+            &mut r0,
+            timeout
+        ),
+        run_keygen(
+            &relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout
+        ),
+    );
+    for result in [a, b] {
+        match result {
+            Err(NodeError::KeygenStalled { missing, .. }) => {
+                assert_eq!(missing, vec![ids[2].public().sig_pk]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn keygen_refuses_an_unconfirmed_safety_number() {
     let (relay, ids, invite, _number) = setup().await;

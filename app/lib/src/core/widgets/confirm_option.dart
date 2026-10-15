@@ -22,8 +22,11 @@ class ConfirmOption extends StatelessWidget {
     return AppTappable(
       onTap: onTap,
       child: Container(
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.s,
+        ),
         decoration: BoxDecoration(
           color: colors.background.ground,
           borderRadius: BorderRadius.circular(AppRadii.medium),

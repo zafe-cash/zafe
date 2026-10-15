@@ -82,14 +82,31 @@ Future<void> initVaultNotifications() async {
   }
 }
 
-/// Once a vault exists: ask for notification permission, schedule the periodic background
-/// check, and register for pushes when Firebase is configured.
-Future<void> startVaultWatch() async {
+/// Whether this app may show notifications (always true where it can't tell).
+Future<bool> notificationsEnabled() async =>
+    await _notifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.areNotificationsEnabled() ??
+    true;
+
+/// Shows the system's notification permission prompt (Android 13+). Returns whether
+/// notifications are on afterwards.
+Future<bool> requestNotifications() async {
   await _notifications
       .resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin
       >()
       ?.requestNotificationsPermission();
+  return notificationsEnabled();
+}
+
+/// Once a vault exists: schedule the periodic background check and register for pushes
+/// when Firebase is configured. [askPermission]: show the system prompt first (only after
+/// the app's own primer said why).
+Future<void> startVaultWatch({bool askPermission = true}) async {
+  if (askPermission) await requestNotifications();
   if (Platform.isAndroid) {
     await Workmanager().initialize(workmanagerDispatcher);
     await Workmanager().registerPeriodicTask(
@@ -100,7 +117,7 @@ Future<void> startVaultWatch() async {
       existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
   }
-  await _registerPush();
+  await _registerPush(askPermission: askPermission);
 }
 
 /// When the app goes to the background: check again soon, so a proposal made while the
@@ -117,7 +134,7 @@ Future<void> scheduleSoonCheck() async {
 }
 
 /// FCM: only when the app was built with a Firebase config (google-services.json).
-Future<void> _registerPush() async {
+Future<void> _registerPush({bool askPermission = true}) async {
   try {
     await Firebase.initializeApp();
   } catch (_) {
@@ -126,7 +143,7 @@ Future<void> _registerPush() async {
   }
   final messaging = FirebaseMessaging.instance;
   FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
-  await messaging.requestPermission();
+  if (askPermission) await messaging.requestPermission();
   final token = await messaging.getToken();
   if (token != null) await _registerToken(token);
   messaging.onTokenRefresh.listen(_registerToken);

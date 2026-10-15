@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/config/beta.dart';
@@ -17,6 +18,7 @@ import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../notifications/notification_primer.dart';
 import '../../notifications/vault_watch.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../services/live_vault_watch.dart';
@@ -62,7 +64,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     Future.microtask(_refresh);
     _startPoll();
     // A vault exists from here on: notifications, background checks, push.
-    unawaited(startVaultWatch());
+    unawaited(_startWatch());
     Future.microtask(_startLive);
     // Another vault or relay: watch that one instead.
     ref.listenManual(
@@ -100,6 +102,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Background checks and pushes; the first time, the notifications primer before the
+  /// system's permission prompt (never the prompt on its own, and never again after).
+  Future<void> _startWatch() async {
+    final prefs = await SharedPreferences.getInstance();
+    var ask = false;
+    if (!(prefs.getBool(kNotificationsPrimedKey) ?? false)) {
+      await prefs.setBool(kNotificationsPrimedKey, true);
+      if (!await notificationsEnabled()) {
+        if (!mounted) return;
+        ask = await showNotificationPrimer(context);
+      }
+    }
+    await startVaultWatch(askPermission: ask);
+    if (mounted) ref.invalidate(notificationsEnabledProvider);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
@@ -111,6 +129,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       unawaited(scheduleSoonCheck());
     }
     if (state == AppLifecycleState.resumed) {
+      // The owner may have turned notifications on in the system settings.
+      ref.invalidate(notificationsEnabledProvider);
       if (_poll == null) _startPoll();
       if (!_live.running) _startLive();
       unawaited(_refresh(force: true));
@@ -156,6 +176,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final vault = ref.watch(vaultProvider);
     final summary = vault.summary;
     if (summary == null) return const SizedBox.shrink();
+    final needsBackup = ref.watch(backupStatusProvider).value == false;
+    final funded = (vault.balance?.totalZat ?? BigInt.zero) > BigInt.zero;
 
     // A failure stays on screen while the next attempt runs, so the status doesn't
     // flicker between "Syncing..." and the error on every poll.
@@ -273,6 +295,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ],
                         ),
                       const SizedBox(height: AppSpacing.md),
+                      // Once the vault holds money, a missing backup outranks every
+                      // other notice (a lost phone could cost the group its funds).
+                      if (needsBackup && funded) ...[
+                        NoticeCard(
+                          title: 'Back up this vault',
+                          body:
+                              'It holds money, and your key share lives only on this '
+                              'phone',
+                          onTap: () => context.push('/export'),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
                       if (ref.watch(
                             proposalsProvider.select(
                               (p) => p.newerVersionEntries,
@@ -294,6 +328,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           body: 'Restart Zafe to finish updating',
                           warning: false,
                           onTap: () => _restartForUpdate(context),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                      if (ref.watch(notificationsEnabledProvider).value ==
+                          false) ...[
+                        NoticeCard(
+                          title: 'Notifications are off',
+                          body:
+                              'You won\'t hear when a payment needs your approval',
+                          onTap: () => enableNotifications(ref),
                         ),
                         const SizedBox(height: AppSpacing.md),
                       ],
@@ -321,7 +365,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                         const SizedBox(height: AppSpacing.md),
                       ],
-                      if (ref.watch(backupStatusProvider).value == false) ...[
+                      if (needsBackup && !funded) ...[
                         NoticeCard(
                           title: 'Back up this vault',
                           body: 'Your key share lives only on this phone',
@@ -334,6 +378,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         received: ref.watch(receivedProvider),
                         hideAmounts: ref.watch(privacyModeProvider),
                         height: vault.balance?.height,
+                        funded: funded,
                       ),
                     ],
                   ),
@@ -599,11 +644,15 @@ class _Payments extends StatelessWidget {
     required this.received,
     required this.hideAmounts,
     this.height,
+    this.funded = false,
   });
   final ProposalsState proposals;
   final ReceivedState received;
   final bool hideAmounts;
   final int? height;
+
+  /// The vault holds money: the empty state suggests a payment, else receiving first.
+  final bool funded;
 
   @override
   Widget build(BuildContext context) {
@@ -675,7 +724,9 @@ class _Payments extends StatelessWidget {
                     if (proposals.loaded) ...[
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
-                        'How about proposing\nyour first payment?',
+                        funded
+                            ? 'How about proposing\nyour first payment?'
+                            : 'Receive funds first: share the\nvault address with the payer.',
                         textAlign: TextAlign.center,
                         style: AppTypography.bodyMedium.copyWith(
                           color: colors.text.secondary,

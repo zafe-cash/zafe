@@ -42,8 +42,12 @@ class FakeTorRuntime implements TorRuntime {
   void setDormant(bool dormant) => calls.add('dormant $dormant');
 }
 
-ZafeError torErr(ZafeErrorKind kind) =>
-    ZafeError(kind: kind, message: 'detail', endpoint: ZafeEndpoint.none);
+ZafeError torErr(ZafeErrorKind kind) => ZafeError(
+  kind: kind,
+  message: 'detail',
+  endpoint: ZafeEndpoint.none,
+  members: const [],
+);
 
 ProviderContainer container(FakeTorRuntime runtime, {bool useTor = false}) {
   final c = ProviderContainer(
@@ -240,6 +244,7 @@ void main() {
           kind: ZafeErrorKind.network,
           message: 'x',
           endpoint: ZafeEndpoint.lightwalletd,
+          members: const [],
         ),
         relayError: torErr(ZafeErrorKind.torFailed),
       );
