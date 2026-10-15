@@ -110,12 +110,6 @@ class ViewingKeyScreen extends ConsumerWidget {
               color: colors.text.secondary,
             ),
           ),
-          const SizedBox(height: AppSpacing.s),
-          note(
-            'Wallets that import a unified full viewing key can show this vault\'s '
-            'history read-only.',
-            color: colors.text.muted,
-          ),
         ],
       ],
     );

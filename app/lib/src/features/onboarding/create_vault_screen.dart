@@ -193,9 +193,8 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          'A proposed payment must be approved and sent within $_expiryDays '
-          'day${_expiryDays == 1 ? '' : 's'}, or it expires and nothing is sent. '
-          'It can\'t be changed later.',
+          'Unsent payments expire after $_expiryDays '
+          'day${_expiryDays == 1 ? '' : 's'}. This can\'t be changed later.',
           style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
         ),
       ],

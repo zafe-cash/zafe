@@ -55,7 +55,7 @@ class _DiagnosticsSheetState extends State<DiagnosticsSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Zafe sends no analytics or crash reports. Errors stay on this phone, with personal details removed. Share them only to report a problem.',
+                'Zafe sends no analytics. Errors stay on this phone, with personal details removed.',
                 style: AppTypography.bodyMedium.copyWith(
                   color: colors.text.secondary,
                 ),

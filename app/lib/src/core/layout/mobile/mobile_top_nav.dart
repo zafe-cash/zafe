@@ -211,31 +211,35 @@ class MobileTopNav extends StatelessWidget {
       ),
     );
 
-    return Row(
-      children: [
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Align(alignment: Alignment.centerLeft, child: account),
-        ),
-        // Zafe: the status may shrink (its label ellipsizes) so the vault name and
-        // avatar keep their room on narrow phones with large system text.
-        if (syncLabel != null)
-          Flexible(
-            child: _tappableSync(
-              _SyncStatus(
-                label: syncLabel!,
-                baseColor: syncLabelColor ?? colors.sync.text,
-                highlightColor:
-                    syncHighlightColor ?? syncLabelColor ?? colors.sync.text,
-                indicatorColor: syncIndicatorColor ?? colors.sync.glow,
-                indicatorSize: _syncIndicatorSize,
-                animated: syncAnimated,
-              ),
-            ),
-          )
-        else
+    // Zafe: the status keeps its natural width at the right edge, but never more than
+    // 60% of the bar (its label ellipsizes), so the vault name and avatar keep room on
+    // narrow phones with large system text.
+    return LayoutBuilder(
+      builder: (context, constraints) => Row(
+        children: [
           const SizedBox(width: AppSpacing.sm),
-      ],
+          Expanded(
+            child: Align(alignment: Alignment.centerLeft, child: account),
+          ),
+          if (syncLabel != null)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth * 0.6),
+              child: _tappableSync(
+                _SyncStatus(
+                  label: syncLabel!,
+                  baseColor: syncLabelColor ?? colors.sync.text,
+                  highlightColor:
+                      syncHighlightColor ?? syncLabelColor ?? colors.sync.text,
+                  indicatorColor: syncIndicatorColor ?? colors.sync.glow,
+                  indicatorSize: _syncIndicatorSize,
+                  animated: syncAnimated,
+                ),
+              ),
+            )
+          else
+            const SizedBox(width: AppSpacing.sm),
+        ],
+      ),
     );
   }
 

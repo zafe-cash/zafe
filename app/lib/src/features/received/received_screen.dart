@@ -4,10 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_loading_icon.dart';
-import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../providers/privacy_mode_provider.dart';
@@ -83,7 +81,7 @@ class ReceivedScreen extends ConsumerWidget {
                 DetailRow(label: 'Confirmations', value: '${r.confirmations}'),
               ],
               const DetailDivider(),
-              _TxIdRow(txid: r.txid),
+              TxIdRow(txid: r.txid),
             ],
           ),
         ),
@@ -140,34 +138,6 @@ class _StatusChip extends StatelessWidget {
           style: AppTypography.labelLarge.copyWith(color: color),
         ),
       ],
-    );
-  }
-}
-
-class _TxIdRow extends StatelessWidget {
-  const _TxIdRow({required this.txid});
-  final String txid;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppTappable(
-      onTap: () => copyTextWithToast(
-        context,
-        text: txid,
-        toastMessage: 'Transaction ID copied',
-      ),
-      semanticsLabel: 'Copy transaction ID',
-      child: DetailRow(
-        label: 'Tx ID',
-        value: txid.length > 16
-            ? '${txid.substring(0, 8)}...${txid.substring(txid.length - 8)}'
-            : txid,
-        trailing: AppIcon(
-          AppIcons.copy,
-          size: 16,
-          color: context.colors.icon.muted,
-        ),
-      ),
     );
   }
 }

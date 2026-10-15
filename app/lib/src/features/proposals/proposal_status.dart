@@ -186,8 +186,9 @@ class ProposalRow extends StatelessWidget {
           };
     return AppTappable(
       onTap: onTap,
-      child: SizedBox(
-        height: 44,
+      // A minimum: with large system text the two lines need more than 44.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
           child: Row(

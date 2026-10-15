@@ -58,8 +58,9 @@ class ReceivedRow extends StatelessWidget {
     return AppTappable(
       onTap: onTap,
       semanticsLabel: 'Received payment',
-      child: SizedBox(
-        height: 44,
+      // A minimum: with large system text the two lines need more than 44.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
           child: Row(

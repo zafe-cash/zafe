@@ -415,7 +415,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
               Text(
                 sending
                     ? p.ready
-                          ? 'Every signature is in. Building the private transaction proof on this phone; keep Zafe open.'
+                          ? 'Every signature is in. Building the transaction; keep Zafe open.'
                           : 'The private transaction proof is built on this phone meanwhile. Keep Zafe open.'
                     : send.error!,
                 style: AppTypography.bodySmall.copyWith(
@@ -570,9 +570,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            p.oneTap
-                ? 'Approving signs the payment on this device. It can\'t be withdrawn afterwards.'
-                : 'One-tap isn\'t available for this payment, so approvers sign again when it\'s sent.',
+            'Approving can\'t be undone.',
             textAlign: TextAlign.center,
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
@@ -595,16 +593,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             onPressed: _startSend,
             child: const Text('Send now'),
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            p.autoSend
-                ? 'All signatures are in. The last approver\'s phone sends it, or you can send it now.'
-                : 'Every signature is in. Any signer can send it now; no one else needs to be online.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
           ...footer,
         ];
       case rust.ProposalStage.approved:
@@ -615,15 +603,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             onPressed: _startSend,
             child: Text(
               p.signingStarted ? 'Resume sending' : 'Collect signatures & send',
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Any signer can send once the payment is approved. The approvers sign automatically '
-            'when they open Zafe.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
             ),
           ),
           ...footer,

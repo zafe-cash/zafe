@@ -7,7 +7,6 @@ import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/amount_display.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_loading_icon.dart';
 import '../../core/widgets/app_tappable.dart';
@@ -123,10 +122,7 @@ class ProposalBody extends ConsumerWidget {
                 DetailRow(label: 'Message', value: payment.memo),
               ],
               if (showReview) ...[const DetailDivider(), _ReviewRows(id: p.id)],
-              if (txid != null) ...[
-                const DetailDivider(),
-                _TxIdRow(txid: txid),
-              ],
+              if (txid != null) ...[const DetailDivider(), TxIdRow(txid: txid)],
             ],
           ),
         ),
@@ -367,32 +363,6 @@ class _ReviewRows extends ConsumerWidget {
                 ),
               ],
             ),
-    );
-  }
-}
-
-class _TxIdRow extends StatelessWidget {
-  const _TxIdRow({required this.txid});
-  final String txid;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppTappable(
-      onTap: () => copyTextWithToast(
-        context,
-        text: txid,
-        toastMessage: 'Transaction ID copied',
-      ),
-      semanticsLabel: 'Copy transaction ID',
-      child: DetailRow(
-        label: 'Tx ID',
-        value: '${txid.substring(0, 8)}...${txid.substring(txid.length - 8)}',
-        trailing: AppIcon(
-          AppIcons.copy,
-          size: 16,
-          color: context.colors.icon.muted,
-        ),
-      ),
     );
   }
 }

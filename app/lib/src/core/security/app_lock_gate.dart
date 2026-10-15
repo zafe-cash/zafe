@@ -213,14 +213,6 @@ class LockScreen extends StatelessWidget {
                   color: colors.text.accent,
                 ),
               ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                'Unlock with your fingerprint, face or screen lock.',
-                textAlign: TextAlign.center,
-                style: AppTypography.bodyMedium.copyWith(
-                  color: colors.text.secondary,
-                ),
-              ),
               if (message != null) ...[
                 const SizedBox(height: AppSpacing.s),
                 Text(

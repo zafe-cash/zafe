@@ -58,16 +58,6 @@ class SignersScreen extends ConsumerWidget {
                             color: colors.text.accent,
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          threshold == 1
-                              ? 'Any one signer can send a payment on their own.'
-                              : 'Every payment needs approvals from $threshold '
-                                    'of these signers before it can be sent.',
-                          style: AppTypography.bodyMedium.copyWith(
-                            color: colors.text.secondary,
-                          ),
-                        ),
                       ],
                     ),
                   ),

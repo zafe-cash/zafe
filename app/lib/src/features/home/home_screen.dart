@@ -427,8 +427,10 @@ class BalanceCard extends StatelessWidget {
         : ZecAmount.fromZatoshi(total).compactBalance.amountText;
     final card = colors.vaultCard;
 
+    // Taller with large system text (amount, label and lines grow; it overflowed).
+    final grow = (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 40);
     return Container(
-      height: 216,
+      height: 216 + grow * 3,
       decoration: BoxDecoration(
         color: card.background,
         borderRadius: BorderRadius.circular(AppRadii.large),
@@ -454,29 +456,34 @@ class BalanceCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    // Shrinks (ellipsis) rather than overflow on narrow phones with
-                    // large system text.
-                    Flexible(
-                      child: Text(
-                        kNetworkBadge.isEmpty
-                            ? 'VAULT BALANCE'
-                            : 'VAULT BALANCE · $kNetworkBadge',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.labelSmall.copyWith(
-                          color: card.textSecondary,
-                          letterSpacing: 1.6,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    // The label takes what it needs and ellipsizes only when the
+                    // card is too narrow (narrow phones, large system text).
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              kNetworkBadge.isEmpty
+                                  ? 'VAULT BALANCE'
+                                  : 'VAULT BALANCE · $kNetworkBadge',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.labelSmall.copyWith(
+                                color: card.textSecondary,
+                                letterSpacing: 1.6,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          AppIcon(
+                            AppIcons.shieldKeyhole,
+                            size: 14,
+                            color: card.accent,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.xs),
-                    AppIcon(
-                      AppIcons.shieldKeyhole,
-                      size: 14,
-                      color: card.accent,
-                    ),
-                    const Spacer(),
                     AppTappable(
                       onTap: onToggle,
                       semanticsLabel: hidden ? 'Show balance' : 'Hide balance',

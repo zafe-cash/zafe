@@ -86,7 +86,7 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
     final (title, body) = switch (phase) {
       MobileTransactionProgressPhase.succeeded => (
         'Sent!',
-        'It will confirm on-chain shortly. Track it in Activity.',
+        'It confirms on-chain shortly.',
       ),
       MobileTransactionProgressPhase.failed => (
         'Send failed',
@@ -95,9 +95,8 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
       _ => (
         'Sending...',
         (p?.ready ?? false) || progress == null || progress.needed == 0
-            ? 'Building the private transaction and submitting it to the network...'
-            : 'Signatures ${progress.received} of ${progress.needed}. The private proof is '
-                  'built on this phone meanwhile.',
+            ? 'Building the transaction and submitting it...'
+            : 'Signatures ${progress.received} of ${progress.needed}.',
       ),
     };
 

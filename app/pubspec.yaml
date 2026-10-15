@@ -29,6 +29,7 @@ dependencies:
     path: rust_builder
   share_plus: ^13.0.0
   shared_preferences: ^2.5.3
+  url_launcher: ^6.3.3
   workmanager: ^0.10.10
 
 dev_dependencies:

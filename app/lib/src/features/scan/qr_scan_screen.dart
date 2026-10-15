@@ -25,8 +25,6 @@ class ScanInviteScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => QrScanScreen(
     title: 'Scan invite',
-    prompt:
-        'Point the camera at the invite QR code on the vault creator\'s phone.',
     rejected:
         'That QR code isn\'t a Zafe invite. Scan the one on the vault creator\'s '
         'setup screen.',
@@ -50,9 +48,6 @@ class ScanRecoveryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => QrScanScreen(
     title: 'Scan recovery code',
-    prompt:
-        'Point the camera at the code on the new phone of the signer who lost '
-        'theirs.',
     rejected:
         'That QR code isn\'t a Zafe recovery code. Scan the one on the "Recover your '
         'seat" screen.',
@@ -83,7 +78,6 @@ class _ScanRecipientScreenState extends State<ScanRecipientScreen> {
   @override
   Widget build(BuildContext context) => QrScanScreen(
     title: 'Scan recipient',
-    prompt: 'Point the camera at a Zcash address or payment request QR code.',
     rejected: _problem ?? 'That QR code isn\'t a Zcash address.',
     accept: (raw) {
       final request = rust_proposals.parsePaymentRequest(
@@ -107,7 +101,7 @@ class QrScanScreen extends StatefulWidget {
   const QrScanScreen({
     super.key,
     required this.title,
-    required this.prompt,
+    this.prompt = '',
     required this.rejected,
     required this.accept,
   });

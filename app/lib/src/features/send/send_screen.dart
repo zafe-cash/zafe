@@ -463,25 +463,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                     ),
                   ),
                 ),
-              const SizedBox(height: AppSpacing.base),
-              Row(
-                children: [
-                  AppIcon(
-                    AppIcons.shieldKeyhole,
-                    size: 16,
-                    color: colors.icon.muted,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Expanded(
-                    child: Text(
-                      'Vault payments are always shielded. Paste a unified address.',
-                      style: AppTypography.bodySmall.copyWith(
-                        color: colors.text.secondary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -814,15 +795,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                             'Send when approved',
                             style: AppTypography.labelLarge.copyWith(
                               color: colors.text.accent,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(
-                            _autoSend
-                                ? 'The last signer to approve sends it right away.'
-                                : 'A signer sends it when you choose.',
-                            style: AppTypography.bodySmall.copyWith(
-                              color: colors.text.secondary,
                             ),
                           ),
                         ],

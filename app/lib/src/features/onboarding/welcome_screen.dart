@@ -50,7 +50,7 @@ class WelcomeScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.s),
           Text(
-            'A shielded multisig for Zcash. Every payment needs your co-signers to agree.',
+            'A shielded multisig for Zcash.',
             style: AppTypography.bodyMedium.copyWith(
               color: colors.text.secondary,
             ),

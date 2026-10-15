@@ -316,14 +316,6 @@ class _LightwalletdSheetState extends ConsumerState<_LightwalletdSheet> {
               ),
             ),
           ],
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Checking the list contacts each server once (through Tor when '
-            'it\'s on).',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
         ],
       ),
     );

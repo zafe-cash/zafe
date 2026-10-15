@@ -17,13 +17,18 @@ import 'package:zafe/src/core/layout/mobile/zafe_screen.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/confirm_option.dart';
 import 'package:zafe/src/core/widgets/mobile/mobile_list_row.dart';
+import 'package:zafe/src/core/widgets/mobile/zafe_detail.dart';
+import 'package:zafe/src/core/widgets/mobile_text_field.dart';
 import 'package:zafe/src/features/backup/backup_prompt_screen.dart';
-import 'package:zafe/src/features/home/home_screen.dart' show NoticeCard;
+import 'package:zafe/src/features/home/home_screen.dart'
+    show BalanceCard, NoticeCard;
 import 'package:zafe/src/features/onboarding/setup_screen.dart';
+import 'package:zafe/src/features/received/received_row.dart';
 import 'package:zafe/src/features/recover/recover_screen.dart';
 import 'package:zafe/src/features/signers/replace_signer_screen.dart';
 import 'package:zafe/src/features/signers/signers_screen.dart';
 import 'package:zafe/src/notifications/notification_primer.dart';
+import 'package:zafe/src/rust/api/received.dart' show ReceivedInfo;
 import 'package:zafe/src/rust/api/repair.dart' show CosignerWords;
 
 Future<void> _loadFonts() async {
@@ -143,6 +148,82 @@ final _cases = <(String, String?, Widget)>[
         ),
         MobileListRow(label: 'Approval rule', value: '2 of 3 signers'),
       ],
+    ),
+  ),
+  (
+    'payment',
+    'Review payment',
+    const Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PaymentCard(
+          amountText: '2.00',
+          address: 'uregtest10jal7369n7asxnqyrgq84c4cyl8s',
+          onFullAddress: _noop,
+        ),
+        SizedBox(height: 12),
+        DetailRow(label: 'Network fee', value: '0.0001 TAZ', onHelp: _noop),
+        DetailRow(
+          label: 'Checked on this device',
+          value: 'Matches',
+          onHelp: _noop,
+        ),
+        DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
+        TxIdRow(
+          txid:
+              '10616fc1aa0000000000000000000000000000000000000000000000c84a8447',
+        ),
+      ],
+    ),
+  ),
+  (
+    'fields',
+    'Back up vault',
+    Column(
+      children: [
+        MobileTextField(
+          controller: TextEditingController(),
+          focusNode: FocusNode(),
+          hintText: 'Passphrase',
+          trailing: const Text('Suggest'),
+        ),
+        const SizedBox(height: 12),
+        MobileTextField(
+          controller: TextEditingController(text: 'uregtest10jal7369n7asx'),
+          focusNode: FocusNode(),
+          leading: const Icon(Icons.send, size: 20),
+          trailing: const Text('Clear'),
+        ),
+      ],
+    ),
+  ),
+  (
+    'vault_card',
+    'Home',
+    BalanceCard(
+      totalZat: BigInt.from(2899990000),
+      fiatText: null,
+      confirmingText: '3.9999 TAZ confirming',
+      hidden: false,
+      onToggle: _noop,
+      threshold: 2,
+      members: 3,
+    ),
+  ),
+  (
+    'activity_row',
+    'Activity',
+    ReceivedRow(
+      received: ReceivedInfo(
+        txid: 'e88aa577',
+        amountZat: BigInt.from(500000000),
+        minedHeight: 114,
+        blockTimeSecs: 1296822960,
+        confirmations: 13,
+        memo: '',
+        isCoinbase: false,
+      ),
+      onTap: _noop,
     ),
   ),
   ('sheet_skip_backup', null, const SkipBackupSheet(risk: _risk)),

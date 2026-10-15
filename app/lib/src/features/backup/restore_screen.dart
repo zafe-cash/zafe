@@ -139,14 +139,6 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       children: [
         const OnboardingBanner('restore_key'),
         const SizedBox(height: AppSpacing.md),
-        Text(
-          'Restore your seat in a vault from a backup made in Zafe. You need the backup and '
-          'its passphrase.',
-          style: AppTypography.bodyMedium.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
         AppButton(
           expand: true,
           variant: AppButtonVariant.secondary,

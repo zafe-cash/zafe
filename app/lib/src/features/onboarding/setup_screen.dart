@@ -635,13 +635,6 @@ class _MembersCard extends StatelessWidget {
                 ],
               ),
             ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            '$threshold signatures needed for each payment.',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
         ],
       ),
     );
@@ -789,7 +782,7 @@ class _CreatingKeys extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    'Keep Zafe open while the members create the vault\'s keys together.',
+                    'Keep Zafe open.',
                     style: AppTypography.bodyMedium.copyWith(
                       color: colors.text.secondary,
                     ),

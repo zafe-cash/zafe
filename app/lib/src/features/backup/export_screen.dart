@@ -155,9 +155,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           _Note(
             icon: AppIcons.checkCircle,
             iconColor: colors.icon.value,
-            text:
-                'Encrypted with your passphrase. Store the file and passphrase apart: '
-                'together they can sign for you in "$name".',
+            text: 'Store the file and passphrase apart.',
           ),
           const SizedBox(height: AppSpacing.md),
           AppButton(
@@ -201,8 +199,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           icon: AppIcons.lock,
           iconColor: colors.icon.accent,
           text:
-              'Restores your seat in "$name" on another phone. Anyone with the file and '
-              'its passphrase can sign for you, so keep them apart.',
+              'Anyone with the file and its passphrase can sign for you in "$name".',
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
