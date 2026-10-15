@@ -554,7 +554,13 @@ class _AppButtonState extends State<AppButton> {
           canRequestFocus: _enabled,
           onFocusChange: _handleFocusChange,
           onKeyEvent: _handleKeyEvent,
-          child: pointer,
+          // Presses in slightly while held, so a tap feels physical.
+          child: AnimatedScale(
+            scale: _pressed && _enabled ? 0.96 : 1,
+            duration: const Duration(milliseconds: 90),
+            curve: Curves.easeOut,
+            child: pointer,
+          ),
         ),
       ),
     );

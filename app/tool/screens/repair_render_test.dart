@@ -166,4 +166,4 @@ void main() {
 
 void _noop() {}
 
-void _takeOver(String key, String name) {}
+Future<void> _takeOver(String key, String name) async {}

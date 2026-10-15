@@ -3,12 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/vault.dart' as rust;
@@ -101,15 +100,6 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
           .read(vaultProvider.notifier)
           .joinVault(extractInvite(_invite.text) ?? _invite.text);
       if (mounted) context.go('/setup');
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e, fallback: 'Couldn\'t join. Try again.'),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -121,11 +111,11 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
     final info = _info;
     return ZafeScreen(
       title: 'Join a vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: info != null && !_busy ? _join : null,
-        leading: _busy ? const AppIcon(AppIcons.loader, size: 20) : null,
-        child: Text(_busy ? 'Joining...' : 'Join vault'),
+      bottom: ActionButton(
+        label: 'Join vault',
+        enabled: info != null,
+        errorFallback: 'Couldn\'t join. Try again.',
+        onPressed: _join,
       ),
       children: [
         const OnboardingBanner('join_doorway'),

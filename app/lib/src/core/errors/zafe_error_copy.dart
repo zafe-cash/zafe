@@ -3,10 +3,20 @@ import '../config/network_config.dart';
 
 /// Friendly copy for errors from Rust. Switches on the typed `ZafeErrorKind` (no
 /// substring matching); `fallback` covers `other`.
+/// A failure the app explains itself (not from Rust): its text is shown as is.
+class UserFacingError implements Exception {
+  const UserFacingError(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 String zafeErrorMessage(
   Object error, {
   String fallback = 'Something went wrong. Try again.',
 }) {
+  if (error is UserFacingError) return error.message;
   if (error is! ZafeError) return fallback;
   return switch (error.kind) {
     ZafeErrorKind.network =>

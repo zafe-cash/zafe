@@ -5,10 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/layout/mobile/mobile_top_scroll_fade.dart';
 import '../../core/formatting/member_label.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/security/unlock_gate.dart';
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -173,31 +172,12 @@ Future<void> _takeOver(
       ],
     ),
   );
-  if (ok != true || !context.mounted) return;
-  if (!await confirmUnlock(
-    context,
-    ref,
-    reason: 'Unlock to help rebuild a key',
-  )) {
-    return;
+  if (ok != true || !context.mounted) throw const ActionCancelled();
+  if (!await confirmUnlock(context, ref, reason: 'Help rebuild a key')) {
+    throw const ActionCancelled();
   }
-  try {
-    await ref
-        .read(proposalsProvider.notifier)
-        .retryRepair(replacement, stalled);
-    if (context.mounted) {
-      showAppToast(context, 'Your phone helps rebuild the key now.');
-    }
-  } catch (e) {
-    if (context.mounted) {
-      showAppToast(
-        context,
-        zafeErrorMessage(e, fallback: 'Couldn\'t start over. Try again.'),
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
-      );
-    }
-  }
+  // The card then shows this phone among the helpers.
+  await ref.read(proposalsProvider.notifier).retryRepair(replacement, stalled);
 }
 
 /// How many signers told the vault they have a backup, and what it means if they don't
@@ -371,7 +351,7 @@ class RepairCard extends StatelessWidget {
   /// `(key hex, label)` of the helpers in the current attempt.
   final List<(String, String)> helpers;
   final bool meHelping;
-  final void Function(String stalled, String name)? onTakeOver;
+  final Future<void> Function(String stalled, String name)? onTakeOver;
 
   @override
   Widget build(BuildContext context) {
@@ -412,12 +392,12 @@ class RepairCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.s),
               SizedBox(
                 width: double.infinity,
-                child: AppButton(
-                  expand: true,
+                child: ActionButton(
+                  label: 'Help instead of $name',
                   variant: AppButtonVariant.secondary,
                   size: AppButtonSize.medium,
+                  errorFallback: 'Couldn\'t start over. Try again.',
                   onPressed: () => onTakeOver!(key, name),
-                  child: Text('Help instead of $name'),
                 ),
               ),
             ],

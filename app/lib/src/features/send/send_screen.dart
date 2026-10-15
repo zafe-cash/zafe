@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -13,6 +14,7 @@ import '../../core/formatting/zec_amount.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
@@ -38,13 +40,8 @@ enum _Step { recipient, amount, review }
 /// Payments to propose again (an expired proposal), or from a `zcash:` payment link:
 /// opens the review step prefilled, or the amount step when the link left it out.
 class SendPrefill {
-  const SendPrefill({
-    required this.payments,
-    required this.autoSend,
-    this.fromLink = false,
-  });
+  const SendPrefill({required this.payments, this.fromLink = false});
   final List<rust.PaymentInput> payments;
-  final bool autoSend;
 
   /// From a payment link (the review card says "payment request").
   final bool fromLink;
@@ -82,7 +79,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   final _amount = TextEditingController();
   final _amountFocus = FocusNode();
   String _memo = '';
-  bool _autoSend = true;
   rust.AddressCheck? _check;
   bool _busy = false;
 
@@ -96,7 +92,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     if (prefill != null && prefill.payments.isNotEmpty) {
       _added.addAll(prefill.payments.take(prefill.payments.length - 1));
       _edit(prefill.payments.last);
-      _autoSend = prefill.autoSend;
       final allValid = prefill.payments.every(
         (p) => rust
             .checkAddress(networkName: kZafeNetwork, address: p.address)
@@ -246,11 +241,9 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       bytes = null;
     }
     if (bytes == null || !mounted) return;
-    void fail(String message) => showAppToast(
-      context,
-      message,
-      iconName: AppIcons.warningCircle,
-      tone: AppToastTone.destructive,
+    Future<void> fail(String message) => showAppMobileSheet<void>(
+      context: context,
+      builder: (_) => _CsvErrorsSheet(errors: [message]),
     );
     if (bytes.length > 1024 * 1024) {
       return fail('That file is too big for a list of recipients');
@@ -286,8 +279,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       _edit(all.last);
       _step = _Step.review;
     });
-    final n = result.payments.length;
-    showAppToast(context, 'Added $n ${n == 1 ? 'recipient' : 'recipients'}');
+    // The review step now lists them: that is the confirmation.
   }
 
   BigInt get _spendable =>
@@ -328,44 +320,30 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     return own != null && own == address.trim();
   }
 
+  /// "Propose payment": the unlock, then the proposal; its page opens on success.
+  /// Failures show under the button.
   Future<void> _propose() async {
     if (_payments.any((p) => _isOwn(p.address))) {
-      showAppToast(
-        context,
+      throw const UserFacingError(
         'This payment goes to the vault\'s own address. Pick another recipient.',
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
       );
-      return;
     }
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Unlock to propose this payment',
-    )) {
-      return;
+    if (!await confirmUnlock(context, ref, reason: 'Propose this payment')) {
+      throw const ActionCancelled();
     }
     setState(() => _busy = true);
     try {
       final id = await ref
           .read(proposalsProvider.notifier)
-          .propose(payments: _payments, autoSend: _autoSend);
+          .propose(
+            payments: _payments,
+            // Always: the last approval sends it (no one has to come back to tap
+            // "Send").
+            autoSend: true,
+          );
       if (!mounted) return;
       context.go('/home');
-      context.push('/proposal/$id');
-    } catch (e) {
-      debugPrint('propose failed: ${describeError(e)}');
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(
-            e,
-            fallback: 'Couldn\'t create the proposal. Try again.',
-          ),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
+      unawaited(context.push('/proposal/$id'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -743,15 +721,12 @@ class _SendScreenState extends ConsumerState<SendScreen> {
           cornerRadius: AppRadii.large,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm,
-            vertical: AppSpacing.lg,
+            vertical: AppSpacing.md,
           ),
           child: Column(
             children: [
-              if (!batch) ...[
-                DetailRow(
-                  label: 'Message',
-                  value: _memo.isEmpty ? 'None' : _memo,
-                ),
+              if (!batch && _memo.isNotEmpty) ...[
+                DetailRow(label: 'Message', value: _memo),
                 const DetailDivider(),
               ],
               DetailRow(
@@ -783,41 +758,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                   ),
                 ),
               ),
-              const DetailDivider(),
-              MergeSemantics(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Send when approved',
-                            style: AppTypography.labelLarge.copyWith(
-                              color: colors.text.accent,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Switch(
-                      value: _autoSend,
-                      onChanged: _busy
-                          ? null
-                          : (v) => setState(() => _autoSend = v),
-                      // Brand fill when on, muted when off: the default Material colours
-                      // made the two states hard to tell apart.
-                      activeThumbColor: colors.button.primary.label,
-                      activeTrackColor: colors.button.primary.bg,
-                      inactiveThumbColor: colors.icon.muted,
-                      inactiveTrackColor: colors.background.raised,
-                      trackOutlineColor: WidgetStatePropertyAll(
-                        colors.border.regular,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -840,11 +780,12 @@ class _SendScreenState extends ConsumerState<SendScreen> {
               : const SizedBox.shrink(),
         ),
         const SizedBox(height: AppSpacing.lg),
-        AppButton(
-          expand: true,
-          leading: _busy ? null : const AppIcon(AppIcons.plane, size: 20),
-          onPressed: _busy ? null : _propose,
-          child: Text(_busy ? 'Building transaction...' : 'Propose payment'),
+        ActionButton(
+          label: 'Propose payment',
+          busyLabel: 'Building transaction...',
+          icon: AppIcons.plane,
+          errorFallback: 'Couldn\'t create the proposal. Try again.',
+          onPressed: _propose,
         ),
         const SizedBox(height: AppSpacing.s),
         AppButton(

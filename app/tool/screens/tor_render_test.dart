@@ -14,7 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/network/tor_setting.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
-import 'package:zafe/src/features/settings/tor_sheet.dart';
+import 'package:zafe/src/features/settings/tor_setting_row.dart';
 import 'package:zafe/src/providers/tor_provider.dart';
 
 Future<void> _loadFonts() async {
@@ -60,7 +60,7 @@ void main() {
       Platform.environment['SCREEN_PREVIEW_OUT'] ?? 'build/screen_preview',
     )..createSync(recursive: true);
     tester.view.devicePixelRatio = 3;
-    tester.view.physicalSize = const Size(390 * 3, 640 * 3);
+    tester.view.physicalSize = const Size(390 * 3, 160 * 3);
     addTearDown(tester.view.reset);
 
     for (final MapEntry(key: name, value: setting) in _states.entries) {
@@ -83,13 +83,17 @@ void main() {
                   child: Builder(
                     builder: (context) => ColoredBox(
                       color: context.colors.background.window,
-                      child: const Align(
-                        alignment: Alignment.bottomCenter,
+                      child: Align(
+                        alignment: Alignment.center,
                         child: Padding(
-                          padding: EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(16),
                           child: Material(
                             type: MaterialType.transparency,
-                            child: TorSheet(),
+                            child: TorSettingRow(
+                              rowStyle: AppTypography.labelLarge.copyWith(
+                                color: context.colors.text.accent,
+                              ),
+                            ),
                           ),
                         ),
                       ),

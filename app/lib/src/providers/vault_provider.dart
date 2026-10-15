@@ -16,7 +16,7 @@ import '../core/storage/zafe_secure_store.dart';
 import '../rust/api/vault.dart' as rust;
 import '../rust/api/proposals.dart' as proposals_api;
 import '../core/security/app_lock.dart';
-import 'device_lock_provider.dart' show kAppLockKey, kRequireUnlockKey;
+import 'device_lock_provider.dart' show kAppLockKey;
 import 'endpoints_provider.dart';
 import 'payment_sounds_provider.dart' show kPaymentSoundsKey;
 import 'privacy_mode_provider.dart' show kPrivacyModeKey;
@@ -34,7 +34,6 @@ class VaultBootstrap {
     this.activeId,
     this.privacyMode = false,
     this.themeMode = ThemeMode.system,
-    this.requireUnlock = true,
     this.appLock = AppLockDelay.standard,
     this.endpoints = ZafeEndpoints.defaults,
     this.useTor = false,
@@ -44,7 +43,6 @@ class VaultBootstrap {
   final String? activeId;
   final bool privacyMode;
   final ThemeMode themeMode;
-  final bool requireUnlock;
   final AppLockDelay appLock;
   final ZafeEndpoints endpoints;
 
@@ -75,7 +73,6 @@ class VaultBootstrap {
       activeId: activeId,
       privacyMode: prefs.getBool(kPrivacyModeKey) ?? false,
       themeMode: themeModeFromName(prefs.getString(kThemeModeKey)),
-      requireUnlock: prefs.getBool(kRequireUnlockKey) ?? true,
       appLock: AppLockDelay.fromName(prefs.getString(kAppLockKey)),
       endpoints: ZafeEndpoints.fromPrefs(prefs),
       useTor: prefs.getBool(kUseTorKey) ?? false,

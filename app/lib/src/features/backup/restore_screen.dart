@@ -11,9 +11,9 @@ import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/vault_summaries.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
@@ -85,15 +85,7 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       );
       final notifier = ref.read(vaultProvider.notifier);
       if (ref.read(vaultProvider).vaults.any((x) => x.id == v.vaultId)) {
-        if (mounted) {
-          showAppToast(
-            context,
-            '"${v.name}" is already on this phone',
-            iconName: AppIcons.warningCircle,
-            tone: AppToastTone.destructive,
-          );
-        }
-        return;
+        throw UserFacingError('"${v.name}" is already on this phone.');
       }
       // The signer names saved with the backup (before the vault becomes active, so the
       // names provider picks them up).
@@ -107,18 +99,8 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       );
       // A backup of this vault exists (it was just restored from one).
       await VaultSummaries.write(v.vaultId, backedUp: true);
-      if (!mounted) return;
-      showAppToast(context, '"${v.name}" restored');
-      context.go('/home');
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
+      // Home showing the vault is the confirmation.
+      if (mounted) context.go('/home');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -129,12 +111,11 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
     final colors = context.colors;
     return ZafeScreen(
       title: 'Restore vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: _data != null && _pass.text.isNotEmpty && !_busy
-            ? _restore
-            : null,
-        child: Text(_busy ? 'Decrypting...' : 'Restore vault'),
+      bottom: ActionButton(
+        label: 'Restore vault',
+        busyLabel: 'Decrypting...',
+        enabled: _data != null && _pass.text.isNotEmpty,
+        onPressed: _restore,
       ),
       children: [
         const OnboardingBanner('restore_key'),

@@ -19,7 +19,6 @@ import 'package:zafe/src/core/widgets/confirm_option.dart';
 import 'package:zafe/src/core/widgets/mobile/mobile_list_row.dart';
 import 'package:zafe/src/core/widgets/mobile/zafe_detail.dart';
 import 'package:zafe/src/core/widgets/mobile_text_field.dart';
-import 'package:zafe/src/features/backup/backup_prompt_screen.dart';
 import 'package:zafe/src/features/home/home_screen.dart'
     show BalanceCard, NoticeCard;
 import 'package:zafe/src/features/onboarding/setup_screen.dart';
@@ -233,13 +232,8 @@ final _cases = <(String, String?, Widget)>[
       waiting: 'Waiting for 24bafb...ec55 and dccacc...b50b.',
     ),
   ),
-  ('sheet_skip_backup', null, const SkipBackupSheet(risk: _risk)),
   ('sheet_primer', null, const NotificationPrimerSheet()),
 ];
-
-const _risk =
-    'If I lose this phone without a backup, the vault keeps working only while no '
-    'more than 2 other members lose theirs.';
 
 /// Logical sizes (width x height) and the text scales tried on each.
 const _sizes = <(String, Size, List<double>)>[

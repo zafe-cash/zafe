@@ -12,14 +12,14 @@ import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/copy_button.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
-import '../../core/errors/zafe_error_copy.dart';
 import '../../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
@@ -38,7 +38,6 @@ class SetupScreen extends ConsumerStatefulWidget {
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
   Timer? _poll;
-  bool _busy = false;
   bool _leaving = false;
   bool _done = false;
 
@@ -103,7 +102,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// on the relay (the invite stops working) and the "New vault" form comes back filled
   /// in; a joiner just leaves.
   Future<void> _cancel({required bool creator, bool confirm = true}) async {
-    if (_busy || _leaving) return;
+    if (_leaving) return;
     if (confirm) {
       final go = await showAppMobileSheet<bool>(
         context: context,
@@ -173,7 +172,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// After membership is locked: leaves the setup (a member never came back, the words
   /// differ, or the group gave up). The creator's cancels it for everyone.
   Future<void> _abandon() async {
-    if (_busy || _leaving) return;
+    if (_leaving) return;
     final go = await showAppMobileSheet<bool>(
       context: context,
       builder: (sheet) {
@@ -221,25 +220,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
   }
 
-  /// "They match": starts this member's part of key generation.
-  Future<void> _confirm(String words) async {
-    setState(() => _busy = true);
-    try {
-      await _refresh(confirmed: words);
-    } catch (e) {
-      debugPrint('setup: confirming the words failed: ${describeError(e)}');
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e, fallback: 'Couldn\'t start. Try again.'),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  /// "They match": starts this member's part of key generation (the screen then shows
+  /// the keys being made). A failure shows under the button.
+  Future<void> _confirm(String words) => _refresh(confirmed: words);
 
   @override
   Widget build(BuildContext context) {
@@ -261,7 +244,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         waiting: membership.keygenWaitingFor.isEmpty
             ? null
             : waitingText(membership.keygenWaitingFor, me: _myKeyHex(vault)),
-        onAbandon: _busy || _leaving ? null : _abandon,
+        onAbandon: _leaving ? null : _abandon,
       );
     }
 
@@ -273,11 +256,11 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         child: const Text('Leave setup'),
       );
     } else if (sealed && words != null && !started) {
-      bottom = AppButton(
-        expand: true,
-        onPressed: _busy ? null : () => _confirm(words),
-        leading: const AppIcon(AppIcons.check, size: 20),
-        child: const Text('They match'),
+      bottom = ActionButton(
+        label: 'They match',
+        icon: AppIcons.check,
+        errorFallback: 'Couldn\'t start. Try again.',
+        onPressed: () => _confirm(words),
       );
     }
 
@@ -338,7 +321,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             AppButton(
               expand: true,
               variant: AppButtonVariant.ghost,
-              onPressed: _busy || _leaving ? null : _abandon,
+              onPressed: _leaving ? null : _abandon,
               // Different words: nobody should make keys with this setup.
               child: Text(
                 words != null ? 'They don\'t match' : 'Abandon setup',
@@ -350,9 +333,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             AppButton(
               expand: true,
               variant: AppButtonVariant.ghost,
-              onPressed: _busy || _leaving
-                  ? null
-                  : () => _cancel(creator: isCreator),
+              onPressed: _leaving ? null : () => _cancel(creator: isCreator),
               child: Text(isCreator ? 'Cancel setup' : 'Leave setup'),
             ),
           ],
@@ -431,16 +412,11 @@ class _InviteCard extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.xs),
               Expanded(
-                child: AppButton(
+                child: CopyButton(
+                  label: 'Copy',
+                  text: link,
+                  sensitive: true,
                   variant: AppButtonVariant.secondary,
-                  onPressed: () => copyTextWithToast(
-                    context,
-                    text: link,
-                    toastMessage: 'Invite link copied',
-                    sensitive: true,
-                  ),
-                  leading: const AppIcon(AppIcons.copy, size: 20),
-                  child: const Text('Copy'),
                 ),
               ),
             ],

@@ -1,10 +1,12 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/config/network_config.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/amount_display.dart';
+import '../../core/privacy/privacy_mask.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_icon.dart';
@@ -127,6 +129,331 @@ class ProposalBody extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A payment that waits for this member's vote, shown as a request: who asks, how
+/// much, to whom, and whether this phone's own check of the transaction agrees.
+/// Everything else (fee, change, signers) is folded under "Details". The actions (Approve,
+/// Decline) are pinned below it by the screen.
+class PaymentRequestView extends ConsumerStatefulWidget {
+  const PaymentRequestView({
+    super.key,
+    required this.proposal,
+    required this.members,
+    required this.me,
+    required this.names,
+    this.height,
+  });
+  final rust.ProposalInfo proposal;
+  final List<String> members;
+  final String? me;
+  final Map<String, String> names;
+  final int? height;
+
+  @override
+  ConsumerState<PaymentRequestView> createState() => _PaymentRequestViewState();
+}
+
+class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
+  bool _details = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final p = widget.proposal;
+    final hide = ref.watch(privacyModeProvider);
+    final payment = p.payments.isEmpty ? null : p.payments.first;
+    final who = memberLabel(p.author, me: widget.me, names: widget.names);
+    final soon = widget.height == null || p.expiryHeight <= 0
+        ? null
+        : blocksToSeconds(widget.height!, p.expiryHeight) < 86400
+        ? expiresIn(p, widget.height!)
+        : null;
+    final display = TextStyle(
+      fontFamily: 'Space Grotesk',
+      fontWeight: FontWeight.w500,
+      color: colors.text.accent,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: AppSpacing.md),
+        Center(child: SignerTile(keyHex: p.author, size: 56)),
+        const SizedBox(height: AppSpacing.s),
+        Text(
+          payment == null ? '$who asks to move funds' : '$who asks to send',
+          textAlign: TextAlign.center,
+          style: AppTypography.bodyMedium.copyWith(
+            color: colors.text.secondary,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: hide
+                      ? fixedPrivacyMask()
+                      : ZecAmount.fromZatoshi(p.totalZat).receipt.amountText,
+                  style: display.copyWith(
+                    fontSize: 48,
+                    height: 1.05,
+                    letterSpacing: -1.8,
+                  ),
+                ),
+                TextSpan(
+                  text: ' $kZcashDefaultCurrencyTicker',
+                  style: display.copyWith(
+                    fontSize: 22,
+                    color: colors.text.value,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 1,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.s),
+        if (payment == null)
+          Text(
+            'Back to the vault',
+            textAlign: TextAlign.center,
+            style: AppTypography.labelLarge.copyWith(
+              color: colors.text.secondary,
+            ),
+          )
+        else
+          Center(
+            child: AppTappable(
+              semanticsLabel: 'Show the full address',
+              onTap: () => showMobileAddressVerifySheet(
+                context,
+                title: 'Full address',
+                address: payment.address,
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.s,
+                  vertical: AppSpacing.xs,
+                ),
+                decoration: BoxDecoration(
+                  color: colors.background.neutralSubtleOpacity,
+                  borderRadius: BorderRadius.circular(AppRadii.full),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppIcon(
+                      AppIcons.shieldKeyhole,
+                      size: 14,
+                      color: colors.icon.brand,
+                    ),
+                    const SizedBox(width: AppSpacing.xxs),
+                    Flexible(
+                      child: Text(
+                        p.payments.length > 1
+                            ? 'To ${p.payments.length} recipients'
+                            : 'To ${compactAddress(payment.address)}',
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.codeSmall.copyWith(
+                          color: colors.text.accent,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xxs),
+                    AppIcon(
+                      AppIcons.chevronForward,
+                      size: 14,
+                      color: colors.icon.muted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (payment != null &&
+            p.payments.length == 1 &&
+            payment.memo.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            '"${payment.memo}"',
+            textAlign: TextAlign.center,
+            style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
+          ),
+        ],
+        if (p.payments.length > 1) ...[
+          const SizedBox(height: AppSpacing.md),
+          RecipientsCard.fromProposal(p.payments),
+        ],
+        const SizedBox(height: AppSpacing.lg),
+        _DeviceCheck(id: p.id),
+        if (soon != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Expires in $soon',
+            textAlign: TextAlign.center,
+            style: AppTypography.bodySmall.copyWith(color: colors.text.warning),
+          ),
+        ],
+        const SizedBox(height: AppSpacing.lg),
+        AppTappable(
+          semanticsLabel: _details ? 'Hide details' : 'Show details',
+          onTap: () => setState(() => _details = !_details),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Details',
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.secondary,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xxs),
+                // The forward chevron turned down (closed) or up (open).
+                AnimatedRotation(
+                  turns: _details ? 0.75 : 0.25,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  child: AppIcon(
+                    AppIcons.chevronForward,
+                    size: 16,
+                    color: colors.icon.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: !_details
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.s),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ProposalApprovalsCard(
+                        proposal: p,
+                        members: widget.members,
+                        me: widget.me,
+                        sending: false,
+                        height: widget.height,
+                        names: widget.names,
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      MobileSurfaceCard(
+                        cornerRadius: AppRadii.large,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.md,
+                        ),
+                        child: Column(
+                          children: [
+                            DetailRow(
+                              label: 'Proposed by',
+                              value: memberLabel(
+                                p.author,
+                                me: widget.me,
+                                names: widget.names,
+                                withKey: true,
+                              ),
+                            ),
+                            if (p.createdAt > BigInt.zero) ...[
+                              const DetailDivider(),
+                              DetailRow(
+                                label: 'Created',
+                                value: formatTimestamp(p.createdAt),
+                              ),
+                            ],
+                            const DetailDivider(),
+                            _ReviewRows(id: p.id, withCheck: false),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The one trust line of a request: this phone's own check of the transaction. Tap for
+/// what was checked. A mismatch is spelled out (never approve it).
+class _DeviceCheck extends ConsumerWidget {
+  const _DeviceCheck({required this.id});
+  final String id;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.colors;
+    final review = ref.watch(proposalReviewProvider(id));
+    Widget line(Widget icon, String text, Color color) => Center(
+      child: AppTappable(
+        semanticsLabel: text,
+        onTap: () => showDeviceCheckSheet(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              icon,
+              const SizedBox(width: AppSpacing.xs),
+              Flexible(
+                child: Text(
+                  text,
+                  style: AppTypography.labelLarge.copyWith(color: color),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return review.when(
+      loading: () => line(
+        AppLoadingIcon(size: 16, color: colors.icon.muted),
+        'Checking on this phone...',
+        colors.text.secondary,
+      ),
+      error: (e, _) => AppTappable(
+        onTap: () => ref.invalidate(proposalReviewProvider(id)),
+        child: Text(
+          zafeErrorMessage(e, fallback: 'Couldn\'t check. Tap to retry.'),
+          textAlign: TextAlign.center,
+          style: AppTypography.bodySmall.copyWith(color: colors.text.warning),
+        ),
+      ),
+      data: (r) => r.verified
+          ? line(
+              AppIcon(
+                AppIcons.checkCircle,
+                size: 18,
+                color: colors.icon.value,
+                patina: colors.icon.value,
+              ),
+              'Checked on this phone',
+              colors.text.accent,
+            )
+          : MobileSurfaceCard(
+              cornerRadius: AppRadii.large,
+              child: Text(
+                'This transaction does not do what the request says. Don\'t approve it. (${r.problem})',
+                style: AppTypography.bodySmall.copyWith(
+                  color: colors.text.destructive,
+                ),
+              ),
+            ),
     );
   }
 }
@@ -295,8 +622,11 @@ class _ProposalApprovalsCardState extends State<ProposalApprovalsCard> {
 
 /// Fee, change and the "verified on this device" line, from `review_proposal`.
 class _ReviewRows extends ConsumerWidget {
-  const _ReviewRows({required this.id});
+  const _ReviewRows({required this.id, this.withCheck = true});
   final String id;
+
+  /// The "Checked on this device" row too (a request shows the check above instead).
+  final bool withCheck;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -338,18 +668,20 @@ class _ReviewRows extends ConsumerWidget {
                     hide: hide,
                   ),
                 ),
-                const DetailDivider(),
-                DetailRow(
-                  label: 'Checked on this device',
-                  onHelp: () => showDeviceCheckSheet(context),
-                  value: 'Matches',
-                  trailing: AppIcon(
-                    AppIcons.checkCircle,
-                    size: 16,
-                    color: colors.icon.value,
-                    patina: colors.icon.value,
+                if (withCheck) ...[
+                  const DetailDivider(),
+                  DetailRow(
+                    label: 'Checked on this device',
+                    onHelp: () => showDeviceCheckSheet(context),
+                    value: 'Matches',
+                    trailing: AppIcon(
+                      AppIcons.checkCircle,
+                      size: 16,
+                      color: colors.icon.value,
+                      patina: colors.icon.value,
+                    ),
                   ),
-                ),
+                ],
               ],
             )
           : Column(

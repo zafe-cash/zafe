@@ -1117,6 +1117,20 @@ Learned while studying it:
   tool/screens/size_sweep_test.dart` (fails on any overflow); test proposer **and** approver flows.
   No dead ends: "Sent!" returns Home by itself (`kSentHoldTime`), reject/cancel/non-final approve
   go back; Tx IDs open ZecBlock (`core/config/block_explorer.dart`).
+- **Actions and feedback (2026-10-16, polish pass)**: a tap that takes a moment or can fail
+  uses `core/widgets/action_button.dart` `ActionButton` (spinner inside, optional
+  `busyLabel`, `doneLabel` check, shake + inline error via `zafeErrorMessage`; throw
+  `ActionCancelled` to back out silently, `UserFacingError` for app-made messages). **No
+  toasts for the result of a tap**: the screen change or the button is the feedback;
+  `CopyButton` turns its icon into a check. Toasts remain only for events not caused by a
+  tap (payment links, no screen lock, update restart), to become banners. Switches use
+  `AppSwitch` (with `busy`), small exclusive choices `AppSegmented` (icons). Buttons press
+  to 96% (`AppButton`). Payments that need your vote open as a request
+  (`PaymentRequestView`, Approve/Decline pinned; the request stays on screen through
+  "Approved" while it leaves: `_holdRequest`). Auto-send is always on (the toggle is gone;
+  `SendPrefill` has no `autoSend`). Confirmation sheets only for what can't be undone
+  (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline, backup
+  "Later" just leaves.
 - **Needs you** (Home, 2026-10-16): payments where `needsMyAction` (`proposal_status.dart`; the same rule
   counts notifications) and seat moves this member can approve, titled by the action (`actionTitle`:
   "Approve payment" / "Send payment" / "Approve again"), above every notice except "Money left without
@@ -1235,9 +1249,10 @@ Learned while studying it:
   `DeviceAuthenticator`, `core/security/unlock_gate.dart` `confirmUnlock(context, ref,
   reason:)`, `providers/device_lock_provider.dart`): approving, Send now / Collect
   signatures & send / Try again, proposing, exporting a backup and removing a vault call
-  `if (!await confirmUnlock(...)) return;` before acting. Rejecting doesn't. The setting
-  "Require unlock to approve" (`zafe_require_unlock`, default on, read in the bootstrap)
-  needs an unlock to turn **off**. Biometrics **or** device credential. No screen lock
+  `if (!await confirmUnlock(...)) return;` before acting (or throw `ActionCancelled` from an
+  `ActionButton` action). Rejecting doesn't. **Always required** (2026-10-16: the "Require
+  unlock to approve" setting was removed; the prompt's reason text is the confirmation,
+  e.g. "Approve this payment. It can't be undone."). Biometrics **or** device credential. No screen lock
   (e.g. the emulator) → the action goes ahead, a one-time toast (`zafe_no_screen_lock_warned`)
   and a permanent note in Settings; unknown errors fail closed. Background checks (push,
   WorkManager) answer signing requests and finish auto-sends **without** a prompt: they only

@@ -7,16 +7,15 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/platform/sensitive_clipboard.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/vault_summaries.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/proposals_provider.dart';
@@ -39,7 +38,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   final _passFocus = FocusNode();
   final _confirm = TextEditingController();
   final _confirmFocus = FocusNode();
-  bool _busy = false;
   rust.ExportedBackup? _done;
 
   @override
@@ -66,36 +64,18 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 
   Future<void> _export() async {
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Unlock to export a backup',
-    )) {
-      return;
+    if (!await confirmUnlock(context, ref, reason: 'Export a backup')) {
+      throw const ActionCancelled();
     }
     final vault = ref.read(vaultProvider);
-    setState(() => _busy = true);
-    try {
-      final backup = await rust.exportVaultBackup(
-        seeds: vault.identity!,
-        material: vault.material!,
-        invite: vault.invite!,
-        names: MemberNames.toSigners(await MemberNames.read(vault.activeId!)),
-        passphrase: _pass.text,
-      );
-      setState(() => _done = backup);
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    final backup = await rust.exportVaultBackup(
+      seeds: vault.identity!,
+      material: vault.material!,
+      invite: vault.invite!,
+      names: MemberNames.toSigners(await MemberNames.read(vault.activeId!)),
+      passphrase: _pass.text,
+    );
+    if (mounted) setState(() => _done = backup);
   }
 
   String get _fileName {
@@ -126,7 +106,11 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       ShareParams(files: [XFile(file.path)], fileNameOverrides: [_fileName]),
     );
     // `unavailable`: the platform can't tell whether a target was picked.
-    if (result.status != ShareResultStatus.dismissed) await _saved();
+    if (result.status != ShareResultStatus.dismissed) {
+      await _saved();
+      // Saved somewhere: nothing left to do here.
+      if (mounted) context.go('/home');
+    }
     // The share sheet has copied or sent it; don't leave the backup lying in the cache.
     try {
       await file.delete();
@@ -136,12 +120,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   Future<void> _copyText() async {
     await copySecret(_done!.text);
     await _saved();
-    if (mounted) {
-      showAppToast(
-        context,
-        'Backup copied. Paste it into your password manager',
-      );
-    }
   }
 
   @override
@@ -165,19 +143,13 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             child: const Text('Save or share the file'),
           ),
           const SizedBox(height: AppSpacing.s),
-          AppButton(
-            expand: true,
+          ActionButton(
+            label: 'Copy as text',
+            icon: AppIcons.copy,
+            doneLabel: 'Copied',
+            resetAfterDone: true,
             variant: AppButtonVariant.secondary,
-            leading: const AppIcon(AppIcons.copy, size: 20),
             onPressed: _copyText,
-            child: const Text('Copy as text'),
-          ),
-          const SizedBox(height: AppSpacing.s),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => context.go('/home'),
-            child: const Text('Done'),
           ),
         ],
       );
@@ -187,10 +159,11 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final mismatch = _confirm.text.isNotEmpty && _confirm.text != _pass.text;
     return ZafeScreen(
       title: 'Back up vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: _ready && !_busy ? _export : null,
-        child: Text(_busy ? 'Encrypting...' : 'Create backup'),
+      bottom: ActionButton(
+        label: 'Create backup',
+        busyLabel: 'Encrypting...',
+        enabled: _ready,
+        onPressed: _export,
       ),
       children: [
         const OnboardingBanner('backup_seal'),

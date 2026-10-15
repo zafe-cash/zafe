@@ -361,7 +361,6 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
           context,
           ref,
           reason: 'Confirm it\'s you to change the server',
-          always: true,
         )) {
       return;
     }

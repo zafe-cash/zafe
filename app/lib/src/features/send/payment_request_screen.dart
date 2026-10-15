@@ -119,7 +119,6 @@ class _PaymentRequestScreenState extends ConsumerState<PaymentRequestScreen> {
                 memo: p.memo,
               ),
           ],
-          autoSend: true,
           fromLink: true,
         ),
       ),

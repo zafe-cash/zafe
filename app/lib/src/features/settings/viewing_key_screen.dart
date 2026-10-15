@@ -5,8 +5,8 @@ import 'package:pretty_qr_code/pretty_qr_code.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/app_button.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../providers/vault_names_provider.dart';
@@ -43,16 +43,11 @@ class ViewingKeyScreen extends ConsumerWidget {
       title: 'Viewing key',
       bottom: key == null
           ? null
-          : AppButton(
-              expand: true,
-              leading: const AppIcon(AppIcons.copy, size: 20),
-              onPressed: () => copyTextWithToast(
-                context,
-                text: key!,
-                toastMessage: 'Viewing key copied',
-                sensitive: true,
-              ),
-              child: const Text('Copy viewing key'),
+          : CopyButton(
+              label: 'Copy viewing key',
+              text: key,
+              sensitive: true,
+              variant: AppButtonVariant.primary,
             ),
       children: [
         Container(

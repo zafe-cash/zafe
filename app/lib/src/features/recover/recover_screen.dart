@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
@@ -12,9 +11,10 @@ import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
+import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
@@ -102,13 +102,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   }
 
   Future<void> _save(rust.RecoveryProgress p) async {
-    if (_saving) return;
     setState(() => _saving = true);
     _timer?.cancel();
     final notifier = ref.read(vaultProvider.notifier);
     try {
       if (ref.read(vaultProvider).vaults.any((v) => v.id == p.vaultId)) {
-        throw StateError('"${p.name}" is already on this phone');
+        throw UserFacingError('"${p.name}" is already on this phone.');
       }
       await notifier.addRestoredVault(
         vaultId: p.vaultId,
@@ -116,23 +115,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
         material: p.material,
         invite: p.invite,
       );
-    } catch (e) {
-      if (mounted) {
-        setState(() => _saving = false);
-        showAppToast(
-          context,
-          e is StateError
-              ? e.message
-              : zafeErrorMessage(e, fallback: 'Couldn\'t save the vault.'),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-      return;
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+      rethrow;
     }
     await _store.deleteRecoveryIdentity();
     if (!mounted) return;
-    showAppToast(context, '"${p.name}" is back on this phone');
     // The key now exists only here: offer a backup first, as after key generation.
     context.go('/backup-prompt');
   }
@@ -167,14 +155,16 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   Future<void> _reject() async {
     await _store.deleteRecoveryIdentity();
     if (!mounted) return;
-    showAppToast(
-      context,
-      'Not saved. Tell your co-signers, and start over with a new code.',
-      iconName: AppIcons.warningCircle,
-      tone: AppToastTone.destructive,
-    );
     setState(() => _found = null);
     await _start(fresh: true);
+    // Shown on the new code's screen until the next check succeeds.
+    if (mounted) {
+      setState(
+        () => _error = const UserFacingError(
+          'Not saved. Tell your co-signers, and share this new code.',
+        ),
+      );
+    }
   }
 
   @override
@@ -184,10 +174,10 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       final summary = rust_vault.vaultSummary(material: found.material);
       return ZafeScreen(
         title: 'Check your vault',
-        bottom: AppButton(
-          expand: true,
-          onPressed: _saving ? null : () => _save(found),
-          child: Text(_saving ? 'Saving...' : 'It matches: save the vault'),
+        bottom: ActionButton(
+          label: 'It matches: save the vault',
+          errorFallback: 'Couldn\'t save the vault.',
+          onPressed: () => _save(found),
         ),
         children: [
           VaultCheckBody(
@@ -232,12 +222,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                     _error!,
                     fallback: 'Can\'t reach the relay.',
                   ),
-            onCopy: () async {
-              await Clipboard.setData(ClipboardData(text: code.code));
-              if (context.mounted) {
-                showAppToast(context, 'Recovery code copied');
-              }
-            },
             onStartOver: _startOver,
           ),
       ],
@@ -255,7 +239,6 @@ class RecoverBody extends StatelessWidget {
     this.received = 0,
     this.needed = 0,
     this.error,
-    this.onCopy,
     this.onStartOver,
   });
 
@@ -267,7 +250,6 @@ class RecoverBody extends StatelessWidget {
   final int received;
   final int needed;
   final String? error;
-  final VoidCallback? onCopy;
   final VoidCallback? onStartOver;
 
   @override
@@ -311,12 +293,11 @@ class RecoverBody extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.s),
         Center(
-          child: AppButton(
-            variant: AppButtonVariant.ghost,
+          child: CopyButton(
+            label: 'Copy code',
+            text: code,
             size: AppButtonSize.medium,
-            leading: const AppIcon(AppIcons.copy, size: 18),
-            onPressed: onCopy,
-            child: const Text('Copy code'),
+            expand: false,
           ),
         ),
         // The safety words, once a co-signer has opened the code.

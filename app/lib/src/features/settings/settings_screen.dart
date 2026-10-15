@@ -22,13 +22,14 @@ import '../../providers/endpoints_provider.dart';
 import '../../providers/payment_sounds_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/theme_mode_provider.dart';
-import '../../providers/tor_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../home/rename_sheet.dart';
 import 'endpoint_sheet.dart';
 import 'diagnostics_sheet.dart';
-import 'tor_sheet.dart';
+import 'tor_setting_row.dart';
+import '../../core/widgets/app_segmented.dart';
+import '../../core/widgets/app_switch.dart';
 
 const _rowHeight = 44.0;
 
@@ -50,12 +51,10 @@ class SettingsScreen extends ConsumerWidget {
     final hideAmounts = ref.watch(privacyModeProvider);
     final paymentSounds = ref.watch(paymentSoundsProvider);
     final themeMode = ref.watch(themeModeProvider);
-    final requireUnlock = ref.watch(requireUnlockProvider);
     final appLock = ref.watch(appLockDelayProvider);
     final hasScreenLock = ref.watch(hasScreenLockProvider).value;
     final me = vault.myKeyHex;
     final endpoints = ref.watch(endpointsProvider);
-    final tor = ref.watch(torProvider);
     if (summary == null) return const SizedBox.shrink();
 
     final rowStyle = AppTypography.labelLarge.copyWith(
@@ -68,10 +67,12 @@ class SettingsScreen extends ConsumerWidget {
       String? value,
       VoidCallback? onTap,
       bool chevron = false,
+      Widget? trailing,
     }) => MobileListRow(
       leading: AppIcon(icon, size: 20, color: colors.icon.muted),
       label: label,
       value: value,
+      trailing: trailing,
       minRowHeight: _rowHeight,
       textStyle: rowStyle,
       valueTextStyle: rowStyle,
@@ -166,18 +167,29 @@ class SettingsScreen extends ConsumerWidget {
                         row(
                           icon: hideAmounts ? AppIcons.eyeClosed : AppIcons.eye,
                           label: 'Hide amounts',
-                          value: hideAmounts ? 'On' : 'Off',
                           onTap: () =>
                               ref.read(privacyModeProvider.notifier).toggle(),
+                          trailing: AppSwitch(
+                            value: hideAmounts,
+                            semanticsLabel: 'Hide amounts',
+                            onChanged: (_) =>
+                                ref.read(privacyModeProvider.notifier).toggle(),
+                          ),
                         ),
                         row(
                           icon: paymentSounds
                               ? AppIcons.sound
                               : AppIcons.soundOff,
                           label: 'Payment sounds',
-                          value: paymentSounds ? 'On' : 'Off',
                           onTap: () =>
                               ref.read(paymentSoundsProvider.notifier).toggle(),
+                          trailing: AppSwitch(
+                            value: paymentSounds,
+                            semanticsLabel: 'Payment sounds',
+                            onChanged: (_) => ref
+                                .read(paymentSoundsProvider.notifier)
+                                .toggle(),
+                          ),
                         ),
                         row(
                           icon: appLock == AppLockDelay.off
@@ -188,13 +200,6 @@ class SettingsScreen extends ConsumerWidget {
                           chevron: true,
                           onTap: () => _pickAppLock(context, ref, appLock),
                         ),
-                        row(
-                          icon: requireUnlock ? AppIcons.lock : AppIcons.unlock,
-                          label: 'Require unlock to approve',
-                          value: requireUnlock ? 'On' : 'Off',
-                          onTap: () =>
-                              _toggleRequireUnlock(context, ref, requireUnlock),
-                        ),
                         if (hasScreenLock == false) const _NoScreenLockNote(),
                       ],
                     ),
@@ -202,13 +207,7 @@ class SettingsScreen extends ConsumerWidget {
                     _Group(
                       title: 'Privacy',
                       rows: [
-                        row(
-                          icon: AppIcons.tor,
-                          label: 'Use Tor',
-                          value: tor.statusLabel,
-                          chevron: true,
-                          onTap: () => showTorSheet(context),
-                        ),
+                        TorSettingRow(rowStyle: rowStyle),
                         row(
                           icon: AppIcons.help,
                           label: 'Diagnostic report',
@@ -222,12 +221,25 @@ class SettingsScreen extends ConsumerWidget {
                     _Group(
                       title: 'System',
                       rows: [
-                        row(
-                          icon: AppIcons.theme,
+                        MobileListRow(
+                          leading: AppIcon(
+                            AppIcons.theme,
+                            size: 20,
+                            color: colors.icon.muted,
+                          ),
                           label: 'Theme',
-                          value: _themeLabel(themeMode),
-                          chevron: true,
-                          onTap: () => _pickTheme(context, ref, themeMode),
+                          minRowHeight: _rowHeight,
+                          textStyle: rowStyle,
+                          trailing: AppSegmented<ThemeMode>(
+                            value: themeMode,
+                            options: const [
+                              (ThemeMode.system, AppIcons.monitor, 'System'),
+                              (ThemeMode.light, AppIcons.day, 'Light'),
+                              (ThemeMode.dark, AppIcons.night, 'Dark'),
+                            ],
+                            onChanged: (m) =>
+                                ref.read(themeModeProvider.notifier).set(m),
+                          ),
                         ),
                         row(
                           icon: AppIcons.endpoint,
@@ -381,25 +393,6 @@ class SettingsScreen extends ConsumerWidget {
     if (context.mounted) context.push('/viewing-key');
   }
 
-  /// Turning the gate off needs an unlock (whatever the setting); turning it on
-  /// doesn't.
-  Future<void> _toggleRequireUnlock(
-    BuildContext context,
-    WidgetRef ref,
-    bool current,
-  ) async {
-    if (current &&
-        !await confirmUnlock(
-          context,
-          ref,
-          reason: 'Unlock to stop asking before approvals',
-          always: true,
-        )) {
-      return;
-    }
-    await ref.read(requireUnlockProvider.notifier).set(!current);
-  }
-
   /// Turning the app lock off or making it wait longer needs an unlock; making it
   /// stricter doesn't.
   Future<void> _pickAppLock(
@@ -428,33 +421,10 @@ class SettingsScreen extends ConsumerWidget {
           context,
           ref,
           reason: 'Unlock to change the app lock',
-          always: true,
         )) {
       return;
     }
     await ref.read(appLockDelayProvider.notifier).set(selected);
-  }
-
-  Future<void> _pickTheme(
-    BuildContext context,
-    WidgetRef ref,
-    ThemeMode current,
-  ) async {
-    final selected = await showAppMobileSheet<ThemeMode>(
-      context: context,
-      builder: (_) => _OptionsSheet<ThemeMode>(
-        title: 'Theme',
-        current: current,
-        options: const [
-          (ThemeMode.system, AppIcons.monitor, 'System (Auto)'),
-          (ThemeMode.light, AppIcons.day, 'Light'),
-          (ThemeMode.dark, AppIcons.night, 'Dark'),
-        ],
-      ),
-    );
-    if (selected != null && selected != current) {
-      await ref.read(themeModeProvider.notifier).set(selected);
-    }
   }
 }
 
@@ -462,12 +432,6 @@ String _networkLabel(String network) => switch (network) {
   'main' => 'Mainnet',
   'test' => 'Testnet',
   _ => 'Regtest',
-};
-
-String _themeLabel(ThemeMode mode) => switch (mode) {
-  ThemeMode.system => 'System',
-  ThemeMode.light => 'Light',
-  ThemeMode.dark => 'Dark',
 };
 
 /// Shown under the Security rows when the phone has no screen lock, so approvals

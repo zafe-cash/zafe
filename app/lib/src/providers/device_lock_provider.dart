@@ -5,29 +5,10 @@ import '../core/security/app_lock.dart';
 import '../core/security/device_auth.dart';
 import 'vault_provider.dart';
 
-const kRequireUnlockKey = 'zafe_require_unlock';
 const kNoScreenLockWarnedKey = 'zafe_no_screen_lock_warned';
 
 final deviceAuthProvider = Provider<DeviceAuth>(
   (ref) => DeviceAuth(platformAuthenticator()),
-);
-
-/// "Require unlock to approve" (default on): approving, sending, proposing,
-/// exporting a backup and removing a vault ask for biometrics or the screen lock.
-/// Plain prefs, read in the bootstrap.
-class RequireUnlockNotifier extends Notifier<bool> {
-  @override
-  bool build() => ref.watch(vaultBootstrapProvider).requireUnlock;
-
-  Future<void> set(bool value) async {
-    state = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(kRequireUnlockKey, value);
-  }
-}
-
-final requireUnlockProvider = NotifierProvider<RequireUnlockNotifier, bool>(
-  RequireUnlockNotifier.new,
 );
 
 /// Whether the phone has a screen lock or biometrics. Re-checked each time

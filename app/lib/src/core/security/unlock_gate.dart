@@ -9,18 +9,16 @@ import 'device_auth.dart';
 /// Asks the owner to unlock before a sensitive action. Returns true when the action
 /// may go ahead. On cancel or failure it shows a neutral toast and returns false,
 /// so callers just `if (!await confirmUnlock(...)) return;`.
-///
-/// [always] ignores the "Require unlock to approve" setting (used to turn it off).
+/// Always asked: a vault never approves, sends or exports without the owner (there is
+/// no setting to turn it off).
 Future<bool> confirmUnlock(
   BuildContext context,
   WidgetRef ref, {
   required String reason,
-  bool always = false,
 }) async {
-  final required = always || ref.read(requireUnlockProvider);
   final outcome = await ref
       .read(deviceAuthProvider)
-      .unlock(required: required, reason: reason);
+      .unlock(required: true, reason: reason);
   if (!context.mounted) return false;
   final message = switch (outcome) {
     UnlockOutcome.unlocked || UnlockOutcome.notRequired => null,
@@ -28,7 +26,8 @@ Future<bool> confirmUnlock(
       await takeNoScreenLockWarning()
           ? 'This phone has no screen lock. Set one to protect approvals'
           : null,
-    UnlockOutcome.cancelled => 'Unlock cancelled. Nothing was done',
+    // Backing out of the prompt is its own answer: nothing to say.
+    UnlockOutcome.cancelled => null,
     UnlockOutcome.lockedOut => 'Too many attempts. Try again later',
     UnlockOutcome.failed => 'Couldn\'t confirm it\'s you. Nothing was done',
   };

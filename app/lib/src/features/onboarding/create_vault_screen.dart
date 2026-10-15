@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
@@ -71,18 +70,6 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
             expiryDays: _expiryDays,
           );
       if (mounted) context.go('/setup');
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(
-            e,
-            fallback: 'Couldn\'t create the vault. Try again.',
-          ),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -97,11 +84,11 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
         _threshold <= _members;
     return ZafeScreen(
       title: 'New vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: valid && !_busy ? _create : null,
-        leading: _busy ? const AppIcon(AppIcons.loader, size: 20) : null,
-        child: Text(_busy ? 'Creating...' : 'Create vault'),
+      bottom: ActionButton(
+        label: 'Create vault',
+        enabled: valid,
+        errorFallback: 'Couldn\'t create the vault. Try again.',
+        onPressed: _create,
       ),
       children: [
         const OnboardingBanner('create_stones'),

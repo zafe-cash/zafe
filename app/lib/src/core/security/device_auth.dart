@@ -8,7 +8,7 @@ enum UnlockOutcome {
   /// The owner unlocked (biometrics or PIN/pattern/password).
   unlocked,
 
-  /// The "Require unlock to approve" setting is off.
+  /// No unlock was asked for (the caller didn't require one, e.g. the app lock is off).
   notRequired,
 
   /// The phone has no screen lock at all, so there is nothing to prompt with.
