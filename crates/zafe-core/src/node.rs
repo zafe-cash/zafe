@@ -63,6 +63,12 @@ pub enum NodeError {
     /// it shows has forked from the history this device has seen.
     #[error("the relay's vault log differs from this device's copy at entry {index}")]
     RelayForked { index: u64 },
+    /// This device's own copy of the vault log no longer verifies (damaged, or written by
+    /// a broken build). It used to be dropped silently and the relay trusted as on a first
+    /// load; now the member decides, by following the relay ([`follow_relay`]) after
+    /// checking with the others (audit L9).
+    #[error("this device's copy of the vault history doesn't verify: {0}")]
+    LogCopyInvalid(String),
     /// The relay doesn't know this vault any more (wiped database) although this device
     /// saved `local_len` entries of its log.
     #[error("the relay no longer has this vault: this device has {local_len} log entries")]
@@ -160,13 +166,26 @@ impl Invite {
 #[derive(Default)]
 pub struct SeqCounter(u64);
 
+/// The last sequence number this process handed out, from any counter. The relay refuses
+/// a seq not above the sender's last one, and the wall clock can step back (WSL corrects
+/// it by a second at a time; phones on a network time update), so a fresh counter's clock
+/// reading alone could fall below what an earlier one sent milliseconds before (the setup
+/// safety values, then key generation: "replayed or reordered envelope").
+static LAST_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl SeqCounter {
     pub fn next_seq(&mut self) -> u64 {
+        use std::sync::atomic::Ordering;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_micros() as u64)
             .unwrap_or(0);
-        self.0 = self.0.saturating_add(1).max(now);
+        let floor = self.0;
+        let next = |last: u64| last.max(floor).saturating_add(1).max(now);
+        let last = LAST_SEQ
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |last| Some(next(last)))
+            .expect("the update always succeeds");
+        self.0 = next(last);
         self.0
     }
 }
@@ -564,6 +583,43 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
     rng: &mut R,
     timeout: Duration,
 ) -> Result<VaultMaterial, NodeError> {
+    run_keygen_with_ceiling(
+        relay,
+        me,
+        invite,
+        confirmed_safety_number,
+        network,
+        network_name,
+        creator_birthday_height,
+        creator_expiry_blocks,
+        None,
+        rng,
+        timeout,
+    )
+    .await
+}
+
+/// Highest birthday a joiner accepts above its server's tip (blocks found meanwhile).
+pub const BIRTHDAY_LEEWAY_BLOCKS: u32 = 10;
+
+/// [`run_keygen`], refusing (before signing anything) a creator birthday above
+/// `max_birthday`: a joiner passes its server's tip + [`BIRTHDAY_LEEWAY_BLOCKS`]. A
+/// far-future birthday would make every member's wallet fail with "server behind" until
+/// that height (audit L8). `None` skips the check (tip unknown).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    invite: &Invite,
+    confirmed_safety_number: &str,
+    network: &P,
+    network_name: &str,
+    creator_birthday_height: Option<u32>,
+    creator_expiry_blocks: Option<u32>,
+    max_birthday: Option<u32>,
+    rng: &mut R,
+    timeout: Duration,
+) -> Result<VaultMaterial, NodeError> {
     let deadline = Instant::now() + timeout;
     let mut seq = SeqCounter::default();
     let is_creator = me.public().sig_pk == invite.creator;
@@ -670,6 +726,12 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
     }
     let birthday_height =
         birthday_height.ok_or_else(|| NodeError::Protocol("creator sent no birthday".into()))?;
+    if max_birthday.is_some_and(|max| birthday_height > max) {
+        return Err(NodeError::Protocol(format!(
+            "the creator chose wallet birthday {birthday_height}, ahead of the chain; ask \
+             them to check their Zcash server and start a new setup"
+        )));
+    }
     let proposal_expiry_blocks = expiry_blocks
         .filter(|b| {
             (crate::vault::MIN_PROPOSAL_EXPIRY_BLOCKS..=crate::vault::MAX_PROPOSAL_EXPIRY_BLOCKS)
@@ -1049,12 +1111,15 @@ fn load_copy(
     let Some((first, rest)) = saved.split_first() else {
         return Ok(None);
     };
-    // A copy that no longer verifies (a different key, damage) is not an anchor.
-    let rebuilt = start_chain(first, mailbox, key).and_then(|(mut chain, mut state)| {
-        extend_chain(&mut chain, &mut state, rest.iter().cloned(), key)?;
-        Ok((chain, state))
-    });
-    Ok(rebuilt.ok())
+    // A copy that no longer verifies is an error, never a silent first load: the relay
+    // would be trusted again without the anchor.
+    start_chain(first, mailbox, key)
+        .and_then(|(mut chain, mut state)| {
+            extend_chain(&mut chain, &mut state, rest.iter().cloned(), key)?;
+            Ok((chain, state))
+        })
+        .map(Some)
+        .map_err(|e| NodeError::LogCopyInvalid(e.to_string()))
 }
 
 /// How long a passed membership check is trusted (per mailbox, per process).
@@ -1172,7 +1237,9 @@ pub struct Followed {
 /// verified from the first entry (signatures, chain, membership at each entry) before the
 /// copy is replaced, so a relay serving junk can't make a device drop its anchor.
 /// Entries only this device saw are lost; they were never in the history the other members
-/// share. Refuses when there is no fork (a rollback is restored from a copy, not followed).
+/// share. Refuses when there is no fork (a rollback is restored from a copy, not followed),
+/// except after [`NodeError::LogCopyInvalid`]: a copy that doesn't verify is replaced the
+/// same way.
 pub async fn follow_relay(
     relay: &RelayClient,
     me: &Identity,
@@ -1184,24 +1251,34 @@ pub async fn follow_relay(
             "this device keeps no copy to discard".into(),
         ));
     };
-    let (copy, _) = load_copy(relay, mailbox, key)?
-        .ok_or_else(|| NodeError::Protocol("this device has no copy to discard".into()))?;
-    // Only a real fork qualifies.
-    match Box::pin(load_log(relay, me, mailbox, key)).await {
-        Err(NodeError::RelayForked { .. }) => {}
-        Err(e) => return Err(e),
-        Ok(_) => {
+    let ours: Vec<LogEntry> = match load_copy(relay, mailbox, key) {
+        Ok(Some((copy, _))) => {
+            // Only a real fork qualifies.
+            match Box::pin(load_log(relay, me, mailbox, key)).await {
+                Err(NodeError::RelayForked { .. }) => {}
+                Err(e) => return Err(e),
+                Ok(_) => {
+                    return Err(NodeError::Protocol(
+                        "the relay's log agrees with this device's copy".into(),
+                    ))
+                }
+            }
+            copy.entries().to_vec()
+        }
+        Ok(None) => {
             return Err(NodeError::Protocol(
-                "the relay's log agrees with this device's copy".into(),
+                "this device has no copy to discard".into(),
             ))
         }
-    }
+        // A copy that doesn't verify is no anchor to keep.
+        Err(NodeError::LogCopyInvalid(_)) => cache.read(&mailbox)?,
+        Err(e) => return Err(e),
+    };
     // The relay's log must stand on its own, checked without the anchor.
     let bare = relay.clone().with_log_cache(None);
     let (theirs, state) = Box::pin(load_log(&bare, me, mailbox, key)).await?;
     Box::pin(check_relay_membership(&bare, me, &state)).await?;
     // Where the two histories part.
-    let ours = copy.entries();
     let common = ours
         .iter()
         .zip(theirs.entries())
@@ -1210,7 +1287,7 @@ pub async fn follow_relay(
     cache.remove(&mailbox);
     save_copy(relay, &theirs);
     Ok(Followed {
-        dropped: copy.len() - common,
+        dropped: ours.len() as u64 - common,
         entries: theirs.len(),
     })
 }
@@ -2581,10 +2658,7 @@ impl SilentSigners {
         if let Some(dir) = self.0.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let tmp = self.0.with_extension("tmp");
-        if std::fs::write(&tmp, bytes).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.0);
-        }
+        let _ = crate::durable::write(&self.0, &bytes);
     }
 }
 
@@ -2953,11 +3027,20 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
             done.push(cursor);
             continue;
         };
-        if !store.contains(&msg.proposal, &msg.pczt_hash) {
+        let request_hash = hash_request_bytes(&bytes);
+        if closed(&msg.proposal) {
+            // Sent, rejected, cancelled or expired: nothing to sign for it (audit L4).
+            store.drop_reply(&request_hash);
+            done.push(cursor);
+            continue;
+        }
+        // Signed earlier but never sent (the send failed): send the same shares.
+        let kept = store.kept_reply(&request_hash);
+        if kept.is_none() && !store.contains(&msg.proposal, &msg.pczt_hash) {
             done.push(cursor); // already answered, or never approved: never answerable
             continue;
         }
-        let result: Result<Vec<u8>, NodeError> = (|| {
+        let result: Result<Vec<u8>, NodeError> = kept.map(Ok).unwrap_or_else(|| {
             let (pczt, payments) = proposal_pczt(&state, &msg.proposal)?;
             let request = decode_request(&bytes)?;
             let shares = member
@@ -2975,11 +3058,15 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
                 .map_err(proto)?;
             let reply = SharesMsg {
                 proposal: msg.proposal,
-                request_hash: hash_request_bytes(&bytes),
+                request_hash,
                 shares: shares.iter().map(|s| s.serialize()).collect(),
             };
-            Ok(version::encode(Format::SignatureShares, &reply)?)
-        })();
+            let reply = version::encode(Format::SignatureShares, &reply)?;
+            // The nonces are gone: keep the shares until they are sent. A failure to keep
+            // them doesn't stop this send.
+            let _ = store.keep_reply(&request_hash, &reply);
+            Ok(reply)
+        });
         match result {
             Ok(reply) => {
                 // The nonces are spent: these shares must get out. The app and a background
@@ -3005,6 +3092,7 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
                         result => break result?,
                     }
                 }
+                store.drop_reply(&request_hash);
                 report.answered.push(msg.proposal);
                 done.push(cursor);
             }
@@ -3293,6 +3381,18 @@ pub fn decode_used_commitments(bytes: &[u8]) -> Result<BTreeSet<[u8; 32]>, NodeE
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sequence_numbers_never_go_back_across_counters() {
+        use super::SeqCounter;
+        let mut last = 0;
+        for _ in 0..1000 {
+            // A fresh counter each time, as each send path makes its own.
+            let seq = SeqCounter::default().next_seq();
+            assert!(seq > last);
+            last = seq;
+        }
+    }
+
     #[test]
     fn the_leader_asks_itself_first_and_silent_signers_last() {
         use super::{order_signers, Identifier};

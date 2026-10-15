@@ -10,6 +10,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::rngs::OsRng;
 use zafe_core::{
+    durable,
     node::{self, Invite, VaultMaterial},
     nonce_store::{FileNonceStore, FilePoolStore},
     relay_client::RelayClient,
@@ -499,10 +500,10 @@ async fn main() -> Result<()> {
             .await?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(home.path(REQUESTS_DIR))?;
-            fs::write(&used_path, node::encode_used_commitments(&used)?)?;
-            fs::write(
-                home.path(&format!("requests/{proposal}.bin")),
-                node::encode_request(&sent.request)?,
+            durable::write(&used_path, &node::encode_used_commitments(&used)?)?;
+            durable::write(
+                &home.path(&format!("requests/{proposal}.bin")),
+                &node::encode_request(&sent.request)?,
             )?;
             // If this member is also a signer, it signs its own part now (never via relay).
             let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
@@ -517,9 +518,9 @@ async fn main() -> Result<()> {
             )
             .await?
             {
-                fs::write(
-                    home.path(&format!("requests/{proposal}.own")),
-                    node::encode_own_shares(&own)?,
+                durable::write(
+                    &home.path(&format!("requests/{proposal}.own")),
+                    &node::encode_own_shares(&own)?,
                 )?;
             }
             println!(

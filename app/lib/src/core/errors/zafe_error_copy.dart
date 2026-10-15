@@ -44,6 +44,9 @@ String zafeErrorMessage(
     ZafeErrorKind.relayForked =>
       'The relay shows a different history than this phone saw, so Zafe isn\'t '
           'using it. Check with the other members before doing anything.',
+    ZafeErrorKind.logCopyInvalid =>
+      'This phone\'s saved copy of the vault history is damaged. Check with the '
+          'other members, then follow the relay from the sync status.',
     ZafeErrorKind.relayMembership =>
       'The relay\'s list of members or its approval rule doesn\'t match this '
           'vault, so Zafe isn\'t using it. Your funds are safe. Ask the other '

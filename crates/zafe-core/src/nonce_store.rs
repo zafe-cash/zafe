@@ -30,6 +30,11 @@ impl FileNonceStore {
         ))
     }
 
+    /// A signed reply kept until sent (`NonceStore::keep_reply`), by request hash.
+    fn reply_file(&self, request_hash: &[u8; 32]) -> PathBuf {
+        self.0.join(format!("{}.reply", hex::encode(request_hash)))
+    }
+
     fn read(&self, proposal: &ProposalId, hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
         let encoded: Vec<Vec<u8>> =
             version::decode(Format::Nonces, &fs::read(self.file(proposal, hash)).ok()?).ok()?;
@@ -71,17 +76,30 @@ impl NonceStore for FileNonceStore {
             .collect::<Result<Vec<_>, _>>()?;
         let bytes = version::encode(Format::Nonces, &encoded).map_err(|e| storage(&e))?;
         fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
-        // Write then rename, so a crash never leaves a truncated nonce file.
-        let path = self.file(&proposal, &hash);
-        let tmp = path.with_extension("tmp");
-        fs::write(&tmp, bytes).map_err(|e| storage(&e))?;
-        fs::rename(&tmp, &path).map_err(|e| storage(&e))
+        // Atomic and flushed: a crash never leaves a truncated nonce file.
+        crate::durable::write(&self.file(&proposal, &hash), &bytes).map_err(|e| storage(&e))
     }
 
     fn take(&mut self, proposal: &ProposalId, hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
         let nonces = self.read(proposal, hash)?;
-        fs::remove_file(self.file(proposal, hash)).ok()?; // delete before use: never reusable
+        // Delete before use, durably: a file back after a power cut could sign twice.
+        crate::durable::remove(&self.file(proposal, hash)).ok()?;
         Some(nonces)
+    }
+
+    fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError> {
+        let storage = |e: &dyn std::fmt::Debug| SessionError::Storage(format!("{e:?}"));
+        fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
+        // The reply carries its own version tag (`SIGNATURE_SHARES`).
+        crate::durable::write(&self.reply_file(request_hash), reply).map_err(|e| storage(&e))
+    }
+
+    fn kept_reply(&self, request_hash: &[u8; 32]) -> Option<Vec<u8>> {
+        fs::read(self.reply_file(request_hash)).ok()
+    }
+
+    fn drop_reply(&mut self, request_hash: &[u8; 32]) {
+        let _ = fs::remove_file(self.reply_file(request_hash));
     }
 }
 
@@ -124,10 +142,7 @@ impl PoolStore for FilePoolStore {
             &nonces.serialize().map_err(|e| storage(&e))?,
         );
         fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
-        let path = self.file(commitment);
-        let tmp = path.with_extension("tmp");
-        fs::write(&tmp, bytes).map_err(|e| storage(&e))?;
-        fs::rename(&tmp, &path).map_err(|e| storage(&e))
+        crate::durable::write(&self.file(commitment), &bytes).map_err(|e| storage(&e))
     }
 
     fn contains(&self, commitment: &[u8]) -> bool {
@@ -137,7 +152,7 @@ impl PoolStore for FilePoolStore {
     fn take(&mut self, commitment: &[u8]) -> Option<SigningNonces> {
         let path = self.file(commitment);
         let bytes = fs::read(&path).ok()?;
-        fs::remove_file(&path).ok()?; // delete before use: never reusable
+        crate::durable::remove(&path).ok()?; // delete before use, durably: never reusable
         SigningNonces::deserialize(version::unframe(Format::PoolNonce, &bytes).ok()?).ok()
     }
 
@@ -154,10 +169,7 @@ impl PoolStore for FilePoolStore {
         let storage = |e: &dyn std::fmt::Debug| SessionError::Storage(format!("{e:?}"));
         fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
         // The event bytes carry their own version tag (`VAULT_EVENT`).
-        let path = self.vote_file(proposal, pczt_hash);
-        let tmp = path.with_extension("tmp");
-        fs::write(&tmp, event).map_err(|e| storage(&e))?;
-        fs::rename(&tmp, &path).map_err(|e| storage(&e))
+        crate::durable::write(&self.vote_file(proposal, pczt_hash), event).map_err(|e| storage(&e))
     }
 
     fn kept_vote(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<u8>> {
@@ -178,5 +190,30 @@ impl FilePoolStore {
             hex::encode(proposal),
             hex::encode(pczt_hash)
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileNonceStore;
+    use crate::session::NonceStore;
+
+    #[test]
+    fn a_kept_reply_survives_until_dropped() {
+        let dir = std::env::temp_dir().join(format!("zafe-replies-{}", std::process::id()));
+        let mut store = FileNonceStore::new(&dir);
+        let hash = [7u8; 32];
+        assert_eq!(store.kept_reply(&hash), None);
+        store.keep_reply(&hash, b"shares").unwrap();
+        // Another handle on the same directory (a restarted app) finds it.
+        assert_eq!(
+            FileNonceStore::new(&dir).kept_reply(&hash).as_deref(),
+            Some(&b"shares"[..])
+        );
+        // A reply is not a nonce file.
+        assert!(!store.contains(&[0; 16], &hash));
+        store.drop_reply(&hash);
+        assert_eq!(store.kept_reply(&hash), None);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

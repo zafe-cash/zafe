@@ -148,7 +148,12 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `res/xml/data_extraction_rules.xml`); iOS needs `isExcludedFromBackup` (not done yet).
 - **Nonces**: one pair per spend, keyed by (proposal, pczt hash); check the request's
   packages against stored commitments **before** consuming; delete before sending a share;
-  never reuse. Re-approval produces fresh commitments; leaders track used commitment sets.
+  never reuse. Nonce, pool-nonce, kept-vote and leader files go through
+  `zafe_core::durable` (write temp + fsync + rename + fsync dir; deletes fsync the dir), so
+  a power cut can't bring a used nonce back (audit L1/L2). An interactive reply is kept
+  (`NonceStore::keep_reply`, `<nonces>/<request hash>.reply`) from signing until the relay
+  accepted it, and `respond` resends it instead of dropping the request (L3); `respond`
+  skips requests for closed or expired proposals (L4). Re-approval produces fresh commitments; leaders track used commitment sets.
 - **Proving runs in parallel with share collection** (`node::finalize`, Vizor's Keystone
   pattern): the Halo 2 proof doesn't depend on spend-auth signatures, so the unsigned PCZT
   is proved on a blocking thread, then signatures are applied to the proved PCZT (verified
@@ -397,7 +402,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   RelayMembership` -> sync failure `relayMembership`. Recovery is a fresh relay.
 - **Leaving a fork**: `node::follow_relay` (bridge `follow_relay`, sync sheet "Follow the
   relay instead") is the only caller of `LogCache::remove` besides vault removal: needs a
-  real fork, verifies the relay's log from entry 0 without the anchor, then replaces the
+  real fork (or a copy that doesn't verify, `LogCopyInvalid`), verifies the relay's log from entry 0 without the anchor, then replaces the
   copy and reports the local-only entries dropped. Always behind a dialog + unlock.
 - **Unapproved-spend grace** (`spend_watch`) only covers Approved/Broadcast proposals and
   the txid their PCZT fixes; cancelled, rejected and open ones get none.
@@ -416,6 +421,22 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   sender; two isolates of one member race on it). Log chains accept entries signed by
   former members (`VaultState::log_authors`): after a seat move the old key can still
   append until the relay updates, and replay ignores it (`NotAMember`).
+- **Relay hardening (audit L6-L9, 2026-10-15)**: the client reads at most
+  `relay_client::MAX_RESPONSE_BYTES` (64 MiB) per response, streamed on both the direct
+  and Tor paths (`RelayClientError::ResponseTooLarge`). `log_append` verifies the entry's
+  signature and charges the key **before** answering `Conflict { len }`. Joiners refuse a
+  creator birthday above their server's tip + `BIRTHDAY_LEEWAY_BLOCKS` (bridge
+  `run_keygen` → `node::run_keygen_with_ceiling`; best effort: skipped if the tip can't be
+  read). A device's log copy that doesn't verify is `NodeError::LogCopyInvalid` (→
+  `ZafeErrorKind::LogCopyInvalid` → `SyncFailureKind.logCopyInvalid`, "History damaged"),
+  never a silent first load; `follow_relay` accepts it as well as a fork. `VaultKeys`'s
+  `Debug` shows only `ak` (L10).
+- **Envelope seqs** (`node::SeqCounter`): microsecond clock, but never below the last seq
+  this process issued (`LAST_SEQ`, shared by every counter). The WSL clock steps back by
+  ~1 s every so often (measured 2026-10-15) and phones correct theirs, and since the safety
+  words a member sends envelopes milliseconds before key generation: a fresh clock-only
+  counter then got 409 "replayed or reordered envelope". Two processes of one member can
+  still collide (the app and a background check); `respond` re-seals on 409.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):

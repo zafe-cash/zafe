@@ -9,6 +9,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
 
 use rand::rngs::OsRng;
 use zafe_core::{
+    durable,
     node::{self, VaultMaterial},
     nonce_store::{FileNonceStore, FilePoolStore},
     relay_client::RelayClient,
@@ -1170,8 +1171,10 @@ pub fn send_with_progress(
             ))?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(leader_dir(&state_dir)).map_err(io)?;
-            fs::write(&used_path, node::encode_used_commitments(&used)?).map_err(io)?;
-            fs::write(&req_path, node::encode_request(&sent.request)?).map_err(io)?;
+            // Atomic: a torn file would block sending (or, for the used set, fail closed
+            // forever).
+            durable::write(&used_path, &node::encode_used_commitments(&used)?).map_err(io)?;
+            durable::write(&req_path, &node::encode_request(&sent.request)?).map_err(io)?;
             sent.request
         }
     };
@@ -1198,7 +1201,7 @@ pub fn send_with_progress(
                 let own =
                     node::sign_own_shares(&relay, &me, &m, &net, tip, &request, &mut store).await?;
                 if let Some(own) = &own {
-                    fs::write(&own_path, node::encode_own_shares(own)?).map_err(io)?;
+                    durable::write(&own_path, &node::encode_own_shares(own)?).map_err(io)?;
                 }
                 own
             }

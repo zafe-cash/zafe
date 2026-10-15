@@ -375,6 +375,15 @@ async fn log_appends_must_extend_the_head() {
         AppendResult::Conflict { len: 2 }
     );
 
+    // A non-member who knows a member's key can't probe the log length: an entry signed
+    // by someone else, at a wrong index, is refused before any conflict is reported.
+    let mut probe =
+        LogEntry::create(&w.ids[3], &key, MAILBOX, 9, head, b"probe", &mut w.rng).unwrap();
+    probe.header.author = w.ids[1].public().sig_pk;
+    let (status, body) = call(&w.app, "/v1/log/append", probe.to_bytes().unwrap()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(decode_body::<AppendResult>(&body).is_err());
+
     // A member reads the log back and verifies the whole chain.
     let (_, body) = signed(
         &w.app,

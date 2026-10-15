@@ -1259,6 +1259,12 @@ async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::Forbidden);
     }
     let author = member(&tx, &h.mailbox, &h.author)?.ok_or(RelayError::Forbidden)?;
+    // Verify before answering anything about the log, `Conflict { len }` included: only
+    // a member's signed entry learns the log length (audit L7).
+    entry
+        .verify_signature(&author)
+        .map_err(|_| RelayError::Unauthenticated)?;
+    relay.limit_key(&author.sig_pk)?;
 
     let len: i64 = tx.query_row(
         "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
@@ -1279,10 +1285,6 @@ async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     if h.index != len as u64 || h.prev_hash != head {
         return ok(&AppendResult::Conflict { len: len as u64 });
     }
-    entry
-        .verify_signature(&author)
-        .map_err(|_| RelayError::Unauthenticated)?;
-    relay.limit_key(&author.sig_pk)?;
     let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
     if let Some(cap) = relay.quotas.log_bytes {
         let used: i64 = tx.query_row(

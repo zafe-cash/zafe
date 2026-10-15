@@ -46,6 +46,7 @@ void main() {
         ZafeErrorKind.relayRolledBack: SyncFailureKind.relayRolledBack,
         ZafeErrorKind.relayLostVault: SyncFailureKind.relayLostVault,
         ZafeErrorKind.relayForked: SyncFailureKind.relayForked,
+        ZafeErrorKind.logCopyInvalid: SyncFailureKind.logCopyInvalid,
         ZafeErrorKind.relayMembership: SyncFailureKind.relayMembership,
       };
       cases.forEach((kind, expected) {
@@ -155,11 +156,11 @@ void main() {
     },
   );
 
-  test('only a forked relay offers to follow it, with a plain warning', () {
+  test('only a fork or a damaged copy offers to follow the relay', () {
     for (final k in SyncFailureKind.values) {
       expect(
         SyncFailure(kind: k).canFollowRelay,
-        k == SyncFailureKind.relayForked,
+        k == SyncFailureKind.relayForked || k == SyncFailureKind.logCopyInvalid,
         reason: '$k',
       );
     }

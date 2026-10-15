@@ -3,6 +3,7 @@
 //! See `spec.md` at the repository root.
 
 pub mod backup;
+pub mod durable;
 pub mod history;
 pub mod keygen;
 pub mod keys;

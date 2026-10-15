@@ -517,3 +517,31 @@ async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
         Err(NodeError::RelayForked { .. })
     ));
 }
+
+/// A device copy that no longer verifies is reported, not silently replaced by whatever
+/// the relay serves; following the relay then replaces it (audit L9).
+#[tokio::test]
+async fn a_copy_that_does_not_verify_is_an_error_until_the_member_follows_the_relay() {
+    let w = world().await;
+    name(&w, 1, &w.url, "Bob").await;
+    let total = len(&w, 0, &w.url).await.unwrap();
+    let mailbox = w.vault.material[0].descriptor.vault_id;
+    let key = w.vault.material[0].log_key();
+
+    // Damage the last saved entry (it still parses, but its signature no longer holds).
+    let cache = LogCache::in_dir(w.dir.path().join("copy-0"));
+    let mut saved = cache.read(&mailbox).unwrap();
+    saved.last_mut().unwrap().ciphertext[30] ^= 1;
+    cache.remove(&mailbox);
+    assert!(cache.write(&mailbox, &saved).unwrap());
+
+    let err = len(&w, 0, &w.url).await.unwrap_err();
+    assert!(matches!(err, NodeError::LogCopyInvalid(_)), "{err:?}");
+
+    let out = follow_relay(&w.client(0, &w.url), &w.vault.ids[0], mailbox, &key)
+        .await
+        .unwrap();
+    assert_eq!(out.entries, total);
+    assert_eq!(out.dropped, 1, "only the damaged entry differs");
+    assert_eq!(len(&w, 0, &w.url).await.unwrap(), total);
+}

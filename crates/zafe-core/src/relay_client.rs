@@ -46,7 +46,15 @@ pub enum RelayClientError {
     /// The relay sent data in a version this build can't read.
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
+    /// The response was over [`MAX_RESPONSE_BYTES`] (a misbehaving relay; audit L6).
+    #[error("the relay's response is over {MAX_RESPONSE_BYTES} bytes")]
+    ResponseTooLarge,
 }
+
+/// Largest response body read from a relay. A page is at most 500 envelopes or log
+/// entries, almost all a few KB, so this is far above anything real while bounding the
+/// memory a hostile relay can make the app allocate.
+pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 impl RelayClientError {
     /// This app is older than what it talked to: updating the app fixes it.
@@ -110,6 +118,9 @@ pub const WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 /// opens a new Tor stream and TLS session (several round trips through the circuit).
 pub const TOR_EXTRA_TIME: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Marks an oversized body inside the Tor client's error type.
+const TOO_LARGE: &str = "relay response too large";
+
 /// What the client needs from a relay response, whichever way it travelled.
 struct RawResponse {
     status: u16,
@@ -130,14 +141,18 @@ async fn over_tor(
     use zcash_client_backend::tor::{self, http::HttpError};
 
     let uri: tonic::transport::Uri = url.parse().map_err(transport)?;
-    let read_body = |incoming: hyper::body::Incoming| async move {
-        Ok::<_, tor::Error>(
-            incoming
-                .collect()
-                .await
-                .map_err(HttpError::from)?
-                .to_bytes(),
-        )
+    // Read frame by frame so an oversized body is cut off, not collected.
+    let read_body = |mut incoming: hyper::body::Incoming| async move {
+        let mut out = Vec::new();
+        while let Some(frame) = incoming.frame().await {
+            if let Ok(data) = frame.map_err(HttpError::from)?.into_data() {
+                if out.len() + data.len() > MAX_RESPONSE_BYTES {
+                    return Err(tor::Error::Io(std::io::Error::other(TOO_LARGE)));
+                }
+                out.extend_from_slice(&data);
+            }
+        }
+        Ok::<_, tor::Error>(bytes::Bytes::from(out))
     };
     let response = match body {
         None => client.http_get(uri, |b| b, read_body, 0, |_| None).await,
@@ -154,7 +169,10 @@ async fn over_tor(
                 .await
         }
     }
-    .map_err(transport)?;
+    .map_err(|e| match &e {
+        tor::Error::Io(io) if io.to_string() == TOO_LARGE => RelayClientError::ResponseTooLarge,
+        _ => transport(e),
+    })?;
     let header = |name: &str| {
         response
             .headers()
@@ -303,7 +321,7 @@ impl RelayClient {
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
-        let response = request.send().await.map_err(transport)?;
+        let mut response = request.send().await.map_err(transport)?;
         let status = response.status().as_u16();
         let header = |name: &str| {
             response
@@ -314,7 +332,19 @@ impl RelayClient {
         };
         let (retry_after, supported_version) =
             (header("retry-after"), header(UNSUPPORTED_VERSION_HEADER));
-        let body = response.bytes().await.map_err(transport)?.to_vec();
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(RelayClientError::ResponseTooLarge);
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(transport)? {
+            if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+                return Err(RelayClientError::ResponseTooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
         Ok(RawResponse {
             status,
             retry_after,

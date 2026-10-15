@@ -77,6 +77,10 @@ enum ZafeErrorKind {
   /// trust it; members compare notes outside Zafe.
   relayForked,
 
+  /// This device's own copy of the vault history doesn't verify. The member can follow
+  /// the relay's history instead, after checking with the others.
+  logCopyInvalid,
+
   /// The relay's member list or threshold differs from the vault's (someone seeded it
   /// wrongly when restoring it): do not trust it; funds are not at risk.
   relayMembership,

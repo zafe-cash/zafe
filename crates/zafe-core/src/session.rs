@@ -108,6 +108,13 @@ pub trait NonceStore {
         nonces: Vec<SigningNonces>,
     ) -> Result<(), SessionError>;
     fn take(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<SigningNonces>>;
+
+    /// Keeps an encoded reply (signature shares) to the signing request with hash
+    /// `request_hash` until it is sent. Signing consumed the nonces, so if the send fails
+    /// these bytes are the only way to answer that request (audit L3).
+    fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError>;
+    fn kept_reply(&self, request_hash: &[u8; 32]) -> Option<Vec<u8>>;
+    fn drop_reply(&mut self, request_hash: &[u8; 32]);
 }
 
 /// Secret nonces for pre-published commitments, keyed by the serialized commitment.
@@ -224,7 +231,10 @@ pub fn group_package(
 
 /// In-memory nonce store (tests and the CLI).
 #[derive(Default)]
-pub struct MemoryNonceStore(BTreeMap<(ProposalId, [u8; 32]), Vec<SigningNonces>>);
+pub struct MemoryNonceStore(
+    BTreeMap<(ProposalId, [u8; 32]), Vec<SigningNonces>>,
+    BTreeMap<[u8; 32], Vec<u8>>,
+);
 
 impl NonceStore for MemoryNonceStore {
     fn contains(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> bool {
@@ -250,6 +260,16 @@ impl NonceStore for MemoryNonceStore {
     }
     fn take(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
         self.0.remove(&(*proposal, *pczt_hash))
+    }
+    fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError> {
+        self.1.insert(*request_hash, reply.to_vec());
+        Ok(())
+    }
+    fn kept_reply(&self, request_hash: &[u8; 32]) -> Option<Vec<u8>> {
+        self.1.get(request_hash).cloned()
+    }
+    fn drop_reply(&mut self, request_hash: &[u8; 32]) {
+        self.1.remove(request_hash);
     }
 }
 

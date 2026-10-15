@@ -41,6 +41,9 @@ enum SyncFailureKind {
   /// The relay's log differs from the history this phone saw.
   relayForked,
 
+  /// This phone's own saved copy of the vault history doesn't verify.
+  logCopyInvalid,
+
   /// The relay's member list or threshold differs from the vault's.
   relayMembership,
 
@@ -81,6 +84,7 @@ class SyncFailure {
     SyncFailureKind.relayRolledBack => 'Relay lost data',
     SyncFailureKind.relayLostVault => 'Relay lost the vault',
     SyncFailureKind.relayForked => 'Relay not trusted',
+    SyncFailureKind.logCopyInvalid => 'History damaged',
     SyncFailureKind.relayMembership => 'Relay not trusted',
     SyncFailureKind.torConnecting => 'Connecting to Tor…',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
@@ -105,6 +109,7 @@ class SyncFailure {
     SyncFailureKind.relayRolledBack => 'The relay lost part of the vault',
     SyncFailureKind.relayLostVault => 'The relay lost the vault',
     SyncFailureKind.relayForked => 'The relay shows another history',
+    SyncFailureKind.logCopyInvalid => 'This phone\'s saved history is damaged',
     SyncFailureKind.relayMembership => 'The relay lists other members',
     SyncFailureKind.torConnecting => 'Connecting to Tor',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
@@ -162,6 +167,12 @@ class SyncFailure {
           'changed or restored, and don\'t approve anything from it until you know why. '
           'If the other members agree the relay\'s history is the right one, you can '
           'follow it: this phone drops its own copy.',
+    SyncFailureKind.logCopyInvalid =>
+      'The copy of the vault\'s history saved on this phone no longer checks out, '
+          'so Zafe stopped instead of trusting the relay blindly. Your funds are safe. '
+          'Ask another member whether their app works normally. If it does, you can '
+          'follow the relay: it checks the relay\'s whole history and replaces the '
+          'damaged copy.',
     SyncFailureKind.relayMembership =>
       'The relay\'s list of members, or the number of approvals it asks for, '
           'doesn\'t match this vault. This can happen when someone restored a wiped '
@@ -187,7 +198,9 @@ class SyncFailure {
 
   /// This phone can drop its own copy of the history and follow the relay's (after the
   /// relay showed another history; the other members must agree the relay is right).
-  bool get canFollowRelay => kind == SyncFailureKind.relayForked;
+  bool get canFollowRelay =>
+      kind == SyncFailureKind.relayForked ||
+      kind == SyncFailureKind.logCopyInvalid;
 
   /// Whether changing a server address in Settings could fix it.
   bool get suggestsSettings => switch (kind) {
@@ -235,6 +248,7 @@ SyncFailure classifySyncFailure(Object error, {SyncEndpoint? fallback}) {
     ZafeErrorKind.relayRolledBack => SyncFailureKind.relayRolledBack,
     ZafeErrorKind.relayLostVault => SyncFailureKind.relayLostVault,
     ZafeErrorKind.relayForked => SyncFailureKind.relayForked,
+    ZafeErrorKind.logCopyInvalid => SyncFailureKind.logCopyInvalid,
     ZafeErrorKind.relayMembership => SyncFailureKind.relayMembership,
     ZafeErrorKind.torConnecting => SyncFailureKind.torConnecting,
     ZafeErrorKind.torFailed => SyncFailureKind.torFailed,

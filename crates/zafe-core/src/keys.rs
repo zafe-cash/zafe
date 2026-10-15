@@ -102,13 +102,23 @@ impl core::fmt::Debug for QuantumSpendingKey {
 }
 
 /// Viewing key material for a vault.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct VaultKeys {
     ak: [u8; 32],
     nk: pallas::Base,
     qk: [u8; 32],
     rivk_ext: pallas::Scalar,
     fvk: FullViewingKey,
+}
+
+/// Only the public `ak`: `nk`, `qk` and `rivk_ext` (and the full viewing key built from
+/// them) must never reach a log or an error message (audit L10).
+impl core::fmt::Debug for VaultKeys {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("VaultKeys")
+            .field("ak", &hex::encode(self.ak))
+            .finish_non_exhaustive()
+    }
 }
 
 impl VaultKeys {
@@ -271,6 +281,20 @@ mod tests {
         assert_eq!(a.fvk().to_bytes(), b.fvk().to_bytes());
         assert_eq!(a.nk(), c.nk());
         assert_ne!(a.rivk_ext(), c.rivk_ext());
+    }
+
+    #[test]
+    fn debug_output_shows_no_secret_component() {
+        let mut rng = StdRng::seed_from_u64(4);
+        let ak: [u8; 32] = FullViewingKey::from(&random_spending_key(&mut rng)).to_bytes()[..32]
+            .try_into()
+            .unwrap();
+        let keys = VaultKeys::derive(&VaultSecret::from_bytes([7u8; 32]), &ak).unwrap();
+        let shown = format!("{keys:?}");
+        assert!(shown.contains(&hex::encode(ak)), "{shown}");
+        for secret in ["nk", "qk", "rivk", "fvk"] {
+            assert!(!shown.contains(secret), "{shown}");
+        }
     }
 
     #[test]

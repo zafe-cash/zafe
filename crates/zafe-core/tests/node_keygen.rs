@@ -5,8 +5,8 @@ use std::time::Duration;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     node::{
-        create_vault, join_vault, load_state, membership, respond, run_keygen, seal, set_name,
-        Invite, NodeError,
+        create_vault, join_vault, load_state, membership, respond, run_keygen,
+        run_keygen_with_ceiling, seal, set_name, Invite, NodeError,
     },
     relay_client::RelayClient,
     session::MemoryNonceStore,
@@ -172,6 +172,53 @@ async fn three_members_create_a_vault_over_the_relay() {
     assert!(set_name(&relay, &ids[2], &c, &"x".repeat(33), &mut r2)
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
+    let (relay, ids, invite, number) = setup().await;
+    let net = regtest_network();
+    let timeout = Duration::from_secs(10);
+    let (mut r0, mut r1, mut r2) = (
+        StdRng::seed_from_u64(1),
+        StdRng::seed_from_u64(2),
+        StdRng::seed_from_u64(3),
+    );
+    // The creator picks a birthday far past the joiners' tip (100 + leeway).
+    let (_, b, _) = tokio::join!(
+        run_keygen(
+            &relay,
+            &ids[0],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            Some(5_000_000),
+            None,
+            &mut r0,
+            timeout
+        ),
+        run_keygen_with_ceiling(
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            None,
+            None,
+            Some(110),
+            &mut r1,
+            timeout
+        ),
+        run_keygen(
+            &relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout
+        ),
+    );
+    match b {
+        Err(NodeError::Protocol(m)) => assert!(m.contains("ahead of the chain"), "{m}"),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[tokio::test]

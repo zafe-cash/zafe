@@ -724,11 +724,12 @@ check. Fixed in the same change unless open:
 - [x] One-tap and interactive don't mix: members whose one-tap shares are logged can't add
       interactive commitments (VoteFinal). Decided 2026-10-15: no mixing; a payment no
       group can complete shows "Propose again" to its proposer (`node::propose_again`).
-- [ ] Low: fsync nonce files and their directory (L1); atomic leader files (L2); persist
-      interactive replies until sent (L3); `respond` skips closed proposals (L4); cap relay
-      response bodies (L6); verify before answering `Conflict{len}` (L7); joiners check the
-      creator's birthday (L8); a local log copy that fails to verify is an error, not
-      TOFU (L9); redact `VaultKeys` Debug (L10).
+- [x] Low, fixed 2026-10-15: fsync nonce files and their directory (L1); atomic leader
+      files (L2); interactive replies kept until sent (L3); `respond` skips closed
+      proposals (L4); relay responses capped at 64 MiB (L6); signature verified before
+      `Conflict{len}` (L7); joiners refuse a birthday ahead of the chain (L8); a local log
+      copy that fails to verify is an error with a follow-the-relay exit (L9); `VaultKeys`
+      Debug redacted (L10).
 - [ ] App, low: Strong biometrics only; sensitive clipboard flag + auto-clear; share_plus
       cache cleanup; `filterTouchesWhenObscured`; require `ZAFE_LINK_HOST` in release
       builds (custom scheme can be claimed); encrypt nonce files; strip bidi from memos and

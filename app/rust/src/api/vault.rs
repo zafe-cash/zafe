@@ -205,7 +205,8 @@ pub fn run_keygen(
     let net = network(&network_name)?;
     let relay = RelayClient::new(relay_url);
     let material = runtime().block_on(async {
-        let birthday = if me.public().sig_pk != invite.creator {
+        let is_creator = me.public().sig_pk == invite.creator;
+        let birthday = if !is_creator {
             None
         } else if let Some(h) = birthday_height {
             Some(h.max(2))
@@ -213,7 +214,20 @@ pub fn run_keygen(
             let tip = latest_height(&mut connect(&lightwalletd_url).await?).await?;
             Some((tip + 1).max(2))
         };
-        let material = node::run_keygen(
+        // Joiners refuse a birthday ahead of the chain; best effort, as a server that
+        // can't be reached here shouldn't block the setup.
+        let max_birthday = if is_creator {
+            None
+        } else {
+            match connect(&lightwalletd_url).await {
+                Ok(mut client) => latest_height(&mut client)
+                    .await
+                    .ok()
+                    .map(|tip| tip + 1 + node::BIRTHDAY_LEEWAY_BLOCKS),
+                Err(_) => None,
+            }
+        };
+        let material = node::run_keygen_with_ceiling(
             &relay,
             &me,
             &invite,
@@ -223,6 +237,7 @@ pub fn run_keygen(
             birthday,
             // Creator only (others take it from the creator); 1152 blocks = 1 day.
             expiry_days.map(|d| d * 1152),
+            max_birthday,
             &mut OsRng,
             Duration::from_secs(u64::from(timeout_secs)),
         )
