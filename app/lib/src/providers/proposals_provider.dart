@@ -408,9 +408,22 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return dropped;
   }
 
-  /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`. Returns whether
-  /// the seat moved (this was the last approval needed).
-  Future<bool> approveSeatMove(String oldKeyHex, String code) async {
+  /// One step of the safety check with the phone that showed `code`: `null` until the
+  /// new phone has taken part, then the words to compare with it.
+  Future<String?> newPhoneWords(String code) => rust_repair.newPhoneWords(
+    relayUrl: _endpoints.relayUrl,
+    seeds: _vault.identity!,
+    code: code,
+  );
+
+  /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`, after its owner
+  /// read out the same `words`. Returns whether the seat moved (this was the last
+  /// approval needed).
+  Future<bool> approveSeatMove(
+    String oldKeyHex,
+    String code,
+    String words,
+  ) async {
     final vault = _vault;
     final moved = await rust_repair.approveSeatMove(
       relayUrl: _endpoints.relayUrl,
@@ -418,6 +431,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       oldKeyHex: oldKeyHex,
       code: code,
+      words: words,
     );
     await refreshFresh();
     return moved;

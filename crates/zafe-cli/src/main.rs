@@ -131,8 +131,21 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SeatCmd {
-    /// Approve moving a signer's seat to the device that printed `code`.
-    Approve { old: String, code: String },
+    /// Approve moving a signer's seat to the device that printed `code`, after comparing
+    /// `words` (from `zafe seat words`) with it.
+    Approve {
+        old: String,
+        code: String,
+        #[arg(long)]
+        words: String,
+    },
+    /// Run the safety check with the device that printed `code` and print the words to
+    /// compare with it (waits up to `timeout_secs` for the new device).
+    Words {
+        code: String,
+        #[arg(long, default_value_t = 60)]
+        timeout_secs: u64,
+    },
     /// Seat moves waiting for approvals.
     List,
     /// Do this member's part in repairing a moved seat's key (and save the new membership).
@@ -543,29 +556,41 @@ async fn main() -> Result<()> {
             let me = home.identity()?;
             let material = home.material()?;
             match cmd {
-                SeatCmd::Approve { old, code } => {
+                SeatCmd::Approve { old, code, words } => {
                     let old: [u8; 32] = hex::decode(old.trim())?
                         .try_into()
                         .map_err(|_| anyhow!("old must be a 32-byte hex key"))?;
                     let request = RecoveryRequest::decode(&code)?;
                     let moved = repair::approve_replacement(
-                        &relay, &me, &material, old, &request, &mut rng,
+                        &relay, &me, &material, old, &request, &words, &mut rng,
                     )
                     .await?;
-                    println!(
-                        "approved (safety code {}){}",
-                        request.safety_code(),
-                        if moved { "; the seat moved" } else { "" }
-                    );
+                    println!("approved{}", if moved { "; the seat moved" } else { "" });
+                }
+                SeatCmd::Words { code, timeout_secs } => {
+                    let request = RecoveryRequest::decode(&code)?;
+                    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+                    loop {
+                        if let Some(words) =
+                            repair::new_phone_words(&relay, &me, &request.identity).await?
+                        {
+                            println!("safety words: {words}");
+                            break;
+                        }
+                        if std::time::Instant::now() > deadline {
+                            bail!("the new device hasn't taken part (is its recovery running?)");
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
                 SeatCmd::List => {
                     let (_, state) = node::load_state(&relay, &me, &material).await?;
                     for p in state.pending_replacements.values() {
                         println!(
-                            "{} -> {}  safety {}  approvals {}/{}",
+                            "{} -> {}  code {}  approvals {}/{}",
                             hex::encode(p.old),
                             hex::encode(p.new.sig_pk),
-                            RecoveryRequest { identity: p.new }.safety_code(),
+                            RecoveryRequest { identity: p.new }.encode(),
                             p.approvals.len(),
                             state.descriptor.threshold
                         );
@@ -623,9 +648,17 @@ async fn main() -> Result<()> {
                 identity: *me.public(),
             };
             println!("{}", request.encode());
-            eprintln!("safety code {}", request.safety_code());
             let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+            let mut shown = std::collections::BTreeSet::new();
             loop {
+                // The safety check: each co-signer's words, once, as they arrive.
+                if let Ok(checks) = repair::recovery_checks(&relay, &me).await {
+                    for c in checks {
+                        if shown.insert(c.cosigner) {
+                            eprintln!("safety words with {}: {}", hex::encode(c.cosigner), c.words);
+                        }
+                    }
+                }
                 match repair::try_recover(&relay, &me).await? {
                     RecoveryStatus::Done { material, invite } => {
                         fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;

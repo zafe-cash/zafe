@@ -75,7 +75,6 @@ class SignersScreen extends ConsumerWidget {
                     const SizedBox(height: AppSpacing.md),
                     SeatMoveCard(
                       who: memberLabel(move.oldKeyHex, me: me, names: names),
-                      safetyCode: move.safetyCode,
                       approvals: move.approvals.length,
                       needed: move.needed,
                       // The signer who lost the phone can't approve; nor twice.
@@ -320,14 +319,12 @@ class SeatMoveCard extends StatelessWidget {
   const SeatMoveCard({
     super.key,
     required this.who,
-    required this.safetyCode,
     required this.approvals,
     required this.needed,
     this.onApprove,
   });
 
   final String who;
-  final String safetyCode;
   final int approvals;
   final int needed;
 
@@ -358,8 +355,8 @@ class SeatMoveCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Approvals: $approvals of $needed. Before approving, ask $who to read the '
-            'safety code on their new phone: it must be $safetyCode.',
+            'Approvals: $approvals of $needed. Before approving, you and $who compare '
+            'safety words: their new phone shows the words your phone gets for it.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),

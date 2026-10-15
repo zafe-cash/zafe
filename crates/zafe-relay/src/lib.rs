@@ -46,14 +46,21 @@ use zafe_proto::{
     relay::{
         encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
         InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
-        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush,
-        Remove, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
-        WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
-        UNSUPPORTED_VERSION_HEADER,
+        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, ReplaceMember,
+        Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest, WaitResponse,
+        MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
 };
+
+/// How long a seat recovery's safety-check values stay (a recovery takes minutes to days).
+pub const RECOVERY_RETENTION_SECS: u64 = 7 * 24 * 3600;
+
+/// Most co-signers' challenges kept for one recovering phone: more than any vault has
+/// approvers, few enough that a stranger can't bury the real ones.
+pub const MAX_RECOVERY_CHALLENGES: i64 = 16;
 
 /// Largest number of items returned by one read.
 const PAGE: i64 = 500;
@@ -235,6 +242,14 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     token TEXT NOT NULL,
     PRIMARY KEY (mailbox, member)
 );
+CREATE TABLE IF NOT EXISTS recovery_values (
+    subject BLOB NOT NULL,
+    signer BLOB NOT NULL,
+    kind INTEGER NOT NULL,
+    signed BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (subject, signer, kind)
+);
 ";
 
 fn system_clock() -> Clock {
@@ -392,6 +407,8 @@ impl Relay {
             .route("/v1/mailbox/replace", post(replace_member))
             .route("/v1/mailbox/reseed", post(reseed))
             .route("/v1/mailboxes", post(mailboxes))
+            .route("/v1/recovery/put", post(recovery_put))
+            .route("/v1/recovery/read", post(recovery_read))
             .route("/v1/push/register", post(register_push))
             .route("/v1/envelope", post(post_envelope))
             .route("/v1/inbox", post(inbox))
@@ -431,6 +448,11 @@ impl Relay {
         let deleted = tx.execute(
             "DELETE FROM deliveries WHERE created_at < ?1",
             params![cutoff],
+        )?;
+        let recovery_cutoff = self.now().saturating_sub(RECOVERY_RETENTION_SECS) as i64;
+        tx.execute(
+            "DELETE FROM recovery_values WHERE created_at < ?1",
+            params![recovery_cutoff],
         )?;
         tx.commit()?;
         Ok(deleted)
@@ -1057,6 +1079,65 @@ async fn mailboxes(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         })
         .collect::<Result<Vec<MailboxId>, RelayError>>()?;
     ok(&MailboxesResponse { mailboxes })
+}
+
+/// Keeps one value of a seat recovery's safety check (see [`RecoveryPut`]). The new phone
+/// (the subject) leaves its commitment and later its secret; anyone else may leave one
+/// challenge. The first of each (subject, signer, kind) stays: a value can't be changed
+/// after the other side has seen it.
+async fn recovery_put(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RecoveryPut>(&relay, &body)?;
+    let p = &req.payload;
+    relay.check_fresh(p.timestamp)?;
+    let by_subject = req.signer.sig_pk == p.subject;
+    let allowed = match p.kind {
+        RecoveryValueKind::Commit | RecoveryValueKind::Reveal => by_subject,
+        RecoveryValueKind::Challenge => !by_subject,
+    };
+    if !allowed {
+        return Err(RelayError::Forbidden);
+    }
+    // The canonical bytes, not the body: nothing extra rides along.
+    let signed = req.to_bytes().map_err(|_| RelayError::BadRequest)?;
+    let db = relay.db.lock().expect("lock");
+    if p.kind == RecoveryValueKind::Challenge {
+        let challenges: i64 = db.query_row(
+            "SELECT COUNT(*) FROM recovery_values WHERE subject = ?1 AND kind = ?2",
+            params![&p.subject[..], p.kind as i64],
+            |r| r.get(0),
+        )?;
+        if challenges >= MAX_RECOVERY_CHALLENGES {
+            return Err(RelayError::Forbidden);
+        }
+    }
+    db.execute(
+        "INSERT OR IGNORE INTO recovery_values (subject, signer, kind, signed, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            &p.subject[..],
+            &req.signer.sig_pk[..],
+            p.kind as i64,
+            &signed[..],
+            relay.now() as i64
+        ],
+    )?;
+    ok(&())
+}
+
+/// Every value left for a recovering phone, as posted (clients verify the signatures).
+async fn recovery_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RecoveryRead>(&relay, &body)?;
+    relay.check_fresh(req.payload.timestamp)?;
+    let db = relay.db.lock().expect("lock");
+    let mut stmt = db.prepare(
+        "SELECT signed FROM recovery_values WHERE subject = ?1 ORDER BY kind, created_at",
+    )?;
+    let values = stmt
+        .query_map(params![&req.payload.subject[..]], |r| {
+            r.get::<_, Vec<u8>>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    ok(&RecoveryValues { values })
 }
 
 async fn register_push(State(relay): State<Relay>, body: Bytes) -> RelayResult {

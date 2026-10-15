@@ -989,8 +989,9 @@ Learned while studying it:
   creator can be replaced). Anything membership-related must use the replayed state
   (`members_by_pk(state)`, `frost_id_of(&state.descriptor, ..)`), never
   `material.descriptor` (which the app refreshes from `ProposalList.updated_material`, and
-  `load_state` only compares on group key + UFVK). Flow: new phone shows a recovery code +
-  8-digit safety code (`RecoveryRequest`), co-signers log `ReplaceApproval` (signature over
+  `load_state` only compares on group key + UFVK). Flow: new phone shows a recovery code
+  (`RecoveryRequest`); each approving co-signer runs the **safety words** check with it
+  (below), then logs `ReplaceApproval` (signature over
   `relay::ReplaceApproval`, reused for the relay), at t the seat moves (votes/shares/groups/
   name re-keyed; interactive approvals voided; pool + backup attestation dropped); the
   relay swaps keys on `/v1/mailbox/replace` with t signatures (t recorded by the creator via
@@ -1021,9 +1022,27 @@ Learned while studying it:
   `seen.json`; not to the old key or members who approved; tap opens Signers), and
   background checks save `updatedMaterial`. Live-tested on the emulator
   2026-10-01 both ways (app as helper, app as the new phone) with CLI members
-  (`zafe recover`, `zafe seat approve|repair`). Tips: `/recover` is a SecureScreen
+  (`zafe recover`, `zafe seat words|approve|repair`). Tips: `/recover` is a SecureScreen
   (screenshots are black: read it with `agent-device snapshot`); the code is not shown as
   text, so "Copy code", then paste it into Join's field to read it.
+- **Seat recovery safety words** (2026-10-15, audit M2; replaced an 8-digit code of the new
+  keys, which a swapped recovery code could match in seconds): commit, challenge, reveal
+  through the relay (`POST /v1/recovery/put|read`, `RecoveryPut` signed; new routes, no
+  `RELAY_API` bump, table `recovery_values` added by `CREATE TABLE IF NOT EXISTS`, so no
+  `RELAY_DB` bump; first value per (subject, signer, kind) stays, at most
+  `MAX_RECOVERY_CHALLENGES` = 16 challenges per new phone, pruned after 7 days; the relay
+  stores the canonical signed bytes, clients verify). The new phone
+  (`repair::recovery_checks`, run by the bridge's `check_recovery` poll) publishes a
+  commitment to its secret, reveals it once a challenge exists, and lists the words per
+  co-signer key (`RecoveryProgress.checks`). A co-signer (`repair::new_phone_words`, bridge
+  `new_phone_words`, polled by the Replace screen) challenges with a value derived from a
+  signature over (subject, commitment), refuses a commitment that changed after it
+  challenged, checks the reveal and returns 4 words (`sas::recovery_words`).
+  `approve_replacement` takes the confirmed words and recomputes them. Both secrets are
+  signature-derived (nothing stored). Every approver does its own check, also when
+  approving from the log's pending move. CLI: `zafe seat words <code>` then `zafe seat
+  approve <old> <code> --words "..."`; `zafe recover` prints the words as they arrive. An
+  older relay answers 404 → "the relay doesn't support safe seat recovery yet".
 - **Backup health** (spec §12.2): `VaultEvent::BackupVerified { epoch, at }` (only for the
   current descriptor epoch; latest per member in `VaultState.backups`), written by
   `node::attest_backup` (once per epoch; bridge `attest_backup`, CLI `zafe backup`).

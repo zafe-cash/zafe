@@ -8,6 +8,7 @@ import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/errors/zafe_error_copy.dart';
+import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
@@ -208,12 +209,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
               leading: const AppIcon(AppIcons.share, size: 20),
               onPressed: () => SharePlus.instance.share(
                 ShareParams(
-                  // No safety code here: it must reach the co-signer by voice, or
-                  // anyone who can swap this message can swap both.
+                  // The safety words are compared by voice: whoever can swap this
+                  // message can't make both phones show the same words.
                   text:
                       'Please move my Zafe seat to my new phone: open Zafe, Signers, '
                       '"Replace a lost phone", and paste this code. I\'ll call you '
-                      'to read out the safety code.\n\n${code.code}',
+                      'to compare the safety words.\n\n${code.code}',
                 ),
               ),
               child: const Text('Send code to a co-signer'),
@@ -222,16 +223,21 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
         if (code != null)
           RecoverBody(
             code: code.code,
-            safetyCode: code.safetyCode,
+            checks: _progress?.checks ?? const [],
             stage: _progress?.stage,
             received: _progress?.received ?? 0,
             needed: _progress?.needed ?? 0,
             error: _error == null
                 ? null
-                : zafeErrorMessage(_error!, fallback: 'Can\'t reach the relay.'),
+                : zafeErrorMessage(
+                    _error!,
+                    fallback: 'Can\'t reach the relay.',
+                  ),
             onCopy: () async {
               await Clipboard.setData(ClipboardData(text: code.code));
-              if (context.mounted) showAppToast(context, 'Recovery code copied');
+              if (context.mounted) {
+                showAppToast(context, 'Recovery code copied');
+              }
             },
             onStartOver: _startOver,
           ),
@@ -245,7 +251,7 @@ class RecoverBody extends StatelessWidget {
   const RecoverBody({
     super.key,
     required this.code,
-    required this.safetyCode,
+    this.checks = const [],
     this.stage,
     this.received = 0,
     this.needed = 0,
@@ -255,7 +261,9 @@ class RecoverBody extends StatelessWidget {
   });
 
   final String code;
-  final String safetyCode;
+
+  /// Each co-signer's words, once that co-signer opened the code.
+  final List<rust.CosignerWords> checks;
   final rust.RecoveryStage? stage;
   final int received;
   final int needed;
@@ -318,23 +326,39 @@ class RecoverBody extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
-          'Safety code',
+          'Safety words',
           style: AppTypography.labelLarge.copyWith(
             color: colors.text.secondary,
           ),
         ),
         const SizedBox(height: AppSpacing.xxs),
-        Text(
-          safetyCode,
-          style: AppTypography.headlineMedium.copyWith(
-            color: colors.text.accent,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-        ),
+        if (checks.isEmpty)
+          Text(
+            'When a co-signer opens your code, the words you both see appear here.',
+            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
+          )
+        else
+          for (final c in checks) ...[
+            Text(
+              'With co-signer ${shortKey(c.cosignerKeyHex)}',
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.secondary,
+              ),
+            ),
+            Text(
+              c.words,
+              style: AppTypography.headlineMedium.copyWith(
+                color: colors.text.accent,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+          ],
         const SizedBox(height: AppSpacing.xxs),
         Text(
-          'Read it to each co-signer who approves, on a call or in person. If their '
-          'phone shows a different code, don\'t go ahead: someone changed the code.',
+          'Compare them with each co-signer who approves, on a call or in person: '
+          'their phone shows the same four words and their key. If the words differ, '
+          'or a co-signer you didn\'t ask shows up, don\'t go ahead: someone changed '
+          'the code.',
           style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
         ),
         const SizedBox(height: AppSpacing.md),

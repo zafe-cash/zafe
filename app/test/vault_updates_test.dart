@@ -235,7 +235,6 @@ void main() {
     SeatMove move({List<String> approvals = const ['bb']}) => SeatMove(
       oldKeyHex: 'aa',
       newKeyHex: 'ff',
-      safetyCode: '1234 5678',
       approvals: approvals,
       needed: 2,
       code: 'zafe-recover-v1:00',

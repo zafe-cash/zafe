@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1235653724;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1796209597;
 
 // Section: executor
 
@@ -170,6 +170,7 @@ fn wire__crate__api__repair__approve_seat_move_impl(
             let api_material = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_old_key_hex = <String>::sse_decode(&mut deserializer);
             let api_code = <String>::sse_decode(&mut deserializer);
+            let api_words = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -180,6 +181,7 @@ fn wire__crate__api__repair__approve_seat_move_impl(
                             api_material,
                             api_old_key_hex,
                             api_code,
+                            api_words,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1091,6 +1093,47 @@ fn wire__crate__api__proposals__memo_length_impl(
                 let output_ok = Result::<_, ()>::Ok(crate::api::proposals::memo_length(api_memo))?;
                 Ok(output_ok)
             })())
+        },
+    )
+}
+fn wire__crate__api__repair__new_phone_words_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "new_phone_words",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_relay_url = <String>::sse_decode(&mut deserializer);
+            let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_code = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::repair::new_phone_words(
+                            api_relay_url,
+                            api_seeds,
+                            api_code,
+                        )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
         },
     )
 }
@@ -2544,6 +2587,18 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for crate::api::repair::CosignerWords {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_cosignerKeyHex = <String>::sse_decode(deserializer);
+        let mut var_words = <String>::sse_decode(deserializer);
+        return crate::api::repair::CosignerWords {
+            cosigner_key_hex: var_cosignerKeyHex,
+            words: var_words,
+        };
+    }
+}
+
 impl SseDecode for crate::api::backup::ExportedBackup {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2634,6 +2689,20 @@ impl SseDecode for Vec<String> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::repair::CosignerWords> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::repair::CosignerWords>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -3047,11 +3116,7 @@ impl SseDecode for crate::api::repair::RecoveryCode {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_code = <String>::sse_decode(deserializer);
-        let mut var_safetyCode = <String>::sse_decode(deserializer);
-        return crate::api::repair::RecoveryCode {
-            code: var_code,
-            safety_code: var_safetyCode,
-        };
+        return crate::api::repair::RecoveryCode { code: var_code };
     }
 }
 
@@ -3059,10 +3124,8 @@ impl SseDecode for crate::api::repair::RecoveryCodeInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_keyHex = <String>::sse_decode(deserializer);
-        let mut var_safetyCode = <String>::sse_decode(deserializer);
         return crate::api::repair::RecoveryCodeInfo {
             key_hex: var_keyHex,
-            safety_code: var_safetyCode,
         };
     }
 }
@@ -3077,6 +3140,7 @@ impl SseDecode for crate::api::repair::RecoveryProgress {
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_material = <Vec<u8>>::sse_decode(deserializer);
         let mut var_invite = <String>::sse_decode(deserializer);
+        let mut var_checks = <Vec<crate::api::repair::CosignerWords>>::sse_decode(deserializer);
         return crate::api::repair::RecoveryProgress {
             stage: var_stage,
             received: var_received,
@@ -3085,6 +3149,7 @@ impl SseDecode for crate::api::repair::RecoveryProgress {
             name: var_name,
             material: var_material,
             invite: var_invite,
+            checks: var_checks,
         };
     }
 }
@@ -3178,14 +3243,12 @@ impl SseDecode for crate::api::proposals::SeatMove {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_oldKeyHex = <String>::sse_decode(deserializer);
         let mut var_newKeyHex = <String>::sse_decode(deserializer);
-        let mut var_safetyCode = <String>::sse_decode(deserializer);
         let mut var_approvals = <Vec<String>>::sse_decode(deserializer);
         let mut var_needed = <u32>::sse_decode(deserializer);
         let mut var_code = <String>::sse_decode(deserializer);
         return crate::api::proposals::SeatMove {
             old_key_hex: var_oldKeyHex,
             new_key_hex: var_newKeyHex,
-            safety_code: var_safetyCode,
             approvals: var_approvals,
             needed: var_needed,
             code: var_code,
@@ -3445,25 +3508,26 @@ fn pde_ffi_dispatcher_primary_impl(
         25 => wire__crate__api__proposals__list_proposals_impl(port, ptr, rust_vec_len, data_len),
         26 => wire__crate__api__received__list_received_impl(port, ptr, rust_vec_len, data_len),
         27 => wire__crate__api__proposals__mark_pool_reset_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__proposals__propose_again_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__vault__run_keygen_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__vault__seal_vault_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__repair__new_phone_words_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__proposals__propose_again_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__vault__run_keygen_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__vault__seal_vault_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3483,23 +3547,23 @@ fn pde_ffi_dispatcher_sync_impl(
         19 => wire__crate__api__vault__identity_public_key_impl(ptr, rust_vec_len, data_len),
         22 => wire__crate__api__app__init_log_cache_impl(ptr, rust_vec_len, data_len),
         28 => wire__crate__api__proposals__memo_length_impl(ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__proposals__nu7_activation_height_impl(ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__vault__parse_invite_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__proposals__nu7_activation_height_impl(ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__vault__parse_invite_impl(ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3566,6 +3630,27 @@ impl flutter_rust_bridge::IntoDart for crate::api::vault::Balance {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::vault::Balance {}
 impl flutter_rust_bridge::IntoIntoDart<crate::api::vault::Balance> for crate::api::vault::Balance {
     fn into_into_dart(self) -> crate::api::vault::Balance {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::repair::CosignerWords {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.cosigner_key_hex.into_into_dart().into_dart(),
+            self.words.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::repair::CosignerWords
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::repair::CosignerWords>
+    for crate::api::repair::CosignerWords
+{
+    fn into_into_dart(self) -> crate::api::repair::CosignerWords {
         self
     }
 }
@@ -3933,11 +4018,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::received::ReceivedInfo>
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::repair::RecoveryCode {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.code.into_into_dart().into_dart(),
-            self.safety_code.into_into_dart().into_dart(),
-        ]
-        .into_dart()
+        [self.code.into_into_dart().into_dart()].into_dart()
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -3954,11 +4035,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::repair::RecoveryCode>
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::repair::RecoveryCodeInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.key_hex.into_into_dart().into_dart(),
-            self.safety_code.into_into_dart().into_dart(),
-        ]
-        .into_dart()
+        [self.key_hex.into_into_dart().into_dart()].into_dart()
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -3983,6 +4060,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::repair::RecoveryProgress {
             self.name.into_into_dart().into_dart(),
             self.material.into_into_dart().into_dart(),
             self.invite.into_into_dart().into_dart(),
+            self.checks.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4121,7 +4199,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::SeatMove {
         [
             self.old_key_hex.into_into_dart().into_dart(),
             self.new_key_hex.into_into_dart().into_dart(),
-            self.safety_code.into_into_dart().into_dart(),
             self.approvals.into_into_dart().into_dart(),
             self.needed.into_into_dart().into_dart(),
             self.code.into_into_dart().into_dart(),
@@ -4479,6 +4556,14 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for crate::api::repair::CosignerWords {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.cosigner_key_hex, serializer);
+        <String>::sse_encode(self.words, serializer);
+    }
+}
+
 impl SseEncode for crate::api::backup::ExportedBackup {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4545,6 +4630,16 @@ impl SseEncode for Vec<String> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <String>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::repair::CosignerWords> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::repair::CosignerWords>::sse_encode(item, serializer);
         }
     }
 }
@@ -4860,7 +4955,6 @@ impl SseEncode for crate::api::repair::RecoveryCode {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.code, serializer);
-        <String>::sse_encode(self.safety_code, serializer);
     }
 }
 
@@ -4868,7 +4962,6 @@ impl SseEncode for crate::api::repair::RecoveryCodeInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.key_hex, serializer);
-        <String>::sse_encode(self.safety_code, serializer);
     }
 }
 
@@ -4882,6 +4975,7 @@ impl SseEncode for crate::api::repair::RecoveryProgress {
         <String>::sse_encode(self.name, serializer);
         <Vec<u8>>::sse_encode(self.material, serializer);
         <String>::sse_encode(self.invite, serializer);
+        <Vec<crate::api::repair::CosignerWords>>::sse_encode(self.checks, serializer);
     }
 }
 
@@ -4950,7 +5044,6 @@ impl SseEncode for crate::api::proposals::SeatMove {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.old_key_hex, serializer);
         <String>::sse_encode(self.new_key_hex, serializer);
-        <String>::sse_encode(self.safety_code, serializer);
         <Vec<String>>::sse_encode(self.approvals, serializer);
         <u32>::sse_encode(self.needed, serializer);
         <String>::sse_encode(self.code, serializer);

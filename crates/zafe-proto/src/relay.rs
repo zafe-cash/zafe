@@ -191,6 +191,43 @@ impl ReplaceApproval {
     }
 }
 
+/// Which value of a seat recovery's safety check (commit, then reveal) a record holds.
+/// Appended only: the postcard index is the wire format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum RecoveryValueKind {
+    /// The new phone's commitment to its secret value (signed by the new phone).
+    Commit,
+    /// A co-signer's random value (signed by that co-signer).
+    Challenge,
+    /// The new phone's secret value, sent once a challenge exists (signed by the new phone).
+    Reveal,
+}
+
+/// Leaves one value of the safety check for the seat recovery of the new phone whose
+/// signing key is `subject` (`POST /v1/recovery/put`, a newer route: an older relay
+/// answers 404). The new phone isn't a vault member yet, so this can't go through a
+/// mailbox. The relay keeps the signed bytes and serves them back; clients verify them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryPut {
+    pub subject: [u8; 32],
+    pub kind: RecoveryValueKind,
+    pub value: [u8; 32],
+    pub timestamp: u64,
+}
+
+/// Reads every value left for `subject` (`POST /v1/recovery/read`), signed by anyone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryRead {
+    pub subject: [u8; 32],
+    pub timestamp: u64,
+}
+
+/// The values left for a subject: each a `Signed<RecoveryPut>` as it was posted.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryValues {
+    pub values: Vec<Vec<u8>>,
+}
+
 /// Moves a seat on the relay: `approval.old` leaves the member list and `approval.new`
 /// joins, given approvals (signatures over `approval`) from at least the mailbox's
 /// threshold of current members other than `old`. Signed by a current member or by `new`

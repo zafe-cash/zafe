@@ -92,7 +92,6 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     let code = repair::recovery_code(fresh.seeds.clone()).unwrap();
     let parsed =
         repair::parse_recovery_code(format!("Move my seat please: {}", code.code)).unwrap();
-    assert_eq!(parsed.safety_code, code.safety_code);
     assert_eq!(parsed.key_hex, fresh.public_key_hex);
     assert!(matches!(
         repair::check_recovery(relay.clone(), fresh.seeds.clone())
@@ -101,29 +100,53 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         RecoveryStage::Waiting
     ));
 
-    // Member 1 approves; the others see the pending move with the same safety code.
+    // A co-signer and the new phone run the safety check (both screens poll it) and see
+    // the same words.
+    let words_of = |i: usize, code: &str| {
+        for _ in 0..4 {
+            // The new phone's poll: commit, then reveal once challenged.
+            repair::check_recovery(relay.clone(), fresh.seeds.clone()).unwrap();
+            if let Some(w) =
+                repair::new_phone_words(relay.clone(), seeds[i].clone(), code.to_owned()).unwrap()
+            {
+                let me = vault::identity_public_key(seeds[i].clone()).unwrap();
+                let shown = repair::check_recovery(relay.clone(), fresh.seeds.clone())
+                    .unwrap()
+                    .checks;
+                let on_new = shown.iter().find(|c| c.cosigner_key_hex == me).unwrap();
+                assert_eq!(on_new.words, w);
+                return w;
+            }
+        }
+        panic!("the safety check didn't finish");
+    };
+
+    // Member 1 approves after comparing words; the others see the pending move.
     let old = vault::identity_public_key(seeds[0].clone()).unwrap();
+    let words_1 = words_of(1, &code.code);
     assert!(!repair::approve_seat_move(
         relay.clone(),
         seeds[1].clone(),
         materials[1].clone(),
         old.clone(),
         code.code.clone(),
+        words_1,
     )
     .unwrap());
     let pending = list(2, &seeds[2], &materials[2]).seat_moves;
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].old_key_hex, old);
-    assert_eq!(pending[0].safety_code, code.safety_code);
     assert_eq!((pending[0].approvals.len(), pending[0].needed), (1, 2));
 
-    // Member 2 approves from the pending move's code: the seat moves.
+    // Member 2 approves from the pending move's code, with its own words: the seat moves.
+    let words_2 = words_of(2, &pending[0].code);
     assert!(repair::approve_seat_move(
         relay.clone(),
         seeds[2].clone(),
         materials[2].clone(),
         old.clone(),
         pending[0].code.clone(),
+        words_2,
     )
     .unwrap());
 

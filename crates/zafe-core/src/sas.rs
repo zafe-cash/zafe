@@ -55,12 +55,38 @@ pub fn words(mailbox: &MailboxId, members: &[(IdentityPublic, [u8; 32])]) -> Str
         parts.push(value.to_vec());
     }
     let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
-    let h = hash(b"Zafe_SafetyWords", &refs);
+    words_of(&hash(b"Zafe_SafetyWords", &refs))
+}
+
+/// [`WORDS`] BIP-39 words from the first 44 bits of `h`.
+fn words_of(h: &[u8; 32]) -> String {
     let bits = u64::from_be_bytes(h[..8].try_into().expect("8 bytes"));
     (0..WORDS)
         .map(|i| English::word_of(((bits >> (64 - 11 * (i + 1))) & 0x7ff) as usize))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Seat recovery (spec §10.1): the commitment a new phone publishes to its secret value
+/// before any co-signer challenges it.
+pub fn recovery_commitment(new: &IdentityPublic, secret: &[u8; 32]) -> [u8; 32] {
+    hash(b"Zafe_RecovCommit", &[&new.fingerprint(), secret])
+}
+
+/// The words a new phone and one co-signer compare before the co-signer approves moving
+/// a seat to it: over the new identity, the co-signer's key, the new phone's revealed
+/// secret and the co-signer's challenge. A recovery code swapped on the way commits to its
+/// value before the challenge exists, so a match is a one-shot guess (2^-44).
+pub fn recovery_words(
+    new: &IdentityPublic,
+    cosigner: &[u8; 32],
+    secret: &[u8; 32],
+    challenge: &[u8; 32],
+) -> String {
+    words_of(&hash(
+        b"Zafe_RecovWords_",
+        &[&new.fingerprint(), cosigner, secret, challenge],
+    ))
 }
 
 /// The same words, however a person typed them (case, spacing).

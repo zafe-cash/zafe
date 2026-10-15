@@ -14,8 +14,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/confirm_option.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
@@ -286,7 +286,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             ),
             if (membership.safetyNumber != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              _ConfirmOption(
+              ConfirmOption(
                 selected: _compared,
                 label: 'I compared these words with every member',
                 onTap: () => setState(() => _compared = !_compared),
@@ -652,67 +652,6 @@ class _SafetyWordsCard extends StatelessWidget {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _ConfirmOption extends StatelessWidget {
-  const _ConfirmOption({
-    required this.selected,
-    required this.label,
-    required this.onTap,
-  });
-  final bool selected;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return AppTappable(
-      onTap: onTap,
-      child: Container(
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: colors.background.ground,
-          borderRadius: BorderRadius.circular(AppRadii.medium),
-          border: Border.all(
-            color: selected ? colors.border.strong : colors.border.subtle,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: AppTypography.bodyMediumStrong.copyWith(
-                  color: colors.text.accent,
-                ),
-              ),
-            ),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected
-                    ? colors.background.inverse
-                    : colors.background.neutralSubtleOpacity,
-              ),
-              alignment: Alignment.center,
-              child: selected
-                  ? AppIcon(
-                      AppIcons.check,
-                      size: 14,
-                      color: colors.icon.inverse,
-                    )
-                  : null,
-            ),
-          ],
-        ),
       ),
     );
   }

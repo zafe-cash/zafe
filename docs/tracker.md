@@ -706,9 +706,10 @@ check. Fixed in the same change unless open:
       (bridge `shared_names`, display only), typed error copy in the setup toasts.
 - [x] **M1** setup safety number (~40 bits) could be ground by a malicious relay. Fixed
       2026-10-15: commit-then-reveal, 4 BIP-39 words (`zafe_core::sas`, `INVITE` 2).
-- [ ] **M2** 8-digit seat-recovery code can be ground in seconds. Decided 2026-10-15:
-      commit-reveal through the relay (new route + table, `RELAY_DB` bump,
-      `RecoveryRequest` v2).
+- [x] **M2** 8-digit seat-recovery code could be ground in seconds. Fixed 2026-10-15:
+      safety words from a commit-reveal exchange through the relay (`/v1/recovery/*`,
+      table `recovery_values`; no `RELAY_DB` or `RecoveryRequest` bump was needed: the
+      commitment lives on the relay, signed by the new phone).
 - [x] **M3** version-gated replay rules (v7 Broadcast txid check) could be skipped by
       tagging an event with an older version. Fixed 2026-10-15 (`VAULT_EVENT` 9: versions
       only go up once a v9 event is logged).

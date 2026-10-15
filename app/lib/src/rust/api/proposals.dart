@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_store`, `parse_id`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `visible_text`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 
@@ -768,9 +768,6 @@ class SeatMove {
   /// The new phone's key (hex).
   final String newKeyHex;
 
-  /// What the new phone shows ("1234 5678"): compare before approving.
-  final String safetyCode;
-
   /// Members who approved so far (hex keys).
   final List<String> approvals;
   final int needed;
@@ -781,7 +778,6 @@ class SeatMove {
   const SeatMove({
     required this.oldKeyHex,
     required this.newKeyHex,
-    required this.safetyCode,
     required this.approvals,
     required this.needed,
     required this.code,
@@ -791,7 +787,6 @@ class SeatMove {
   int get hashCode =>
       oldKeyHex.hashCode ^
       newKeyHex.hashCode ^
-      safetyCode.hashCode ^
       approvals.hashCode ^
       needed.hashCode ^
       code.hashCode;
@@ -803,7 +798,6 @@ class SeatMove {
           runtimeType == other.runtimeType &&
           oldKeyHex == other.oldKeyHex &&
           newKeyHex == other.newKeyHex &&
-          safetyCode == other.safetyCode &&
           approvals == other.approvals &&
           needed == other.needed &&
           code == other.code;

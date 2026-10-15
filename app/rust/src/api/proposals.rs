@@ -422,8 +422,6 @@ pub struct SeatMove {
     pub old_key_hex: String,
     /// The new phone's key (hex).
     pub new_key_hex: String,
-    /// What the new phone shows ("1234 5678"): compare before approving.
-    pub safety_code: String,
     /// Members who approved so far (hex keys).
     pub approvals: Vec<String>,
     pub needed: u32,
@@ -568,7 +566,6 @@ fn seat_moves(state: &VaultState) -> Vec<SeatMove> {
             SeatMove {
                 old_key_hex: hex::encode(p.old),
                 new_key_hex: hex::encode(p.new.sig_pk),
-                safety_code: request.safety_code(),
                 approvals: p.approvals.iter().map(|(pk, _)| hex::encode(pk)).collect(),
                 needed: u32::from(state.descriptor.threshold),
                 code: request.encode(),

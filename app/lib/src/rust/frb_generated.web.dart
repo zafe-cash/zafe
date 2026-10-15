@@ -78,6 +78,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ZafeError dco_decode_box_autoadd_zafe_error(dynamic raw);
 
   @protected
+  CosignerWords dco_decode_cosigner_words(dynamic raw);
+
+  @protected
   ExportedBackup dco_decode_exported_backup(dynamic raw);
 
   @protected
@@ -100,6 +103,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<CosignerWords> dco_decode_list_cosigner_words(dynamic raw);
 
   @protected
   List<PaymentInfo> dco_decode_list_payment_info(dynamic raw);
@@ -300,6 +306,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ZafeError sse_decode_box_autoadd_zafe_error(SseDeserializer deserializer);
 
   @protected
+  CosignerWords sse_decode_cosigner_words(SseDeserializer deserializer);
+
+  @protected
   ExportedBackup sse_decode_exported_backup(SseDeserializer deserializer);
 
   @protected
@@ -322,6 +331,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<CosignerWords> sse_decode_list_cosigner_words(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<PaymentInfo> sse_decode_list_payment_info(SseDeserializer deserializer);
@@ -547,6 +561,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_cosigner_words(CosignerWords self, SseSerializer serializer);
+
+  @protected
   void sse_encode_exported_backup(
     ExportedBackup self,
     SseSerializer serializer,
@@ -572,6 +589,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_cosigner_words(
+    List<CosignerWords> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_payment_info(

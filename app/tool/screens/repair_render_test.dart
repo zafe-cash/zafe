@@ -17,7 +17,8 @@ import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/features/recover/recover_screen.dart';
 import 'package:zafe/src/features/signers/replace_signer_screen.dart';
 import 'package:zafe/src/features/signers/signers_screen.dart';
-import 'package:zafe/src/rust/api/repair.dart' show RecoveryStage;
+import 'package:zafe/src/rust/api/repair.dart'
+    show CosignerWords, RecoveryStage;
 
 Future<void> _loadFonts() async {
   final families = <String, List<String>>{
@@ -54,14 +55,22 @@ void main() {
       (
         'waiting',
         'Recover your seat',
-        const RecoverBody(code: _code, safetyCode: '4817 0263'),
+        const RecoverBody(
+          code: _code,
+          checks: [
+            CosignerWords(
+              cosignerKeyHex:
+                  '97c9ce4b0d2f6a1e8c3b5d7f9a1c3e5f7b9d1f3a5c7e9b1d3f5a7c9e1b3d123e',
+              words: 'ancient cinnamon zebra legend',
+            ),
+          ],
+        ),
       ),
       (
         'repairing',
         'Recover your seat',
         const RecoverBody(
           code: _code,
-          safetyCode: '4817 0263',
           stage: RecoveryStage.repairing,
           received: 1,
           needed: 2,
@@ -85,13 +94,18 @@ void main() {
           children: [
             SeatMoveCard(
               who: 'Alice',
-              safetyCode: '4817 0263',
               approvals: 1,
               needed: 2,
               onApprove: _noop,
             ),
             SizedBox(height: AppSpacing.md),
-            SafetyCodeCard(safetyCode: '4817 0263', who: 'Alice'),
+            SafetyWordsCard(
+              words: 'ancient cinnamon zebra legend',
+              who: 'Alice',
+              myKeyHex:
+                  '97c9ce4b0d2f6a1e8c3b5d7f9a1c3e5f7b9d1f3a5c7e9b1d3f5a7c9e1b3d123e',
+              confirmed: true,
+            ),
             SizedBox(height: AppSpacing.md),
             RepairCard(
               who: 'Alice',

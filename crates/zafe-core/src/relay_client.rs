@@ -7,9 +7,10 @@ use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
         InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
-        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush,
-        Remove, ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed,
-        WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
+        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, ReplaceApproval,
+        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
+        WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
     Envelope, Identity, LogEntry, MailboxId, ProtoError,
@@ -516,6 +517,44 @@ impl RelayClient {
             },
         )
         .await
+    }
+
+    /// Leaves one value of the safety check of `subject`'s seat recovery (see
+    /// [`RecoveryPut`]). A relay without the route answers 404.
+    pub async fn recovery_put(
+        &self,
+        who: &Identity,
+        subject: [u8; 32],
+        kind: RecoveryValueKind,
+        value: [u8; 32],
+    ) -> Result<(), RelayClientError> {
+        let payload = RecoveryPut {
+            subject,
+            kind,
+            value,
+            timestamp: now(),
+        };
+        self.signed::<_, ()>("/v1/recovery/put", who, payload).await
+    }
+
+    /// The values left for `subject`'s recovery whose signature verifies and that are
+    /// about `subject` (the relay is not trusted with them).
+    pub async fn recovery_read(
+        &self,
+        who: &Identity,
+        subject: [u8; 32],
+    ) -> Result<Vec<Signed<RecoveryPut>>, RelayClientError> {
+        let read = RecoveryRead {
+            subject,
+            timestamp: now(),
+        };
+        let response: RecoveryValues = self.signed("/v1/recovery/read", who, read).await?;
+        Ok(response
+            .values
+            .iter()
+            .filter_map(|b| Signed::<RecoveryPut>::from_bytes(b).ok())
+            .filter(|s| s.verify().is_ok_and(|p| p.subject == subject))
+            .collect())
     }
 
     /// The mailboxes `who` is a member of. Empty from a relay without the route (404).

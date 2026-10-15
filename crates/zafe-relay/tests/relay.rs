@@ -827,3 +827,84 @@ async fn oversized_bodies_are_refused() {
     .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+/// A seat recovery's safety values: the new phone (subject) leaves its commitment and
+/// secret, others one challenge each; the first of each stays; the relay hands back the
+/// signed values.
+#[tokio::test]
+async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
+    use zafe_proto::relay::{RecoveryPut, RecoveryRead, RecoveryValueKind as K, RecoveryValues};
+    let w = World::new(true).await;
+    let (new, cosigner) = (&w.ids[3], &w.ids[1]);
+    let subject = new.public().sig_pk;
+    let put = |kind, value: u8| RecoveryPut {
+        subject,
+        kind,
+        value: [value; 32],
+        timestamp: NOW,
+    };
+    let path = "/v1/recovery/put";
+    // Only the new phone commits and reveals; only others challenge.
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(K::Commit, 1)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Challenge, 1)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Commit, 1)).await.0,
+        StatusCode::OK
+    );
+    // A second commitment doesn't replace the first.
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Commit, 2)).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(K::Challenge, 3)).await.0,
+        StatusCode::OK
+    );
+
+    let (status, body) = signed(
+        &w.app,
+        "/v1/recovery/read",
+        cosigner,
+        RecoveryRead {
+            subject,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let values: Vec<RecoveryPut> = decode_body::<RecoveryValues>(&body)
+        .unwrap()
+        .values
+        .iter()
+        .map(|b| {
+            Signed::<RecoveryPut>::from_bytes(b)
+                .unwrap()
+                .verify()
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    assert_eq!(values, vec![put(K::Commit, 1), put(K::Challenge, 3)]);
+
+    // A stranger can't bury the real challenges under many of its own.
+    let mut rng = StdRng::seed_from_u64(9);
+    let mut refused = false;
+    for _ in 0..20 {
+        let stranger = Identity::generate(&mut rng);
+        if signed(&w.app, path, &stranger, put(K::Challenge, 4))
+            .await
+            .0
+            == StatusCode::FORBIDDEN
+        {
+            refused = true;
+            break;
+        }
+    }
+    assert!(refused, "challenges per recovering phone are capped");
+}
