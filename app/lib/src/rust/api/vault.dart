@@ -271,13 +271,20 @@ class InviteInfo {
 class MembershipInfo {
   final List<String> members;
   final bool sealed;
-  final String safetyNumber;
+
+  /// The safety words to compare (4 words), once membership is locked and every
+  /// member's part of the check arrived. `None` until then: keep polling.
+  final String? safetyNumber;
+
+  /// Members (key hex) whose part of the safety check hasn't arrived yet.
+  final List<String> waitingFor;
   final bool isCreator;
 
   const MembershipInfo({
     required this.members,
     required this.sealed,
-    required this.safetyNumber,
+    this.safetyNumber,
+    required this.waitingFor,
     required this.isCreator,
   });
 
@@ -286,6 +293,7 @@ class MembershipInfo {
       members.hashCode ^
       sealed.hashCode ^
       safetyNumber.hashCode ^
+      waitingFor.hashCode ^
       isCreator.hashCode;
 
   @override
@@ -296,6 +304,7 @@ class MembershipInfo {
           members == other.members &&
           sealed == other.sealed &&
           safetyNumber == other.safetyNumber &&
+          waitingFor == other.waitingFor &&
           isCreator == other.isCreator;
 }
 

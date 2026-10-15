@@ -52,6 +52,10 @@ pub enum Kind {
     /// Share repair, helper to the member being repaired: an RTS sigma plus the vault
     /// secret, log key and public key package.
     RepairSigma,
+    /// Setup safety words, step 1: a member's commitment to its secret value (public).
+    SafetyCommit,
+    /// Setup safety words, step 2: the value itself, sent once every commitment is in.
+    SafetyReveal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

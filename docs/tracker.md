@@ -704,22 +704,24 @@ check. Fixed in the same change unless open:
       share text no longer carries the safety code, shared names that look like "You",
       duplicate another member's, or hide bidi/zero-width characters are not shown
       (bridge `shared_names`, display only), typed error copy in the setup toasts.
-- [ ] **M1** setup safety number (~40 bits) can be ground by a malicious relay; **M2**
-      8-digit seat-recovery code in seconds. Fix with a commit-then-reveal short code
-      (docs/onboarding.md §5.4); needs spec + version bumps.
-- [ ] **M3** version-gated replay rules (v7 Broadcast txid check) can be skipped by an
-      author tagging an event with an older version. Fix by log position or a per-vault
-      minimum event version; changes replay, gate it.
+- [x] **M1** setup safety number (~40 bits) could be ground by a malicious relay. Fixed
+      2026-10-15: commit-then-reveal, 4 BIP-39 words (`zafe_core::sas`, `INVITE` 2).
+- [ ] **M2** 8-digit seat-recovery code can be ground in seconds. Decided 2026-10-15:
+      commit-reveal through the relay (new route + table, `RELAY_DB` bump,
+      `RecoveryRequest` v2).
+- [x] **M3** version-gated replay rules (v7 Broadcast txid check) could be skipped by
+      tagging an event with an older version. Fixed 2026-10-15 (`VAULT_EVENT` 9: versions
+      only go up once a v9 event is logged).
 - [ ] **M5-B** the leader always picks the first t approvers by identifier: a member who
       sorts first can stall rounds by never answering. Rotate or exclude timed-out signers.
-- [ ] **L5** proposals whose PCZT doesn't parse still drain every pool; reject at replay
-      (gated) or cap `signing_spends`.
+- [x] **L5** proposals whose PCZT doesn't parse drained every pool. Fixed 2026-10-15
+      (`VAULT_EVENT` 9 rejects them at replay).
 - [ ] One-tap pool depth: a proposal with more spends than a member's pool covers
       (2-of-3: > 16 spends at a full pool, > 8 at half) loses one-tap for that member's
       groups. Size the pool to the vault's note count, or top up before proposing.
-- [ ] One-tap and interactive don't mix: members whose one-tap shares are logged can't add
-      interactive commitments (VoteFinal). A gated replay rule allowing it would make every
-      mixed state completable.
+- [x] One-tap and interactive don't mix: members whose one-tap shares are logged can't add
+      interactive commitments (VoteFinal). Decided 2026-10-15: no mixing; a payment no
+      group can complete shows "Propose again" to its proposer (`node::propose_again`).
 - [ ] Low: fsync nonce files and their directory (L1); atomic leader files (L2); persist
       interactive replies until sent (L3); `respond` skips closed proposals (L4); cap relay
       response bodies (L6); verify before answering `Conflict{len}` (L7); joiners check the

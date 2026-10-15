@@ -43,9 +43,7 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
     vault::seal_vault(relay.clone(), seeds[0].clone(), invite.clone()).unwrap();
-    let safety = vault::vault_membership(relay.clone(), seeds[0].clone(), invite.clone())
-        .unwrap()
-        .safety_number;
+    let safety = safety_words(&relay, &seeds, &invite);
     let materials: Vec<Vec<u8>> = seeds
         .iter()
         .enumerate()
@@ -169,4 +167,29 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     assert!(mine.repairs.is_empty());
     assert!(list(1, &seeds[1], &updated[0]).repairs.is_empty());
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Polls every member's membership in turn until all show the safety words (each poll
+/// sends that member's commitment, then its value), and returns them.
+fn safety_words(relay: &str, seeds: &[Vec<u8>], invite: &str) -> String {
+    for _ in 0..300 {
+        let words: Vec<Option<String>> = seeds
+            .iter()
+            .map(|s| {
+                vault::vault_membership(relay.into(), s.clone(), invite.into())
+                    .unwrap()
+                    .safety_number
+            })
+            .collect();
+        if words.iter().all(Option::is_some) {
+            let words: Vec<String> = words.into_iter().flatten().collect();
+            assert!(
+                words.iter().all(|w| w == &words[0]),
+                "same words everywhere"
+            );
+            return words[0].clone();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("the safety check never completed");
 }

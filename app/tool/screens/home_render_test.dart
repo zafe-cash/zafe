@@ -60,6 +60,7 @@ rust.ProposalInfo _proposal(
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  needsNewProposal: false,
 );
 
 Future<void> _loadFonts() async {

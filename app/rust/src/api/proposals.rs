@@ -258,6 +258,10 @@ pub struct ProposalInfo {
     pub still_sendable: bool,
     /// A live proposal (id) that spends this cancelled one's notes back to the vault.
     pub invalidated_by: Option<String>,
+    /// One-tap, open, and no signer group can be completed any more (a member's phone
+    /// was restored or replaced while it was open): the proposer should propose it again
+    /// (`propose_again`), and everyone approves once more.
+    pub needs_new_proposal: bool,
 }
 
 fn parse_id(hex_id: &str) -> Result<ProposalId, ZafeError> {
@@ -286,6 +290,7 @@ fn nonce_store(state_dir: &str) -> FileNonceStore {
 fn info(state: &VaultState, me: [u8; 32], state_dir: &str) -> Vec<ProposalInfo> {
     let d = &state.descriptor;
     let nonces = nonce_store(state_dir);
+    let pool = pool_store(state_dir);
     let mut out: Vec<_> = state
         .proposals
         .values()
@@ -351,6 +356,7 @@ fn info(state: &VaultState, me: [u8; 32], state_dir: &str) -> Vec<ProposalInfo> 
             needs_reapproval: matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
                 && p.approvals.get(&me).is_some_and(|c| !c.is_empty())
                 && !nonces.contains(&p.id, &p.pczt_hash),
+            needs_new_proposal: node::one_tap_stuck(state, &p.id, &me, &pool),
         })
         .collect();
     out.sort_by_key(|p| {
@@ -668,6 +674,42 @@ pub fn propose_payment(
                 &sent_txs(&db_dir, &m),
                 &requests,
                 auto_send,
+                &mut OsRng,
+            )
+            .await?,
+        )
+    })?;
+    Ok(hex::encode(id))
+}
+
+/// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
+/// commitments (see `ProposalInfo.needs_new_proposal`). Returns the new proposal's id.
+pub fn propose_again(
+    relay_url: String,
+    lightwalletd_url: String,
+    db_dir: String,
+    db_key: Vec<u8>,
+    seeds: Vec<u8>,
+    material: Vec<u8>,
+    proposal_id: String,
+) -> Result<String, ZafeError> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
+    let target = parse_id(&proposal_id)?;
+    let _guard = wallet_lock();
+    let id = runtime().block_on(async {
+        let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        let mut client = connect(&lightwalletd_url).await?;
+        wallet.sync(&mut client).await?;
+        Ok::<_, ZafeError>(
+            node::propose_again(
+                &RelayClient::new(relay_url),
+                &me,
+                &m,
+                &mut wallet,
+                &mut client,
+                &sent_txs(&db_dir, &m),
+                target,
                 &mut OsRng,
             )
             .await?,

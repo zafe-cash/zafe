@@ -153,11 +153,16 @@ enum VaultCmd {
     },
     /// Join a vault from an invite string.
     Join { invite: String },
-    /// Show members, whether membership is sealed, and the safety number.
-    Members,
+    /// Show members, whether membership is sealed, and (once every member's part of the
+    /// check is in) the safety words. With `--wait`, keep going until the words are known:
+    /// every member must run it at the same time once membership is sealed.
+    Members {
+        #[arg(long)]
+        wait: bool,
+    },
     /// Creator: freeze membership once everyone has joined.
     Seal,
-    /// Run key generation. Requires the safety number you compared with the others.
+    /// Run key generation. Requires the safety words you compared with the others.
     Keygen {
         #[arg(long)]
         safety_number: String,
@@ -700,14 +705,29 @@ async fn vault(
             fs::write(home.path(INVITE_FILE), parsed.encode())?;
             println!("joined vault {}", parsed.name);
         }
-        VaultCmd::Members => {
-            let (members, sealed, number) =
-                node::membership(relay, &home.identity()?, &home.invite()?).await?;
-            for m in &members {
-                println!("member {}", hex::encode(m.sig_pk));
+        VaultCmd::Members { wait } => {
+            let (me, invite) = (home.identity()?, home.invite()?);
+            let m = node::membership(relay, &me, &invite).await?;
+            for member in &m.members {
+                println!("member {}", hex::encode(member.sig_pk));
             }
-            println!("sealed {sealed}");
-            println!("safety number: {number}");
+            println!("sealed {}", m.sealed);
+            let words = match (m.safety_words, wait) {
+                (Some(words), _) => Some(words),
+                (None, true) => Some(
+                    node::wait_for_safety_words(relay, &me, &invite, Duration::from_secs(300))
+                        .await?,
+                ),
+                (None, false) => {
+                    for pk in &m.waiting_for {
+                        println!("waiting for {}", hex::encode(pk));
+                    }
+                    None
+                }
+            };
+            if let Some(words) = words {
+                println!("safety words: {words}");
+            }
         }
         VaultCmd::Seal => {
             node::seal(relay, &home.identity()?, &home.invite()?).await?;

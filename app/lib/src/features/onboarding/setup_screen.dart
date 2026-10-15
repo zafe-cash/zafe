@@ -26,7 +26,7 @@ import 'invite_link.dart';
 import 'onboarding_art.dart';
 
 /// Vault setup: invite, members joining, locking membership, comparing the safety
-/// number, and key generation (spec §7.2).
+/// words, and key generation (spec §7.2).
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
 
@@ -216,11 +216,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         child: const Text('Leave setup'),
       );
     } else if (sealed) {
+      final words = membership?.safetyNumber;
       bottom = AppButton(
         expand: true,
-        onPressed: _compared
-            ? () => _createKeys(membership!.safetyNumber)
-            : null,
+        onPressed: _compared && words != null ? () => _createKeys(words) : null,
         leading: const AppIcon(AppIcons.key, size: 20),
         child: const Text('Create vault keys'),
       );
@@ -264,6 +263,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             expected: info.members,
             threshold: info.threshold,
             myKeyHex: _myKeyHex(vault),
+            notHere: sealed ? membership?.waitingFor ?? const [] : const [],
           ),
           const SizedBox(height: AppSpacing.md),
           if (_error != null)
@@ -280,13 +280,18 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   : 'Waiting for the other members to join with the invite.',
             ),
           if (sealed && membership != null) ...[
-            _SafetyNumberCard(number: membership.safetyNumber),
-            const SizedBox(height: AppSpacing.sm),
-            _ConfirmOption(
-              selected: _compared,
-              label: 'I compared this number with every member',
-              onTap: () => setState(() => _compared = !_compared),
+            _SafetyWordsCard(
+              words: membership.safetyNumber,
+              waiting: membership.waitingFor.length,
             ),
+            if (membership.safetyNumber != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              _ConfirmOption(
+                selected: _compared,
+                label: 'I compared these words with every member',
+                onTap: () => setState(() => _compared = !_compared),
+              ),
+            ],
           ],
           if (!sealed && !_gone) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -444,12 +449,16 @@ class _MembersCard extends StatelessWidget {
     required this.expected,
     required this.threshold,
     required this.myKeyHex,
+    this.notHere = const [],
   });
 
   final List<String> members;
   final int expected;
   final int threshold;
   final String? myKeyHex;
+
+  /// Members whose phone hasn't sent its part of the safety check yet.
+  final List<String> notHere;
 
   @override
   Widget build(BuildContext context) {
@@ -514,6 +523,15 @@ class _MembersCard extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (notHere.contains(m)) ...[
+                    const Spacer(),
+                    Text(
+                      'Not here yet',
+                      style: AppTypography.labelMedium.copyWith(
+                        color: colors.text.muted,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -553,13 +571,22 @@ class _MembersCard extends StatelessWidget {
   }
 }
 
-class _SafetyNumberCard extends StatelessWidget {
-  const _SafetyNumberCard({required this.number});
-  final String number;
+class _SafetyWordsCard extends StatelessWidget {
+  const _SafetyWordsCard({required this.words, required this.waiting});
+
+  /// The four words, or `null` while members' parts of the check are still arriving.
+  final String? words;
+
+  /// How many members haven't sent their part yet.
+  final int waiting;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final words = this.words;
+    final muted = AppTypography.bodySmall.copyWith(
+      color: colors.text.darkCard.withValues(alpha: 0.7),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
       decoration: BoxDecoration(
@@ -579,7 +606,7 @@ class _SafetyNumberCard extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.xs),
               Text(
-                'Safety number',
+                'Safety words',
                 style: AppTypography.labelMedium.copyWith(
                   color: colors.text.darkCard,
                 ),
@@ -587,22 +614,42 @@ class _SafetyNumberCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          Text(
-            number,
-            style: AppTypography.headlineLarge.copyWith(
-              color: colors.text.darkCard,
+          if (words == null) ...[
+            AppIcon(AppIcons.loader, size: 24, color: colors.text.darkCard),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              waiting == 1
+                  ? 'Waiting for 1 member to open Zafe. The words appear once every member\'s '
+                        'phone has taken part.'
+                  : 'Waiting for $waiting members to open Zafe. The words appear once every '
+                        'member\'s phone has taken part.',
+              textAlign: TextAlign.center,
+              style: muted,
             ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Read it to each member over a call, or compare in person. Every member must see the same number. '
-            'If any member sees a different one, stop: someone may be impersonating a member.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.darkCard.withValues(alpha: 0.7),
+          ] else ...[
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final w in words.split(' '))
+                  Text(
+                    w,
+                    style: AppTypography.headlineLarge.copyWith(
+                      color: colors.text.darkCard,
+                    ),
+                  ),
+              ],
             ),
-          ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Read them to each member over a call, or compare in person. Every member must '
+              'see the same words. If anyone sees different ones, stop: someone may be '
+              'impersonating a member.',
+              textAlign: TextAlign.center,
+              style: muted,
+            ),
+          ],
         ],
       ),
     );

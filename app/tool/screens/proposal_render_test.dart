@@ -69,6 +69,7 @@ rust.ProposalInfo _proposal({
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  needsNewProposal: false,
 );
 
 final _review = rust.ReviewInfo(

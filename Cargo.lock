@@ -4773,6 +4773,7 @@ dependencies = [
  "anyhow",
  "axum",
  "flutter_rust_bridge",
+ "futures",
  "hex",
  "orchard",
  "postcard",

@@ -242,6 +242,35 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     }
   }
 
+  /// Cancels a payment that can no longer be signed the one-tap way and proposes the
+  /// same payment again, so everyone can approve it with one tap.
+  Future<void> _repropose(rust.ProposalInfo p) async {
+    if (!await confirmUnlock(
+      context,
+      ref,
+      reason: 'Unlock to propose this payment again',
+    )) {
+      return;
+    }
+    setState(() => _invalidating = true);
+    try {
+      final id = await ref.read(proposalsProvider.notifier).proposeAgain(p.id);
+      if (mounted) context.pushReplacement('/proposal/$id');
+    } catch (e) {
+      debugPrint('propose again failed: ${describeError(e)}');
+      if (mounted) {
+        showAppToast(
+          context,
+          zafeErrorMessage(e, fallback: 'Couldn\'t propose it again. Try again.'),
+          iconName: AppIcons.warningCircle,
+          tone: AppToastTone.destructive,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _invalidating = false);
+    }
+  }
+
   void _proposeAgain(rust.ProposalInfo p) {
     context.push(
       '/send',
@@ -481,6 +510,38 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     ];
 
     if (p.needsReapproval) return [..._approveAgain(note), ...footer];
+
+    // A signer's phone was restored or replaced while this payment was open, so its
+    // signatures can't all be collected any more. Nothing was sent.
+    if (p.needsNewProposal) {
+      return [
+        Text(
+          p.isMine
+              ? 'This payment can no longer get every signature: a signer\'s phone was '
+                    'restored or replaced while it was open. Nothing was sent. Propose it '
+                    'again and everyone approves once more, with one tap.'
+              : 'This payment can no longer get every signature: a signer\'s phone was '
+                    'restored or replaced while it was open. Nothing was sent. Ask the '
+                    'person who proposed it to propose it again.',
+          textAlign: TextAlign.center,
+          style: note,
+        ),
+        if (p.isMine) ...[
+          const SizedBox(height: AppSpacing.sm),
+          AppButton(
+            expand: true,
+            leading: _invalidating
+                ? null
+                : const AppIcon(AppIcons.renew, size: 20),
+            onPressed: _invalidating ? null : () => _repropose(p),
+            child: Text(
+              _invalidating ? 'Building transaction...' : 'Propose again',
+            ),
+          ),
+        ],
+        ...footer,
+      ];
+    }
 
     switch (p.stage) {
       case rust.ProposalStage.open:

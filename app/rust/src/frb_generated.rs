@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 480932954;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1235653724;
 
 // Section: executor
 
@@ -1279,6 +1279,53 @@ fn wire__crate__api__proposals__prewarm_prover_impl(
                     let output_ok = Result::<_, ()>::Ok({
                         crate::api::proposals::prewarm_prover();
                     })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__proposals__propose_again_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "propose_again",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_relay_url = <String>::sse_decode(&mut deserializer);
+            let api_lightwalletd_url = <String>::sse_decode(&mut deserializer);
+            let api_db_dir = <String>::sse_decode(&mut deserializer);
+            let api_db_key = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_material = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_proposal_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, crate::api::error::ZafeError>((move || {
+                    let output_ok = crate::api::proposals::propose_again(
+                        api_relay_url,
+                        api_lightwalletd_url,
+                        api_db_dir,
+                        api_db_key,
+                        api_seeds,
+                        api_material,
+                        api_proposal_id,
+                    )?;
                     Ok(output_ok)
                 })())
             }
@@ -2731,12 +2778,14 @@ impl SseDecode for crate::api::vault::MembershipInfo {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_members = <Vec<String>>::sse_decode(deserializer);
         let mut var_sealed = <bool>::sse_decode(deserializer);
-        let mut var_safetyNumber = <String>::sse_decode(deserializer);
+        let mut var_safetyNumber = <Option<String>>::sse_decode(deserializer);
+        let mut var_waitingFor = <Vec<String>>::sse_decode(deserializer);
         let mut var_isCreator = <bool>::sse_decode(deserializer);
         return crate::api::vault::MembershipInfo {
             members: var_members,
             sealed: var_sealed,
             safety_number: var_safetyNumber,
+            waiting_for: var_waitingFor,
             is_creator: var_isCreator,
         };
     }
@@ -2906,6 +2955,7 @@ impl SseDecode for crate::api::proposals::ProposalInfo {
         let mut var_needsReapproval = <bool>::sse_decode(deserializer);
         let mut var_stillSendable = <bool>::sse_decode(deserializer);
         let mut var_invalidatedBy = <Option<String>>::sse_decode(deserializer);
+        let mut var_needsNewProposal = <bool>::sse_decode(deserializer);
         return crate::api::proposals::ProposalInfo {
             id: var_id,
             author: var_author,
@@ -2929,6 +2979,7 @@ impl SseDecode for crate::api::proposals::ProposalInfo {
             needs_reapproval: var_needsReapproval,
             still_sendable: var_stillSendable,
             invalidated_by: var_invalidatedBy,
+            needs_new_proposal: var_needsNewProposal,
         };
     }
 }
@@ -3394,23 +3445,24 @@ fn pde_ffi_dispatcher_primary_impl(
         26 => wire__crate__api__received__list_received_impl(port, ptr, rust_vec_len, data_len),
         27 => wire__crate__api__proposals__mark_pool_reset_impl(port, ptr, rust_vec_len, data_len),
         34 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__vault__run_keygen_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__vault__seal_vault_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__proposals__propose_again_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__vault__run_keygen_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__vault__seal_vault_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__vault__vault_membership_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3435,18 +3487,18 @@ fn pde_ffi_dispatcher_sync_impl(
         31 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
         32 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
         33 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3611,6 +3663,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::vault::MembershipInfo {
             self.members.into_into_dart().into_dart(),
             self.sealed.into_into_dart().into_dart(),
             self.safety_number.into_into_dart().into_dart(),
+            self.waiting_for.into_into_dart().into_dart(),
             self.is_creator.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -3784,6 +3837,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::ProposalInfo {
             self.needs_reapproval.into_into_dart().into_dart(),
             self.still_sendable.into_into_dart().into_dart(),
             self.invalidated_by.into_into_dart().into_dart(),
+            self.needs_new_proposal.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4598,7 +4652,8 @@ impl SseEncode for crate::api::vault::MembershipInfo {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<String>>::sse_encode(self.members, serializer);
         <bool>::sse_encode(self.sealed, serializer);
-        <String>::sse_encode(self.safety_number, serializer);
+        <Option<String>>::sse_encode(self.safety_number, serializer);
+        <Vec<String>>::sse_encode(self.waiting_for, serializer);
         <bool>::sse_encode(self.is_creator, serializer);
     }
 }
@@ -4750,6 +4805,7 @@ impl SseEncode for crate::api::proposals::ProposalInfo {
         <bool>::sse_encode(self.needs_reapproval, serializer);
         <bool>::sse_encode(self.still_sendable, serializer);
         <Option<String>>::sse_encode(self.invalidated_by, serializer);
+        <bool>::sse_encode(self.needs_new_proposal, serializer);
     }
 }
 

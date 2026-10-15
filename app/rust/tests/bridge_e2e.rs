@@ -134,15 +134,7 @@ fn payment_flow_through_bridge() {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
     vault::seal_vault(relay.clone(), seeds[0].clone(), invite.clone()).unwrap();
-    let safety: Vec<String> = seeds
-        .iter()
-        .map(|s| {
-            vault::vault_membership(relay.clone(), s.clone(), invite.clone())
-                .unwrap()
-                .safety_number
-        })
-        .collect();
-    assert!(safety.iter().all(|n| n == &safety[0]));
+    let safety = safety_words(&relay, &seeds, &invite);
 
     // Keygen: all three at once (A picks birthday 2: regtest isn't up yet).
     // Each member's signing state dir, where keygen leaves its one-tap pool nonces. B
@@ -160,7 +152,7 @@ fn payment_flow_through_bridge() {
                 lwd.clone(),
                 s.clone(),
                 invite.clone(),
-                safety[0].clone(),
+                safety.clone(),
             );
             let state = (i == 0).then(|| {
                 let dir = tmp.join(format!("m{i}")).join("signing");
@@ -773,9 +765,7 @@ fn payment_flow_through_bridge() {
         vault::create_vault(relay.clone(), seeds2[0].clone(), "Payroll".into(), 2, 2).unwrap();
     vault::join_vault(relay.clone(), seeds2[1].clone(), invite2.clone()).unwrap();
     vault::seal_vault(relay.clone(), seeds2[0].clone(), invite2.clone()).unwrap();
-    let safety2 = vault::vault_membership(relay.clone(), seeds2[0].clone(), invite2.clone())
-        .unwrap()
-        .safety_number;
+    let safety2 = safety_words(&relay, &seeds2, &invite2);
     // The creator picks lightwalletd's tip + 1 as the birthday (as the app does).
     let handles: Vec<_> = seeds2
         .iter()
@@ -1021,4 +1011,29 @@ fn payment_flow_through_bridge() {
     }
 
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Polls every member's membership in turn until all show the safety words (each poll
+/// sends that member's commitment, then its value), and returns them.
+fn safety_words(relay: &str, seeds: &[Vec<u8>], invite: &str) -> String {
+    for _ in 0..300 {
+        let words: Vec<Option<String>> = seeds
+            .iter()
+            .map(|s| {
+                vault::vault_membership(relay.into(), s.clone(), invite.into())
+                    .unwrap()
+                    .safety_number
+            })
+            .collect();
+        if words.iter().all(Option::is_some) {
+            let words: Vec<String> = words.into_iter().flatten().collect();
+            assert!(
+                words.iter().all(|w| w == &words[0]),
+                "same words everywhere"
+            );
+            return words[0].clone();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("the safety check never completed");
 }

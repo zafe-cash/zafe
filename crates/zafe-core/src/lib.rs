@@ -14,6 +14,7 @@ pub mod nonce_store;
 pub mod price;
 pub mod relay_client;
 pub mod repair;
+pub mod sas;
 pub mod session;
 pub mod signing;
 pub mod spend_watch;

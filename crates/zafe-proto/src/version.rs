@@ -37,13 +37,22 @@ pub const LOG_ENTRY: u16 = 1;
 /// one-tap commitments, which a restore from a backup needs (a backup carries no nonces,
 /// so the old pool is dead). A reset is only valid in a version 8 event; an older app
 /// skips every version 8 event, so members must update together before anyone restores.
-pub const VAULT_EVENT: u16 = 8;
+/// 9 (2026-10-15): no new variant. Once a version 9 event is in the log, versions only go
+/// up: every later event is replayed under the rules of the highest version seen, so an
+/// author can't dodge a rule by tagging an event with an old version (security audit M3).
+/// A version 9 `Proposal` must carry a PCZT that parses and declare no more spends to sign
+/// than it has (audit L5: unusable proposals drained every one-tap pool). An older app
+/// skips version 9 events, so members update together; logs without one replay as before.
+pub const VAULT_EVENT: u16 = 9;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).
 pub const RELAY_API: u16 = 1;
-/// Invites (`zafe-invite-v1:` text prefix).
-pub const INVITE: u16 = 1;
+/// Invites (`zafe-invite-v<INVITE>:` text prefix). 2 (2026-10-15): same body; setups
+/// compare commit-then-reveal safety words (`zafe_core::sas`) instead of a 12-digit hash
+/// of the member keys, so an older app must not join (it would show a number nobody else
+/// has): it reports "update Zafe" for a version 2 invite.
+pub const INVITE: u16 = 2;
 /// A member's identity seeds as stored on a device and in backups.
 pub const IDENTITY_SEEDS: u16 = 1;
 /// A member's vault material (key package, vault secret, descriptor, log key).

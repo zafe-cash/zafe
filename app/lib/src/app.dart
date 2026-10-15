@@ -95,7 +95,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
   WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(openTapped()));
 
   // Invite links open the Join screen with the invite filled in; joining still takes a
-  // tap there and the safety number check after it. From inside a vault it's "Add vault".
+  // tap there and the safety-word check after it. From inside a vault it's "Add vault".
   // A link that arrives during key generation or the backup prompt right after it waits
   // for the next navigation away from them.
   void openInviteLink() {

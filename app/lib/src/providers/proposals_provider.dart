@@ -479,6 +479,24 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return newId;
   }
 
+  /// Cancels a payment that can no longer be completed the one-tap way and proposes the
+  /// same payment again with fresh signing data. Returns the new proposal id.
+  Future<String> proposeAgain(String id) async {
+    final vault = _vault;
+    final paths = await ZafePaths.get();
+    final newId = await rust.proposeAgain(
+      relayUrl: _endpoints.relayUrl,
+      lightwalletdUrl: _endpoints.lightwalletdUrl,
+      dbDir: paths.dbDir,
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
+      seeds: vault.identity!,
+      material: vault.material!,
+      proposalId: id,
+    );
+    await refreshFresh();
+    return newId;
+  }
+
   /// Abandons this device's unfinished signing round and starts a new one with the
   /// approvers whose signatures are still unused.
   Future<void> startOver(String id) async {

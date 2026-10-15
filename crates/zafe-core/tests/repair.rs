@@ -7,8 +7,7 @@ use pasta_curves::pallas;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     node::{
-        create_vault, join_vault, load_state, membership, run_keygen, seal, set_name, NodeError,
-        VaultMaterial,
+        create_vault, join_vault, load_state, run_keygen, seal, set_name, NodeError, VaultMaterial,
     },
     relay_client::RelayClient,
     repair::{
@@ -48,7 +47,17 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
         join_vault(relay, id, &invite).await.unwrap();
     }
     seal(relay, &ids[0], &invite).await.unwrap();
-    let (_, _, number) = membership(relay, &ids[0], &invite).await.unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let mut rngs: Vec<StdRng> = (0..n)

@@ -82,8 +82,18 @@ impl Log {
 
     /// Appends an event authored by member `author` (the relay only accepts members, but
     /// replay must not rely on that, so the chain here is checked against all 4 ids).
+    ///
+    /// Written as version 8: these fixtures use fake PCZTs, which version 9 proposals may
+    /// not carry. Version 9 rules have their own tests (`push_v`).
     fn push(&mut self, author: usize, event: &VaultEvent) {
-        self.push_raw(author, &event.to_bytes().unwrap());
+        self.push_v(author, event, 8);
+    }
+
+    /// Appends `event` tagged with event `version`.
+    fn push_v(&mut self, author: usize, event: &VaultEvent, version: u16) {
+        let mut bytes = event.to_bytes().unwrap();
+        bytes[..2].copy_from_slice(&version.to_le_bytes());
+        self.push_raw(author, &bytes);
     }
 
     /// Appends an entry whose plaintext is `bytes` as is.
@@ -1314,4 +1324,45 @@ fn a_pool_reset_without_a_pool_is_harmless() {
         .pools
         .get(&log.ids[2].public().sig_pk)
         .is_none_or(|p| p.available() == 0));
+}
+
+/// Version 9: once a version 9 event is in the log, an author can't dodge a newer rule by
+/// tagging an event with an older version; before one, old logs keep their meaning.
+#[test]
+fn versions_only_go_up_after_version_9() {
+    // An old log: a version 5 proposal with a fake PCZT replays as it always did.
+    let mut old = Log::new();
+    old.push(0, &old.created(&[0, 1, 2]));
+    old.push_raw(0, &proposal_v(1, 5));
+    let state = old.replay().unwrap();
+    assert!(state.proposals.contains_key(&[1; 16]));
+    assert_eq!(state.max_event_version, 5);
+
+    // After a version 9 event, the same entry is replayed under version 9 rules (here:
+    // a proposal must carry a usable PCZT), whatever version it claims.
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push_v(1, &name("Bob"), 9);
+    log.push_raw(0, &proposal_v(1, 5));
+    let state = log.replay().unwrap();
+    assert!(state.proposals.is_empty());
+    assert_eq!(state.ignored, vec![(2, VaultError::BadProposal(2))]);
+    assert_eq!(state.max_event_version, 9);
+}
+
+/// Version 9: a proposal whose PCZT doesn't parse is ignored instead of taking one-tap
+/// commitments from every member's pool.
+#[test]
+fn version_9_proposals_need_a_usable_pczt() {
+    let mut log = pooled_log(4);
+    let available = |s: &VaultState| s.pools.values().map(|p| p.available()).collect::<Vec<_>>();
+    let before = available(&log.replay().unwrap());
+    log.push_v(0, &proposal(1), 9);
+    let state = log.replay().unwrap();
+    assert!(state.proposals.is_empty());
+    assert!(matches!(
+        state.ignored.last(),
+        Some((_, VaultError::BadProposal(_)))
+    ));
+    assert_eq!(available(&state), before, "no commitments taken");
 }

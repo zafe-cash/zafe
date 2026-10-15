@@ -1,4 +1,4 @@
-/// Invite links, the tappable and scannable form of a raw invite (`zafe-invite-v1:<hex>`):
+/// Invite links, the tappable and scannable form of a raw invite (`zafe-invite-v2:<hex>`):
 ///
 /// - `https://<ZAFE_LINK_HOST>/join#<invite>` when the build has a link host. It opens Zafe
 ///   when installed (Android App Links, iOS Universal Links) and the landing page otherwise

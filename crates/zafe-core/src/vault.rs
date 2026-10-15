@@ -67,6 +67,11 @@ pub enum VaultError {
     BadReplacement(u64),
     #[error("entry {0}: not a valid change to a seat's key repair")]
     BadRepair(u64),
+    /// A version 9 `Proposal` whose PCZT doesn't parse, or that declares more spends to
+    /// sign than the PCZT has: members would reject it anyway, and it would only drain
+    /// every member's one-tap pool.
+    #[error("entry {0}: proposal with a transaction members can't use")]
+    BadProposal(u64),
 }
 
 /// Most commitments one `Commitments` event may carry.
@@ -516,6 +521,11 @@ pub struct VaultState {
     /// Identities whose seat moved away. Their log entries still chain (see
     /// [`VaultState::log_authors`]) and replay ignores them as `NotAMember`.
     pub former_members: Vec<IdentityPublic>,
+    /// Highest event version seen in the log so far. From version 9 on it is a floor:
+    /// an entry tagged with an older version is replayed under the newer rules, so a
+    /// member can't skip a rule (e.g. the version 7 broadcast txid check) by tagging an
+    /// event with an old version. Logs without a version 9 entry replay as before.
+    pub max_event_version: u16,
 }
 
 impl VaultState {
@@ -554,6 +564,7 @@ impl VaultState {
             pending_replacements: BTreeMap::new(),
             replacements: Vec::new(),
             former_members: Vec::new(),
+            max_event_version: 0,
         };
         for entry in rest {
             state.apply_entry(entry, key);
@@ -569,12 +580,23 @@ impl VaultState {
             .map_err(|_| VaultError::Undecryptable(index))
             .and_then(|bytes| VaultEvent::from_bytes_versioned(&bytes))
             .and_then(|(event, found)| {
-                self.apply_versioned(index, entry.header.author, event, found)
+                let effective = self.effective_version(found);
+                self.max_event_version = self.max_event_version.max(found);
+                self.apply_versioned(index, entry.header.author, event, effective)
             });
         if let Err(e) = result {
             self.ignored.push((index, e));
         }
         self.applied = index + 1;
+    }
+
+    /// The version whose rules apply to an event tagged `found` (see `max_event_version`).
+    fn effective_version(&self, found: u16) -> u16 {
+        if self.max_event_version >= VERSION_FLOOR_FROM {
+            found.max(self.max_event_version)
+        } else {
+            found
+        }
     }
 
     /// Entries skipped because they come from a newer version of Zafe: other members can
@@ -643,6 +665,13 @@ impl VaultState {
                         Some((nfs, *p.global().expiry_height()))
                     })
                     .unwrap_or_default();
+                if event_version >= VERSION_FLOOR_FROM
+                    && (expected_txid.is_none()
+                        || signing_spends == 0
+                        || usize::from(signing_spends) > nullifiers.len())
+                {
+                    return Err(VaultError::BadProposal(index));
+                }
                 // First come, first served: notes an earlier proposal that can still be
                 // signed spends are taken, until that proposal's transaction expires (as
                 // of the chain tip this proposal was built on, so every member agrees).
@@ -1092,6 +1121,10 @@ const BROADCAST_CHECKED_FROM: u16 = 7;
 
 /// First `VAULT_EVENT` version that has [`VaultEvent::PoolReset`].
 const POOL_RESET_FROM: u16 = 8;
+
+/// First `VAULT_EVENT` version after which versions only go up (see
+/// `VaultState::max_event_version`), and proposals must carry a usable PCZT.
+const VERSION_FLOOR_FROM: u16 = 9;
 
 fn check_descriptor_signatures(
     descriptor: &VaultDescriptor,

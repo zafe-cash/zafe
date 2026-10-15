@@ -1,5 +1,5 @@
 use rand::{rngs::StdRng, SeedableRng};
-use zafe_proto::{safety_number, Envelope, Identity, Kind, ProtoError, Recipient, ReplayGuard};
+use zafe_proto::{Envelope, Identity, Kind, ProtoError, Recipient, ReplayGuard};
 
 const MAILBOX: [u8; 16] = [9; 16];
 
@@ -133,21 +133,4 @@ fn identity_is_deterministic_from_seeds() {
     let (_, ids) = identities(1);
     let again = Identity::from_seeds(ids[0].seeds().clone());
     assert_eq!(again.public(), ids[0].public());
-}
-
-#[test]
-fn safety_number_properties() {
-    let (_, ids) = identities(4);
-    let set: Vec<_> = ids[..3].iter().map(|i| *i.public()).collect();
-    let mut reversed = set.clone();
-    reversed.reverse();
-    let n = safety_number(&MAILBOX, &set);
-    assert_eq!(n.len(), 14); // "dddd dddd dddd"
-    assert_eq!(n, safety_number(&MAILBOX, &reversed), "order-independent");
-
-    // Swapping any member (e.g. a relay substituting its own key) changes it.
-    let mut swapped = set.clone();
-    swapped[1] = *ids[3].public();
-    assert_ne!(n, safety_number(&MAILBOX, &swapped));
-    assert_ne!(n, safety_number(&[0; 16], &set), "bound to the vault");
 }

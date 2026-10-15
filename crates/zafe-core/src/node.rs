@@ -17,7 +17,6 @@ use reddsa::frost::redpallas::{
 use serde::{Deserialize, Serialize};
 use zafe_proto::{
     relay::AppendResult,
-    safety_number,
     version::{self, DecodeError, Format, UnsupportedVersion},
     Chain, Envelope, Identity, IdentityPublic, Kind, LogEntry, LogKey, MailboxId, ProtoError,
 };
@@ -272,16 +271,159 @@ pub async fn join_vault(
     Ok(())
 }
 
-/// Current members (as the relay reports them), whether membership is sealed, and the
-/// safety number to compare out of band.
+/// Setup state as this member sees it.
+#[derive(Clone, Debug)]
+pub struct Membership {
+    /// Members as the relay reports them.
+    pub members: Vec<IdentityPublic>,
+    pub sealed: bool,
+    /// The safety words to compare out of band (`sas::words`), once membership is locked
+    /// and every member's commitment and value arrived. `None` until then.
+    pub safety_words: Option<String>,
+    /// Members whose part of the safety check hasn't arrived yet (empty before sealing).
+    pub waiting_for: Vec<[u8; 32]>,
+}
+
+/// The current membership and, once it is sealed, one step of the safety check: this
+/// member publishes its commitment, then (once it holds every other member's
+/// commitment) its value; when every value is in, the words. Call it repeatedly (the app
+/// polls it): each call does what it can and returns.
 pub async fn membership(
     relay: &RelayClient,
     who: &Identity,
     invite: &Invite,
-) -> Result<(Vec<IdentityPublic>, bool, String), NodeError> {
+) -> Result<Membership, NodeError> {
     let response = relay.members(who, invite.mailbox).await?;
-    let number = safety_number(&invite.mailbox, &response.members);
-    Ok((response.members, response.sealed, number))
+    let mut out = Membership {
+        members: response.members,
+        sealed: response.sealed,
+        safety_words: None,
+        waiting_for: Vec::new(),
+    };
+    if out.sealed {
+        let (words, waiting) = safety_check(relay, who, invite.mailbox, &out.members).await?;
+        out.safety_words = words;
+        out.waiting_for = waiting;
+    }
+    Ok(out)
+}
+
+/// Relay URL, mailbox, sender, envelope kind.
+type SafetySent = (String, MailboxId, [u8; 32], u8);
+
+/// Commitments and values this process already sent, per relay, so polling doesn't send
+/// them again (a restarted app sends them once more; receivers keep the first of each).
+static SAFETY_SENT: std::sync::Mutex<BTreeSet<SafetySent>> = std::sync::Mutex::new(BTreeSet::new());
+
+/// Polls [`membership`] until the safety words are known (membership must get sealed
+/// meanwhile). For the CLI and tests; the app polls `membership` itself.
+pub async fn wait_for_safety_words(
+    relay: &RelayClient,
+    me: &Identity,
+    invite: &Invite,
+    timeout: Duration,
+) -> Result<String, NodeError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(words) = membership(relay, me, invite).await?.safety_words {
+            return Ok(words);
+        }
+        if Instant::now() > deadline {
+            return Err(NodeError::Timeout("the other members' safety values"));
+        }
+        // Two requests per poll: once a second stays well under the hosted per-key rate.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+async fn safety_check(
+    relay: &RelayClient,
+    me: &Identity,
+    mailbox: MailboxId,
+    members: &[IdentityPublic],
+) -> Result<(Option<String>, Vec<[u8; 32]>), NodeError> {
+    let my_pk = me.public().sig_pk;
+    let secret = crate::sas::secret(me, &mailbox);
+    let by_pk: BTreeMap<[u8; 32], IdentityPublic> =
+        members.iter().map(|m| (m.sig_pk, *m)).collect();
+    if !by_pk.contains_key(&my_pk) {
+        return Err(NodeError::NotReady(
+            "this phone isn't a member of the setup".into(),
+        ));
+    }
+    let others: Vec<[u8; 32]> = by_pk.keys().filter(|pk| **pk != my_pk).copied().collect();
+
+    let mut commits = BTreeMap::<[u8; 32], [u8; 32]>::new();
+    let mut reveals = BTreeMap::<[u8; 32], [u8; 32]>::new();
+    for (_, sender, env) in read_inbox(relay, me, mailbox, &by_pk, 0).await? {
+        let slot = match env.header.kind {
+            Kind::SafetyCommit => &mut commits,
+            Kind::SafetyReveal => &mut reveals,
+            _ => continue,
+        };
+        if let Some(value) = env
+            .open(me, &sender)
+            .ok()
+            .and_then(|p| <[u8; 32]>::try_from(p.as_slice()).ok())
+        {
+            // The first of each kind from each member counts.
+            slot.entry(sender.sig_pk).or_insert(value);
+        }
+    }
+
+    let send = |kind: Kind, payload: [u8; 32]| async move {
+        let key = (relay.base_url().to_owned(), mailbox, my_pk, kind as u8);
+        if SAFETY_SENT.lock().expect("not poisoned").contains(&key) {
+            return Ok::<_, NodeError>(());
+        }
+        let env = Envelope::public(
+            me,
+            mailbox,
+            SeqCounter::default().next_seq(),
+            kind,
+            &payload,
+        )
+        .map_err(proto)?;
+        relay.send(&env).await?;
+        SAFETY_SENT.lock().expect("not poisoned").insert(key);
+        Ok(())
+    };
+    send(
+        Kind::SafetyCommit,
+        crate::sas::commitment(&mailbox, &my_pk, &secret),
+    )
+    .await?;
+    let missing_commits: Vec<_> = others
+        .iter()
+        .filter(|pk| !commits.contains_key(*pk))
+        .copied()
+        .collect();
+    if !missing_commits.is_empty() {
+        return Ok((None, missing_commits));
+    }
+    // Every other member is committed: only now does this value leave the phone.
+    send(Kind::SafetyReveal, secret).await?;
+    let missing_reveals: Vec<_> = others
+        .iter()
+        .filter(|pk| !reveals.contains_key(*pk))
+        .copied()
+        .collect();
+    if !missing_reveals.is_empty() {
+        return Ok((None, missing_reveals));
+    }
+    let mut values = vec![(*me.public(), secret)];
+    for pk in &others {
+        let value = reveals[pk];
+        if crate::sas::commitment(&mailbox, pk, &value) != commits[pk] {
+            return Err(NodeError::Verification(
+                "a member's safety value doesn't match what it committed to: stop, and \
+                 don't make keys for this setup"
+                    .into(),
+            ));
+        }
+        values.push((by_pk[pk], value));
+    }
+    Ok((Some(crate::sas::words(&mailbox, &values)), Vec::new()))
 }
 
 /// Creator only, before membership is locked: abandons the setup and deletes it on the
@@ -306,7 +448,7 @@ pub async fn seal(
     creator: &Identity,
     invite: &Invite,
 ) -> Result<(), NodeError> {
-    let (members, _, _) = membership(relay, creator, invite).await?;
+    let members = relay.members(creator, invite.mailbox).await?.members;
     if members.len() != usize::from(invite.members) {
         return Err(NodeError::NotReady(format!(
             "{} of {} members joined",
@@ -426,14 +568,24 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
     let mut seq = SeqCounter::default();
     let is_creator = me.public().sig_pk == invite.creator;
 
-    // Membership must be sealed and match what the user confirmed.
-    let (members, sealed, number) = membership(relay, me, invite).await?;
+    // Membership must be sealed, and its safety words what the user confirmed.
+    let Membership {
+        members,
+        sealed,
+        safety_words,
+        ..
+    } = membership(relay, me, invite).await?;
     if !sealed || members.len() != usize::from(invite.members) {
         return Err(NodeError::NotReady("membership is not sealed yet".into()));
     }
-    if number != confirmed_safety_number.trim() {
+    let Some(words) = safety_words else {
+        return Err(NodeError::NotReady(
+            "the safety check isn't complete yet".into(),
+        ));
+    };
+    if words != crate::sas::normalize(confirmed_safety_number) {
         return Err(NodeError::SafetyNumberMismatch {
-            actual: number,
+            actual: words,
             confirmed: confirmed_safety_number.into(),
         });
     }
@@ -1560,6 +1712,116 @@ pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCor
     Ok(id)
 }
 
+/// Proposer: cancels `proposal` and proposes the same payments again, with fresh one-tap
+/// commitments. For a payment that can no longer be completed the one-tap way
+/// ([`one_tap_stuck`]): everyone then approves once more, with one tap. A sweep is
+/// proposed again for the cancelled payment it makes unsendable. Returns the new id.
+#[allow(clippy::too_many_arguments)]
+pub async fn propose_again<
+    P: Parameters + Clone + Send + Sync + 'static,
+    R: RngCore + CryptoRng,
+>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    wallet: &mut VaultWallet<P>,
+    lightwalletd: &mut Client,
+    sent: &SentTxs,
+    proposal: ProposalId,
+    rng: &mut R,
+) -> Result<ProposalId, NodeError> {
+    let (_, state) = load_state(relay, me, material).await?;
+    let p = state
+        .proposals
+        .get(&proposal)
+        .ok_or_else(|| NodeError::Protocol("unknown proposal".into()))?;
+    if p.author != me.public().sig_pk {
+        return Err(NodeError::Verification(
+            "only the member who proposed it can propose it again".into(),
+        ));
+    }
+    if !matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved) {
+        return Err(NodeError::NotReady("this payment is no longer open".into()));
+    }
+    let auto_send = p.auto_send;
+    let payments = p
+        .payments
+        .iter()
+        .map(|x| {
+            Ok(PaymentRequest {
+                address: x.address.clone(),
+                amount_zat: x.amount_zat,
+                memo: Some(zcash_protocol::memo::MemoBytes::from_bytes(&x.memo).map_err(proto)?),
+            })
+        })
+        .collect::<Result<Vec<_>, NodeError>>()?;
+    // A sweep (no payments) makes a cancelled payment unsendable: find that payment.
+    let swept = payments
+        .is_empty()
+        .then(|| {
+            state.proposals.values().find(|q| {
+                q.status == ProposalStatus::Cancelled
+                    && q.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
+            })
+        })
+        .flatten()
+        .map(|q| q.id);
+    if payments.is_empty() && swept.is_none() {
+        return Err(NodeError::Protocol("nothing to propose again".into()));
+    }
+    cancel(relay, me, material, proposal, rng).await?;
+    match swept {
+        Some(target) => {
+            invalidate(relay, me, material, wallet, lightwalletd, sent, target, rng).await
+        }
+        None => {
+            propose(
+                relay,
+                me,
+                material,
+                wallet,
+                lightwalletd,
+                sent,
+                &payments,
+                auto_send,
+                rng,
+            )
+            .await
+        }
+    }
+}
+
+/// Whether an open one-tap proposal can no longer be completed the one-tap way, as far as
+/// this device can tell: no signer group could still get every member's shares. A member
+/// who already posted shares can't add a group (its vote is final), and this member can't
+/// sign a group whose nonces this device doesn't hold (a restore, or a phone that took
+/// over a seat). The proposer should then propose it again ([`propose_again`]).
+pub fn one_tap_stuck(
+    state: &VaultState,
+    proposal: &ProposalId,
+    me: &[u8; 32],
+    pool: &impl PoolStore,
+) -> bool {
+    let Some(p) = state.proposals.get(proposal) else {
+        return false;
+    };
+    let Some(pre) = p.preprocessed.as_ref() else {
+        return false;
+    };
+    if p.ready_group.is_some()
+        || !matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
+    {
+        return false;
+    }
+    let can_still_sign = |m: &[u8; 32], g: usize| match p.shares.get(m) {
+        Some(posted) => posted.iter().any(|s| usize::from(s.group) == g),
+        None if m == me => (0..usize::from(p.signing_spends))
+            .all(|j| pre.commitment(g, j, me).is_some_and(|c| pool.contains(c))),
+        None => true,
+    };
+    !(0..pre.subsets.len()).any(|g| pre.subsets[g].iter().all(|m| can_still_sign(m, g)))
+}
+
 /// Refreshes this member's note holds from the vault log (see [`note_holds`]), so its
 /// spendable balance and its next proposal leave out notes live proposals spend.
 ///
@@ -2557,6 +2819,8 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
             | Kind::DkgRound2
             | Kind::SkContribution
             | Kind::DescriptorSignature
+            | Kind::SafetyCommit
+            | Kind::SafetyReveal
             | Kind::LogKey => {
                 done.push(cursor);
                 continue;
@@ -2994,13 +3258,23 @@ mod tests {
             name: "Ops".into(),
         };
         let text = invite.encode();
-        assert!(text.starts_with("zafe-invite-v1:"));
-        let newer = text.replacen("zafe-invite-v1:", "zafe-invite-v2:", 1);
+        let tag = format!("zafe-invite-v{}:", version::INVITE);
+        assert!(text.starts_with(&tag));
+        let newer = text.replacen(&tag, &format!("zafe-invite-v{}:", version::INVITE + 1), 1);
         match Invite::decode(&newer) {
             Err(NodeError::UnsupportedVersion(v)) => {
-                assert_eq!((v.format, v.found, v.supported), (Format::Invite, 2, 1));
+                assert_eq!(
+                    (v.format, v.found, v.supported),
+                    (Format::Invite, version::INVITE + 1, version::INVITE)
+                );
                 assert!(v.is_newer());
             }
+            other => panic!("{other:?}"),
+        }
+        // An invite from before the safety words (version 1) is refused as older.
+        let older = text.replacen(&tag, "zafe-invite-v1:", 1);
+        match Invite::decode(&older) {
+            Err(NodeError::UnsupportedVersion(v)) => assert!(!v.is_newer()),
             other => panic!("{other:?}"),
         }
         assert!(matches!(

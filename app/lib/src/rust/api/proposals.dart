@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_store`, `parse_id`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_store`, `parse_id`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 
@@ -107,6 +107,26 @@ Future<String> proposePayment({
   material: material,
   payments: payments,
   autoSend: autoSend,
+);
+
+/// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
+/// commitments (see `ProposalInfo.needs_new_proposal`). Returns the new proposal's id.
+Future<String> proposeAgain({
+  required String relayUrl,
+  required String lightwalletdUrl,
+  required String dbDir,
+  required List<int> dbKey,
+  required List<int> seeds,
+  required List<int> material,
+  required String proposalId,
+}) => RustLib.instance.api.crateApiProposalsProposeAgain(
+  relayUrl: relayUrl,
+  lightwalletdUrl: lightwalletdUrl,
+  dbDir: dbDir,
+  dbKey: dbKey,
+  seeds: seeds,
+  material: material,
+  proposalId: proposalId,
 );
 
 /// Proposes spending a cancelled proposal's notes back to the vault, so the cancelled
@@ -427,6 +447,11 @@ class ProposalInfo {
   /// A live proposal (id) that spends this cancelled one's notes back to the vault.
   final String? invalidatedBy;
 
+  /// One-tap, open, and no signer group can be completed any more (a member's phone
+  /// was restored or replaced while it was open): the proposer should propose it again
+  /// (`propose_again`), and everyone approves once more.
+  final bool needsNewProposal;
+
   const ProposalInfo({
     required this.id,
     required this.author,
@@ -450,6 +475,7 @@ class ProposalInfo {
     required this.needsReapproval,
     required this.stillSendable,
     this.invalidatedBy,
+    required this.needsNewProposal,
   });
 
   @override
@@ -475,7 +501,8 @@ class ProposalInfo {
       expiryHeight.hashCode ^
       needsReapproval.hashCode ^
       stillSendable.hashCode ^
-      invalidatedBy.hashCode;
+      invalidatedBy.hashCode ^
+      needsNewProposal.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -503,7 +530,8 @@ class ProposalInfo {
           expiryHeight == other.expiryHeight &&
           needsReapproval == other.needsReapproval &&
           stillSendable == other.stillSendable &&
-          invalidatedBy == other.invalidatedBy;
+          invalidatedBy == other.invalidatedBy &&
+          needsNewProposal == other.needsNewProposal;
 }
 
 class ProposalList {

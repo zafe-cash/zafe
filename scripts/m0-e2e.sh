@@ -53,12 +53,16 @@ member B vault join "$INVITE"
 member C vault join "$INVITE"
 member A vault seal
 
-step "everyone compares the safety number"
-SN_A=$(member A vault members | sed -n 's/^safety number: //p')
-SN_B=$(member B vault members | sed -n 's/^safety number: //p')
-SN_C=$(member C vault members | sed -n 's/^safety number: //p')
+step "everyone compares the safety words (commit, then reveal: all three at once)"
+# Wait for these three only: a bare `wait` would also wait for the relay.
+pids=()
+for who in A B C; do member "$who" vault members --wait > "$WORK/m$who" & pids+=($!); done
+for pid in "${pids[@]}"; do wait "$pid"; done
+SN_A=$(sed -n 's/^safety words: //p' "$WORK/mA")
+SN_B=$(sed -n 's/^safety words: //p' "$WORK/mB")
+SN_C=$(sed -n 's/^safety words: //p' "$WORK/mC")
 echo "A: $SN_A  B: $SN_B  C: $SN_C"
-[[ "$SN_A" == "$SN_B" && "$SN_B" == "$SN_C" ]] || { echo "safety numbers differ" >&2; exit 1; }
+[[ -n "$SN_A" && "$SN_A" == "$SN_B" && "$SN_B" == "$SN_C" ]] || { echo "safety words differ" >&2; exit 1; }
 
 step "key generation (three processes, through the relay)"
 member A vault keygen --safety-number "$SN_A" --birthday 2 > "$WORK/kA" &

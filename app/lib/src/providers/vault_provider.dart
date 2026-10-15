@@ -380,8 +380,8 @@ class VaultNotifier extends Notifier<VaultState> {
     await refreshMembership();
   }
 
-  /// Runs key generation with every member; blocks until done. `safetyNumber` is the
-  /// number the user confirmed out of band.
+  /// Runs key generation with every member; blocks until done. `safetyNumber` holds the
+  /// safety words the user compared out of band.
   Future<void> createKeys(String safetyNumber) async {
     final vaultId = state.activeId!;
     final material = await rust.runKeygen(

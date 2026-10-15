@@ -25,5 +25,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
 [dev-dependencies]
 zafe-relay = { path = "../../crates/zafe-relay" }
+futures = "0.3"
 axum.workspace = true
 orchard.workspace = true

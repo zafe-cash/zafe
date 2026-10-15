@@ -56,16 +56,21 @@ async fn setup() -> (RelayClient, Vec<Identity>, Invite, String) {
     }
     seal(&relay, &ids[0], &invite).await.unwrap();
 
-    // Every member sees the same safety number.
-    let mut numbers = Vec::new();
-    for id in &ids {
-        let (members, sealed, number) = membership(&relay, id, &invite).await.unwrap();
-        assert!(sealed);
-        assert_eq!(members.len(), 3);
-        numbers.push(number);
-    }
-    assert!(numbers.windows(2).all(|w| w[0] == w[1]));
-    let number = numbers.remove(0);
+    // Membership is locked; every member sees the same safety words once all values are in.
+    let m = membership(&relay, &ids[0], &invite).await.unwrap();
+    assert!(m.sealed);
+    assert_eq!(m.members.len(), 3);
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(&relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     (relay, ids, invite, number)
 }
 

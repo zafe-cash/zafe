@@ -52,9 +52,17 @@ async fn make_vault(relay: &RelayClient) -> Vault {
         join_vault(relay, id, &invite).await.unwrap();
     }
     seal(relay, &ids[0], &invite).await.unwrap();
-    let (_, _, number) = zafe_core::node::membership(relay, &ids[0], &invite)
-        .await
-        .unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let (mut r0, mut r1, mut r2) = (

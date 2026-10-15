@@ -12,7 +12,7 @@ use rust_lib_zafe::api::watch::{
     stop_vault_watch, watch_vault_with, VaultActivity, VaultActivityKind,
 };
 use zafe_core::{
-    node::{create_vault, join_vault, membership, run_keygen, seal, top_up_pool, VaultMaterial},
+    node::{create_vault, join_vault, run_keygen, seal, top_up_pool, VaultMaterial},
     relay_client::RelayClient,
     session::MemoryPoolStore,
     wallet::regtest_network,
@@ -37,7 +37,17 @@ async fn two_member_vault(relay: &RelayClient) -> (Vec<Identity>, Vec<VaultMater
         .unwrap();
     join_vault(relay, &ids[1], &invite).await.unwrap();
     seal(relay, &ids[0], &invite).await.unwrap();
-    let (_, _, number) = membership(relay, &ids[0], &invite).await.unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let (mut r0, mut r1) = (StdRng::seed_from_u64(1), StdRng::seed_from_u64(2));

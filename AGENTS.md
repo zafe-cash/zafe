@@ -75,13 +75,27 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `qsk = trunc32(PRF^expand_sk[0x0C])`, `qk = BLAKE3.derive_key("Zcash ZIP 2005 qk-derivation v1", qsk)`,
   `rivk_ext = ToScalar(PRF^expand_qk[0x0D] || ak || nk)`. FVK via `FullViewingKey::from_bytes`.
   Never use frost-tools' `from_sk_ak_incompatible_with_quantum_recoverability...` (not recoverable).
-- **DKG**: safety number confirmed out of band before starting; round-1 echo hashes must all
+- **DKG**: safety words confirmed out of band before starting; round-1 echo hashes must all
   match; round-2 packages and `sk` contributions are HPKE-sealed; every member signs the
   descriptor. Each `sk` contribution is committed in round 1 (`SkContribution::commitment`,
   in `Round1Msg.sk_commitment`), the commitments are part of the echo every member
   compares (`echo_with_commitments`), and a revealed `r_j` that doesn't match aborts
   keygen: no member can choose its contribution after seeing the others'. `reddsa`
   0.5.2's `post_dkg` normalizes `ak` to even Y (orchard rejects odd).
+- **Setup safety words** (2026-10-15, `zafe_core::sas`, audit finding: the old 12-digit
+  hash of member keys was ~40 bits and a relay could grind a matching key set): after
+  sealing, each member sends a `Kind::SafetyCommit` envelope (commitment to a secret), then,
+  only once it holds every other member's commitment, `Kind::SafetyReveal` (the secret);
+  the 4 BIP-39 words hash every member's key and value, so a relay gets one guess (2^-44).
+  The secret is derived from an Ed25519 signature (deterministic: a restarted app reveals
+  what it committed to, nothing stored). `node::membership` does one step per call and
+  returns `safety_words` (`None` + `waiting_for` until all values are in); the app's setup
+  screen polls it every 2 s, so **every member must have the setup screen open** for the
+  words to appear (the screen marks members "Not here yet"). CLI/tests:
+  `node::wait_for_safety_words` (1 s poll: two requests per poll, under the hosted per-key
+  rate); `SAFETY_SENT` dedupes sends per (relay URL, mailbox, sender, kind) in-process.
+  Keygen still takes the confirmed string (`--safety-number` in the CLI, `confirmedSafetyNumber`
+  in the bridge) and re-derives it.
 - **Randomizer**: the FROST randomizer for each spend is the PCZT's own `alpha` (fixed before
   round 1 because `rk` feeds the sighash). Secure per the Re-Randomized FROST paper; matches
   frost-tools' `zcash-sign`. **Deviates from ZIP 312**, which says the Coordinator MUST
@@ -188,7 +202,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   commitments. The other signer's one-tap approval is final, the restored member could only approve interactively,
   and a 2-of-2 could never complete (~15 proposals, until the dead pool ran out). Fix: `VaultEvent::PoolReset`
   retires the author's *unassigned* commitments (assigned ones stay, so already-assigned open proposals still need
-  re-proposing). `node::top_up_pool(.., reset, ..)` logs it before publishing a full fresh pool, only when asked:
+  re-proposing: `node::one_tap_stuck` → bridge `ProposalInfo.needs_new_proposal`, and the proposer's "Propose
+  again" button runs `node::propose_again`, which cancels and re-proposes the same payments with fresh one-tap
+  commitments; the user chose this over mixing one-tap and interactive approvals on one payment, 2026-10-15).
+  `node::top_up_pool(.., reset, ..)` logs it before publishing a full fresh pool, only when asked:
   the restore (`addRestoredVault`) calls bridge `mark_pool_reset(state_dir)`, which writes the
   `state_dir::POOL_RESET` marker; `list_proposals` reads it, resets, removes it. CLI: `zafe pool --reset`. Only the
   restore asks, because two devices of one member (a deliberate second phone) would otherwise retire each
@@ -231,7 +248,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
     versioning (tables but version 0), is refused at startup: delete it. Bumps:
     **2** (2026-09-30) added the quota counters `mailboxes.delivery_bytes/log_bytes`;
     a schema-1 DB is migrated at startup (`migrate_from_v1`: ALTER + backfill).
-  - **Device state**: invites (`zafe-invite-v1:`, `INVITE`; another version →
+  - **Device state**: invites (`zafe-invite-v2:`, `INVITE`; another version →
     `UnsupportedVersion`, not "bad invite"), identity seeds (`IdentitySeeds::to_bytes`,
     66 bytes: secure storage, CLI `identity.bin`, backups), vault material
     (`VaultMaterial::to_bytes`: secure storage, CLI `vault.bin`, backups), nonce and pool
@@ -291,6 +308,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   together before anyone sends. Versions 1-6 broadcasts replay unchecked, forever.
   `VAULT_EVENT` 7 → 8 (2026-10-12, `VaultEvent::PoolReset`, appended): valid only in a version 8 event. **Gate:**
   an older app skips every version 8 event, so all members must update together before anyone restores a backup.
+  `VAULT_EVENT` 8 → 9 (2026-10-15, no new variant, audit M3/L5): once a version 9 event is in the log, later
+  events replay under the highest version seen (no dodging a rule with an old tag), and a version 9 `Proposal`
+  must carry a parseable PCZT that declares no more spends than it has. **Gate:** older apps skip v9 events;
+  logs without one replay as before. `INVITE` 1 → 2 (2026-10-15): same body, but setups use the safety words,
+  so an older app refuses a v2 invite ("update Zafe") instead of showing a number nobody else has.
   **Pre-release: nothing reads the unversioned bytes from before 2026-09-30**; reset
   test devices (`adb shell pm clear xyz.zafe.zafe`), the harness
   (`scripts/app-harness.sh stop`) and relay DBs after pulling this change.
@@ -1209,7 +1231,7 @@ Learned while studying it:
   don't conclude "not delivered" too early: check `adb logcat | grep FLTFireMsg`. The
   relay logs `push: sent` at debug level (`RUST_LOG=zafe_relay=debug`).
 - **Invites** (`features/onboarding/invite_link.dart`, pure and unit-tested): raw form
-  `zafe-invite-v1:<hex postcard>` (~250 chars; URL-safe, asserted in `node::tests`), link
+  `zafe-invite-v2:<hex postcard>` (~250 chars; URL-safe, asserted in `node::tests`), link
   form `zafe://join?invite=<raw>`, or `https://<ZAFE_LINK_HOST>/join#<raw>` when the build
   has the dart-define (invite in the **fragment**, so the landing site's server never sees
   it; only that exact host, port 443, no query). Both forms are always accepted; the https
@@ -1235,7 +1257,7 @@ Learned while studying it:
   `inviteLinks` and `paymentLinks` (its stream also delivers the launch link); `app.dart` opens
   `/welcome` + push `/join?invite=` (calling `beginAddVault` when a vault is active) and
   defers while keys are being made or on `/backup-prompt`. Test on a device with
-  `adb shell "am start -a android.intent.action.VIEW -d 'zafe://join?invite=zafe-invite-v1:...'"`
+  `adb shell "am start -a android.intent.action.VIEW -d 'zafe://join?invite=zafe-invite-v2:...'"`
   (quoted twice: the device shell splits it again; cold start: `adb shell am force-stop
   xyz.zafe.zafe` first).
 - **Website** (`infra/site/`, Astro 7, static): a calm home page `/` (no JS; structured

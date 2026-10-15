@@ -134,7 +134,11 @@ pub fn join_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(
 pub struct MembershipInfo {
     pub members: Vec<String>,
     pub sealed: bool,
-    pub safety_number: String,
+    /// The safety words to compare (4 words), once membership is locked and every
+    /// member's part of the check arrived. `None` until then: keep polling.
+    pub safety_number: Option<String>,
+    /// Members (key hex) whose part of the safety check hasn't arrived yet.
+    pub waiting_for: Vec<String>,
     pub is_creator: bool,
 }
 
@@ -145,12 +149,12 @@ pub fn vault_membership(
 ) -> Result<MembershipInfo, ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
-    let (members, sealed, safety_number) =
-        runtime().block_on(node::membership(&RelayClient::new(relay_url), &me, &invite))?;
+    let m = runtime().block_on(node::membership(&RelayClient::new(relay_url), &me, &invite))?;
     Ok(MembershipInfo {
-        members: members.iter().map(|m| hex::encode(m.sig_pk)).collect(),
-        sealed,
-        safety_number,
+        members: m.members.iter().map(|m| hex::encode(m.sig_pk)).collect(),
+        sealed: m.sealed,
+        safety_number: m.safety_words,
+        waiting_for: m.waiting_for.iter().map(hex::encode).collect(),
         is_creator: me.public().sig_pk == invite.creator,
     })
 }

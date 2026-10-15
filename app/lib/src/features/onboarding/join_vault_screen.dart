@@ -178,7 +178,7 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
           const SizedBox(height: AppSpacing.sm),
           Text(
             'Opened from a link. Join only if you were expecting this invite from '
-            'someone you know. You\'ll compare a safety number with every member '
+            'someone you know. You\'ll compare four safety words with every member '
             'before any keys are made.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,

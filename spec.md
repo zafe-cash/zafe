@@ -216,9 +216,11 @@ interface Envelope {
 - Vault log entries: XChaCha20-Poly1305 under the vault log key.
 - Recipients drop any envelope whose signature fails, whose sender isn't a current member, or whose `seq` was already seen.
 
-### 5.3 Safety number
+### 5.3 Safety words
 
-A **safety number** is a short fingerprint over the sorted list of all members' `IdentityPublic` keys plus `vaultId`, shown as 12 digits and as a QR code. All members must confirm the same safety number **before the DKG starts** (§7.2). This is the only defence against a malicious relay impersonating members during setup.
+The **safety words** are four BIP-39 words that every member compares out of band. All members must confirm the same words **before the DKG starts** (§7.2). This is the only defence against a malicious relay impersonating members during setup.
+
+They come from a commit-then-reveal exchange after membership is locked (2026-10-15, replacing a 12-digit hash of the member keys, which a relay could grind in days on one core). Each member derives a secret value from a signature by its identity key over the mailbox id, sends a commitment to it (`SafetyCommit` envelope), and sends the value (`SafetyReveal`) only once it holds every other member's commitment. The words hash the mailbox id and every member's key and value. A relay that shows two members different member lists must commit to its own values before it learns the honest members' values, so a match is a one-shot guess: 2^-44.
 
 ---
 
@@ -243,7 +245,7 @@ A **safety number** is a short fingerprint over the sorted list of all members' 
 | Censor or delay messages (members see stalled sessions and can switch relay; relay is self-hostable) | Spend |
 | Withhold or reorder log entries (hash chain and member signatures detect gaps and forks) | Forge member messages or votes |
 | Serve an older log (restore an old database, or lose data), or a different history (each device keeps its own copy of the log and refuses a relay that no longer holds its last entry, §6.3) | Make a device accept a log shorter than the one it already saw |
-| Impersonate members during setup **if the safety number is skipped** (the UI blocks the DKG until it is confirmed) | Read content |
+| Impersonate members during setup **if the safety words are skipped** (the UI blocks the DKG until they are confirmed) | Read content |
 
 ### 6.3 Vault log
 
@@ -293,7 +295,7 @@ Name, network (`test` / `main`), `N`, `t`, and optional initial rules and addres
 2  Invite:  link (remote) or QR (in person); carries mailbox id,
             creator sigPk fingerprint, one-time join token
 3  Members join, publish IdentityPublic
-4  ALL members confirm the safety number
+4  ALL members confirm the safety words
       remote: read the 12 digits over a call / trusted channel
       in person: scan each other's QR
    → DKG is disabled in the UI until every member has confirmed
@@ -729,7 +731,7 @@ Restore the backup, then sync the vault log from the relay, then resync the wall
 
 ### 13.2 Assumptions
 
-- Members actually compare safety numbers during setup.
+- Members actually compare safety words during setup.
 - Members' devices and OS secure storage are not compromised.
 - Upstream libraries (`frost-core`, `reddsa`, `orchard`, `pczt`, librustzcash) are correct.
 - In a rotation or reshare, departing members delete their shares, and every member deletes old shares and old backups (only migration removes this assumption; §10.4.4).

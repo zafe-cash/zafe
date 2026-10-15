@@ -9,8 +9,8 @@ use rand::{rngs::StdRng, SeedableRng};
 use reddsa::frost::redpallas::Identifier;
 use zafe_core::{
     node::{
-        append_event, approve, create_vault, join_vault, load_state, membership, run_keygen, seal,
-        top_up_pool, NodeError, VaultMaterial,
+        append_event, approve, create_vault, join_vault, load_state, one_tap_stuck, run_keygen,
+        seal, top_up_pool, NodeError, VaultMaterial,
     },
     relay_client::RelayClient,
     session::{pczt_hash, GroupPlan, Member, MemoryNonceStore, MemoryPoolStore, PoolStore},
@@ -54,7 +54,17 @@ async fn vault(
         join_vault(&relay, id, &invite).await.unwrap();
     }
     seal(&relay, &ids[0], &invite).await.unwrap();
-    let (_, _, number) = membership(&relay, &ids[0], &invite).await.unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(&relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     let net = regtest_network();
     let runs = ids.iter().enumerate().map(|(i, id)| {
         let (relay, invite, number, net) = (&relay, &invite, &number, &net);
@@ -303,4 +313,15 @@ async fn a_useless_interactive_approval_is_refused() {
     assert!(matches!(err, NodeError::NotReady(_)), "{err:?}");
     let (_, state) = load_state(&relay, &ids[1], &materials[1]).await.unwrap();
     assert_eq!(state.proposals[&proposal].approvals.len(), 1);
+
+    // Member 1's phone knows the payment is stuck (the proposer is then offered
+    // "Propose again"); member 0's can't tell, since member 1 may still sign.
+    let pk = |i: usize| ids[i].public().sig_pk;
+    assert!(one_tap_stuck(
+        &state,
+        &proposal,
+        &pk(1),
+        &MemoryPoolStore::default()
+    ));
+    assert!(!one_tap_stuck(&state, &proposal, &pk(0), &pools[0]));
 }
