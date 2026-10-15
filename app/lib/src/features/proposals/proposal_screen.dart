@@ -91,10 +91,16 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
                       : 'Approved. Ready to send')
                 : (r.signed ? 'Approved and signed' : 'Approved'),
           );
+          // Nothing left to do here until more signers approve: go back. A payment
+          // that is ready to send stays, for "Send now".
+          if (!r.completed) _leave();
         }
       } else {
         await notifier.reject(widget.id);
-        if (mounted) showAppToast(context, 'Rejected');
+        if (mounted) {
+          showAppToast(context, 'Rejected');
+          _leave();
+        }
       }
     } catch (e) {
       debugPrint('vote failed: ${describeError(e)}');
@@ -108,6 +114,15 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       }
     } finally {
       if (mounted) setState(() => _voting = false);
+    }
+  }
+
+  /// Back to where the payment was opened from (Home if it was opened directly).
+  void _leave() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/home');
     }
   }
 
@@ -187,12 +202,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       await ref.read(proposalsProvider.notifier).cancel(widget.id);
       if (mounted) {
         showAppToast(context, 'Payment cancelled');
-        // Back to where the payment was opened from.
-        if (context.canPop()) {
-          context.pop();
-        } else {
-          context.go('/home');
-        }
+        _leave();
       }
     } catch (e) {
       debugPrint('cancel failed: ${describeError(e)}');

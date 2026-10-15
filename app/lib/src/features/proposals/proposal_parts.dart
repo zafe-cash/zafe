@@ -183,44 +183,56 @@ class _ProposalApprovalsCardState extends State<ProposalApprovalsCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
+          // Wraps (status under the title) rather than squeeze "Approvals" on narrow
+          // phones with large system text.
+          SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xxs,
+              children: [
+                Text(
                   'Approvals',
                   style: AppTypography.labelLarge.copyWith(
                     color: colors.text.accent,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-              ProposalStatusChip(
-                proposal: p,
-                sending: sending,
-                height: widget.height,
-              ),
-            ],
+                ProposalStatusChip(
+                  proposal: p,
+                  sending: sending,
+                  height: widget.height,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: AppSpacing.s),
-          Row(
-            children: [
-              Expanded(
-                child: ApprovalDots(
+          SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xxs,
+              children: [
+                ApprovalDots(
                   approved: p.approvals.length,
                   rejected: p.rejections.length,
                   members: members.length,
                   threshold: p.threshold,
                 ),
-              ),
-              Text(
-                // Approvals so far, then the vault's rule (t of n), so a 2-of-3 vault never
-                // reads as "2 of 2".
-                '${p.approvals.length} approved · needs ${p.threshold} of ${members.length}',
-                style: AppTypography.labelMedium.copyWith(
-                  color: colors.text.secondary,
+                Text(
+                  // Approvals so far, then the vault's rule (t of n), so a 2-of-3 vault never
+                  // reads as "2 of 2".
+                  '${p.approvals.length} approved · needs ${p.threshold} of ${members.length}',
+                  style: AppTypography.labelMedium.copyWith(
+                    color: colors.text.secondary,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: AppSpacing.s),
           const SizedBox(height: AppSpacing.xs),
