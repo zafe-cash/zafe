@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/config/beta.dart';
@@ -109,16 +108,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Background checks and pushes; the first time, the notifications primer before the
   /// system's permission prompt (never the prompt on its own, and never again after).
   Future<void> _startWatch() async {
-    final prefs = await SharedPreferences.getInstance();
-    var ask = false;
-    if (!(prefs.getBool(kNotificationsPrimedKey) ?? false)) {
-      await prefs.setBool(kNotificationsPrimedKey, true);
-      if (!await notificationsEnabled()) {
-        if (!mounted) return;
-        ask = await showNotificationPrimer(context);
-      }
-    }
-    await startVaultWatch(askPermission: ask);
+    await startWatchWithPrimer(context);
     if (mounted) ref.invalidate(notificationsEnabledProvider);
   }
 

@@ -2,6 +2,9 @@
 //! side calls): recovery code, co-signers' approvals, the helpers' repair inside their
 //! regular refresh, and the new phone collecting its key. No chain needed.
 
+mod common;
+
+use common::Setup;
 use std::thread;
 
 use rust_lib_zafe::api::{
@@ -42,35 +45,20 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     for s in &seeds[1..] {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
-    vault::seal_vault(relay.clone(), seeds[0].clone(), invite.clone()).unwrap();
-    let safety = safety_words(&relay, &seeds, &invite);
-    let materials: Vec<Vec<u8>> = seeds
+    // The same dirs `state_dir(i)` returns below. No lightwalletd: the creator passes
+    // birthday 2 and joiners skip the ceiling when the server can't be reached.
+    let lwd = "http://127.0.0.1:1";
+    let setups: Vec<Setup> = seeds
         .iter()
         .enumerate()
-        .map(|(i, s)| {
-            let (relay, s, invite, sn) = (relay.clone(), s.clone(), invite.clone(), safety.clone());
-            // The same dir `state_dir(i)` returns below.
-            let state = tmp.join(format!("m{i}")).to_string_lossy().into_owned();
-            thread::spawn(move || {
-                vault::run_keygen(
-                    relay,
-                    "http://127.0.0.1:1".into(),
-                    "regtest".into(),
-                    s,
-                    invite,
-                    sn,
-                    60,
-                    Some(2),
-                    None,
-                    Some(state),
-                )
-                .unwrap()
-            })
+        .map(|(i, s)| Setup {
+            seeds: s.clone(),
+            state_dir: tmp.join(format!("m{i}")).to_string_lossy().into(),
+            bridge: true,
         })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .map(|h| h.join().unwrap())
         .collect();
+    let safety = common::safety_words(&relay, lwd, &setups, &invite);
+    let materials = common::keygen(&relay, lwd, &setups, &invite, &safety, Some(2));
     let state_dir = |i: usize| {
         let d = tmp.join(format!("m{i}"));
         std::fs::create_dir_all(&d).unwrap();
@@ -190,29 +178,4 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     assert!(mine.repairs.is_empty());
     assert!(list(1, &seeds[1], &updated[0]).repairs.is_empty());
     let _ = std::fs::remove_dir_all(&tmp);
-}
-
-/// Polls every member's membership in turn until all show the safety words (each poll
-/// sends that member's commitment, then its value), and returns them.
-fn safety_words(relay: &str, seeds: &[Vec<u8>], invite: &str) -> String {
-    for _ in 0..300 {
-        let words: Vec<Option<String>> = seeds
-            .iter()
-            .map(|s| {
-                vault::vault_membership(relay.into(), s.clone(), invite.into())
-                    .unwrap()
-                    .safety_number
-            })
-            .collect();
-        if words.iter().all(Option::is_some) {
-            let words: Vec<String> = words.into_iter().flatten().collect();
-            assert!(
-                words.iter().all(|w| w == &words[0]),
-                "same words everywhere"
-            );
-            return words[0].clone();
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    panic!("the safety check never completed");
 }

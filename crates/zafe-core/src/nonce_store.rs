@@ -43,7 +43,7 @@ impl NonceKey {
     }
 
     /// `nonce || ciphertext`, bound to `name` (the file name).
-    fn seal(&self, name: &str, plain: &[u8]) -> Vec<u8> {
+    pub(crate) fn seal(&self, name: &str, plain: &[u8]) -> Vec<u8> {
         let mut nonce = [0u8; 24];
         rand::rngs::OsRng.fill_bytes(&mut nonce);
         let aead = XChaCha20Poly1305::new((&self.0).into());
@@ -59,7 +59,7 @@ impl NonceKey {
         [nonce.as_slice(), &sealed].concat()
     }
 
-    fn open(&self, name: &str, sealed: &[u8]) -> Option<Vec<u8>> {
+    pub(crate) fn open(&self, name: &str, sealed: &[u8]) -> Option<Vec<u8>> {
         let (nonce, body) = sealed.split_at_checked(24)?;
         XChaCha20Poly1305::new((&self.0).into())
             .decrypt(

@@ -5,6 +5,8 @@
 
 use std::{
     collections::BTreeMap,
+    fs,
+    path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -26,7 +28,9 @@ use zcash_protocol::consensus::Parameters;
 use crate::{
     keygen::{member_identifier, KeygenParams, Round1, SkContribution},
     keys::VaultSecret,
+    nonce_store::NonceKey,
     relay_client::{RelayClient, RelayClientError},
+    state_dir,
     vault::{MemberInfo, VaultDescriptor, VaultError, VaultEvent, VaultState},
 };
 
@@ -56,6 +60,9 @@ pub enum NodeError {
     Verification(String),
     #[error("protocol: {0}")]
     Protocol(String),
+    /// This phone's own setup state couldn't be read or written.
+    #[error("this phone's setup state: {0}")]
+    Io(String),
     #[error(transparent)]
     Wallet(#[from] crate::wallet::WalletError),
     /// The event is not valid on top of the current log (every member would ignore it).
@@ -510,227 +517,278 @@ struct Round1Msg {
     sk_commitment: [u8; 32],
 }
 
-/// Collects opened envelopes by (kind, sender) from the inbox, keeping the cursor.
-struct Inbox<'a> {
-    relay: &'a RelayClient,
-    me: &'a Identity,
-    mailbox: MailboxId,
-    members: BTreeMap<[u8; 32], IdentityPublic>,
-    cursor: u64,
-    received: BTreeMap<(u8, [u8; 32]), Vec<u8>>,
-}
+/// The first message of each kind from each member, opened (sealed ones decrypted).
+type Received = BTreeMap<(u8, [u8; 32]), Vec<u8>>;
 
 fn kind_tag(kind: Kind) -> u8 {
     kind as u8
 }
 
-impl Inbox<'_> {
-    async fn poll(&mut self) -> Result<(), NodeError> {
-        for (cursor, sender, envelope) in read_inbox(
-            self.relay,
-            self.me,
-            self.mailbox,
-            &self.members,
-            self.cursor,
-        )
-        .await?
-        {
-            self.cursor = cursor;
-            if let Ok(payload) = envelope.open(self.me, &sender) {
-                // First message of each kind from each sender wins; later copies are ignored.
-                self.received
-                    .entry((kind_tag(envelope.header.kind), envelope.header.from))
-                    .or_insert(payload);
-            }
-        }
-        Ok(())
-    }
-
-    /// Waits until a message of `kind` has arrived from every sender in `from`.
-    async fn wait_all(
-        &mut self,
-        kind: Kind,
-        from: &[[u8; 32]],
-        deadline: Instant,
-        what: &'static str,
-    ) -> Result<BTreeMap<[u8; 32], Vec<u8>>, NodeError> {
-        loop {
-            self.poll().await?;
-            let got: BTreeMap<_, _> = from
-                .iter()
-                .filter_map(|pk| {
-                    self.received
-                        .get(&(kind_tag(kind), *pk))
-                        .map(|p| (*pk, p.clone()))
-                })
-                .collect();
-            if got.len() == from.len() {
-                return Ok(got);
-            }
-            if Instant::now() > deadline {
-                return Err(NodeError::KeygenStalled {
-                    stage: what,
-                    missing: from
-                        .iter()
-                        .filter(|pk| !got.contains_key(*pk))
-                        .copied()
-                        .collect(),
-                });
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    }
-}
-
-/// Runs the whole key-generation ceremony for this member (spec §7.2), blocking until done.
-///
-/// `confirmed_safety_number` is what the user compared out of band; the ceremony refuses to
-/// start if the relay's member set produces a different one. The creator passes the vault
-/// birthday height and the proposal expiry window (`None`: the default); other members
-/// take both from the creator's round-1 message. Every member signs the descriptor that
-/// holds them, so a creator can't give members different values.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
+async fn read_received(
     relay: &RelayClient,
     me: &Identity,
-    invite: &Invite,
-    confirmed_safety_number: &str,
-    network: &P,
-    network_name: &str,
-    creator_birthday_height: Option<u32>,
-    creator_expiry_blocks: Option<u32>,
-    rng: &mut R,
-    timeout: Duration,
-) -> Result<VaultMaterial, NodeError> {
-    run_keygen_with_ceiling(
-        relay,
-        me,
-        invite,
-        confirmed_safety_number,
-        network,
-        network_name,
-        creator_birthday_height,
-        creator_expiry_blocks,
-        None,
-        rng,
-        timeout,
-    )
-    .await
+    mailbox: MailboxId,
+    members: &BTreeMap<[u8; 32], IdentityPublic>,
+) -> Result<Received, NodeError> {
+    let mut received = Received::new();
+    for (_, sender, envelope) in read_inbox(relay, me, mailbox, members, 0).await? {
+        if let Ok(payload) = envelope.open(me, &sender) {
+            // First message of each kind from each sender wins; later copies are ignored.
+            received
+                .entry((kind_tag(envelope.header.kind), envelope.header.from))
+                .or_insert(payload);
+        }
+    }
+    Ok(received)
+}
+
+/// Where key generation is: waiting (for what, and on whom), or done.
+#[derive(Debug)]
+pub enum KeygenProgress {
+    /// `stage` names the step; `missing` the members it waits for (empty: nobody in
+    /// particular, e.g. this member's own confirmation).
+    Waiting {
+        stage: &'static str,
+        missing: Vec<[u8; 32]>,
+    },
+    /// The vault exists. Save the material, then [`forget_keygen`].
+    Done(Box<VaultMaterial>),
+}
+
+/// Values only the first step uses: round 1 fixes them for the rest of the ceremony.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct KeygenOptions {
+    /// Creator only: the vault's birthday height.
+    pub creator_birthday_height: Option<u32>,
+    /// Creator only: the proposal expiry window in blocks (`None`: the default).
+    pub creator_expiry_blocks: Option<u32>,
+    /// Joiners: the highest creator birthday to accept (their server's tip +
+    /// [`BIRTHDAY_LEEWAY_BLOCKS`]; audit L8). `None` skips the check.
+    pub max_birthday: Option<u32>,
 }
 
 /// Highest birthday a joiner accepts above its server's tip (blocks found meanwhile).
 pub const BIRTHDAY_LEEWAY_BLOCKS: u32 = 10;
 
-/// [`run_keygen`], refusing (before signing anything) a creator birthday above
-/// `max_birthday`: a joiner passes its server's tip + [`BIRTHDAY_LEEWAY_BLOCKS`]. A
-/// far-future birthday would make every member's wallet fail with "server behind" until
-/// that height (audit L8). `None` skips the check (tip unknown).
+/// This member's key-generation state between steps (`state_dir::KEYGEN`, encrypted with
+/// the vault's [`NonceKey`]). Written before anything it covers is sent: round 1 is never
+/// generated twice, and everything after it is recomputed deterministically.
+#[derive(Serialize, Deserialize)]
+struct KeygenState {
+    /// The safety words this member confirmed.
+    words: String,
+    round1_secret: Vec<u8>,
+    round1_package: Vec<u8>,
+    /// The encoded `Round1Msg` this member sends.
+    round1_msg: Vec<u8>,
+    sk_contribution: [u8; 32],
+    max_birthday: Option<u32>,
+    /// Creator only, made before it is sent.
+    log_key: Option<[u8; 32]>,
+    /// `SENT_*` flags: what already went out (a crash between sending and saving the flag
+    /// sends it once more; receivers keep the first copy).
+    sent: u8,
+}
+
+const SENT_ROUND1: u8 = 1;
+const SENT_ROUND2: u8 = 2;
+const SENT_SIGNATURE: u8 = 4;
+const SENT_LOG: u8 = 8;
+
+impl KeygenState {
+    fn load(path: &Path, key: &NonceKey) -> Result<Option<Self>, NodeError> {
+        let bytes = match fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(NodeError::Io(e.to_string())),
+        };
+        // Unreadable is an error, never "not started": a fresh round 1 after one went
+        // out would split the ceremony.
+        let plain = key.open(state_dir::KEYGEN, &bytes).ok_or_else(|| {
+            NodeError::Protocol("this phone's key-generation state can't be read".into())
+        })?;
+        Ok(Some(version::decode(Format::KeygenState, &plain)?))
+    }
+
+    fn sealed(&self, key: &NonceKey) -> Result<Vec<u8>, NodeError> {
+        Ok(key.seal(
+            state_dir::KEYGEN,
+            &version::encode(Format::KeygenState, self)?,
+        ))
+    }
+
+    fn save(&self, path: &Path, key: &NonceKey) -> Result<(), NodeError> {
+        crate::durable::write(path, &self.sealed(key)?).map_err(|e| NodeError::Io(e.to_string()))
+    }
+}
+
+/// Whether this member has confirmed the safety words and started key generation for the
+/// setup whose state lives in `state_dir`.
+pub fn keygen_started(state_dir: &Path) -> bool {
+    state_dir.join(state_dir::KEYGEN).exists()
+}
+
+/// Deletes the key-generation state once the vault's material is saved (or the setup
+/// was abandoned).
+pub fn forget_keygen(state_dir: &Path) -> std::io::Result<()> {
+    match crate::durable::remove(&state_dir.join(state_dir::KEYGEN)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// One step of key generation for this member (spec §7.2): does whatever it can with the
+/// messages that have arrived, sends what follows, and returns. Call it again later (the
+/// app's poll, a background check after a push): nobody has to be online at the same
+/// time. `membership` is the current [`membership`] (sealed, with the safety words).
+///
+/// `confirmed` is the safety words the user compared out of band; it starts the ceremony
+/// (this member's round 1). Later steps can pass `None`: the state file remembers it.
+/// Every member signs the descriptor that holds the creator's birthday and expiry window,
+/// so a creator can't give members different values.
 #[allow(clippy::too_many_arguments)]
-pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
+pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
     invite: &Invite,
-    confirmed_safety_number: &str,
+    membership: &Membership,
+    state_dir: &Path,
+    key: &NonceKey,
+    confirmed: Option<&str>,
     network: &P,
     network_name: &str,
-    creator_birthday_height: Option<u32>,
-    creator_expiry_blocks: Option<u32>,
-    max_birthday: Option<u32>,
+    options: KeygenOptions,
     rng: &mut R,
-    timeout: Duration,
-) -> Result<VaultMaterial, NodeError> {
-    let deadline = Instant::now() + timeout;
-    let mut seq = SeqCounter::default();
-    let is_creator = me.public().sig_pk == invite.creator;
-
-    // Membership must be sealed, and its safety words what the user confirmed.
-    let Membership {
-        members,
-        sealed,
-        safety_words,
-        ..
-    } = membership(relay, me, invite).await?;
-    if !sealed || members.len() != usize::from(invite.members) {
-        return Err(NodeError::NotReady("membership is not sealed yet".into()));
+) -> Result<KeygenProgress, NodeError> {
+    let waiting = |stage, missing| Ok(KeygenProgress::Waiting { stage, missing });
+    let my_pk = me.public().sig_pk;
+    let is_creator = my_pk == invite.creator;
+    let members = &membership.members;
+    if !membership.sealed || members.len() != usize::from(invite.members) {
+        return waiting("members", Vec::new());
     }
-    let Some(words) = safety_words else {
-        return Err(NodeError::NotReady(
-            "the safety check isn't complete yet".into(),
-        ));
+    let Some(words) = membership.safety_words.clone() else {
+        return waiting("safety words", membership.waiting_for.clone());
     };
-    if words != crate::sas::normalize(confirmed_safety_number) {
-        return Err(NodeError::SafetyNumberMismatch {
-            actual: words,
-            confirmed: confirmed_safety_number.into(),
-        });
-    }
     let params =
         KeygenParams::new(invite.mailbox, invite.threshold, invite.members).map_err(proto)?;
+    let frost_id = |pk: &[u8; 32]| member_identifier(pk, &invite.mailbox).map_err(proto);
+
+    // This member's state: made once, when it confirms the words.
+    let path = state_dir.join(state_dir::KEYGEN);
+    let mut st = match KeygenState::load(&path, key)? {
+        Some(st) => st,
+        None => {
+            let Some(confirmed) = confirmed else {
+                return waiting("your confirmation", Vec::new());
+            };
+            if words != crate::sas::normalize(confirmed) {
+                return Err(NodeError::SafetyNumberMismatch {
+                    actual: words,
+                    confirmed: confirmed.into(),
+                });
+            }
+            // Its state is gone once the vault is saved: a late step from another process
+            // must not start a second round 1 for a vault that already exists.
+            if !relay.read_log(me, invite.mailbox, 0).await?.is_empty() {
+                return Err(NodeError::NotReady(
+                    "this vault's keys were already made".into(),
+                ));
+            }
+            let round1 = Round1::start(params, frost_id(&my_pk)?, rng).map_err(proto)?;
+            let contribution = SkContribution::generate(rng);
+            let msg = Round1Msg {
+                sk_commitment: contribution.commitment(&invite.mailbox, &my_pk),
+                package: round1.package().serialize().map_err(proto)?,
+                birthday_height: if is_creator {
+                    options.creator_birthday_height
+                } else {
+                    None
+                },
+                proposal_expiry_blocks: if is_creator {
+                    Some(
+                        options
+                            .creator_expiry_blocks
+                            .unwrap_or(crate::vault::DEFAULT_PROPOSAL_EXPIRY_BLOCKS),
+                    )
+                } else {
+                    None
+                },
+            };
+            let st = KeygenState {
+                words: words.clone(),
+                round1_secret: round1.secret_bytes().map_err(proto)?,
+                round1_package: round1.package().serialize().map_err(proto)?,
+                round1_msg: version::encode(Format::DkgRound1, &msg)?,
+                sk_contribution: *contribution.as_bytes(),
+                max_birthday: options.max_birthday,
+                log_key: None,
+                sent: 0,
+            };
+            fs::create_dir_all(state_dir).map_err(|e| NodeError::Io(e.to_string()))?;
+            // Create-if-absent: the app and a background check may both get here; the
+            // first file wins and both continue with it.
+            crate::durable::create_new(&path, &st.sealed(key)?)
+                .map_err(|e| NodeError::Io(e.to_string()))?;
+            KeygenState::load(&path, key)?.ok_or_else(|| NodeError::Io("keygen state".into()))?
+        }
+    };
+    if st.words != words {
+        return Err(NodeError::SafetyNumberMismatch {
+            actual: words,
+            confirmed: st.words,
+        });
+    }
+
     let by_pk: BTreeMap<[u8; 32], IdentityPublic> =
         members.iter().map(|m| (m.sig_pk, *m)).collect();
-    let others: Vec<[u8; 32]> = by_pk
-        .keys()
-        .filter(|pk| **pk != me.public().sig_pk)
-        .copied()
-        .collect();
-    let frost_id = |pk: &[u8; 32]| member_identifier(pk, &invite.mailbox).map_err(proto);
+    let others: Vec<[u8; 32]> = by_pk.keys().filter(|pk| **pk != my_pk).copied().collect();
     let id_to_pk: BTreeMap<Identifier, [u8; 32]> = by_pk
         .keys()
         .map(|pk| Ok((frost_id(pk)?, *pk)))
         .collect::<Result<_, NodeError>>()?;
-
-    let mut inbox = Inbox {
-        relay,
-        me,
-        mailbox: invite.mailbox,
-        members: by_pk.clone(),
-        cursor: 0,
-        received: BTreeMap::new(),
+    let mut seq = SeqCounter::default();
+    let send_public = |kind: Kind, payload: Vec<u8>, seq: u64| async move {
+        relay
+            .send(&Envelope::public(me, invite.mailbox, seq, kind, &payload).map_err(proto)?)
+            .await?;
+        Ok::<_, NodeError>(())
     };
 
     // Round 1: broadcast, with a commitment to this member's `sk` contribution.
-    let round1 = Round1::start(params, frost_id(&me.public().sig_pk)?, rng).map_err(proto)?;
-    let contribution = SkContribution::generate(rng);
-    let my_commitment = contribution.commitment(&invite.mailbox, &me.public().sig_pk);
-    let msg = Round1Msg {
-        sk_commitment: my_commitment,
-        package: round1.package().serialize().map_err(proto)?,
-        birthday_height: if is_creator {
-            creator_birthday_height
-        } else {
-            None
-        },
-        proposal_expiry_blocks: if is_creator {
-            Some(creator_expiry_blocks.unwrap_or(crate::vault::DEFAULT_PROPOSAL_EXPIRY_BLOCKS))
-        } else {
-            None
-        },
-    };
-    let payload = version::encode(Format::DkgRound1, &msg)?;
-    relay
-        .send(
-            &Envelope::public(
-                me,
-                invite.mailbox,
-                seq.next_seq(),
-                Kind::DkgRound1,
-                &payload,
-            )
-            .map_err(proto)?,
-        )
-        .await?;
+    if st.sent & SENT_ROUND1 == 0 {
+        send_public(Kind::DkgRound1, st.round1_msg.clone(), seq.next_seq()).await?;
+        st.sent |= SENT_ROUND1;
+        st.save(&path, key)?;
+    }
 
-    let r1 = inbox
-        .wait_all(Kind::DkgRound1, &others, deadline, "round-1 packages")
-        .await?;
-    let mut birthday_height = if is_creator {
-        creator_birthday_height
-    } else {
-        None
+    let received = read_received(relay, me, invite.mailbox, &by_pk).await?;
+    let from_all = |kind: Kind, from: &[[u8; 32]]| {
+        let got: BTreeMap<[u8; 32], Vec<u8>> = from
+            .iter()
+            .filter_map(|pk| {
+                received
+                    .get(&(kind_tag(kind), *pk))
+                    .map(|p| (*pk, p.clone()))
+            })
+            .collect();
+        let missing: Vec<[u8; 32]> = from
+            .iter()
+            .filter(|pk| !got.contains_key(*pk))
+            .copied()
+            .collect();
+        (got, missing)
     };
-    let mut expiry_blocks = msg.proposal_expiry_blocks;
+
+    let (r1, missing) = from_all(Kind::DkgRound1, &others);
+    if !missing.is_empty() {
+        return waiting("round-1 packages", missing);
+    }
+    let my_msg: Round1Msg = version::decode(Format::DkgRound1, &st.round1_msg)?;
+    let mut birthday_height = my_msg.birthday_height;
+    let mut expiry_blocks = my_msg.proposal_expiry_blocks;
     let mut received1 = BTreeMap::new();
-    let mut commitments = BTreeMap::from([(frost_id(&me.public().sig_pk)?, my_commitment)]);
+    let mut commitments = BTreeMap::from([(frost_id(&my_pk)?, my_msg.sk_commitment)]);
     for (pk, bytes) in &r1 {
         let m: Round1Msg = version::decode(Format::DkgRound1, bytes)?;
         commitments.insert(frost_id(pk)?, m.sk_commitment);
@@ -745,7 +803,7 @@ pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
     }
     let birthday_height =
         birthday_height.ok_or_else(|| NodeError::Protocol("creator sent no birthday".into()))?;
-    if max_birthday.is_some_and(|max| birthday_height > max) {
+    if st.max_birthday.is_some_and(|max| birthday_height > max) {
         return Err(NodeError::Protocol(format!(
             "the creator chose wallet birthday {birthday_height}, ahead of the chain; ask \
              them to check their Zcash server and start a new setup"
@@ -760,60 +818,59 @@ pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
             NodeError::Protocol("creator sent no valid proposal expiry window".into())
         })?;
 
-    // Round 2: echo hash (broadcast), round-2 packages and sk contributions (sealed).
+    // Round 2 (deterministic from the saved round 1): echo hash (broadcast), round-2
+    // packages and sk contributions (sealed).
+    let round1 = Round1::restore(
+        params,
+        frost_id(&my_pk)?,
+        &st.round1_secret,
+        &st.round1_package,
+    )
+    .map_err(proto)?;
+    let contribution = SkContribution::from_bytes(st.sk_contribution);
     let (round2, outgoing) = round1.advance(received1).map_err(proto)?;
     // Members also agree on every `sk` commitment before any contribution counts.
     let echo = crate::keygen::echo_with_commitments(&round2.echo(), &commitments);
-    relay
-        .send(
-            &Envelope::public(me, invite.mailbox, seq.next_seq(), Kind::DkgEcho, &echo)
-                .map_err(proto)?,
-        )
-        .await?;
-    for (to_id, package) in outgoing {
-        let to = by_pk[&id_to_pk[&to_id]];
-        let bytes = package.serialize().map_err(proto)?;
-        relay
-            .send(
-                &Envelope::sealed(
-                    me,
-                    &to,
-                    invite.mailbox,
-                    seq.next_seq(),
-                    Kind::DkgRound2,
-                    &bytes,
-                    rng,
-                )
-                .map_err(proto)?,
-            )
-            .await?;
-        relay
-            .send(
-                &Envelope::sealed(
-                    me,
-                    &to,
-                    invite.mailbox,
-                    seq.next_seq(),
-                    Kind::SkContribution,
-                    contribution.as_bytes(),
-                    rng,
-                )
-                .map_err(proto)?,
-            )
-            .await?;
+    if st.sent & SENT_ROUND2 == 0 {
+        send_public(Kind::DkgEcho, echo.to_vec(), seq.next_seq()).await?;
+        for (to_id, package) in &outgoing {
+            let to = by_pk[&id_to_pk[to_id]];
+            let bytes = package.serialize().map_err(proto)?;
+            for (kind, payload) in [
+                (Kind::DkgRound2, bytes.as_slice()),
+                (Kind::SkContribution, contribution.as_bytes().as_slice()),
+            ] {
+                relay
+                    .send(
+                        &Envelope::sealed(
+                            me,
+                            &to,
+                            invite.mailbox,
+                            seq.next_seq(),
+                            kind,
+                            payload,
+                            rng,
+                        )
+                        .map_err(proto)?,
+                    )
+                    .await?;
+            }
+        }
+        st.sent |= SENT_ROUND2;
+        st.save(&path, key)?;
     }
 
-    for (_, their_echo) in inbox
-        .wait_all(Kind::DkgEcho, &others, deadline, "echo hashes")
-        .await?
-    {
-        if their_echo.as_slice() != echo.as_slice() {
-            return Err(NodeError::EchoMismatch);
-        }
+    let (echoes, missing) = from_all(Kind::DkgEcho, &others);
+    if !missing.is_empty() {
+        return waiting("echo hashes", missing);
     }
-    let r2 = inbox
-        .wait_all(Kind::DkgRound2, &others, deadline, "round-2 packages")
-        .await?;
+    if echoes.values().any(|e| e.as_slice() != echo.as_slice()) {
+        return Err(NodeError::EchoMismatch);
+    }
+    let (r2, missing) = from_all(Kind::DkgRound2, &others);
+    if !missing.is_empty() {
+        return waiting("round-2 packages", missing);
+    }
     let received2 = r2
         .iter()
         .map(|(pk, b)| {
@@ -825,11 +882,12 @@ pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
         .collect::<Result<BTreeMap<_, _>, NodeError>>()?;
     let dkg_result = round2.finish(received2).map_err(proto)?;
 
-    let sk_msgs = inbox
-        .wait_all(Kind::SkContribution, &others, deadline, "sk contributions")
-        .await?;
+    let (sk_msgs, missing) = from_all(Kind::SkContribution, &others);
+    if !missing.is_empty() {
+        return waiting("sk contributions", missing);
+    }
     let mut contributions = BTreeMap::new();
-    contributions.insert(frost_id(&me.public().sig_pk)?, contribution);
+    contributions.insert(frost_id(&my_pk)?, contribution);
     for (pk, bytes) in sk_msgs {
         let arr: [u8; 32] = bytes.as_slice().try_into().map_err(proto)?;
         let id = frost_id(&pk)?;
@@ -881,87 +939,83 @@ pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
         epoch: 0,
         transcript_hash: output.transcript_hash,
     };
-    let my_sig = me
-        .sign(&descriptor.signing_message().map_err(proto)?)
-        .to_vec();
-    relay
-        .send(
-            &Envelope::public(
-                me,
-                invite.mailbox,
-                seq.next_seq(),
-                Kind::DescriptorSignature,
-                &my_sig,
-            )
-            .map_err(proto)?,
-        )
-        .await?;
-    let mut signatures = vec![(me.public().sig_pk, my_sig)];
     let message = descriptor.signing_message().map_err(proto)?;
-    for (pk, sig) in inbox
-        .wait_all(
-            Kind::DescriptorSignature,
-            &others,
-            deadline,
-            "descriptor signatures",
-        )
-        .await?
-    {
+    // Ed25519 is deterministic: a resumed step makes the same signature.
+    let my_sig = me.sign(&message).to_vec();
+    if st.sent & SENT_SIGNATURE == 0 {
+        send_public(Kind::DescriptorSignature, my_sig.clone(), seq.next_seq()).await?;
+        st.sent |= SENT_SIGNATURE;
+        st.save(&path, key)?;
+    }
+    let (sigs, missing) = from_all(Kind::DescriptorSignature, &others);
+    if !missing.is_empty() {
+        return waiting("descriptor signatures", missing);
+    }
+    let mut signatures = vec![(my_pk, my_sig)];
+    for (pk, sig) in sigs {
         by_pk[&pk]
             .verify(&message, &sig)
             .map_err(|_| NodeError::Protocol("bad descriptor signature".into()))?;
         signatures.push((pk, sig));
     }
 
-    // Log key: the creator generates it and seals it to every member, then writes the
-    // VaultCreated entry. Others wait for both.
+    // Log key: the creator makes it (saved before it leaves), seals it to every member,
+    // then writes the VaultCreated entry. Others wait for both.
     let log_key = if is_creator {
-        let key = LogKey::generate(0, rng);
-        for pk in &others {
-            let mut bytes = 0u32.to_le_bytes().to_vec();
-            bytes.extend_from_slice(key.as_bytes());
-            relay
-                .send(
-                    &Envelope::sealed(
-                        me,
-                        &by_pk[pk],
-                        invite.mailbox,
-                        seq.next_seq(),
-                        Kind::LogKey,
-                        &bytes,
-                        rng,
-                    )
-                    .map_err(proto)?,
-                )
-                .await?;
-        }
-        let event = VaultEvent::Created {
-            descriptor: descriptor.clone(),
-            signatures,
-        };
-        let entry = LogEntry::create(
-            me,
-            &key,
-            invite.mailbox,
-            0,
-            [0; 32],
-            &event.to_bytes().map_err(proto)?,
-            rng,
-        )
-        .map_err(proto)?;
-        match relay.append_log(&entry).await? {
-            AppendResult::Appended { .. } => {}
-            AppendResult::Conflict { len } => {
-                return Err(NodeError::Protocol(format!(
-                    "log already has {len} entries"
-                )))
+        let key_bytes = match st.log_key {
+            Some(k) => k,
+            None => {
+                let k = *LogKey::generate(0, rng).as_bytes();
+                st.log_key = Some(k);
+                st.save(&path, key)?;
+                k
             }
+        };
+        let log_key = LogKey::from_bytes(0, key_bytes);
+        if st.sent & SENT_LOG == 0 {
+            for pk in &others {
+                let mut bytes = 0u32.to_le_bytes().to_vec();
+                bytes.extend_from_slice(log_key.as_bytes());
+                relay
+                    .send(
+                        &Envelope::sealed(
+                            me,
+                            &by_pk[pk],
+                            invite.mailbox,
+                            seq.next_seq(),
+                            Kind::LogKey,
+                            &bytes,
+                            rng,
+                        )
+                        .map_err(proto)?,
+                    )
+                    .await?;
+            }
+            let event = VaultEvent::Created {
+                descriptor: descriptor.clone(),
+                signatures,
+            };
+            let entry = LogEntry::create(
+                me,
+                &log_key,
+                invite.mailbox,
+                0,
+                [0; 32],
+                &event.to_bytes().map_err(proto)?,
+                rng,
+            )
+            .map_err(proto)?;
+            // A conflict means an earlier step appended it; the check below compares it.
+            relay.append_log(&entry).await?;
+            st.sent |= SENT_LOG;
+            st.save(&path, key)?;
         }
-        key
+        log_key
     } else {
-        let msgs = inbox
-            .wait_all(Kind::LogKey, &[invite.creator], deadline, "log key")
-            .await?;
+        let (msgs, missing) = from_all(Kind::LogKey, &[invite.creator]);
+        if !missing.is_empty() {
+            return waiting("log key", missing);
+        }
         let bytes = &msgs[&invite.creator];
         if bytes.len() != 36 {
             return Err(NodeError::Protocol("bad log key".into()));
@@ -971,34 +1025,100 @@ pub async fn run_keygen_with_ceiling<P: Parameters, R: RngCore + CryptoRng>(
     };
 
     // Everyone checks the log's first entry is the descriptor they signed.
-    let state = loop {
-        let entries = relay.read_log(me, invite.mailbox, 0).await?;
-        if !entries.is_empty() {
-            let mut chain = Chain::new(invite.mailbox);
-            for e in entries {
-                chain.append(e, &members).map_err(chain_err)?;
-            }
-            break VaultState::replay(chain.entries(), &log_key).map_err(vault_err)?;
-        }
-        if Instant::now() > deadline {
-            return Err(NodeError::Timeout("VaultCreated log entry"));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    };
+    let entries = relay.read_log(me, invite.mailbox, 0).await?;
+    if entries.is_empty() {
+        return waiting("vault log", vec![invite.creator]);
+    }
+    let mut chain = Chain::new(invite.mailbox);
+    for e in entries {
+        chain.append(e, members).map_err(chain_err)?;
+    }
+    let state = VaultState::replay(chain.entries(), &log_key).map_err(vault_err)?;
     if state.descriptor != descriptor {
         return Err(NodeError::Protocol(
             "logged descriptor differs from ours".into(),
         ));
     }
 
-    Ok(VaultMaterial {
+    Ok(KeygenProgress::Done(Box::new(VaultMaterial {
         descriptor,
         key_package: output.key_package.serialize().map_err(proto)?,
         public_key_package: output.public_key_package.serialize().map_err(proto)?,
         vault_secret: *output.vault_secret.as_bytes(),
         log_key_epoch: log_key.epoch,
         log_key: *log_key.as_bytes(),
-    })
+    })))
+}
+
+/// The creator locks membership as soon as every seat is taken (no tap: the safety words
+/// that follow are the check). Others, and a full or sealed setup, do nothing. Returns
+/// the membership after it.
+pub async fn seal_when_full(
+    relay: &RelayClient,
+    me: &Identity,
+    invite: &Invite,
+    membership: Membership,
+) -> Result<Membership, NodeError> {
+    if membership.sealed
+        || me.public().sig_pk != invite.creator
+        || membership.members.len() != usize::from(invite.members)
+    {
+        return Ok(membership);
+    }
+    seal(relay, me, invite).await?;
+    self::membership(relay, me, invite).await
+}
+
+/// Runs key generation to the end for this member, stepping once a second (three relay requests a step: under the hosted per-key rate) ([`keygen_step`]
+/// with the state in `state_dir`), for the CLI and tests; the app steps it itself. Seals
+/// membership when this member is the creator and every seat is taken. Deletes the state
+/// once done. Gives up after `timeout` with [`NodeError::KeygenStalled`].
+#[allow(clippy::too_many_arguments)]
+pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    invite: &Invite,
+    confirmed_safety_words: &str,
+    network: &P,
+    network_name: &str,
+    options: KeygenOptions,
+    state_dir: std::path::PathBuf,
+    key: NonceKey,
+    rng: &mut R,
+    timeout: Duration,
+) -> Result<VaultMaterial, NodeError> {
+    let (state_dir, key) = (state_dir.as_path(), &key);
+    let deadline = Instant::now() + timeout;
+    loop {
+        let m = membership(relay, me, invite).await?;
+        let m = seal_when_full(relay, me, invite, m).await?;
+        match keygen_step(
+            relay,
+            me,
+            invite,
+            &m,
+            state_dir,
+            key,
+            Some(confirmed_safety_words),
+            network,
+            network_name,
+            options,
+            rng,
+        )
+        .await?
+        {
+            KeygenProgress::Done(material) => {
+                forget_keygen(state_dir).map_err(|e| NodeError::Io(e.to_string()))?;
+                return Ok(*material);
+            }
+            KeygenProgress::Waiting { stage, missing } => {
+                if Instant::now() > deadline {
+                    return Err(NodeError::KeygenStalled { stage, missing });
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 // --- Relay reads -------------------------------------------------------------------------

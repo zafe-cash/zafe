@@ -27,6 +27,7 @@ import '../rust/api/spends.dart' as rust_spends;
 import '../rust/api/tor.dart';
 import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
+import '../providers/setup_step.dart';
 import 'vault_updates.dart';
 import '../core/storage/wallet_key.dart';
 
@@ -153,13 +154,14 @@ Future<void> _registerPush({bool askPermission = true}) async {
 /// identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
+  // Vaults still being set up too: their setup steps run in background checks.
   for (final v in await ZafeSecureStore.instance.readAll()) {
-    if (!v.ready) continue;
+    if (v.identity == null) continue;
     try {
       await rust_vault.registerPush(
         relayUrl: relayUrl,
         seeds: v.identity!,
-        material: v.material!,
+        vaultId: v.id,
         platform: Platform.isIOS ? 'apns' : 'fcm',
         token: token,
       );
@@ -334,9 +336,84 @@ Future<void> _check() async {
   // The URLs the user set in Settings (read after the reload: prefs cache per isolate).
   final endpoints = ZafeEndpoints.fromPrefs(prefs);
   for (final v in vaults) {
-    if (v.ready) await _checkVault(v, hideAmounts, endpoints);
+    if (v.ready) {
+      await _checkVault(v, hideAmounts, endpoints);
+    } else if (v.identity != null && v.invite != null) {
+      await _checkSetup(v, prefs, endpoints);
+    }
   }
 }
+
+/// Payload of the "compare safety words" and "vault ready" notifications.
+const kSetupPayload = 'setup';
+const kVaultReadyPayload = 'ready';
+
+/// A vault still being set up: one setup step (it can lock membership, send this
+/// member's part of the safety check, continue key generation, and save the vault once
+/// it exists). Two notifications only, the moments that need the member: the words are
+/// there to compare, and the vault is ready to back up.
+Future<void> _checkSetup(
+  StoredVault v,
+  SharedPreferences prefs,
+  ZafeEndpoints endpoints,
+) async {
+  try {
+    final p = await stepSetup(
+      endpoints: endpoints,
+      vaultId: v.id,
+      seeds: v.identity!,
+      invite: v.invite!,
+    );
+    final name = rust_vault.parseInvite(invite: v.invite!).name;
+    if (p.material != null) {
+      await _notifySetup(
+        v.id,
+        kVaultReadyPayload,
+        '$name is ready',
+        'Back it up now.',
+      );
+    } else if (p.safetyNumber != null && !p.started) {
+      final key = 'zafe_setup_words_shown_${v.id}';
+      if (prefs.getBool(key) ?? false) return;
+      await prefs.setBool(key, true);
+      await _notifySetup(
+        v.id,
+        kSetupPayload,
+        '$name: compare safety words',
+        'Everyone has joined.',
+      );
+    }
+  } catch (e, st) {
+    debugPrint('setup check failed for ${v.id}: ${describeError(e)}');
+    await _logBackgroundError('setup', e, st);
+  }
+}
+
+Future<void> _notifySetup(
+  String vaultId,
+  String what,
+  String title,
+  String body,
+) => _notifications.show(
+  id: notificationPayload(vaultId, what).hashCode & 0x7fffffff,
+  title: title,
+  body: body,
+  notificationDetails: const NotificationDetails(
+    android: AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription:
+          'Payments that need you, payments sent or rejected, and money received',
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: 'ic_notification',
+      color: Color(0xFF00736C),
+      visibility: NotificationVisibility.private,
+    ),
+    iOS: DarwinNotificationDetails(),
+  ),
+  payload: notificationPayload(vaultId, what),
+);
 
 /// One vault: sync, read the log, answer interactive signing requests, finish an auto-send
 /// this member owes, update the switcher summary, and notify about changes.

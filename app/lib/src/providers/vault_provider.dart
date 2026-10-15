@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/config/endpoints.dart';
-import '../core/config/network_config.dart';
 import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/network/tor_setting.dart' show kUseTorKey;
@@ -22,6 +21,7 @@ import 'endpoints_provider.dart';
 import 'payment_sounds_provider.dart' show kPaymentSoundsKey;
 import 'privacy_mode_provider.dart' show kPrivacyModeKey;
 import 'server_failover_provider.dart';
+import 'setup_step.dart';
 import 'theme_mode_provider.dart' show kThemeModeKey, themeModeFromName;
 
 const kActiveVaultKey = 'zafe_active_vault';
@@ -110,7 +110,7 @@ class VaultState {
   /// While adding another vault: the vault to go back to if the user cancels.
   final String? returnTo;
 
-  final rust.MembershipInfo? membership;
+  final rust.SetupProgress? membership;
 
   /// Last known balance per vault id (this session).
   final Map<String, rust.Balance> balances;
@@ -156,7 +156,7 @@ class VaultState {
     bool clearActive = false,
     String? returnTo,
     bool clearReturnTo = false,
-    rust.MembershipInfo? membership,
+    rust.SetupProgress? membership,
     bool clearMembership = false,
     Map<String, rust.Balance>? balances,
     bool? syncing,
@@ -234,6 +234,14 @@ class VaultNotifier extends Notifier<VaultState> {
     unawaited(sync());
   }
 
+  /// Shows vault [id], reading it from storage again (a background check may have saved
+  /// its keys meanwhile).
+  Future<void> showVault(String id) async {
+    state = state.copyWith(clearReturnTo: true);
+    await _reload(activeId: id);
+    if (state.hasVault) unawaited(sync());
+  }
+
   /// Leaves the current vault on screen to create or join another (onboarding shows).
   void beginAddVault() {
     final current = state.activeId;
@@ -270,11 +278,36 @@ class VaultNotifier extends Notifier<VaultState> {
     );
     final vaultId = rust.parseInvite(invite: invite).vaultId;
     await _store.add(id: vaultId, identity: id.seeds, invite: invite);
-    // Used by `createKeys` (the creator's round-1 message carries it to the others).
+    // Carried to the others by the creator's round-1 message (`stepSetup`).
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_expiryDaysKey(vaultId), expiryDays);
+    await prefs.setInt(expiryDaysKey(vaultId), expiryDays);
     state = state.copyWith(clearReturnTo: true);
     await _reload(activeId: vaultId);
+  }
+
+  /// Gives up on a setup whose membership is locked but whose keys were never made (a
+  /// member never came back). The creator also deletes it on the relay (allowed until
+  /// the vault's first log entry), so the others see it was cancelled.
+  Future<void> abandonSetup() async {
+    final id = state.activeId;
+    final seeds = state.identity;
+    final invite = state.invite;
+    final info = state.inviteInfo;
+    if (id == null) return;
+    if (seeds != null &&
+        invite != null &&
+        info?.creatorHex == rust.identityPublicKey(seeds: seeds)) {
+      try {
+        await rust.cancelSetup(
+          relayUrl: _endpoints.relayUrl,
+          seeds: seeds,
+          invite: invite,
+        );
+      } catch (_) {
+        // Forgotten here anyway; the others see it once the relay drops it.
+      }
+    }
+    await removeVault(id);
   }
 
   /// Abandons the vault setup on screen (before membership is locked). The creator's
@@ -283,14 +316,6 @@ class VaultNotifier extends Notifier<VaultState> {
   /// [createPrefillProvider]); a joiner just leaves. `deleted` is false when the relay
   /// couldn't delete the setup (older relay, or offline): the vault is forgotten here
   /// anyway, and the old invite may keep working until the relay drops it.
-  /// Gives up on a setup whose membership is locked but whose keys were never made (a
-  /// member never took part). Only forgets it on this phone: no keys or funds exist yet,
-  /// and the relay keeps a locked setup until it expires.
-  Future<void> abandonSetup() async {
-    final id = state.activeId;
-    if (id != null) await removeVault(id);
-  }
-
   Future<({bool creator, bool deleted})> cancelSetup() async {
     final id = state.activeId;
     final seeds = state.identity;
@@ -310,7 +335,7 @@ class VaultNotifier extends Notifier<VaultState> {
               name: info.name,
               threshold: info.threshold,
               members: info.members,
-              expiryDays: prefs.getInt(_expiryDaysKey(id)) ?? 7,
+              expiryDays: prefs.getInt(expiryDaysKey(id)) ?? 7,
             ),
           );
       try {
@@ -369,46 +394,23 @@ class VaultNotifier extends Notifier<VaultState> {
     unawaited(sync());
   }
 
-  Future<rust.MembershipInfo> refreshMembership() async {
-    final membership = await rust.vaultMembership(
-      relayUrl: _endpoints.relayUrl,
-      seeds: state.identity!,
-      invite: state.invite!,
-    );
-    state = state.copyWith(membership: membership);
-    return membership;
-  }
-
-  Future<void> seal() async {
-    await rust.sealVault(
-      relayUrl: _endpoints.relayUrl,
-      seeds: state.identity!,
-      invite: state.invite!,
-    );
-    await refreshMembership();
-  }
-
-  /// Runs key generation with every member; blocks until done. `safetyNumber` holds the
-  /// safety words the user compared out of band.
-  Future<void> createKeys(String safetyNumber) async {
+  /// One step of the setup on screen (see [stepSetup]); [confirmed] starts this member's
+  /// part of key generation. Once the vault exists it becomes ready here.
+  Future<rust.SetupProgress> setupStep({String? confirmed}) async {
     final vaultId = state.activeId!;
-    final material = await rust.runKeygen(
-      relayUrl: _endpoints.relayUrl,
-      lightwalletdUrl: _endpoints.lightwalletdUrl,
-      networkName: kZafeNetwork,
+    final progress = await stepSetup(
+      endpoints: _endpoints,
+      vaultId: vaultId,
       seeds: state.identity!,
       invite: state.invite!,
-      confirmedSafetyNumber: safetyNumber,
-      timeoutSecs: 600,
-      birthdayHeight: null,
-      expiryDays: (await SharedPreferences.getInstance()).getInt(
-        _expiryDaysKey(vaultId),
-      ),
-      stateDir: await (await ZafePaths.get()).stateDir(vaultId),
+      confirmed: confirmed,
     );
-    await _store.writeMaterial(vaultId, material);
-    await _reload(activeId: vaultId);
-    unawaited(sync());
+    state = state.copyWith(membership: progress);
+    if (progress.material != null) {
+      await _reload(activeId: vaultId);
+      unawaited(sync());
+    }
+    return progress;
   }
 
   /// Removes a vault from this device: its secrets, signing state, notification state and
@@ -572,8 +574,6 @@ final createPrefillProvider =
     );
 
 /// The approval window the creator chose for a vault being set up (days).
-String _expiryDaysKey(String vaultId) => 'zafe_vault_${vaultId}_expiryDays';
-
 final vaultProvider = NotifierProvider<VaultNotifier, VaultState>(
   VaultNotifier.new,
 );

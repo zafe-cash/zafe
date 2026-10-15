@@ -295,10 +295,16 @@ Name, network (`test` / `main`), `N`, `t`, and optional initial rules and addres
 2  Invite:  link (remote) or QR (in person); carries mailbox id,
             creator sigPk fingerprint, one-time join token
 3  Members join, publish IdentityPublic
+   (the creator's phone locks membership itself once every seat is taken)
 4  ALL members confirm the safety words
-      remote: read the 12 digits over a call / trusted channel
-      in person: scan each other's QR
-   → DKG is disabled in the UI until every member has confirmed
+      remote: read the 4 words over a call / a chat the members trust
+      in person: show them side by side
+   → a member's round 1 goes out only after it confirmed ("They match")
+   Steps 4-8 run as repeated steps (node::keygen_step), each member's state saved on
+   its phone (encrypted, written before anything it covers is sent), driven by the app
+   and by background checks woken by pushes: members don't have to be online together.
+   Every member still has to take part. Until the vault's first log entry the creator
+   can cancel the setup on the relay.
 5  FROST DKG (frost-core dkg part1/2/3, redpallas):
       part1 packages → broadcast via relay
       echo check: each member broadcasts H(all part1 packages it received);

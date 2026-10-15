@@ -5,8 +5,8 @@ use std::time::Duration;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     node::{
-        create_vault, join_vault, load_state, membership, respond, run_keygen,
-        run_keygen_with_ceiling, seal, set_name, Invite, NodeError,
+        create_vault, join_vault, load_state, membership, respond, run_keygen, seal, set_name,
+        Invite, KeygenOptions, NodeError,
     },
     relay_client::RelayClient,
     session::MemoryNonceStore,
@@ -93,16 +93,49 @@ async fn three_members_create_a_vault_over_the_relay() {
             &number,
             &net,
             "regtest",
-            Some(2),
-            Some(3 * 1152),
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: Some(3 * 1152),
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
         run_keygen(
-            &relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
         ),
         run_keygen(
-            &relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout
+            &relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
         ),
     );
     let (a, b, c) = (a.unwrap(), b.unwrap(), c.unwrap());
@@ -193,26 +226,49 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
             &number,
             &net,
             "regtest",
-            Some(5_000_000),
-            None,
+            KeygenOptions {
+                creator_birthday_height: Some(5_000_000),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
-        run_keygen_with_ceiling(
+        run_keygen(
             &relay,
             &ids[1],
             &invite,
             &number,
             &net,
             "regtest",
-            None,
-            None,
-            Some(110),
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: Some(110)
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r1,
             timeout
         ),
         run_keygen(
-            &relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout
+            &relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
         ),
     );
     match b {
@@ -237,13 +293,32 @@ async fn keygen_names_the_member_who_never_took_part() {
             &number,
             &net,
             "regtest",
-            Some(2),
-            None,
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
         run_keygen(
-            &relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
         ),
     );
     for result in [a, b] {
@@ -268,8 +343,13 @@ async fn keygen_refuses_an_unconfirmed_safety_number() {
         "0000 0000 0000",
         &net,
         "regtest",
-        None,
-        None,
+        KeygenOptions {
+            creator_birthday_height: None,
+            creator_expiry_blocks: None,
+            max_birthday: None,
+        },
+        keygen_dir(),
+        keygen_key(),
         &mut rng,
         Duration::from_secs(5),
     )
@@ -380,16 +460,49 @@ async fn a_restored_device_replaces_its_dead_pool() {
             &number,
             &net,
             "regtest",
-            Some(2),
-            None,
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
         run_keygen(
-            &relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
         ),
         run_keygen(
-            &relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout
+            &relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
         ),
     );
     let (material, _, _) = (a.unwrap(), b.unwrap(), c.unwrap());
@@ -467,4 +580,14 @@ async fn a_restored_device_replaces_its_dead_pool() {
     .unwrap();
     let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
     assert_eq!(state.pools[&me].available(), published);
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

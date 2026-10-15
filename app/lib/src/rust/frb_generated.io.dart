@@ -139,9 +139,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<UnapprovedSpendInfo> dco_decode_list_unapproved_spend_info(dynamic raw);
 
   @protected
-  MembershipInfo dco_decode_membership_info(dynamic raw);
-
-  @protected
   MempoolEvent dco_decode_mempool_event(dynamic raw);
 
   @protected
@@ -218,6 +215,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SendStage dco_decode_send_stage(dynamic raw);
+
+  @protected
+  SetupProgress dco_decode_setup_progress(dynamic raw);
 
   @protected
   SignerName dco_decode_signer_name(dynamic raw);
@@ -379,9 +379,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  MembershipInfo sse_decode_membership_info(SseDeserializer deserializer);
-
-  @protected
   MempoolEvent sse_decode_mempool_event(SseDeserializer deserializer);
 
   @protected
@@ -460,6 +457,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SendStage sse_decode_send_stage(SseDeserializer deserializer);
+
+  @protected
+  SetupProgress sse_decode_setup_progress(SseDeserializer deserializer);
 
   @protected
   SignerName sse_decode_signer_name(SseDeserializer deserializer);
@@ -655,12 +655,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_membership_info(
-    MembershipInfo self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_mempool_event(MempoolEvent self, SseSerializer serializer);
 
   @protected
@@ -758,6 +752,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_send_stage(SendStage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_setup_progress(SetupProgress self, SseSerializer serializer);
 
   @protected
   void sse_encode_signer_name(SignerName self, SseSerializer serializer);

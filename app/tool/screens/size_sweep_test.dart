@@ -75,7 +75,7 @@ final _cases = <(String, String?, Widget)>[
       ],
     ),
   ),
-  ('setup_stalled', 'Grants', Text(stalledText([_key, _key2]))),
+  ('setup_waiting', 'Grants', Text(waitingText([_key, _key2]))),
   (
     'recover',
     'Recover your seat',
@@ -224,6 +224,13 @@ final _cases = <(String, String?, Widget)>[
         isCoinbase: false,
       ),
       onTap: _noop,
+    ),
+  ),
+  (
+    'creating_keys',
+    null,
+    const CreatingKeysScreen(
+      waiting: 'Waiting for 24bafb...ec55 and dccacc...b50b.',
     ),
   ),
   ('sheet_skip_backup', null, const SkipBackupSheet(risk: _risk)),

@@ -17,6 +17,21 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     sync_dir(path)
 }
 
+/// Creates `path` with `bytes` (atomically, as [`write`]) only if it doesn't exist yet.
+/// `Ok(false)`: it already existed and is left as it was (someone else created it first).
+///
+/// Exclusive within this process: on a phone the app and its background engines share
+/// one process. Not a hard link (create the temp file, link it into place): Android
+/// forbids apps to make hard links ("Permission denied").
+pub fn create_new(path: &Path, bytes: &[u8]) -> io::Result<bool> {
+    static CREATING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = CREATING.lock().unwrap_or_else(|e| e.into_inner());
+    if path.exists() {
+        return Ok(false);
+    }
+    write(path, bytes).map(|()| true)
+}
+
 /// Deletes `path` and flushes its directory, so the file can't come back after a crash.
 pub fn remove(path: &Path) -> io::Result<()> {
     fs::remove_file(path)?;

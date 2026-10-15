@@ -92,13 +92,34 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   the 4 BIP-39 words hash every member's key and value, so a relay gets one guess (2^-44).
   The secret is derived from an Ed25519 signature (deterministic: a restarted app reveals
   what it committed to, nothing stored). `node::membership` does one step per call and
-  returns `safety_words` (`None` + `waiting_for` until all values are in); the app's setup
-  screen polls it every 2 s, so **every member must have the setup screen open** for the
-  words to appear (the screen marks members "Not here yet"). CLI/tests:
+  returns `safety_words` (`None` + `waiting_for` until all values are in); the setup
+  screen and background checks both step it (see "Async setup"). CLI/tests:
   `node::wait_for_safety_words` (1 s poll: two requests per poll, under the hosted per-key
   rate); `SAFETY_SENT` dedupes sends per (relay URL, mailbox, sender, kind) in-process.
   Keygen still takes the confirmed string (`--safety-number` in the CLI, `confirmedSafetyNumber`
   in the bridge) and re-derives it.
+- **Async setup** (2026-10-16): keygen is a step function, `node::keygen_step` (plus
+  `seal_when_full`: the creator's step locks a full setup; bridge `setup_step` does
+  membership, seal, safety check and keygen in one call; `node::run_keygen` loops it for the
+  CLI/tests, 1 step/s to stay under the hosted rate). State between steps:
+  `state_dir::KEYGEN` (`keygen.state`, `KEYGEN_STATE` 1, sealed with the vault's
+  `NonceKey`): words, round-1 secret + package, `sk` contribution, creator's log key, sent
+  flags. **Written before anything it covers is sent** (round 1 is never generated twice;
+  part 2, the echo, signatures are recomputed deterministically each step; receivers keep
+  the first copy of a resent message). Unreadable state is an error, never a fresh start.
+  Created only once: `durable::create_new` under a process-wide lock (the app and its
+  background engines share one process on Android; **Android forbids hard links in app
+  storage**, "Permission denied", so the temp-file-plus-link trick failed live). A new
+  round 1 is refused once the vault log has an entry, and the app stops stepping once the
+  material is in secure storage (a background check may have saved it and deleted the
+  state: a fresh step would offer the words again). `KeygenProgress::Done` repeats until
+  the caller saved the material and called `forget_keygen`. App: `providers/setup_step.dart`
+  `stepSetup` (screen + `vault_watch._checkSetup`); push tokens registered per vault id at
+  join (`register_push` takes the vault id); notifications `vaultId:setup` ("compare safety
+  words", once, pref `zafe_setup_words_shown_<id>`) and `vaultId:ready` (opens
+  `/backup-prompt` with `go`). Message formats and order unchanged: no version bump.
+  Tests: `tests/keygen_async.rs` (members at different times, two processes, wrong key),
+  bridge tests step members round-robin (`app/rust/tests/common`).
 - **Randomizer**: the FROST randomizer for each spend is the PCZT's own `alpha` (fixed before
   round 1 because `rk` feeds the sighash). Secure per the Re-Randomized FROST paper; matches
   frost-tools' `zcash-sign`. **Deviates from ZIP 312**, which says the Coordinator MUST
@@ -387,16 +408,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   before the first wallet call leaves no note. The report adds a "Rust panics" section and a "Slow steps" one (`timings.log`, written by `diag::Stopwatch` around `sync_vault` and `list_proposals`: step names and durations only, for calls over 1.5 s and the first of each kind per process; first-sync investigation 2026-10-12). `first_sync_timing` (zafe-core example) times a new wallet's create + first sync on a live server: ~3 s on desktop against testnet. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
-- **Abandoning a locked setup** (2026-10-15, onboarding P0): once sealed the relay refuses
-  `cancel_setup`, so any member's "Abandon setup" (`VaultNotifier.abandonSetup`) only
-  forgets the vault on this phone (no keys or funds exist yet); the others must abandon
-  too. Keygen's waits fail with `NodeError::KeygenStalled { stage, missing }` →
+- **Abandoning a locked setup** (2026-10-15, onboarding P0; relay rule relaxed 2026-10-16):
+  the relay accepts the creator's `cancel_setup` until the vault's first log entry, sealed
+  or not, so the creator's "Abandon setup" / "They don't match" cancels it for everyone;
+  a joiner's only forgets it on this phone. Keygen's waits fail with `NodeError::KeygenStalled { stage, missing }` →
   `ZafeErrorKind::KeygenIncomplete`, and `ZafeError.members` (hex keys, empty for other
   kinds) lists who never took part; the setup screen names them (`stalledText`) and the
   key button becomes "Try again".
 - **Cancelling a setup** (2026-10-12): before membership is locked the creator can back out
   (`node::cancel_setup`, bridge `cancel_setup`, `POST /v1/mailbox/cancel`, body
-  `CancelSetup`; creator-signed, refused once sealed or when the mailbox has log entries;
+  `CancelSetup`; creator-signed, refused once the mailbox has log entries (sealed is fine since 2026-10-16);
   deletes the mailbox, members, deliveries, sender seqs and push tokens; wakes waiters).
   New route, no `RELAY_API` bump: a relay without it answers 404 and the client reports
   `Ok(false)` (same for an already-deleted mailbox), and the app forgets the vault

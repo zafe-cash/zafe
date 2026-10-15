@@ -69,6 +69,23 @@ final _routerProvider = Provider<GoRouter>((ref) {
     notificationTaps.value = null;
     final (vaultId, proposalId) = ids;
     final vaults = ref.read(vaultProvider);
+    if (proposalId == kSetupPayload || proposalId == kVaultReadyPayload) {
+      // A setup's notification: show that vault (its setup screen, or Home once the
+      // background check saved its keys; reload picks those up), then the backup.
+      if (!vaults.vaults.any((v) => v.id == vaultId)) return;
+      await ref.read(vaultProvider.notifier).showVault(vaultId);
+      final settingUp = ref.read(vaultProvider).isSettingUp;
+      // The backup prompt as right after keys are made in the app (`go`: no way back
+      // past its "Later" acknowledgement).
+      router.go(
+        settingUp
+            ? '/setup'
+            : proposalId == kVaultReadyPayload
+            ? '/backup-prompt'
+            : '/home',
+      );
+      return;
+    }
     if (!vaults.vaults.any((v) => v.id == vaultId && v.ready)) return;
     if (vaults.activeId != vaultId || vaults.isAdding) {
       await ref.read(vaultProvider.notifier).switchTo(vaultId);

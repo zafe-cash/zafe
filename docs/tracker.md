@@ -744,8 +744,14 @@ check. Fixed in the same change unless open:
 - [x] P0: exit after membership is locked + keygen timeout naming who didn't take part
       (2026-10-15: "Abandon setup" for any member once sealed, local only; keygen
       timeout = `NodeError::KeygenStalled` → `ZafeErrorKind::KeygenIncomplete` with
-      `ZafeError.members`; the setup screen names them and offers "Try again"). Still to
-      do from §5.5: make keys automatically once everyone confirmed, setup-time push.
+      `ZafeError.members`; the setup screen names them and offers "Try again").
+- [x] Async setup (2026-10-16): nobody has to be online at the same time. Membership
+      locks itself when full (creator), "They match" is the one tap and starts this
+      member's keys, every other step runs in background checks woken by pushes
+      (registered at join), two notifications only ("compare safety words", "vault ready,
+      back it up"); the creator can cancel a locked setup until the vault exists; the
+      setup screen names who it waits for. Live-tested on the emulator with the app closed
+      (words notification 12 s after the lock, keys 3 s after the others started).
 - [x] P0: backup card first once the vault holds funds; acknowledgement on "Later"
       (2026-10-16: `confirmSkipBackup`, wording per t/n in `skipBackupRisk`).
 - [x] P0: notification primer before the OS prompt, and a denied state (2026-10-16:
@@ -754,7 +760,7 @@ check. Fixed in the same change unless open:
 - [x] P0: empty-state copy (2026-10-16: "Receive funds first" at zero balance).
 - [ ] P1: per-member confirmation of the safety words, QR in the same room. (Done
       2026-10-15: commit-then-reveal words for setup and seat recovery, M1/M2.)
-- [ ] P1: waiting room with per-seat status, setup-time push, invite expiry.
+- [ ] P1: invite expiry (waiting room status and setup-time push done with async setup).
 - [ ] P1: threshold presets, t = n confirmation, name in setup, "before you invite" brief.
 - [ ] P1: readiness card, Receive interstitial without a backup, passphrase recall check.
 - [ ] P2: guided test payment, one-time tips + Help hub, Welcome simplification,

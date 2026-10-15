@@ -168,8 +168,8 @@ enum VaultCmd {
     /// Join a vault from an invite string.
     Join { invite: String },
     /// Show members, whether membership is sealed, and (once every member's part of the
-    /// check is in) the safety words. With `--wait`, keep going until the words are known:
-    /// every member must run it at the same time once membership is sealed.
+    /// check is in) the safety words. With `--wait`, keep going until the words are known
+    /// (each call sends this member's part; the others can take part at any time).
     Members {
         #[arg(long)]
         wait: bool,
@@ -828,8 +828,17 @@ async fn vault(
                 &safety_number,
                 &network(),
                 network().name(),
-                birthday,
-                expiry_days.map(|d| d * 1152),
+                node::KeygenOptions {
+                    creator_birthday_height: birthday,
+                    creator_expiry_blocks: expiry_days.map(|d| d * 1152),
+                    max_birthday: None,
+                },
+                // The home is the state dir; the state is deleted once the vault exists.
+                home.0.clone(),
+                NonceKey::derive(
+                    &fs::read(home.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?,
+                    &invite.mailbox,
+                ),
                 rng,
                 Duration::from_secs(timeout_secs),
             )

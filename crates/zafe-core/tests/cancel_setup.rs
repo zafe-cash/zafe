@@ -65,7 +65,9 @@ async fn cancelling_a_setup_ends_the_invite() {
 }
 
 #[tokio::test]
-async fn a_locked_membership_cannot_be_cancelled() {
+async fn a_locked_setup_without_keys_can_still_be_cancelled() {
+    // A member never came back after membership was locked: the creator can still call
+    // it off, and the others see the setup is gone.
     let relay = RelayClient::new(serve(Relay::new()).await);
     let mut rng = StdRng::seed_from_u64(10);
     let (creator, joiner) = (Identity::generate(&mut rng), Identity::generate(&mut rng));
@@ -74,6 +76,6 @@ async fn a_locked_membership_cannot_be_cancelled() {
         .unwrap();
     join_vault(&relay, &joiner, &invite).await.unwrap();
     seal(&relay, &creator, &invite).await.unwrap();
-    assert!(cancel_setup(&relay, &creator, &invite).await.is_err());
-    membership(&relay, &joiner, &invite).await.unwrap();
+    assert!(cancel_setup(&relay, &creator, &invite).await.unwrap());
+    assert!(membership(&relay, &joiner, &invite).await.is_err());
 }

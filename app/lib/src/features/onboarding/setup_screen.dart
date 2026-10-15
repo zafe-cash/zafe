@@ -16,7 +16,6 @@ import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_toast.dart';
-import '../../core/widgets/confirm_option.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
@@ -24,10 +23,12 @@ import '../../core/errors/zafe_error_copy.dart';
 import '../../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
+import '../../notifications/notification_primer.dart' show startWatchWithPrimer;
 import 'onboarding_art.dart';
 
-/// Vault setup: invite, members joining, locking membership, comparing the safety
-/// words, and key generation (spec §7.2).
+/// Vault setup: invite, members joining, comparing the safety words, and key generation
+/// (spec §7.2). Every step also runs in background checks, so nobody has to keep this
+/// screen open: membership locks itself once full, and "They match" is the one tap.
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
 
@@ -37,23 +38,24 @@ class SetupScreen extends ConsumerStatefulWidget {
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
   Timer? _poll;
-  bool _compared = false;
   bool _busy = false;
-  bool _creatingKeys = false;
   bool _leaving = false;
+  bool _done = false;
 
   /// The relay no longer has this setup: the creator cancelled it.
   bool _gone = false;
   String? _error;
-
-  /// Key generation timed out: the members (keys) who never took part.
-  List<String>? _stalled;
 
   @override
   void initState() {
     super.initState();
     _refresh();
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    // Background checks and pushes carry the setup on while Zafe is closed, and say
+    // when it's time to compare words; the primer comes first, once.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(startWatchWithPrimer(context));
+    });
   }
 
   @override
@@ -62,10 +64,19 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
-  Future<void> _refresh() async {
-    if (_creatingKeys || _leaving) return;
+  Future<void> _refresh({String? confirmed}) async {
+    if (_leaving || _done) return;
     try {
-      await ref.read(vaultProvider.notifier).refreshMembership();
+      final p = await ref
+          .read(vaultProvider.notifier)
+          .setupStep(confirmed: confirmed);
+      if (p.material != null && mounted && !_done) {
+        // The vault exists: its key share now lives only on this phone.
+        _done = true;
+        _poll?.cancel();
+        context.go('/backup-prompt');
+        return;
+      }
       if (mounted && (_error != null || _gone)) {
         setState(() {
           _error = null;
@@ -80,6 +91,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           _gone = true;
           _error = null;
         });
+      } else if (confirmed != null) {
+        rethrow;
       } else {
         setState(() => _error = 'Can\'t reach the relay. Retrying...');
       }
@@ -157,29 +170,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     }
   }
 
-  Future<void> _seal() async {
-    setState(() => _busy = true);
-    try {
-      await ref.read(vaultProvider.notifier).seal();
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(
-            e,
-            fallback: 'Couldn\'t lock membership. Try again.',
-          ),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  /// After membership is locked: leaves the setup on this phone (a member never took
-  /// part, or the group gave up). Everyone else has to do the same.
+  /// After membership is locked: leaves the setup (a member never came back, the words
+  /// differ, or the group gave up). The creator's cancels it for everyone.
   Future<void> _abandon() async {
     if (_busy || _leaving) return;
     final go = await showAppMobileSheet<bool>(
@@ -196,7 +188,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'No keys or funds exist yet. Tell the others to abandon it too, then start over with a new invite.',
+                  'No keys or funds exist yet. Start over with a new invite.',
                   style: AppTypography.bodyMedium.copyWith(
                     color: colors.text.accent,
                   ),
@@ -229,34 +221,23 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
   }
 
-  Future<void> _createKeys(String safetyNumber) async {
-    setState(() {
-      _creatingKeys = true;
-      _stalled = null;
-    });
-    _poll?.cancel();
+  /// "They match": starts this member's part of key generation.
+  Future<void> _confirm(String words) async {
+    setState(() => _busy = true);
     try {
-      await ref.read(vaultProvider.notifier).createKeys(safetyNumber);
-      // Right after creation: the key share now exists only on this phone.
-      if (mounted) context.go('/backup-prompt');
+      await _refresh(confirmed: words);
     } catch (e) {
+      debugPrint('setup: confirming the words failed: ${describeError(e)}');
       if (mounted) {
-        final stalled =
-            e is ZafeError && e.kind == ZafeErrorKind.keygenIncomplete;
-        setState(() {
-          _creatingKeys = false;
-          _stalled = stalled ? e.members : null;
-        });
-        if (!stalled) {
-          showAppToast(
-            context,
-            zafeErrorMessage(e, fallback: 'Key generation failed. Try again.'),
-            iconName: AppIcons.warningCircle,
-            tone: AppToastTone.destructive,
-          );
-        }
-        _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+        showAppToast(
+          context,
+          zafeErrorMessage(e, fallback: 'Couldn\'t start. Try again.'),
+          iconName: AppIcons.warningCircle,
+          tone: AppToastTone.destructive,
+        );
       }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -267,12 +248,22 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     final membership = vault.membership;
     if (info == null) return const SizedBox.shrink();
 
-    final joined = membership?.members.length ?? 1;
-    final everyoneJoined = joined == info.members;
     final sealed = membership?.sealed ?? false;
     final isCreator = membership?.isCreator ?? false;
 
-    if (_creatingKeys) return const _CreatingKeys();
+    final started = membership?.started ?? false;
+    final words = membership?.safetyNumber;
+
+    // After "They match": the key shards while the keys are made, here or in the
+    // background (Zafe can be closed).
+    if (started && membership != null) {
+      return CreatingKeysScreen(
+        waiting: membership.keygenWaitingFor.isEmpty
+            ? null
+            : waitingText(membership.keygenWaitingFor, me: _myKeyHex(vault)),
+        onAbandon: _busy || _leaving ? null : _abandon,
+      );
+    }
 
     Widget? bottom;
     if (_gone && !sealed) {
@@ -281,22 +272,12 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         onPressed: () => _cancel(creator: false, confirm: false),
         child: const Text('Leave setup'),
       );
-    } else if (sealed) {
-      final words = membership?.safetyNumber;
+    } else if (sealed && words != null && !started) {
       bottom = AppButton(
         expand: true,
-        onPressed: _compared && words != null ? () => _createKeys(words) : null,
-        leading: const AppIcon(AppIcons.key, size: 20),
-        child: Text(_stalled == null ? 'Create vault keys' : 'Try again'),
-      );
-    } else if (isCreator) {
-      bottom = AppButton(
-        expand: true,
-        onPressed: everyoneJoined && !_busy ? _seal : null,
-        leading: const AppIcon(AppIcons.lock, size: 20),
-        child: Text(
-          everyoneJoined ? 'Lock membership' : 'Waiting for members...',
-        ),
+        onPressed: _busy ? null : () => _confirm(words),
+        leading: const AppIcon(AppIcons.check, size: 20),
+        child: const Text('They match'),
       );
     }
 
@@ -329,7 +310,11 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             expected: info.members,
             threshold: info.threshold,
             myKeyHex: _myKeyHex(vault),
-            notHere: sealed ? membership?.waitingFor ?? const [] : const [],
+            waiting: !sealed
+                ? const []
+                : started
+                ? membership?.keygenWaitingFor ?? const []
+                : membership?.waitingFor ?? const [],
           ),
           const SizedBox(height: AppSpacing.md),
           if (_error != null)
@@ -339,37 +324,25 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 color: context.colors.text.warning,
               ),
             ),
-          if (!sealed && !isCreator)
+          if (!sealed && !_gone)
             _Hint(
-              text: everyoneJoined
-                  ? 'Everyone has joined. Waiting for the creator to lock membership.'
-                  : 'Waiting for the other members to join with the invite.',
+              text: 'You can close Zafe. It tells you when it\'s your turn.',
             ),
-          if (sealed && membership != null) ...[
+          if (sealed && membership != null && !started)
             SetupSafetyWordsCard(
-              words: membership.safetyNumber,
+              words: words,
               waiting: membership.waitingFor.length,
             ),
-            if (membership.safetyNumber != null) ...[
-              const SizedBox(height: AppSpacing.sm),
-              ConfirmOption(
-                selected: _compared,
-                label: 'I compared these words with every member',
-                onTap: () => setState(() => _compared = !_compared),
-              ),
-            ],
-          ],
-          if (sealed && _stalled != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            _Hint(text: stalledText(_stalled!, me: _myKeyHex(vault))),
-          ],
           if (sealed) ...[
             const SizedBox(height: AppSpacing.sm),
             AppButton(
               expand: true,
               variant: AppButtonVariant.ghost,
               onPressed: _busy || _leaving ? null : _abandon,
-              child: const Text('Abandon setup'),
+              // Different words: nobody should make keys with this setup.
+              child: Text(
+                words != null ? 'They don\'t match' : 'Abandon setup',
+              ),
             ),
           ],
           if (!sealed && !_gone) ...[
@@ -526,7 +499,7 @@ class _MembersCard extends StatelessWidget {
     required this.expected,
     required this.threshold,
     required this.myKeyHex,
-    this.notHere = const [],
+    this.waiting = const [],
   });
 
   final List<String> members;
@@ -534,8 +507,8 @@ class _MembersCard extends StatelessWidget {
   final int threshold;
   final String? myKeyHex;
 
-  /// Members whose phone hasn't sent its part of the safety check yet.
-  final List<String> notHere;
+  /// Members the setup is waiting for (their phone hasn't done its part yet).
+  final List<String> waiting;
 
   @override
   Widget build(BuildContext context) {
@@ -600,10 +573,10 @@ class _MembersCard extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (notHere.contains(m)) ...[
+                  if (waiting.contains(m)) ...[
                     const Spacer(),
                     Text(
-                      'Not here yet',
+                      'Waiting',
                       style: AppTypography.labelMedium.copyWith(
                         color: colors.text.muted,
                       ),
@@ -693,8 +666,8 @@ class SetupSafetyWordsCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Text(
               waiting == 1
-                  ? 'Waiting for 1 member to open Zafe.'
-                  : 'Waiting for $waiting members to open Zafe.',
+                  ? 'Waiting for 1 member.'
+                  : 'Waiting for $waiting members.',
               textAlign: TextAlign.center,
               style: muted,
             ),
@@ -715,7 +688,7 @@ class SetupSafetyWordsCard extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Compare them with every member on a call or in person. If anyone sees different words, stop.',
+              'Compare them with every member on a call, in person or in a chat you trust. If anyone sees different words, stop.',
               textAlign: TextAlign.center,
               style: muted,
             ),
@@ -750,8 +723,25 @@ class _Hint extends StatelessWidget {
   }
 }
 
-class _CreatingKeys extends StatelessWidget {
-  const _CreatingKeys();
+/// Who key generation is waiting for (`missing`, key hex; this member left out).
+String waitingText(List<String> missing, {String? me}) {
+  final who = missing.where((k) => k != me).map(shortKey).toList();
+  final names = switch (who.length) {
+    0 => 'the other members',
+    1 => who.single,
+    _ => '${who.sublist(0, who.length - 1).join(', ')} and ${who.last}',
+  };
+  return 'Waiting for $names.';
+}
+
+/// The vault's keys being made (after this member confirmed the words): the key shards,
+/// who it waits for, and a way out if someone never comes back.
+class CreatingKeysScreen extends StatelessWidget {
+  const CreatingKeysScreen({super.key, this.waiting, this.onAbandon});
+
+  /// "Waiting for ..." when other members haven't done their part yet.
+  final String? waiting;
+  final VoidCallback? onAbandon;
 
   @override
   Widget build(BuildContext context) {
@@ -763,32 +753,54 @@ class _CreatingKeys extends StatelessWidget {
         children: [
           const OnboardingHero('key_shards'),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppIcon(AppIcons.loader, size: 24, color: colors.icon.accent),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Creating your vault keys...',
-                    style: TextStyle(
-                      fontFamily: 'Space Grotesk',
-                      fontSize: 24,
-                      height: 28 / 24,
-                      color: colors.text.accent,
+            // Scrolls on small phones with large text; otherwise sits at the bottom.
+            child: LayoutBuilder(
+              builder: (context, box) => SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: box.maxHeight - 2 * AppSpacing.sm,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppIcon(
+                          AppIcons.loader,
+                          size: 24,
+                          color: colors.icon.accent,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          'Creating your vault keys...',
+                          style: TextStyle(
+                            fontFamily: 'Space Grotesk',
+                            fontSize: 24,
+                            height: 28 / 24,
+                            color: colors.text.accent,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          waiting == null
+                              ? 'You can close Zafe. It tells you when the vault is ready.'
+                              : '$waiting You can close Zafe. It tells you when the vault is ready.',
+                          style: AppTypography.bodyMedium.copyWith(
+                            color: colors.text.secondary,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        AppButton(
+                          expand: true,
+                          variant: AppButtonVariant.ghost,
+                          onPressed: onAbandon,
+                          child: const Text('Abandon setup'),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    'Keep Zafe open.',
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: colors.text.secondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                ],
+                ),
               ),
             ),
           ),
@@ -796,16 +808,4 @@ class _CreatingKeys extends StatelessWidget {
       ),
     );
   }
-}
-
-/// What the setup screen says after key generation timed out waiting for `missing`.
-String stalledText(List<String> missing, {String? me}) {
-  final who = missing.where((k) => k != me).map(shortKey).toList();
-  final names = switch (who.length) {
-    0 => 'some members',
-    1 => who.single,
-    _ => '${who.sublist(0, who.length - 1).join(', ')} and ${who.last}',
-  };
-  return '$names never took part, so key generation stopped. Ask them to open Zafe, '
-      'then try again, or abandon this setup.';
 }

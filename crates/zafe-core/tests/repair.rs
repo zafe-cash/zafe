@@ -7,7 +7,8 @@ use pasta_curves::pallas;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     node::{
-        create_vault, join_vault, load_state, run_keygen, seal, set_name, NodeError, VaultMaterial,
+        create_vault, join_vault, load_state, run_keygen, seal, set_name, KeygenOptions, NodeError,
+        VaultMaterial,
     },
     relay_client::RelayClient,
     repair::{
@@ -71,7 +72,21 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
         .map(|(i, (id, rng))| {
             let birthday = (i == 0).then_some(2);
             run_keygen(
-                relay, id, &invite, &number, &net, "regtest", birthday, None, rng, timeout,
+                relay,
+                id,
+                &invite,
+                &number,
+                &net,
+                "regtest",
+                KeygenOptions {
+                    creator_birthday_height: birthday,
+                    creator_expiry_blocks: None,
+                    max_birthday: None,
+                },
+                keygen_dir(),
+                keygen_key(),
+                rng,
+                timeout,
             )
         });
     let materials = futures::future::join_all(runs)
@@ -401,4 +416,14 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     );
     sign_together(&material, &m[3], &mut rng);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

@@ -518,15 +518,28 @@ async fn the_creator_can_cancel_a_setup_before_it_is_sealed() {
 }
 
 #[tokio::test]
-async fn a_sealed_vault_cannot_be_cancelled() {
-    let w = World::new(true).await;
-    let (status, _) = signed(
-        &w.app,
-        "/v1/mailbox/cancel",
+async fn a_sealed_setup_can_be_cancelled_until_the_vault_exists() {
+    // A locked setup whose keys were never made (a member never came back): the creator
+    // can still cancel it, nobody else can.
+    let mut w = World::new(true).await;
+    let cancel = || CancelSetup { mailbox: MAILBOX };
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[1], cancel()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Once the vault's first log entry exists, it can't be cancelled any more.
+    let key = LogKey::generate(0, &mut w.rng);
+    let first = LogEntry::create(
         &w.ids[0],
-        CancelSetup { mailbox: MAILBOX },
+        &key,
+        MAILBOX,
+        0,
+        [0; 32],
+        b"vault created",
+        &mut w.rng,
     )
-    .await;
+    .unwrap();
+    let (status, _) = call(&w.app, "/v1/log/append", first.to_bytes().unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = signed(
         &w.app,
@@ -539,6 +552,30 @@ async fn a_sealed_vault_cannot_be_cancelled() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "the vault is untouched");
+}
+
+#[tokio::test]
+async fn the_creator_cancels_a_sealed_setup_with_no_keys() {
+    let w = World::new(true).await;
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/cancel",
+        &w.ids[0],
+        CancelSetup { mailbox: MAILBOX },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/members",
+        &w.ids[1],
+        MembersRead {
+            mailbox: MAILBOX,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the setup is gone");
 }
 
 #[tokio::test]

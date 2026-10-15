@@ -78,6 +78,9 @@ pub const USED_COMMITMENTS: u16 = 1;
 /// Signers a leader saw leave a round unanswered (`silent.bin`, a preference only:
 /// unreadable counts as empty).
 pub const SILENT_SIGNERS: u16 = 1;
+/// A member's key-generation state between steps (`keygen.state`: round-1 secret, `sk`
+/// contribution, log key, what was sent), so a setup can pause and resume (2026-10-16).
+pub const KEYGEN_STATE: u16 = 1;
 /// This device's copy of a vault's log (`log_cache::LogCache`, `<mailbox>.log`).
 pub const LOG_CACHE: u16 = 1;
 /// Encrypted vault backups (`ZAFEBAK`; the tag is a single byte there). 2 added signer
@@ -112,6 +115,7 @@ pub enum Format {
     OwnShares,
     UsedCommitments,
     SilentSigners,
+    KeygenState,
     LogCache,
     Backup,
     RelayDb,
@@ -138,6 +142,7 @@ impl Format {
             Format::OwnShares => OWN_SHARES,
             Format::UsedCommitments => USED_COMMITMENTS,
             Format::SilentSigners => SILENT_SIGNERS,
+            Format::KeygenState => KEYGEN_STATE,
             Format::LogCache => LOG_CACHE,
             Format::Backup => BACKUP,
             Format::RelayDb => RELAY_DB,
@@ -164,6 +169,7 @@ impl Format {
             Format::OwnShares => "own signature shares",
             Format::UsedCommitments => "used commitments",
             Format::SilentSigners => "silent signers",
+            Format::KeygenState => "key generation state",
             Format::LogCache => "log copy",
             Format::Backup => "backup",
             Format::RelayDb => "relay database",

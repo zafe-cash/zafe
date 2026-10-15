@@ -12,7 +12,7 @@ use rust_lib_zafe::api::watch::{
     stop_vault_watch, watch_vault_with, VaultActivity, VaultActivityKind,
 };
 use zafe_core::{
-    node::{create_vault, join_vault, run_keygen, seal, top_up_pool, VaultMaterial},
+    node::{create_vault, join_vault, run_keygen, seal, top_up_pool, KeygenOptions, VaultMaterial},
     relay_client::RelayClient,
     session::MemoryPoolStore,
     wallet::regtest_network,
@@ -59,12 +59,33 @@ async fn two_member_vault(relay: &RelayClient) -> (Vec<Identity>, Vec<VaultMater
             &number,
             &net,
             "regtest",
-            Some(2),
-            None,
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
-        run_keygen(relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout),
+        run_keygen(
+            relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
+        ),
     );
     (ids, vec![a.unwrap(), b.unwrap()])
 }
@@ -190,4 +211,14 @@ fn vault_watch_reports_activity_and_stops() {
     let events = start(&old, &ids[0], &materials[0], 5);
     assert_eq!(next(&events), VaultActivityKind::Unsupported);
     assert_ended(&events);
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

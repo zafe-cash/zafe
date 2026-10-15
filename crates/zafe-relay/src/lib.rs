@@ -766,7 +766,9 @@ async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let id = &req.payload.mailbox;
     let mut db = relay.db.lock().expect("lock");
     let mb = mailbox(&db, id)?;
-    if req.signer.sig_pk != mb.creator || mb.sealed {
+    // Sealed is fine: until the vault's first log entry no keys exist, and a setup whose
+    // member never came back must be cancellable.
+    if req.signer.sig_pk != mb.creator {
         return Err(RelayError::Forbidden);
     }
     let logged: i64 = db.query_row(

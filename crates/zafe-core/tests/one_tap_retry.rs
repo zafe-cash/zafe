@@ -10,7 +10,7 @@ use reddsa::frost::redpallas::Identifier;
 use zafe_core::{
     node::{
         append_event, approve, create_vault, join_vault, load_state, one_tap_stuck, run_keygen,
-        seal, top_up_pool, NodeError, VaultMaterial,
+        seal, top_up_pool, KeygenOptions, NodeError, VaultMaterial,
     },
     relay_client::RelayClient,
     session::{pczt_hash, GroupPlan, Member, MemoryNonceStore, MemoryPoolStore, PoolStore},
@@ -78,8 +78,13 @@ async fn vault(
                 number,
                 net,
                 "regtest",
-                birthday,
-                None,
+                KeygenOptions {
+                    creator_birthday_height: birthday,
+                    creator_expiry_blocks: None,
+                    max_birthday: None,
+                },
+                keygen_dir(),
+                keygen_key(),
                 &mut rng,
                 Duration::from_secs(60),
             )
@@ -324,4 +329,14 @@ async fn a_useless_interactive_approval_is_refused() {
         &MemoryPoolStore::default()
     ));
     assert!(!one_tap_stuck(&state, &proposal, &pk(0), &pools[0]));
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

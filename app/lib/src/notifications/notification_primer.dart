@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart'
     show openAppSettings;
 
@@ -45,7 +46,7 @@ class NotificationPrimerSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Know when a payment needs your approval or money arrives. No amounts show on the lock screen.',
+              'Know when it\'s your turn: comparing safety words, approving a payment. No amounts show on the lock screen.',
               style: AppTypography.bodyMedium.copyWith(
                 color: colors.text.secondary,
               ),
@@ -68,6 +69,22 @@ class NotificationPrimerSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Background checks and pushes; the first time, the primer before the system's
+/// permission prompt (never the prompt on its own, and never again after). From Home once
+/// a vault exists, and from the setup screen (setup steps run in background checks too).
+Future<void> startWatchWithPrimer(BuildContext context) async {
+  final prefs = await SharedPreferences.getInstance();
+  var ask = false;
+  if (!(prefs.getBool(kNotificationsPrimedKey) ?? false)) {
+    await prefs.setBool(kNotificationsPrimedKey, true);
+    if (!await notificationsEnabled()) {
+      if (!context.mounted) return;
+      ask = await showNotificationPrimer(context);
+    }
+  }
+  await startVaultWatch(askPermission: ask);
 }
 
 /// "Turn on" from the Home card: the system prompt if Android still offers it, else the
