@@ -217,16 +217,20 @@ class MobileTopNav extends StatelessWidget {
         Expanded(
           child: Align(alignment: Alignment.centerLeft, child: account),
         ),
+        // Zafe: the status may shrink (its label ellipsizes) so the vault name and
+        // avatar keep their room on narrow phones with large system text.
         if (syncLabel != null)
-          _tappableSync(
-            _SyncStatus(
-              label: syncLabel!,
-              baseColor: syncLabelColor ?? colors.sync.text,
-              highlightColor:
-                  syncHighlightColor ?? syncLabelColor ?? colors.sync.text,
-              indicatorColor: syncIndicatorColor ?? colors.sync.glow,
-              indicatorSize: _syncIndicatorSize,
-              animated: syncAnimated,
+          Flexible(
+            child: _tappableSync(
+              _SyncStatus(
+                label: syncLabel!,
+                baseColor: syncLabelColor ?? colors.sync.text,
+                highlightColor:
+                    syncHighlightColor ?? syncLabelColor ?? colors.sync.text,
+                indicatorColor: syncIndicatorColor ?? colors.sync.glow,
+                indicatorSize: _syncIndicatorSize,
+                animated: syncAnimated,
+              ),
             ),
           )
         else
@@ -530,9 +534,15 @@ class _SyncStatusState extends State<_SyncStatus> {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            widget.label,
-            style: AppTypography.labelMedium.copyWith(color: widget.baseColor),
+          Flexible(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.labelMedium.copyWith(
+                color: widget.baseColor,
+              ),
+            ),
           ),
           const SizedBox(width: AppSpacing.s),
           _SyncEdgeIndicator(
@@ -551,11 +561,13 @@ class _SyncStatusState extends State<_SyncStatus> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _ShimmerLabel(
-              label: widget.label,
-              baseColor: widget.baseColor,
-              highlightColor: widget.highlightColor,
-              progress: t,
+            Flexible(
+              child: _ShimmerLabel(
+                label: widget.label,
+                baseColor: widget.baseColor,
+                highlightColor: widget.highlightColor,
+                progress: t,
+              ),
             ),
             const SizedBox(width: AppSpacing.s),
             _SyncEdgeIndicator(
@@ -617,6 +629,8 @@ class _ShimmerLabel extends StatelessWidget {
       // Solid color so `srcIn` keeps the gradient over the full glyph.
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: AppTypography.labelMedium.copyWith(
           color: const Color(0xFFFFFFFF),
         ),

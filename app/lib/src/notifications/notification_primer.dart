@@ -23,11 +23,23 @@ final notificationsEnabledProvider = FutureProvider.autoDispose<bool>(
 Future<bool> showNotificationPrimer(BuildContext context) async {
   final yes = await showAppMobileSheet<bool>(
     context: context,
-    builder: (sheet) {
-      final colors = sheet.colors;
-      return MobileModalScaffold(
-        title: 'Turn on notifications',
-        onClose: () => Navigator.of(sheet).pop(false),
+    builder: (sheet) => const NotificationPrimerSheet(),
+  );
+  return yes == true;
+}
+
+/// The primer's content: pops `true` for "Turn on".
+class NotificationPrimerSheet extends StatelessWidget {
+  const NotificationPrimerSheet({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MobileModalScaffold(
+      title: 'Turn on notifications',
+      onClose: () => Navigator.of(context).pop(false),
+      constrainBody: true,
+      child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -43,22 +55,21 @@ Future<bool> showNotificationPrimer(BuildContext context) async {
             const SizedBox(height: AppSpacing.md),
             AppButton(
               expand: true,
-              onPressed: () => Navigator.of(sheet).pop(true),
+              onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Turn on'),
             ),
             const SizedBox(height: AppSpacing.xs),
             AppButton(
               expand: true,
               variant: AppButtonVariant.ghost,
-              onPressed: () => Navigator.of(sheet).pop(false),
+              onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Not now'),
             ),
           ],
         ),
-      );
-    },
-  );
-  return yes == true;
+      ),
+    );
+  }
 }
 
 /// "Turn on" from the Home card: the system prompt if Android still offers it, else the

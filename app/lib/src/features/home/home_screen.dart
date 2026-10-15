@@ -454,14 +454,20 @@ class BalanceCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(
-                      kNetworkBadge.isEmpty
-                          ? 'VAULT BALANCE'
-                          : 'VAULT BALANCE · $kNetworkBadge',
-                      style: AppTypography.labelSmall.copyWith(
-                        color: card.textSecondary,
-                        letterSpacing: 1.6,
-                        fontWeight: FontWeight.w600,
+                    // Shrinks (ellipsis) rather than overflow on narrow phones with
+                    // large system text.
+                    Flexible(
+                      child: Text(
+                        kNetworkBadge.isEmpty
+                            ? 'VAULT BALANCE'
+                            : 'VAULT BALANCE · $kNetworkBadge',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.labelSmall.copyWith(
+                          color: card.textSecondary,
+                          letterSpacing: 1.6,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.xs),
@@ -579,9 +585,13 @@ class _ThresholdStrip extends StatelessWidget {
             ),
           ),
         const SizedBox(width: 4),
-        Text(
-          '$threshold of $members signers to send',
-          style: AppTypography.labelSmall.copyWith(color: card.textSecondary),
+        Flexible(
+          child: Text(
+            '$threshold of $members signers to send',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.labelSmall.copyWith(color: card.textSecondary),
+          ),
         ),
       ],
     );

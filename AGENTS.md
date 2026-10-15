@@ -739,6 +739,17 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   launch's splash. Android < 12 and iOS (no handler yet) still follow the OS theme.
   Check resources without a Gradle build: `aapt2 compile --dir res` + `aapt2 link` against
   `platforms/android-36/android.jar`.
+- **Small phones and large text** (checked 2026-10-16): `flutter test
+  tool/screens/size_sweep_test.dart` renders the newer screens and sheets at 320x568 to
+  412x915 and text scales 1.0/1.3/2.0 and fails on any overflow; on the emulator use
+  `adb shell wm size 720x1280 && adb shell wm density 320` (360x640 dp) and `adb shell
+  settings put system font_scale 2.0` (reset with `wm size reset`, `wm density reset`,
+  font_scale 1.0). A debug build records every overflow in `files/diagnostics/crashes.log`
+  (`adb shell run-as xyz.zafe.zafe cat ...`), which also covers capture-protected screens.
+  Rules learned: `AppButton` labels shrink to fit a bounded width; `MobileListRow` puts the
+  value under the label at text scale >= 1.5; sheets with prose use `constrainBody: true`
+  and a scrolling body; full-screen layouts with spacers use LayoutBuilder +
+  SingleChildScrollView + ConstrainedBox(minHeight) + IntrinsicHeight (Welcome).
 - **Screen previews without a device**: `flutter test tool/screens/home_render_test.dart`
   (vault card, Home buttons, notice card, activity rows, tab bar → `home_{dark,light}.png`)
   and `flutter test tool/screens/proposal_render_test.dart`

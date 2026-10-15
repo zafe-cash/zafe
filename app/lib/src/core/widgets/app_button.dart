@@ -396,11 +396,9 @@ class _AppButtonState extends State<AppButton> {
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
             child: label,
           );
-    rowChildren.add(
-      widget.constrainContent
-          ? Flexible(fit: FlexFit.loose, child: labelSlot)
-          : labelSlot,
-    );
+    // Placeholder for the label: filled in below once the available width is known.
+    final labelIndex = rowChildren.length;
+    rowChildren.add(const SizedBox.shrink());
     if (widget.trailing != null) {
       rowChildren
         ..add(SizedBox(width: iconGap))
@@ -442,13 +440,29 @@ class _AppButtonState extends State<AppButton> {
         padding: contentPadding,
         child: IconTheme.merge(
           data: IconThemeData(color: labelColor, size: sizing.iconSize),
-          child: Row(
-            mainAxisSize: widget.constrainContent
-                ? MainAxisSize.max
-                : MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: rowChildren,
+          // Zafe: with a bounded width (a phone screen, an Expanded) the label shrinks
+          // to fit instead of overflowing: long labels at large system text sizes on
+          // narrow phones (tool/screens/size_sweep_test.dart). Unbounded (inside a bare
+          // Row) it keeps its natural size, as before.
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final children = [...rowChildren];
+              children[labelIndex] =
+                  widget.constrainContent || constraints.hasBoundedWidth
+                  ? Flexible(
+                      fit: FlexFit.loose,
+                      child: FittedBox(fit: BoxFit.scaleDown, child: labelSlot),
+                    )
+                  : labelSlot;
+              return Row(
+                mainAxisSize: widget.constrainContent
+                    ? MainAxisSize.max
+                    : MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: children,
+              );
+            },
           ),
         ),
       ),

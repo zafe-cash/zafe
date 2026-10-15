@@ -157,20 +157,20 @@ Future<SkipBackupChoice?> confirmSkipBackup(
   required int n,
 }) => showAppMobileSheet<SkipBackupChoice>(
   context: context,
-  builder: (sheet) => _SkipBackupSheet(
+  builder: (sheet) => SkipBackupSheet(
     risk: skipBackupRisk(t: t, n: n),
   ),
 );
 
-class _SkipBackupSheet extends StatefulWidget {
-  const _SkipBackupSheet({required this.risk});
+class SkipBackupSheet extends StatefulWidget {
+  const SkipBackupSheet({super.key, required this.risk});
   final String risk;
 
   @override
-  State<_SkipBackupSheet> createState() => _SkipBackupSheetState();
+  State<SkipBackupSheet> createState() => _SkipBackupSheetState();
 }
 
-class _SkipBackupSheetState extends State<_SkipBackupSheet> {
+class _SkipBackupSheetState extends State<SkipBackupSheet> {
   bool _understood = false;
 
   @override
@@ -179,38 +179,42 @@ class _SkipBackupSheetState extends State<_SkipBackupSheet> {
     return MobileModalScaffold(
       title: 'Back up later?',
       onClose: () => Navigator.of(context).pop(),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Home keeps reminding you until you do.',
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
+      constrainBody: true,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Home keeps reminding you until you do.',
+              style: AppTypography.bodyMedium.copyWith(
+                color: colors.text.secondary,
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          ConfirmOption(
-            selected: _understood,
-            label: widget.risk,
-            onTap: () => setState(() => _understood = !_understood),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          AppButton(
-            expand: true,
-            onPressed: () => Navigator.of(context).pop(SkipBackupChoice.backUp),
-            child: const Text('Back up now'),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: _understood
-                ? () => Navigator.of(context).pop(SkipBackupChoice.skip)
-                : null,
-            child: const Text('Back up later'),
-          ),
-        ],
+            const SizedBox(height: AppSpacing.md),
+            ConfirmOption(
+              selected: _understood,
+              label: widget.risk,
+              onTap: () => setState(() => _understood = !_understood),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppButton(
+              expand: true,
+              onPressed: () =>
+                  Navigator.of(context).pop(SkipBackupChoice.backUp),
+              child: const Text('Back up now'),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: _understood
+                  ? () => Navigator.of(context).pop(SkipBackupChoice.skip)
+                  : null,
+              child: const Text('Back up later'),
+            ),
+          ],
+        ),
       ),
     );
   }

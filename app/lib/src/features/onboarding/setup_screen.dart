@@ -99,35 +99,38 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           return MobileModalScaffold(
             title: creator ? 'Cancel this setup?' : 'Leave this setup?',
             onClose: () => Navigator.of(sheet).pop(false),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  creator
-                      ? 'The invite stops working, and anyone who already joined will see '
-                            'that you cancelled. You can set it up again with the same '
-                            'details, and send a new invite.'
-                      : 'You\'ll need a new invite to join again.',
-                  style: AppTypography.bodyMedium.copyWith(
-                    color: colors.text.accent,
+            constrainBody: true,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    creator
+                        ? 'The invite stops working, and anyone who already joined will see '
+                              'that you cancelled. You can set it up again with the same '
+                              'details, and send a new invite.'
+                        : 'You\'ll need a new invite to join again.',
+                    style: AppTypography.bodyMedium.copyWith(
+                      color: colors.text.accent,
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                AppButton(
-                  expand: true,
-                  variant: AppButtonVariant.destructive,
-                  onPressed: () => Navigator.of(sheet).pop(true),
-                  child: Text(creator ? 'Cancel setup' : 'Leave'),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                AppButton(
-                  expand: true,
-                  variant: AppButtonVariant.ghost,
-                  onPressed: () => Navigator.of(sheet).pop(false),
-                  child: const Text('Keep waiting'),
-                ),
-              ],
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    expand: true,
+                    variant: AppButtonVariant.destructive,
+                    onPressed: () => Navigator.of(sheet).pop(true),
+                    child: Text(creator ? 'Cancel setup' : 'Leave'),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  AppButton(
+                    expand: true,
+                    variant: AppButtonVariant.ghost,
+                    onPressed: () => Navigator.of(sheet).pop(false),
+                    child: const Text('Keep waiting'),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -188,32 +191,35 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         return MobileModalScaffold(
           title: 'Abandon this setup?',
           onClose: () => Navigator.of(sheet).pop(false),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Nothing is lost: no keys or funds exist yet. Tell the other members, '
-                'so they abandon it too, then start again with a new invite.',
-                style: AppTypography.bodyMedium.copyWith(
-                  color: colors.text.accent,
+          constrainBody: true,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Nothing is lost: no keys or funds exist yet. Tell the other members, '
+                  'so they abandon it too, then start again with a new invite.',
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: colors.text.accent,
+                  ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              AppButton(
-                expand: true,
-                variant: AppButtonVariant.destructive,
-                onPressed: () => Navigator.of(sheet).pop(true),
-                child: const Text('Abandon setup'),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              AppButton(
-                expand: true,
-                variant: AppButtonVariant.ghost,
-                onPressed: () => Navigator.of(sheet).pop(false),
-                child: const Text('Keep waiting'),
-              ),
-            ],
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  expand: true,
+                  variant: AppButtonVariant.destructive,
+                  onPressed: () => Navigator.of(sheet).pop(true),
+                  child: const Text('Abandon setup'),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                AppButton(
+                  expand: true,
+                  variant: AppButtonVariant.ghost,
+                  onPressed: () => Navigator.of(sheet).pop(false),
+                  child: const Text('Keep waiting'),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -343,7 +349,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   : 'Waiting for the other members to join with the invite.',
             ),
           if (sealed && membership != null) ...[
-            _SafetyWordsCard(
+            SetupSafetyWordsCard(
               words: membership.safetyNumber,
               waiting: membership.waitingFor.length,
             ),
@@ -648,8 +654,12 @@ class _MembersCard extends StatelessWidget {
   }
 }
 
-class _SafetyWordsCard extends StatelessWidget {
-  const _SafetyWordsCard({required this.words, required this.waiting});
+class SetupSafetyWordsCard extends StatelessWidget {
+  const SetupSafetyWordsCard({
+    super.key,
+    required this.words,
+    required this.waiting,
+  });
 
   /// The four words, or `null` while members' parts of the check are still arriving.
   final String? words;
