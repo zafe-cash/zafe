@@ -387,6 +387,7 @@ class _InviteCard extends StatelessWidget {
                     context,
                     text: link,
                     toastMessage: 'Invite link copied',
+                    sensitive: true,
                   ),
                   leading: const AppIcon(AppIcons.copy, size: 20),
                   child: const Text('Copy'),

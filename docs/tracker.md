@@ -730,11 +730,12 @@ check. Fixed in the same change unless open:
       `Conflict{len}` (L7); joiners refuse a birthday ahead of the chain (L8); a local log
       copy that fails to verify is an error with a follow-the-relay exit (L9); `VaultKeys`
       Debug redacted (L10).
-- [ ] App, low: Strong biometrics only; sensitive clipboard flag + auto-clear; share_plus
-      cache cleanup; `filterTouchesWhenObscured`; require `ZAFE_LINK_HOST` in release
-      builds (custom scheme can be claimed); encrypt nonce files; strip bidi from memos and
-      link labels; show the short key next to shared names in "Proposed by" and
-      notifications.
+- [x] App, low, fixed 2026-10-15: strong biometrics or PIN only (Android native prompt);
+      sensitive clipboard flag + auto-clear; share_plus cache cleanup at launch;
+      `filterTouchesWhenObscured`; `ZAFE_LINK_HOST` required in release workflows; nonce
+      files encrypted (`NONCES`/`POOL_NONCE` 2); hidden/bidi characters shown in memos and
+      link labels; short key next to shared names in "Proposed by" and notifications.
+      Still open: iOS has no clipboard flag or capture shield yet.
 
 ## Onboarding (designed 2026-10-15, docs/onboarding.md)
 

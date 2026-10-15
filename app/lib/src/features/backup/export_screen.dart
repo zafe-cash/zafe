@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
@@ -10,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/platform/sensitive_clipboard.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/vault_summaries.dart';
@@ -134,7 +134,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 
   Future<void> _copyText() async {
-    await Clipboard.setData(ClipboardData(text: _done!.text));
+    await copySecret(_done!.text);
     await _saved();
     if (mounted) {
       showAppToast(

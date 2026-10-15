@@ -65,10 +65,12 @@ pub const DKG_ROUND1: u16 = 3;
 pub const SIGNING_REQUEST: u16 = 1;
 /// Signature shares answering a signing request (envelope payload).
 pub const SIGNATURE_SHARES: u16 = 1;
-/// Interactive-signing nonce files (`FileNonceStore`).
-pub const NONCES: u16 = 1;
-/// Pre-published pool nonce files (`FilePoolStore`).
-pub const POOL_NONCE: u16 = 1;
+/// Interactive-signing nonce files (`FileNonceStore`). 2 (2026-10-15): encrypted with the
+/// member's `NonceKey`; version 1 (plaintext) files are still read.
+pub const NONCES: u16 = 2;
+/// Pre-published pool nonce files (`FilePoolStore`). 2 (2026-10-15): encrypted, like
+/// `NONCES`; version 1 files are still read.
+pub const POOL_NONCE: u16 = 2;
 /// The leader's own signature shares kept until broadcast (`<id>.own`).
 pub const OWN_SHARES: u16 = 1;
 /// The leader's set of commitment sets already used in requests (`used_commitments.bin`).

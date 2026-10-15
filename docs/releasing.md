@@ -40,5 +40,5 @@ builds use the debug key (fine for testing, but such an APK can't update a real 
 ```bash
 cd app && flutter build apk --release --split-per-abi --target-platform android-arm64 \
   --dart-define=ZAFE_NETWORK=test --dart-define=ZAFE_RELAY_URL=https://<relay> \
-  --dart-define=ZAFE_LINK_HOST=<site host>   # optional
+  --dart-define=ZAFE_LINK_HOST=<site host>   # required for releases
 ```

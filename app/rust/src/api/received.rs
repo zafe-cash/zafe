@@ -63,7 +63,7 @@ pub fn list_received(
                 } else {
                     tip - mined + 1
                 },
-                memo: p.memos.join("\n\n"),
+                memo: super::proposals::visible_text(&p.memos.join("\n\n")),
                 is_coinbase: p.coinbase,
             }
         })

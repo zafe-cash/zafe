@@ -50,6 +50,7 @@ class ViewingKeyScreen extends ConsumerWidget {
                 context,
                 text: key!,
                 toastMessage: 'Viewing key copied',
+                sensitive: true,
               ),
               child: const Text('Copy viewing key'),
             ),

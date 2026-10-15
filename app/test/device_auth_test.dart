@@ -115,4 +115,26 @@ void main() {
     final auth = DeviceAuth(_FakeAuthenticator(lockError: StateError('x')));
     expect(await auth.hasScreenLock(), isFalse);
   });
+
+  test('the Android prompt\'s error names map like local_auth\'s', () {
+    // MainActivity.unlockError answers with these names.
+    final cases = {
+      'userCanceled': UnlockOutcome.cancelled,
+      'systemCanceled': UnlockOutcome.cancelled,
+      'timeout': UnlockOutcome.cancelled,
+      'authInProgress': UnlockOutcome.cancelled,
+      'temporaryLockout': UnlockOutcome.lockedOut,
+      'biometricLockout': UnlockOutcome.lockedOut,
+      'noCredentialsSet': UnlockOutcome.noScreenLock,
+      'unknownError': UnlockOutcome.failed,
+      'somethingNew': UnlockOutcome.failed,
+    };
+    cases.forEach((name, outcome) {
+      expect(
+        DeviceAuth.outcomeForError(StrongDeviceAuthenticator.errorCode(name)),
+        outcome,
+        reason: name,
+      );
+    });
+  });
 }

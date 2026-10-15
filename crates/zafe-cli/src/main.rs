@@ -12,7 +12,7 @@ use rand::rngs::OsRng;
 use zafe_core::{
     durable,
     node::{self, Invite, VaultMaterial},
-    nonce_store::{FileNonceStore, FilePoolStore},
+    nonce_store::{FileNonceStore, FilePoolStore, NonceKey},
     relay_client::RelayClient,
     repair::{self, RecoveryRequest, RecoveryStatus},
     session::ProposalId,
@@ -192,6 +192,13 @@ impl Home {
         Ok(Identity::from_seeds(IdentitySeeds::from_bytes(&bytes)?))
     }
 
+    /// The key this member's nonce files in the vault are encrypted with (derived from
+    /// the identity seeds, like the app).
+    fn nonce_key(&self, material: &VaultMaterial) -> Result<NonceKey> {
+        let seeds = fs::read(self.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?;
+        Ok(NonceKey::derive(&seeds, &material.descriptor.vault_id))
+    }
+
     fn invite(&self) -> Result<Invite> {
         let s = fs::read_to_string(self.path(INVITE_FILE))
             .context("no invite; create or join a vault")?;
@@ -365,8 +372,10 @@ async fn main() -> Result<()> {
         Command::Approve { proposal } => {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
-            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
-            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
+            let mut store =
+                FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
+            let mut pool =
+                FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
             let approved = node::approve(
                 &relay,
                 &home.identity()?,
@@ -422,7 +431,8 @@ async fn main() -> Result<()> {
         }
         Command::Pool { reset } => {
             let material = home.material()?;
-            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
+            let mut pool =
+                FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
             let n = node::top_up_pool(
                 &relay,
                 &home.identity()?,
@@ -506,7 +516,8 @@ async fn main() -> Result<()> {
                 &node::encode_request(&sent.request)?,
             )?;
             // If this member is also a signer, it signs its own part now (never via relay).
-            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
+            let mut store =
+                FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
             if let Some(own) = node::sign_own_shares(
                 &relay,
                 &home.identity()?,
@@ -637,7 +648,8 @@ async fn main() -> Result<()> {
         Command::Respond => {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
-            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
+            let mut store =
+                FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
             let report = node::respond(
                 &relay,
                 &home.identity()?,
@@ -793,7 +805,8 @@ async fn vault(
             println!("vault created: {}", material.descriptor.address);
             // Like the app: publish the one-tap commitment pool while every member is
             // present, so the first payment can be one tap.
-            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
+            let mut pool =
+                FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
             let n = node::top_up_pool(relay, &me, &material, &mut pool, false, None, rng).await?;
             println!("published {n} commitment(s)");
         }

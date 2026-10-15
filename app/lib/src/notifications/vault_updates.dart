@@ -80,9 +80,10 @@ List<VaultUpdate> vaultUpdates({
   List<rust.UnapprovedSpendInfo> unapprovedSpends = const [],
   String? me,
 }) {
+  // A name with the member's short key: names are chosen by the members themselves.
   String? nameOf(String keyHex) {
     final n = names[keyHex]?.trim();
-    return n == null || n.isEmpty ? null : n;
+    return n == null || n.isEmpty ? null : '$n (${shortKey(keyHex)})';
   }
 
   final out = <VaultUpdate>[];

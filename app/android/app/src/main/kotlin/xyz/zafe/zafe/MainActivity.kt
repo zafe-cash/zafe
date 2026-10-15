@@ -1,16 +1,24 @@
 package xyz.zafe.zafe
 
+import android.app.KeyguardManager
 import android.app.UiModeManager
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
+import androidx.biometric.BiometricManager.Authenticators
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -25,8 +33,14 @@ class MainActivity : FlutterFragmentActivity() {
     private val soundIds = mutableMapOf<String, Int>()
     private val loadedSounds = mutableSetOf<Int>()
 
+    /// The unlock waiting for the PIN screen's answer (Android 10 and older).
+    private var pendingUnlock: MethodChannel.Result? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Taps that arrive while another app draws over this one (an overlay trying to
+        // trick the owner into approving) are dropped.
+        window.decorView.filterTouchesWhenObscured = true
         // A wallet's balances and payments stay out of the recent-apps view (the card
         // shows a blank window instead). Screenshots inside the app still work.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -113,9 +127,133 @@ class MainActivity : FlutterFragmentActivity() {
         return true
     }
 
+    /// Asks for a strong biometric (class 3: fingerprint, secure face unlock) or the
+    /// device credential. Weak biometrics, such as camera face unlock a photo can fool,
+    /// are never offered. Answers `null` when unlocked, else an error code the Dart side
+    /// maps like local_auth's (`userCanceled`, `biometricLockout`, ...).
+    private fun unlock(reason: String, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val prompt = BiometricPrompt(
+                this,
+                ContextCompat.getMainExecutor(this),
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(r: BiometricPrompt.AuthenticationResult) {
+                        result.success(null)
+                    }
+
+                    override fun onAuthenticationError(code: Int, message: CharSequence) {
+                        result.success(unlockError(code))
+                    }
+                },
+            )
+            val info = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock Zafe")
+                .setSubtitle(reason)
+                .setAllowedAuthenticators(
+                    Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL,
+                )
+                .build()
+            prompt.authenticate(info)
+        } else {
+            // Before Android 11 the system can't combine strong biometrics with the
+            // credential in one prompt: ask for the PIN, pattern or password alone.
+            val intent = getSystemService(KeyguardManager::class.java)
+                ?.createConfirmDeviceCredentialIntent("Unlock Zafe", reason)
+            if (intent == null) {
+                result.success("noCredentialsSet")
+                return
+            }
+            pendingUnlock?.success("authInProgress")
+            pendingUnlock = result
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, UNLOCK_REQUEST)
+        }
+    }
+
+    private fun unlockError(code: Int): String = when (code) {
+        BiometricPrompt.ERROR_USER_CANCELED,
+        BiometricPrompt.ERROR_NEGATIVE_BUTTON -> "userCanceled"
+        BiometricPrompt.ERROR_CANCELED -> "systemCanceled"
+        BiometricPrompt.ERROR_TIMEOUT -> "timeout"
+        BiometricPrompt.ERROR_LOCKOUT -> "temporaryLockout"
+        BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> "biometricLockout"
+        BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL -> "noCredentialsSet"
+        else -> "unknownError"
+    }
+
+    @Deprecated("Only the PIN screen of Android 10 and older answers here")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == UNLOCK_REQUEST) {
+            val pending = pendingUnlock
+            pendingUnlock = null
+            pending?.success(if (resultCode == RESULT_OK) null else "userCanceled")
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    /// Copies a secret (backup text, recovery code) flagged as sensitive, so Android
+    /// doesn't show it in the copy preview or keyboard suggestions (Android 13+ honour
+    /// the flag; older versions read the same extra name).
+    private fun copySensitive(text: String) {
+        val clip = ClipData.newPlainText("", text)
+        clip.description.extras = PersistableBundle().apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+            } else {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
+    }
+
+    /// Clears the clipboard if it still holds `text`. In the background Android 10+
+    /// won't let the app read it; then it is cleared anyway, as it most likely still
+    /// holds the secret.
+    private fun clearClipboardIfUnchanged(text: String) {
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return
+        val current = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text
+        if (current != null && current.toString() != text) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            clipboard.clearPrimaryClip()
+        } else {
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         loadPaymentSounds()
+        // The unlock prompt for approving, sending and the app lock.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "xyz.zafe/device_auth")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hasScreenLock" -> result.success(
+                        getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true,
+                    )
+                    "authenticate" -> runOnUiThread {
+                        unlock(call.argument<String>("reason") ?: "", result)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // Secrets copied by the app: flagged sensitive, cleared again after a while.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "xyz.zafe/clipboard")
+            .setMethodCallHandler { call, result ->
+                val text = call.argument<String>("text") ?: ""
+                when (call.method) {
+                    "copySensitive" -> runOnUiThread {
+                        copySensitive(text)
+                        result.success(null)
+                    }
+                    "clearIfUnchanged" -> runOnUiThread {
+                        clearClipboardIfUnchanged(text)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         // Payment moments (approve, ready, sent, received, failed): sound + haptics.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "xyz.zafe/payment_feedback")
             .setMethodCallHandler { call, result ->
@@ -191,5 +329,9 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private companion object {
+        const val UNLOCK_REQUEST = 0x2afe
     }
 }

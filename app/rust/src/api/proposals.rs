@@ -11,7 +11,7 @@ use rand::rngs::OsRng;
 use zafe_core::{
     durable,
     node::{self, VaultMaterial},
-    nonce_store::{FileNonceStore, FilePoolStore},
+    nonce_store::{FileNonceStore, FilePoolStore, NonceKey},
     relay_client::RelayClient,
     repair,
     session::{NonceStore, ProposalId},
@@ -120,8 +120,8 @@ pub fn parse_payment_request(network_name: String, text: String) -> ScannedReque
                         .memo()
                         .map(|m| memo_text(m.as_slice()))
                         .unwrap_or_default(),
-                    label: p.label().cloned().unwrap_or_default(),
-                    message: p.message().cloned().unwrap_or_default(),
+                    label: visible_text(p.label().map_or("", String::as_str)),
+                    message: visible_text(p.message().map_or("", String::as_str)),
                 })
                 .collect::<Vec<_>>(),
             Err(_) => return fail("This payment link can't be read".into()),
@@ -191,7 +191,7 @@ fn memo_text(bytes: &[u8]) -> String {
         .ok()
         .and_then(|b| Memo::try_from(b).ok())
         .and_then(|m| match m {
-            Memo::Text(t) => Some(t.to_string()),
+            Memo::Text(t) => Some(visible_text(&t)),
             _ => None,
         })
         .unwrap_or_default()
@@ -280,18 +280,35 @@ fn request_file(state_dir: &str, id: &ProposalId) -> PathBuf {
     leader_dir(state_dir).join(format!("{}.{}", hex::encode(id), state_dir::REQUEST_EXT))
 }
 
-fn pool_store(state_dir: &str) -> FilePoolStore {
-    FilePoolStore::new(PathBuf::from(state_dir).join(state_dir::POOL))
+/// This member's key for its nonce files in this vault (derived, never stored).
+fn nonce_key(seeds: &[u8], m: &VaultMaterial) -> NonceKey {
+    NonceKey::derive(seeds, &m.descriptor.vault_id)
 }
 
-fn nonce_store(state_dir: &str) -> FileNonceStore {
-    FileNonceStore::new(PathBuf::from(state_dir).join(state_dir::NONCES))
+fn pool_store(state_dir: &str, seeds: &[u8], m: &VaultMaterial) -> FilePoolStore {
+    FilePoolStore::new(
+        PathBuf::from(state_dir).join(state_dir::POOL),
+        nonce_key(seeds, m),
+    )
 }
 
-fn info(state: &VaultState, me: [u8; 32], state_dir: &str) -> Vec<ProposalInfo> {
+fn nonce_store(state_dir: &str, seeds: &[u8], m: &VaultMaterial) -> FileNonceStore {
+    FileNonceStore::new(
+        PathBuf::from(state_dir).join(state_dir::NONCES),
+        nonce_key(seeds, m),
+    )
+}
+
+fn info(
+    state: &VaultState,
+    me: [u8; 32],
+    state_dir: &str,
+    seeds: &[u8],
+    m: &VaultMaterial,
+) -> Vec<ProposalInfo> {
     let d = &state.descriptor;
-    let nonces = nonce_store(state_dir);
-    let pool = pool_store(state_dir);
+    let nonces = nonce_store(state_dir, seeds, m);
+    let pool = pool_store(state_dir, seeds, m);
     let mut out: Vec<_> = state
         .proposals
         .values()
@@ -449,7 +466,7 @@ pub fn list_proposals(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let relay = RelayClient::new(relay_url);
-    let mut pool = pool_store(&state_dir);
+    let mut pool = pool_store(&state_dir, &seeds, &m);
     // A device just restored from a backup retires the commitments its previous device
     // published (see `node::top_up_pool`); the marker is removed once that is logged.
     let reset_marker = PathBuf::from(&state_dir).join(state_dir::POOL_RESET);
@@ -487,9 +504,9 @@ pub fn list_proposals(
     watch.finish();
     let state = state?;
     node::forget_closed(&state, &me.public().sig_pk, tip_height, &mut pool);
-    node::forget_closed_nonces(&state, tip_height, &mut nonce_store(&state_dir));
+    node::forget_closed_nonces(&state, tip_height, &mut nonce_store(&state_dir, &seeds, &m));
     Ok(ProposalList {
-        items: info(&state, me.public().sig_pk, &state_dir),
+        items: info(&state, me.public().sig_pk, &state_dir, &seeds, &m),
         newer_version_entries: state.newer_version_entries() as u32,
         shared_names: shared_names(&state),
         backed_up: backed_up(&state),
@@ -591,22 +608,33 @@ fn shared_names(state: &VaultState) -> Vec<SignerName> {
         .collect()
 }
 
+/// Invisible or direction-changing characters: they can hide text or make it read in
+/// another order than it is (an amount or address inside a memo, a name).
+fn hidden_char(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FE00}'..='\u{FE0F}'
+        | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}')
+}
+
+/// Text from outside (memos, a payment link's label and message) as shown: each hidden
+/// character becomes U+FFFD, so it is visible and can't reorder what's around it.
+pub(crate) fn visible_text(text: &str) -> String {
+    text.chars()
+        .map(|c| if hidden_char(c) { '\u{FFFD}' } else { c })
+        .collect()
+}
+
 /// No invisible or direction-changing characters, and not "You" (with anything after).
 fn plain_name(name: &str) -> bool {
-    let hidden = |c: char| {
-        matches!(c,
-            '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FE00}'..='\u{FE0F}'
-            | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}')
-    };
     let lower = name.trim().to_lowercase();
     let you = lower == "you" || lower.starts_with("you ") || lower.starts_with("you(");
-    !you && !name.chars().any(hidden)
+    !you && !name.chars().any(hidden_char)
 }
 
 #[cfg(test)]
 mod name_tests {
-    use super::plain_name;
+    use super::{plain_name, visible_text};
 
     #[test]
     fn names_that_could_pass_for_someone_else_are_not_plain() {
@@ -615,6 +643,8 @@ mod name_tests {
         assert!(!plain_name("You"));
         assert!(!plain_name(" you (CFO)"));
         assert!(!plain_name("Al\u{202E}ecila"));
+        assert_eq!(visible_text("pay \u{202E}01 ZEC"), "pay \u{FFFD}01 ZEC");
+        assert_eq!(visible_text("plain memo"), "plain memo");
         assert!(!plain_name("Ali\u{200B}ce"));
     }
 }
@@ -852,8 +882,8 @@ pub fn approve_proposal(
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
-    let mut store = nonce_store(&state_dir);
-    let mut pool = pool_store(&state_dir);
+    let mut store = nonce_store(&state_dir, &seeds, &m);
+    let mut pool = pool_store(&state_dir, &seeds, &m);
     let approved = runtime().block_on(node::approve(
         &RelayClient::new(relay_url),
         &me,
@@ -997,7 +1027,7 @@ pub fn answer_signing_requests(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
-    let mut store = nonce_store(&state_dir);
+    let mut store = nonce_store(&state_dir, &seeds, &m);
     // Runs even without stored nonces (one-tap members rarely hold any): the inbox still
     // has keygen messages, finished requests and old shares for the relay to delete.
     let tip = match tip_height {
@@ -1197,7 +1227,7 @@ pub fn send_with_progress(
         let own: Option<Vec<Vec<u8>>> = match fs::read(&own_path) {
             Ok(bytes) => Some(node::decode_own_shares(&bytes)?),
             Err(_) => {
-                let mut store = nonce_store(&state_dir);
+                let mut store = nonce_store(&state_dir, &seeds, &m);
                 let own =
                     node::sign_own_shares(&relay, &me, &m, &net, tip, &request, &mut store).await?;
                 if let Some(own) = &own {

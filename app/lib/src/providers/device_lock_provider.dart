@@ -9,7 +9,7 @@ const kRequireUnlockKey = 'zafe_require_unlock';
 const kNoScreenLockWarnedKey = 'zafe_no_screen_lock_warned';
 
 final deviceAuthProvider = Provider<DeviceAuth>(
-  (ref) => DeviceAuth(LocalDeviceAuthenticator()),
+  (ref) => DeviceAuth(platformAuthenticator()),
 );
 
 /// "Require unlock to approve" (default on): approving, sending, proposing,

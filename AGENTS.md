@@ -143,7 +143,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   gotcha: Zakura (like Zebra) keeps the last ~100 blocks in memory, so restarting the
   node rewinds the chain as well as the mempool; don't use it to simulate a drop.
 - **Nonce storage**: `nonce_store::FileNonceStore` (atomic write+rename; `put` returns an
-  error so a failed write never publishes an approval). The directory must be excluded from
+  error so a failed write never publishes an approval). Since `NONCES`/`POOL_NONCE` 2
+  (2026-10-15) nonce and pool-nonce files are XChaCha20-Poly1305 encrypted (file name as
+  AAD) with `NonceKey::derive(identity seeds, vault id)`: the stores take the key (bridge
+  `nonce_key(seeds, m)`, CLI `Home::nonce_key`). Version 1 plaintext files are still read
+  (published pool commitments stay usable after the update); another key reads nothing. The directory must be excluded from
   backups/device transfer: the Android app disables both (`allowBackup=false`,
   `res/xml/data_extraction_rules.xml`); iOS needs `isExcludedFromBackup` (not done yet).
 - **Nonces**: one pair per spend, keyed by (proposal, pczt hash); check the request's
@@ -1140,6 +1144,20 @@ Learned while studying it:
   10.3.4 holding a vault was updated in place (same signing key) to 11.2.0: same vault, address and signer
   key, zero `FlutterSecureStorage` errors, then a new vault (write path, keygen, first sync) worked. Repeat
   that in-place test whenever the plugin changes: it guards the key shares.
+- **Strong unlock on Android** (2026-10-15, user's decision): `local_auth` always offers
+  weak (class 2) biometrics such as camera face unlock, so Android uses
+  `StrongDeviceAuthenticator` (`xyz.zafe/device_auth` in `MainActivity`): `BiometricPrompt`
+  with `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` on Android 11+, the `KeyguardManager` PIN
+  screen alone below (the two can't be combined there). Error names are local_auth's, so
+  `DeviceAuth.outcomeForError` maps both; iOS keeps `LocalDeviceAuthenticator`
+  (`platformAuthenticator()`). Same activity: `filterTouchesWhenObscured` on the decor
+  view (overlay tapjacking), and `xyz.zafe/clipboard`: `copySecret` (invite link, viewing
+  key, backup text) flags the clip sensitive and clears it after 60 s if unchanged.
+  `clearShareCache` deletes `<cache>/share_plus` at launch (share_plus keeps the last
+  shared file, e.g. a backup, until the next share). Memos and payment-link labels go
+  through the bridge's `visible_text` (hidden/bidi characters shown as U+FFFD); "Proposed
+  by" and notifications add the short key after a member's name. Release workflows now
+  fail without `ZAFE_LINK_HOST` (`zafe://` can be claimed by any app).
 - **Unlock gate** (spec §14; `core/security/device_auth.dart` pure logic behind a
   `DeviceAuthenticator`, `core/security/unlock_gate.dart` `confirmUnlock(context, ref,
   reason:)`, `providers/device_lock_provider.dart`): approving, Send now / Collect

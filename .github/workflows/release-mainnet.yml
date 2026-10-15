@@ -8,7 +8,7 @@ name: Release (Android, mainnet)
 #
 # Needs, see docs/releasing.md:
 #   repository variables
-#     ZAFE_LINK_HOST             optional: host of the invite landing site (infra/site/),
+#     ZAFE_LINK_HOST             required: host of the invite landing site (infra/site/),
 #                                e.g. zafe.cash; without it invites are zafe:// links
 #   secrets of the environment `android-release` (only v* tags may use it, so no branch or
 #   pull-request workflow can read the signing key)
@@ -72,7 +72,9 @@ jobs:
           [ "$(curl -fsS --max-time 15 https://relay.zafe.cash/health || true)" = ok ] \
             || { echo "::error::https://relay.zafe.cash/health did not answer ok"; missing=1; }
           case "$ZAFE_LINK_HOST" in
-            '') echo "::warning::No ZAFE_LINK_HOST: invites are zafe:// links, which need Zafe installed" ;;
+            # Required: a release must open invites through verified https App Links; any
+            # app can claim the zafe:// scheme and receive the invite instead.
+            '') echo "::error::Set ZAFE_LINK_HOST: without it invites are zafe:// links, which another app can claim"; missing=1 ;;
             *[!a-z0-9.-]*|.*|*.|*..*) echo "::error::ZAFE_LINK_HOST must be a bare lower-case host like zafe.example"; missing=1 ;;
           esac
           for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do

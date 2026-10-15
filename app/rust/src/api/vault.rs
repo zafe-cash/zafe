@@ -245,7 +245,10 @@ pub fn run_keygen(
         .map_err(anyhow::Error::from)?;
         // Best effort: list_proposals tops up again on every refresh.
         if let Some(dir) = state_dir {
-            let mut pool = FilePoolStore::new(PathBuf::from(dir).join(state_dir::POOL));
+            let mut pool = FilePoolStore::new(
+                PathBuf::from(dir).join(state_dir::POOL),
+                zafe_core::nonce_store::NonceKey::derive(&seeds, &material.descriptor.vault_id),
+            );
             if let Err(e) =
                 node::top_up_pool(&relay, &me, &material, &mut pool, false, None, &mut OsRng).await
             {

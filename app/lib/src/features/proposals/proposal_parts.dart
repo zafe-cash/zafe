@@ -102,7 +102,12 @@ class ProposalBody extends ConsumerWidget {
             children: [
               DetailRow(
                 label: 'Proposed by',
-                value: memberLabel(p.author, me: me, names: names),
+                value: memberLabel(
+                  p.author,
+                  me: me,
+                  names: names,
+                  withKey: true,
+                ),
               ),
               if (p.createdAt > BigInt.zero) ...[
                 const DetailDivider(),
