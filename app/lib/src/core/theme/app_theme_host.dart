@@ -95,8 +95,7 @@ class _NativeAppearanceSync extends StatefulWidget {
   final Widget child;
 
   @override
-  State<_NativeAppearanceSync> createState() =>
-      _NativeAppearanceSyncState();
+  State<_NativeAppearanceSync> createState() => _NativeAppearanceSyncState();
 }
 
 class _NativeAppearanceSyncState extends State<_NativeAppearanceSync> {

@@ -44,6 +44,30 @@ String expiresIn(rust.ProposalInfo p, int height, {int? nu7Height}) {
   return 'about ${n(days, 'day')}';
 }
 
+/// A payment waiting for this member: a vote, or (once every signature is in and nobody
+/// is auto-sending) a send. Home's "Needs you" and the notifications use the same rule.
+bool needsMyAction(rust.ProposalInfo p, {int? height}) =>
+    !proposalExpired(p, height) &&
+    (p.needsReapproval ||
+        (p.stage == rust.ProposalStage.open && p.myVote == rust.MyVote.none) ||
+        (p.stage == rust.ProposalStage.approved && !(p.ready && p.autoSend)));
+
+/// " · expires in about 5 hours" when an unsent payment has less than a day left, else ''.
+String _soon(rust.ProposalInfo p, int? height) {
+  if (height == null || p.expiryHeight <= 0) return '';
+  final secs = blocksToSeconds(height, p.expiryHeight);
+  return secs > 0 && secs < 86400
+      ? ' · expires in ${expiresIn(p, height)}'
+      : '';
+}
+
+/// What this member has to do with a payment that [needsMyAction].
+String actionTitle(rust.ProposalInfo p) => p.needsReapproval
+    ? 'Approve again'
+    : p.stage == rust.ProposalStage.approved
+    ? 'Send payment'
+    : 'Approve payment';
+
 /// Title for a proposal from this member's point of view (sentence case).
 String proposalTitle(rust.ProposalInfo p, {int? height}) =>
     proposalExpired(p, height) ? 'Expired' : _title(p);
@@ -159,10 +183,14 @@ class ProposalRow extends StatelessWidget {
     required this.onTap,
     this.hideAmount = false,
     this.height,
+    this.asAction = false,
   });
   final rust.ProposalInfo proposal;
   final bool hideAmount;
   final VoidCallback onTap;
+
+  /// Titled with what to do ("Approve payment"), for Home's "Needs you".
+  final bool asAction;
 
   /// Synced chain tip, to show expiry.
   final int? height;
@@ -172,16 +200,14 @@ class ProposalRow extends StatelessWidget {
     final colors = context.colors;
     final p = proposal;
     final expired = proposalExpired(p, height);
-    final needsMe =
-        !expired &&
-        p.stage == rust.ProposalStage.open &&
-        p.myVote == rust.MyVote.none;
+    final needsMe = needsMyAction(p, height: height);
     final subtitle = expired
         ? (p.createdAt > BigInt.zero ? formatTimestamp(p.createdAt) : '')
         : switch (p.stage) {
             rust.ProposalStage.open =>
-              '${p.approvals.length} of ${p.threshold} approved',
-            rust.ProposalStage.approved => 'Approved',
+              '${p.approvals.length} of ${p.threshold} approved'
+                  '${_soon(p, height)}',
+            rust.ProposalStage.approved => 'Approved${_soon(p, height)}',
             _ => p.createdAt > BigInt.zero ? formatTimestamp(p.createdAt) : '',
           };
     return AppTappable(
@@ -218,7 +244,9 @@ class ProposalRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      proposalTitle(p, height: height),
+                      asAction
+                          ? actionTitle(p)
+                          : proposalTitle(p, height: height),
                       style: AppTypography.labelLarge.copyWith(
                         color: colors.text.accent,
                       ),

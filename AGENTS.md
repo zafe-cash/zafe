@@ -1096,6 +1096,11 @@ Learned while studying it:
   tool/screens/size_sweep_test.dart` (fails on any overflow); test proposer **and** approver flows.
   No dead ends: "Sent!" returns Home by itself (`kSentHoldTime`), reject/cancel/non-final approve
   go back; Tx IDs open ZecBlock (`core/config/block_explorer.dart`).
+- **Needs you** (Home, 2026-10-16): payments where `needsMyAction` (`proposal_status.dart`; the same rule
+  counts notifications) and seat moves this member can approve, titled by the action (`actionTitle`:
+  "Approve payment" / "Send payment" / "Approve again"), above every notice except "Money left without
+  approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
+  wants attention asked for only when the member must act.
 - **Privacy mode is app-wide** (`privacyModeProvider`, persisted in prefs, read in the
   bootstrap): every amount goes through `amountWithTicker(text, hide:)`. Vizor's
   `hideAmountIfPrivacyMode` only appends the unit to the *mask*, so passing a bare amount

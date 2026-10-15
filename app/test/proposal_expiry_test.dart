@@ -104,6 +104,38 @@ void main() {
     });
   });
 
+  test('needs you: what this member must do, and nothing else', () {
+    final vote = proposal('a');
+    final voted = proposal('b', myVote: MyVote.approved);
+    final send = proposal(
+      'c',
+      stage: ProposalStage.approved,
+      myVote: MyVote.approved,
+      ready: true,
+      autoSend: false,
+    );
+    final autoSending = proposal(
+      'd',
+      stage: ProposalStage.approved,
+      myVote: MyVote.approved,
+      ready: true,
+    );
+    final expired = proposal('e', expiryHeight: 10);
+    expect(needsMyAction(vote), isTrue);
+    expect(needsMyAction(voted), isFalse);
+    expect(needsMyAction(send), isTrue);
+    expect(needsMyAction(autoSending), isFalse);
+    expect(needsMyAction(expired, height: 10), isFalse);
+    expect(actionTitle(vote), 'Approve payment');
+    expect(actionTitle(send), 'Send payment');
+    expect(
+      actionTitle(
+        proposal('f', myVote: MyVote.approved, needsReapproval: true),
+      ),
+      'Approve again',
+    );
+  });
+
   test('propose again fills the amount field with plain decimal ZEC', () {
     expect(zecDecimal(BigInt.from(150000000)), '1.5');
     expect(zecDecimal(BigInt.from(100000000)), '1');
