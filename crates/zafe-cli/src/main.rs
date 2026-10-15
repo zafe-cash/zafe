@@ -428,6 +428,7 @@ async fn main() -> Result<()> {
                 &material,
                 &mut pool,
                 reset,
+                None,
                 &mut rng,
             )
             .await?;
@@ -491,6 +492,8 @@ async fn main() -> Result<()> {
                 tip,
                 id,
                 &used,
+                &node::SilentSigners::at(home.path(REQUESTS_DIR).join(state_dir::SILENT_SIGNERS))
+                    .load(),
                 &mut rng,
             )
             .await?;
@@ -661,9 +664,13 @@ async fn main() -> Result<()> {
                     .map(|b| node::decode_own_shares(&b))
                     .transpose()?;
             let mut client = connect(&cli.lightwalletd).await?;
-            let sent = node::finalize(
+            let me = home.identity()?;
+            let silent =
+                node::SilentSigners::at(home.path(REQUESTS_DIR).join(state_dir::SILENT_SIGNERS));
+            let signers: Vec<_> = request.signers.iter().copied().collect();
+            let sent = match node::finalize(
                 &relay,
-                &home.identity()?,
+                &me,
                 &material,
                 &request,
                 own.as_deref(),
@@ -672,7 +679,29 @@ async fn main() -> Result<()> {
                 |p| eprintln!("shares {}/{}", p.received, p.needed),
                 &mut rng,
             )
-            .await?;
+            .await
+            {
+                Ok(sent) => {
+                    silent.update(&[], &signers);
+                    sent
+                }
+                Err(e) => {
+                    // After a timeout, the next `zafe request` asks the silent signers last.
+                    if matches!(e, node::NodeError::Timeout(_)) {
+                        if let Ok(quiet) =
+                            node::unanswered_signers(&relay, &me, &material, &request).await
+                        {
+                            let answered: Vec<_> = signers
+                                .iter()
+                                .filter(|s| !quiet.contains(s))
+                                .copied()
+                                .collect();
+                            silent.update(&quiet, &answered);
+                        }
+                    }
+                    return Err(e.into());
+                }
+            };
             node::SentTxs::in_dir(home.path(state_dir::SENT)).put(&sent);
             println!("broadcast txid {}", hex_txid(&sent.txid));
         }
@@ -764,7 +793,7 @@ async fn vault(
             // Like the app: publish the one-tap commitment pool while every member is
             // present, so the first payment can be one tap.
             let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
-            let n = node::top_up_pool(relay, &me, &material, &mut pool, false, rng).await?;
+            let n = node::top_up_pool(relay, &me, &material, &mut pool, false, None, rng).await?;
             println!("published {n} commitment(s)");
         }
         VaultCmd::Show => {

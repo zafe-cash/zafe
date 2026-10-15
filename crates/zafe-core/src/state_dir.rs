@@ -14,6 +14,8 @@ pub const REPAIR: &str = "repair";
 pub const SENT: &str = "sent";
 /// Commitment sets a leader already used (`node::encode_used_commitments`).
 pub const USED_COMMITMENTS: &str = "used_commitments.bin";
+/// Signers this leader saw leave a round unanswered (`node::SilentSigners`).
+pub const SILENT_SIGNERS: &str = "silent.bin";
 /// Marker file: this device was restored from a backup, so its next refresh retires the
 /// commitments the previous device published and publishes a fresh pool
 /// (`node::top_up_pool` with `reset`). Written by the restore, removed after the reset.

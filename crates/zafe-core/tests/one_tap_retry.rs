@@ -93,7 +93,7 @@ async fn vault(
         let mut pool = MemoryPoolStore::default();
         let mut rng = StdRng::seed_from_u64(200 + i as u64);
         assert!(
-            top_up_pool(&relay, id, m, &mut pool, false, &mut rng)
+            top_up_pool(&relay, id, m, &mut pool, false, None, &mut rng)
                 .await
                 .unwrap()
                 > 0

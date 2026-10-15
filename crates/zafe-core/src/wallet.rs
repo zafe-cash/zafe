@@ -687,6 +687,13 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         })
     }
 
+    /// Ironwood notes of the vault with value that no transaction this wallet has seen
+    /// spends (expired unmined spends still count as spends: an estimate, used to size the
+    /// one-tap pool for proposals that spend many notes, see `node::pool_target_for_notes`).
+    pub fn unspent_note_count(&self) -> Result<usize, WalletError> {
+        unspent_note_count_at(&self.path, &self.key, self.account.expose_uuid().as_bytes())
+    }
+
     /// Payments the vault received, newest first (unmined ones first). Excludes transactions
     /// that spend any vault note: their outputs back to the vault are change (or a self
     /// transfer), not incoming money. Expired unmined transactions are left out.
@@ -1049,6 +1056,28 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         }
         Ok(pczt)
     }
+}
+
+/// `VaultWallet::unspent_note_count` for the account with this UUID in the database at `path`.
+fn unspent_note_count_at(
+    path: &Path,
+    key: &WalletKey,
+    account: &[u8; 16],
+) -> Result<usize, WalletError> {
+    let conn = open_connection(path, key, true)?;
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM ironwood_received_notes rn
+             JOIN accounts a ON a.id = rn.account_id
+             WHERE a.uuid = ?1 AND rn.value > 0
+               AND NOT EXISTS (SELECT 1 FROM ironwood_received_note_spends s
+                               WHERE s.ironwood_received_note_id = rn.id)",
+            rusqlite::params![account.as_slice()],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    Ok(usize::try_from(n).unwrap_or(0))
 }
 
 /// `VaultWallet::received_payments` for the account with this UUID in the database at `path`.
@@ -1457,6 +1486,11 @@ mod tests {
         .unwrap();
         drop(conn);
 
+        // Six notes, one spent by transaction 3.
+        assert_eq!(
+            unspent_note_count_at(&path, &key, account.expose_uuid().as_bytes()).unwrap(),
+            5
+        );
         let got = received_payments_at(&path, &key, account.expose_uuid().as_bytes()).unwrap();
         let txid = |b: u8| zcash_protocol::TxId::from_bytes([b; 32]).to_string();
         assert_eq!(

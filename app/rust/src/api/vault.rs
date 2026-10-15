@@ -232,7 +232,7 @@ pub fn run_keygen(
         if let Some(dir) = state_dir {
             let mut pool = FilePoolStore::new(PathBuf::from(dir).join(state_dir::POOL));
             if let Err(e) =
-                node::top_up_pool(&relay, &me, &material, &mut pool, false, &mut OsRng).await
+                node::top_up_pool(&relay, &me, &material, &mut pool, false, None, &mut OsRng).await
             {
                 eprintln!("commitment pool after keygen: {e}");
             }
@@ -306,6 +306,16 @@ pub struct Balance {
 }
 
 /// Serializes use of the wallet database (sync, propose and reads race otherwise).
+/// Each vault's unspent note count as of this process's last sync (`sync_vault`), so the
+/// next pool top-up (`list_proposals`) can size the pool for proposals that spend many
+/// notes (`node::pool_target_for_notes`). Unknown until a sync ran in this process.
+static NOTE_COUNTS: std::sync::Mutex<std::collections::BTreeMap<[u8; 16], usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+pub(crate) fn note_count(vault_id: &[u8; 16]) -> Option<usize> {
+    NOTE_COUNTS.lock().ok()?.get(vault_id).copied()
+}
+
 pub(crate) fn wallet_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|p| p.into_inner())
@@ -435,6 +445,9 @@ pub fn sync_vault(
             }
         }
         let b = wallet.balance()?;
+        if let (Ok(n), Ok(mut counts)) = (wallet.unspent_note_count(), NOTE_COUNTS.lock()) {
+            counts.insert(m.descriptor.vault_id, n);
+        }
         watch.lap("balance");
         // Before the vault's birthday block exists the wallet has no chain height yet.
         let height = match wallet.chain_height()? {

@@ -712,13 +712,15 @@ check. Fixed in the same change unless open:
 - [x] **M3** version-gated replay rules (v7 Broadcast txid check) could be skipped by
       tagging an event with an older version. Fixed 2026-10-15 (`VAULT_EVENT` 9: versions
       only go up once a v9 event is logged).
-- [ ] **M5-B** the leader always picks the first t approvers by identifier: a member who
-      sorts first can stall rounds by never answering. Rotate or exclude timed-out signers.
+- [x] **M5-B** the leader always picked the first t approvers by identifier, so a member
+      who sorts first could stall rounds. Fixed 2026-10-15: the leader asks itself first
+      and signers who left a round unanswered last (`node::order_signers`, `SilentSigners`).
 - [x] **L5** proposals whose PCZT doesn't parse drained every pool. Fixed 2026-10-15
       (`VAULT_EVENT` 9 rejects them at replay).
-- [ ] One-tap pool depth: a proposal with more spends than a member's pool covers
-      (2-of-3: > 16 spends at a full pool, > 8 at half) loses one-tap for that member's
-      groups. Size the pool to the vault's note count, or top up before proposing.
+- [x] One-tap pool depth: a proposal with more spends than a member's pool covers lost
+      one-tap. Fixed 2026-10-15: pools are sized to the vault's unspent note count
+      (`pool_target_for_notes`, capped at 1024 commitments). Still falls back above the
+      cap, and right after install until the first sync records the count.
 - [x] One-tap and interactive don't mix: members whose one-tap shares are logged can't add
       interactive commitments (VoteFinal). Decided 2026-10-15: no mixing; a payment no
       group can complete shows "Propose again" to its proposer (`node::propose_again`).

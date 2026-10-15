@@ -316,9 +316,17 @@ async fn a_restored_device_replaces_its_dead_pool() {
     // The original device publishes its pool.
     let mut rng = StdRng::seed_from_u64(5);
     let mut old_device = MemoryPoolStore::default();
-    let published = top_up_pool(&relay, &ids[0], &material, &mut old_device, false, &mut rng)
-        .await
-        .unwrap();
+    let published = top_up_pool(
+        &relay,
+        &ids[0],
+        &material,
+        &mut old_device,
+        false,
+        None,
+        &mut rng,
+    )
+    .await
+    .unwrap();
     assert!(published > 0);
     let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
     let old: Vec<Vec<u8>> = state.pools[&me].commitments.clone();
@@ -328,17 +336,33 @@ async fn a_restored_device_replaces_its_dead_pool() {
     // dead commitments as available, so nothing is published.
     let mut restored = MemoryPoolStore::default();
     assert_eq!(
-        top_up_pool(&relay, &ids[0], &material, &mut restored, false, &mut rng)
-            .await
-            .unwrap(),
+        top_up_pool(
+            &relay,
+            &ids[0],
+            &material,
+            &mut restored,
+            false,
+            None,
+            &mut rng
+        )
+        .await
+        .unwrap(),
         0
     );
 
     // With the reset, the old ones are retired and a full fresh pool follows, all of it
     // signable here.
-    let n = top_up_pool(&relay, &ids[0], &material, &mut restored, true, &mut rng)
-        .await
-        .unwrap();
+    let n = top_up_pool(
+        &relay,
+        &ids[0],
+        &material,
+        &mut restored,
+        true,
+        None,
+        &mut rng,
+    )
+    .await
+    .unwrap();
     assert_eq!(n, published);
     let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
     let pool = &state.pools[&me];
@@ -348,9 +372,17 @@ async fn a_restored_device_replaces_its_dead_pool() {
     assert!(state.ignored.is_empty());
 
     // Running the reset again right away only retires and republishes: still a full pool.
-    top_up_pool(&relay, &ids[0], &material, &mut restored, true, &mut rng)
-        .await
-        .unwrap();
+    top_up_pool(
+        &relay,
+        &ids[0],
+        &material,
+        &mut restored,
+        true,
+        None,
+        &mut rng,
+    )
+    .await
+    .unwrap();
     let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
     assert_eq!(state.pools[&me].available(), published);
 }

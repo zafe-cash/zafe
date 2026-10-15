@@ -455,7 +455,8 @@ pub fn list_proposals(
     let reset = reset_marker.exists();
     let mut watch = crate::diag::Stopwatch::new("proposals");
     let state = runtime().block_on(async {
-        node::top_up_pool(&relay, &me, &m, &mut pool, reset, &mut OsRng).await?;
+        let notes = super::vault::note_count(&m.descriptor.vault_id);
+        node::top_up_pool(&relay, &me, &m, &mut pool, reset, notes, &mut OsRng).await?;
         if reset {
             let _ = std::fs::remove_file(&reset_marker);
         }
@@ -1097,6 +1098,7 @@ pub fn send_with_progress(
     let relay = RelayClient::new(relay_url);
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
     let req_path = request_file(&state_dir, &id);
+    let silent = node::SilentSigners::at(leader_dir(&state_dir).join(state_dir::SILENT_SIGNERS));
     let io = |e: std::io::Error| ZafeError::new(ZafeErrorKind::Other, e.to_string());
 
     // One tap: the approvals already carry every signature; aggregate and send alone.
@@ -1156,7 +1158,15 @@ pub fn send_with_progress(
                 Err(_) => BTreeSet::new(),
             };
             let sent = runtime().block_on(node::request_signatures(
-                &relay, &me, &m, &net, tip, id, &used, &mut OsRng,
+                &relay,
+                &me,
+                &m,
+                &net,
+                tip,
+                id,
+                &used,
+                &silent.load(),
+                &mut OsRng,
             ))?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(leader_dir(&state_dir)).map_err(io)?;
@@ -1194,7 +1204,7 @@ pub fn send_with_progress(
             }
         };
         let mut client = connect(&lightwalletd_url).await?;
-        let sent = node::finalize(
+        let finalized = node::finalize(
             &relay,
             &me,
             &m,
@@ -1213,7 +1223,28 @@ pub fn send_with_progress(
             },
             &mut OsRng,
         )
-        .await?;
+        .await;
+        let signers: Vec<_> = request.signers.iter().copied().collect();
+        let sent = match finalized {
+            Ok(sent) => {
+                silent.update(&[], &signers);
+                sent
+            }
+            Err(e @ node::NodeError::Timeout(_)) => {
+                // Remember who never answered, so the next round (after "Start over")
+                // asks someone else first.
+                if let Ok(quiet) = node::unanswered_signers(&relay, &me, &m, &request).await {
+                    let answered: Vec<_> = signers
+                        .iter()
+                        .filter(|s| !quiet.contains(s))
+                        .copied()
+                        .collect();
+                    silent.update(&quiet, &answered);
+                }
+                return Err(e.into());
+            }
+            Err(e) => return Err(e.into()),
+        };
         sent_txs(&db_dir, &m).put(&sent);
         let txid = sent.txid;
         let _ = fs::remove_file(&req_path);

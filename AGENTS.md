@@ -161,6 +161,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `bridge_e2e` now makes the leader an approver.
 - **Signing requests are deterministic** (same approvals → same bytes → same request
   hash), so re-running `request_signatures` after a partial failure is safe.
+- **Who the leader asks** (`node::order_signers`, audit M5-B, 2026-10-15): itself first
+  (it always answers), then members not in `SilentSigners`, then those who are, each by
+  identifier. `SilentSigners` (`<leader dir>/silent.bin`, `SILENT_SIGNERS` format,
+  unreadable = empty: it's only a preference) gains a round's unanswered signers when
+  `finalize` times out (`node::unanswered_signers`) and loses each signer who answers a
+  round. Before this the first t approvers by identifier were always chosen, so one
+  member could stall every interactive round.
 - **Leader resumability**: the app persists each signing request (`<state>/leader/<id>.req`)
   and the used-commitments set; `send_proposal` after a timeout resumes the same round.
   **Start over** (`restart_signing`) deletes `<id>.req` and `<id>.own` only; the old
@@ -183,7 +190,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   signing when pools are short or C(n, t) > 64. Pool size (`node::pool_target`):
   `POOL_PROPOSALS` = 16 single-spend proposals' worth, C(n-1, t-1) each, at least
   `MIN_POOL_TARGET` = 32 and at most one batch (256; replay caps a member at 4096
-  outstanding); published first at the end of keygen (bridge `run_keygen` takes the vault's
+  outstanding); deepened to cover one proposal spending every unspent vault note
+  (`pool_target_for_notes`: notes × C(n-1, t-1), at most `MAX_DEEP_POOL` = 1024, published
+  in batches of 256; the bridge's `sync_vault` records the note count per vault in memory,
+  `VaultWallet::unspent_note_count`, and `list_proposals` passes it; CLI and keygen pass
+  `None`); published first at the end of keygen (bridge `run_keygen` takes the vault's
   `state_dir`; CLI `vault keygen`), while every member is present, so the first payment
   is one tap (it used to wait for each member's first refresh; the harness's CLI members
   never published, and the app fell back to interactive); `assign_commitments` assigns a
@@ -254,7 +265,8 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
     (`VaultMaterial::to_bytes`: secure storage, CLI `vault.bin`, backups), nonce and pool
     nonce files (an unreadable version counts as missing: never used), leader `.own`
     (`OWN_SHARES`) and `used_commitments.bin` (`USED_COMMITMENTS`; unreadable is an
-    **error**, never "empty", or a commitment set could be reused), backups (`ZAFEBAK`
+    **error**, never "empty", or a commitment set could be reused), `silent.bin`
+    (`SILENT_SIGNERS`; unreadable = empty, a preference only), backups (`ZAFEBAK`
     byte = `BACKUP`, text `zafe-backup-v1:`; the text prefix is not the format version),
     the log copy (`log_cache`, `<vault id hex>.log`, `LOG_CACHE`: an unparsable file is
     "no anchor", a newer version is an error).

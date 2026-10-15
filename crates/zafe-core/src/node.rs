@@ -2176,6 +2176,34 @@ pub fn pool_target(descriptor: &crate::vault::VaultDescriptor) -> usize {
     pool_target_for(descriptor.members.len(), usize::from(descriptor.threshold))
 }
 
+/// Most commitments a member keeps when sizing for the vault's notes (four batches; the
+/// log carries 64 bytes each). Above it, a proposal spending that many notes still falls
+/// back to interactive signing for this member's groups.
+pub const MAX_DEEP_POOL: usize = 4 * crate::vault::MAX_COMMITMENT_BATCH;
+
+/// [`pool_target`], deepened so that one proposal spending every one of the vault's
+/// `notes` unspent notes still gets one-tap (it takes C(n-1, t-1) commitments per spend
+/// from each member), up to [`MAX_DEEP_POOL`]. `None` (note count unknown) = `pool_target`.
+pub fn pool_target_for_notes(
+    descriptor: &crate::vault::VaultDescriptor,
+    notes: Option<usize>,
+) -> usize {
+    deep_pool_target_for(
+        descriptor.members.len(),
+        usize::from(descriptor.threshold),
+        notes,
+    )
+}
+
+fn deep_pool_target_for(n: usize, t: usize, notes: Option<usize>) -> usize {
+    let per_spend = binomial(n.saturating_sub(1), t.saturating_sub(1));
+    let deep = notes
+        .unwrap_or(0)
+        .saturating_mul(per_spend)
+        .min(MAX_DEEP_POOL);
+    pool_target_for(n, t).max(deep)
+}
+
 fn pool_target_for(n: usize, t: usize) -> usize {
     let per_proposal = binomial(n.saturating_sub(1), t.saturating_sub(1));
     (POOL_PROPOSALS * per_proposal).clamp(MIN_POOL_TARGET, crate::vault::MAX_COMMITMENT_BATCH)
@@ -2205,6 +2233,7 @@ pub async fn top_up_pool<R: RngCore + CryptoRng>(
     material: &VaultMaterial,
     pool: &mut impl PoolStore,
     reset: bool,
+    notes: Option<usize>,
     rng: &mut R,
 ) -> Result<usize, NodeError> {
     let (mut chain, mut state) = load_state(relay, me, material).await?;
@@ -2229,28 +2258,28 @@ pub async fn top_up_pool<R: RngCore + CryptoRng>(
         .pools
         .get(&me.public().sig_pk)
         .map_or(0, crate::vault::Pool::available);
-    let target = pool_target(&material.descriptor);
+    let target = pool_target_for_notes(&material.descriptor, notes);
     if available * 2 >= target {
         return Ok(0);
     }
-    let batch = crate::session::new_pool_commitments(
-        &material.key_package()?,
-        target - available,
-        pool,
-        rng,
-    )
-    .map_err(proto)?;
-    let count = batch.len();
-    append_event(
-        relay,
-        me,
-        material,
-        &mut chain,
-        &mut state,
-        &VaultEvent::Commitments { batch },
-        rng,
-    )
-    .await?;
+    let key_package = material.key_package()?;
+    let mut count = 0;
+    while available + count < target {
+        let size = (target - available - count).min(crate::vault::MAX_COMMITMENT_BATCH);
+        let batch =
+            crate::session::new_pool_commitments(&key_package, size, pool, rng).map_err(proto)?;
+        count += batch.len();
+        append_event(
+            relay,
+            me,
+            material,
+            &mut chain,
+            &mut state,
+            &VaultEvent::Commitments { batch },
+            rng,
+        )
+        .await?;
+    }
     Ok(count)
 }
 
@@ -2502,6 +2531,82 @@ async fn send_raw(raw: &[u8], lightwalletd: &mut Client) -> Result<Result<(), St
     })
 }
 
+/// Who a leader asks first: itself (it always answers), then members who haven't left one
+/// of its rounds unanswered, then those who have (`silent`, see [`SilentSigners`]), each
+/// group by identifier. Without this the same first t approvers were always chosen, so
+/// one member who sorts first could stall every round by never answering (audit M5-B).
+pub fn order_signers(
+    available: Vec<Identifier>,
+    mine: Identifier,
+    silent: &BTreeSet<Identifier>,
+) -> Vec<Identifier> {
+    let mut ordered = available;
+    ordered.sort_by_key(|id| (*id != mine, silent.contains(id), *id));
+    ordered
+}
+
+/// Signers this leader saw leave a round unanswered (`<leader dir>/silent.bin`), asked
+/// last next time ([`order_signers`]). A signer leaves the set once it answers a round.
+/// Only a preference: an unreadable file counts as empty.
+pub struct SilentSigners(std::path::PathBuf);
+
+impl SilentSigners {
+    pub fn at(path: impl Into<std::path::PathBuf>) -> Self {
+        Self(path.into())
+    }
+
+    pub fn load(&self) -> BTreeSet<Identifier> {
+        std::fs::read(&self.0)
+            .ok()
+            .and_then(|b| version::decode::<BTreeSet<Vec<u8>>>(Format::SilentSigners, &b).ok())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| Identifier::deserialize(id).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Adds `silent` and removes `answered`. Best effort, like the preference it stores.
+    pub fn update(&self, silent: &[Identifier], answered: &[Identifier]) {
+        let mut set = self.load();
+        set.extend(silent.iter().copied());
+        for id in answered {
+            set.remove(id);
+        }
+        let ids: BTreeSet<Vec<u8>> = set.iter().map(|id| id.serialize()).collect();
+        let Ok(bytes) = version::encode(Format::SilentSigners, &ids) else {
+            return;
+        };
+        if let Some(dir) = self.0.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = self.0.with_extension("tmp");
+        if std::fs::write(&tmp, bytes).is_ok() {
+            let _ = std::fs::rename(&tmp, &self.0);
+        }
+    }
+}
+
+/// Leader: the request's signers (other than this member) whose shares haven't arrived,
+/// for [`SilentSigners`] after a round timed out.
+pub async fn unanswered_signers(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    request: &SigningRequest,
+) -> Result<Vec<Identifier>, NodeError> {
+    let (_, state) = load_state(relay, me, material).await?;
+    let shares = read_shares(relay, me, material, &state, request).await?;
+    let mine = *material.key_package()?.identifier();
+    Ok(request
+        .signers
+        .iter()
+        .filter(|id| **id != mine && !shares.contains_key(*id))
+        .copied()
+        .collect())
+}
+
 /// Raw transactions this device broadcast, one file per txid, kept until mined or expired
 /// so a transaction that drops out of the mempool can be sent again (`reserve_notes`).
 /// Only the broadcaster has the bytes: signatures and proof aren't in the vault log.
@@ -2667,6 +2772,7 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     tip_height: u32,
     proposal: ProposalId,
     used: &BTreeSet<[u8; 32]>,
+    silent: &BTreeSet<Identifier>,
     rng: &mut R,
 ) -> Result<SentRequest, NodeError> {
     let (_, state) = load_state(relay, me, material).await?;
@@ -2722,8 +2828,8 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
         hash_of.insert(member, hash);
     }
     let threshold = usize::from(material.descriptor.threshold);
-    let chosen: Vec<Identifier> = leader
-        .available_signers()
+    let mine = *material.key_package()?.identifier();
+    let chosen: Vec<Identifier> = order_signers(leader.available_signers(), mine, silent)
         .into_iter()
         .take(threshold)
         .collect();
@@ -3187,6 +3293,37 @@ pub fn decode_used_commitments(bytes: &[u8]) -> Result<BTreeSet<[u8; 32]>, NodeE
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_leader_asks_itself_first_and_silent_signers_last() {
+        use super::{order_signers, Identifier};
+        let id = |n: u16| Identifier::try_from(n).unwrap();
+        let all = vec![id(1), id(2), id(3), id(4)];
+        // Before anyone stalls: the leader (3), then by identifier.
+        assert_eq!(
+            order_signers(all.clone(), id(3), &Default::default()),
+            vec![id(3), id(1), id(2), id(4)]
+        );
+        // Member 1 left a round unanswered: a 2-of-4 now goes to 3 and 2, not 3 and 1.
+        let silent = [id(1)].into_iter().collect();
+        assert_eq!(order_signers(all, id(3), &silent)[..2], [id(3), id(2)]);
+        // The leader isn't among the approvers: silent members still come last.
+        assert_eq!(
+            order_signers(vec![id(1), id(2)], id(9), &silent),
+            vec![id(2), id(1)]
+        );
+    }
+
+    #[test]
+    fn pools_deepen_for_vaults_with_many_notes() {
+        use super::{deep_pool_target_for, pool_target_for, MAX_DEEP_POOL};
+        let base = pool_target_for(3, 2);
+        assert_eq!(deep_pool_target_for(3, 2, None), base);
+        assert_eq!(deep_pool_target_for(3, 2, Some(3)), base);
+        // 2-of-3: each spend takes C(2, 1) = 2 of this member's commitments.
+        assert_eq!(deep_pool_target_for(3, 2, Some(100)), 200);
+        assert_eq!(deep_pool_target_for(3, 2, Some(100_000)), MAX_DEEP_POOL);
+    }
+
     #[test]
     fn pool_covers_sixteen_proposals_within_one_batch() {
         use super::pool_target_for;
