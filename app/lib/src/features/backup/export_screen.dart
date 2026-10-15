@@ -156,8 +156,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             icon: AppIcons.checkCircle,
             iconColor: colors.icon.value,
             text:
-                'Encrypted with your passphrase. Keep the file and the passphrase in different '
-                'places: together they give full signing power in "$name".',
+                'Encrypted with your passphrase. Store the file and passphrase apart: '
+                'together they can sign for you in "$name".',
           ),
           const SizedBox(height: AppSpacing.md),
           AppButton(
@@ -181,14 +181,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             onPressed: () => context.go('/home'),
             child: const Text('Done'),
           ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            'Moving to a new phone? Restore this backup there first, check the vault works, '
-            'then remove it from this phone in Settings.',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
         ],
       );
     }
@@ -209,10 +201,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           icon: AppIcons.lock,
           iconColor: colors.icon.accent,
           text:
-              'A backup restores your seat in "$name" on another phone: your key share and '
-              'vault access. Anyone with the backup and its passphrase gets your signing power '
-              'here, so choose a strong passphrase and keep it separate from the file. '
-              'Signing nonces are never included.',
+              'Restores your seat in "$name" on another phone. Anyone with the file and '
+              'its passphrase can sign for you, so keep them apart.',
         ),
         const SizedBox(height: AppSpacing.md),
         Text(

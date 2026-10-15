@@ -188,15 +188,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
       ),
       children: [
         Text(
-          'When a signer loses their phone and has no backup, co-signers can move their '
-          'seat to a new phone. It takes as many approvals as a payment, and the '
-          'approvers\' phones then rebuild the signer\'s key on the new phone.',
-          style: AppTypography.bodyMedium.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
           'Who lost their phone?',
           style: AppTypography.labelLarge.copyWith(
             color: colors.text.secondary,
@@ -376,10 +367,9 @@ class SafetyWordsCard extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.xxs),
             Text(
-              'Call $who or meet in person. Their new phone lists these words next to '
-              '${myKeyHex == null ? 'your key' : 'your key, ${shortKey(myKeyHex!)}'}. '
-              'Approve only if they are exactly these. Anyone with this seat can approve '
-              'payments and sees everything in the vault.',
+              'Call $who or meet in person. Approve only if their new phone shows these '
+              'words next to '
+              '${myKeyHex == null ? 'your key' : 'your key, ${shortKey(myKeyHex!)}'}.',
               style: AppTypography.bodySmall.copyWith(
                 color: colors.text.secondary,
               ),

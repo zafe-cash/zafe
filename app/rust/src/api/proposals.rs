@@ -654,6 +654,50 @@ pub struct PaymentInput {
     pub memo: String,
 }
 
+/// Checks `payments` and turns them into wallet requests.
+fn payment_requests(
+    m: &VaultMaterial,
+    payments: &[PaymentInput],
+) -> Result<Vec<PaymentRequest>, ZafeError> {
+    let net = network(&m.descriptor.network)?;
+    if payments.is_empty() {
+        return Err(ZafeError::invalid("Add at least one payment"));
+    }
+    payments
+        .iter()
+        .map(|p| {
+            node::orchard_receiver(&net, p.address.trim())?;
+            if p.amount_zat == 0 {
+                return Err(ZafeError::invalid("Amount must be more than zero"));
+            }
+            Ok(PaymentRequest {
+                address: p.address.trim().to_string(),
+                amount_zat: p.amount_zat,
+                memo: memo_bytes(&p.memo)?,
+            })
+        })
+        .collect()
+}
+
+/// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
+/// last synced: the same note selection as `propose_payment`, nothing built or logged.
+/// Fails like a proposal would (e.g. not enough funds), so the review can say so first.
+pub fn estimate_fee(
+    lightwalletd_url: String,
+    db_dir: String,
+    db_key: Vec<u8>,
+    material: Vec<u8>,
+    payments: Vec<PaymentInput>,
+) -> Result<u64, ZafeError> {
+    let m = self::material(&material)?;
+    let requests = payment_requests(&m, &payments)?;
+    let _guard = wallet_lock();
+    runtime().block_on(async {
+        let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        Ok(wallet.fee_for(&requests)?)
+    })
+}
+
 /// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns
 /// the proposal id.
 #[allow(clippy::too_many_arguments)]
@@ -669,24 +713,7 @@ pub fn propose_payment(
 ) -> Result<String, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let net = network(&m.descriptor.network)?;
-    if payments.is_empty() {
-        return Err(ZafeError::invalid("Add at least one payment"));
-    }
-    let requests = payments
-        .iter()
-        .map(|p| {
-            node::orchard_receiver(&net, p.address.trim())?;
-            if p.amount_zat == 0 {
-                return Err(ZafeError::invalid("Amount must be more than zero"));
-            }
-            Ok(PaymentRequest {
-                address: p.address.trim().to_string(),
-                amount_zat: p.amount_zat,
-                memo: memo_bytes(&p.memo)?,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let requests = payment_requests(&m, &payments)?;
     let _guard = wallet_lock();
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;

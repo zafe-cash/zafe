@@ -135,20 +135,6 @@ class SignersScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.s),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xxs,
-                    ),
-                    child: Text(
-                      'Tap a signer to label them on this phone: only you see your '
-                      'labels. Members can also name themselves from their own row, '
-                      'and everyone sees that name.',
-                      style: AppTypography.bodySmall.copyWith(
-                        color: colors.text.muted,
-                      ),
-                    ),
-                  ),
                   if (members.length > 1) ...[
                     const SizedBox(height: AppSpacing.md),
                     AppButton(
@@ -182,8 +168,8 @@ Future<void> _takeOver(
     builder: (c) => AlertDialog(
       title: Text('Help instead of $name?'),
       content: Text(
-        'Your phone takes $name\'s place in rebuilding the key, and the rebuild starts '
-        'over. Do this only if $name can\'t open Zafe for a while.',
+        'Your phone takes $name\'s place and the rebuild starts over. Only do this '
+        'if $name can\'t open Zafe for a while.',
       ),
       actions: [
         TextButton(
@@ -355,8 +341,8 @@ class SeatMoveCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Approvals: $approvals of $needed. Before approving, you and $who compare '
-            'safety words: their new phone shows the words your phone gets for it.',
+            'Approvals: $approvals of $needed. Compare safety words with $who before '
+            'approving.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),
@@ -423,10 +409,10 @@ class RepairCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(
             meHelping
-                ? 'Your phone is one of the helpers ($names). It does its part '
-                      'whenever Zafe is open or checks in the background.'
-                : 'The phones of $names rebuild it on $who\'s new phone when they open '
-                      'Zafe. If one of them can\'t for a while, help in their place.',
+                ? 'Your phone is a helper, with $names. It does its part whenever '
+                      'Zafe runs.'
+                : '$names rebuild it on $who\'s new phone when they open Zafe. If '
+                      'one can\'t for a while, help in their place.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),

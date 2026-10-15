@@ -45,9 +45,7 @@ class NotificationPrimerSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Your co-signers will need your approval. Zafe tells you when a payment '
-              'waits for you, and when money arrives. Notifications show no amounts on '
-              'the lock screen.',
+              'Know when a payment needs your approval or money arrives. No amounts show on the lock screen.',
               style: AppTypography.bodyMedium.copyWith(
                 color: colors.text.secondary,
               ),

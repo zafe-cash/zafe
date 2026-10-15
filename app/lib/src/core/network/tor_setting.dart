@@ -75,18 +75,14 @@ class TorSetting {
 
   /// What the setting does in its current state, for the Tor sheet.
   String get explanation => !enabled
-      ? 'Tor is off. Zafe connects directly to the relay and the Zcash server, so '
-            'they see this phone\'s IP address.'
+      ? 'Off: the relay and Zcash server see your IP address.'
       : switch (connection) {
           TorConnection.connected =>
-            'Zafe connects to the relay and the Zcash server through Tor, so '
-                'neither sees this phone\'s IP address.',
+            'On: the relay and Zcash server can\'t see your IP address.',
           TorConnection.failed =>
-            'Tor couldn\'t connect. Zafe sends nothing until it does: no sync, no '
-                'approvals, no payments. Try again, or turn Tor off.',
+            'Tor couldn\'t connect, so nothing is sent. Try again, or turn Tor off.',
           _ =>
-            'Connecting to Tor. Zafe sends nothing until it is connected, and never '
-                'falls back to a direct connection. The first time can take a minute.',
+            'Connecting to Tor. Nothing is sent until it connects; the first time can take a minute.',
         };
 
   /// Home's status line while Tor is in the way, or `null` to show the usual one.

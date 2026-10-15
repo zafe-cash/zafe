@@ -107,9 +107,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 children: [
                   Text(
                     creator
-                        ? 'The invite stops working, and anyone who already joined will see '
-                              'that you cancelled. You can set it up again with the same '
-                              'details, and send a new invite.'
+                        ? 'The invite stops working and those who joined see that you cancelled. You can set it up again.'
                         : 'You\'ll need a new invite to join again.',
                     style: AppTypography.bodyMedium.copyWith(
                       color: colors.text.accent,
@@ -198,8 +196,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Nothing is lost: no keys or funds exist yet. Tell the other members, '
-                  'so they abandon it too, then start again with a new invite.',
+                  'No keys or funds exist yet. Tell the others to abandon it too, then start over with a new invite.',
                   style: AppTypography.bodyMedium.copyWith(
                     color: colors.text.accent,
                   ),
@@ -421,9 +418,7 @@ class _InviteCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xxs),
           Text(
-            'Send it only to the people who will co-sign, over a channel you trust. Anyone '
-            'with it can take a seat until you lock membership, so check the member list '
-            'before you do.',
+            'Send it only to your co-signers, over a channel you trust. Until you lock membership, anyone with it can join.',
             textAlign: TextAlign.center,
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
@@ -516,8 +511,7 @@ Future<void> shareInviteQrImage(String link, String vaultName) async {
       files: [XFile(file.path, mimeType: 'image/png')],
       fileNameOverrides: [name],
       text:
-          'Zafe invite to "$vaultName". Scan it in Zafe (Join, then Scan QR code, or '
-          'Choose image). Only for the people who will co-sign.',
+          'Zafe invite to "$vaultName". In Zafe, tap Join, then Scan QR code.',
     ),
   );
   // The share sheet has copied or sent it; don't leave the invite in the cache.
@@ -706,10 +700,8 @@ class SetupSafetyWordsCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Text(
               waiting == 1
-                  ? 'Waiting for 1 member to open Zafe. The words appear once every member\'s '
-                        'phone has taken part.'
-                  : 'Waiting for $waiting members to open Zafe. The words appear once every '
-                        'member\'s phone has taken part.',
+                  ? 'Waiting for 1 member to open Zafe.'
+                  : 'Waiting for $waiting members to open Zafe.',
               textAlign: TextAlign.center,
               style: muted,
             ),
@@ -730,9 +722,7 @@ class SetupSafetyWordsCard extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Read them to each member over a call, or compare in person. Every member must '
-              'see the same words. If anyone sees different ones, stop: someone may be '
-              'impersonating a member.',
+              'Compare them with every member on a call or in person. If anyone sees different words, stop.',
               textAlign: TextAlign.center,
               style: muted,
             ),
@@ -799,8 +789,7 @@ class _CreatingKeys extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    'Keep Zafe open. Your share is being created together with the other members; '
-                    'the full key never exists anywhere.',
+                    'Keep Zafe open while the members create the vault\'s keys together.',
                     style: AppTypography.bodyMedium.copyWith(
                       color: colors.text.secondary,
                     ),
@@ -824,6 +813,6 @@ String stalledText(List<String> missing, {String? me}) {
     1 => who.single,
     _ => '${who.sublist(0, who.length - 1).join(', ')} and ${who.last}',
   };
-  return 'Key generation stopped: $names never took part. Ask them to open Zafe and keep '
-      'this screen open, then try again together. Or abandon this setup and start over.';
+  return '$names never took part, so key generation stopped. Ask them to open Zafe, '
+      'then try again, or abandon this setup.';
 }

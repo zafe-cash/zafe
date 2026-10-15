@@ -849,6 +849,55 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         payments: &[PaymentRequest],
         expiry_blocks: u32,
     ) -> Result<Pczt, WalletError> {
+        let proposal = self.transfer_proposal(payments)?;
+        create_pczt_from_proposal::<
+            _,
+            _,
+            GreedyInputSelectorError,
+            _,
+            zcash_primitives::transaction::fees::zip317::FeeError,
+            _,
+        >(
+            &mut self.db,
+            &self.params,
+            &SystemClock,
+            &mut crate::zrng::zrng(),
+            self.account,
+            OvkPolicy::Sender,
+            &proposal,
+            Some(BlockHeight::from(proposal_expiry(
+                &self.params,
+                u32::from(BlockHeight::from(proposal.min_target_height())),
+                expiry_blocks,
+            ))),
+            BundlePadding::DEFAULT,
+        )
+        .map_err(|e| WalletError::Proposal(format!("{e:?}")))
+    }
+
+    /// The exact ZIP 317 fee [`Self::propose`] would pay for `payments` now: the same note
+    /// selection, without building anything (nothing is written or locked). For the send
+    /// review, before anyone proposes.
+    pub fn fee_for(&mut self, payments: &[PaymentRequest]) -> Result<u64, WalletError> {
+        let proposal = self.transfer_proposal(payments)?;
+        Ok(proposal
+            .steps()
+            .iter()
+            .map(|step| u64::from(step.balance().fee_required()))
+            .sum())
+    }
+
+    /// Note selection and change for `payments` (ZIP 317 fee, Ironwood change).
+    fn transfer_proposal(
+        &mut self,
+        payments: &[PaymentRequest],
+    ) -> Result<
+        zcash_client_backend::proposal::Proposal<
+            StandardFeeRule,
+            zcash_client_sqlite::ReceivedNoteId,
+        >,
+        WalletError,
+    > {
         let request = TransactionRequest::new(
             payments
                 .iter()
@@ -879,55 +928,30 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             DustOutputPolicy::default(),
             SplitPolicy::single_output(),
         );
-        let proposal =
-            propose_transfer::<_, _, _, _, zcash_client_sqlite::wallet::commitment_tree::Error>(
-                &mut self.db,
-                &self.params,
-                self.account,
-                &GreedyInputSelector::new(),
-                &change,
-                request,
-                ConfirmationsPolicy::default(),
-                &SpendPolicy::default(),
-                None,
-                None,
-            )
-            .map_err(|e| {
-                let e = format!("{e:?}");
-                let reserved = self
-                    .db
-                    .get_locked_outputs(self.account)
-                    .is_ok_and(|l| !l.is_empty());
-                if reserved && e.contains("InsufficientFunds") {
-                    WalletError::FundsReserved
-                } else {
-                    WalletError::Proposal(e)
-                }
-            })?;
-
-        create_pczt_from_proposal::<
-            _,
-            _,
-            GreedyInputSelectorError,
-            _,
-            zcash_primitives::transaction::fees::zip317::FeeError,
-            _,
-        >(
+        propose_transfer::<_, _, _, _, zcash_client_sqlite::wallet::commitment_tree::Error>(
             &mut self.db,
             &self.params,
-            &SystemClock,
-            &mut crate::zrng::zrng(),
             self.account,
-            OvkPolicy::Sender,
-            &proposal,
-            Some(BlockHeight::from(proposal_expiry(
-                &self.params,
-                u32::from(BlockHeight::from(proposal.min_target_height())),
-                expiry_blocks,
-            ))),
-            BundlePadding::DEFAULT,
+            &GreedyInputSelector::new(),
+            &change,
+            request,
+            ConfirmationsPolicy::default(),
+            &SpendPolicy::default(),
+            None,
+            None,
         )
-        .map_err(|e| WalletError::Proposal(format!("{e:?}")))
+        .map_err(|e| {
+            let e = format!("{e:?}");
+            let reserved = self
+                .db
+                .get_locked_outputs(self.account)
+                .is_ok_and(|l| !l.is_empty());
+            if reserved && e.contains("InsufficientFunds") {
+                WalletError::FundsReserved
+            } else {
+                WalletError::Proposal(e)
+            }
+        })
     }
 
     /// Builds and IO-finalizes a PCZT that spends exactly the notes with `nullifiers` (all

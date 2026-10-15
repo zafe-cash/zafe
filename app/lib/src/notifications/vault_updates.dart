@@ -134,8 +134,8 @@ List<VaultUpdate> vaultUpdates({
           proposalId: key,
           title: '$vaultName: a signer lost their phone',
           body:
-              '$who is moving to a new phone. Check the safety code with them, then '
-              'approve in Signers.',
+              '$who is moving to a new phone. Compare safety words with them in '
+              'Signers.',
         ),
       );
     }

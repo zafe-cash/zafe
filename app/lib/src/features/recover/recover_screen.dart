@@ -143,8 +143,7 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       builder: (c) => AlertDialog(
         title: const Text('Start over?'),
         content: const Text(
-          'This phone makes a new code. Approvals of the old code won\'t move your seat '
-          'here, so send the new code to your co-signers.',
+          'This phone makes a new code. Send it to your co-signers; approvals of the old one won\'t count.',
         ),
         actions: [
           TextButton(
@@ -212,9 +211,9 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                   // The safety words are compared by voice: whoever can swap this
                   // message can't make both phones show the same words.
                   text:
-                      'Please move my Zafe seat to my new phone: open Zafe, Signers, '
-                      '"Replace a lost phone", and paste this code. I\'ll call you '
-                      'to compare the safety words.\n\n${code.code}',
+                      'Please move my Zafe seat to my new phone: in Zafe, open Signers, '
+                      '"Replace a lost phone", and paste this code. I\'ll call to '
+                      'compare safety words.\n\n${code.code}',
                 ),
               ),
               child: const Text('Send code to a co-signer'),
@@ -280,17 +279,13 @@ class RecoverBody extends StatelessWidget {
             ? 'Approved. Your co-signers\' phones are rebuilding your key.'
             : 'Approved. Rebuilding your key: $received of $needed co-signers done.',
       rust.RecoveryStage.done => 'Done. Saving the vault on this phone.',
-      _ =>
-        'Waiting for your co-signers to approve. Keep this screen open, or come back '
-            'to it.',
+      _ => 'Waiting for your co-signers to approve.',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Lost your phone and have no backup? Your co-signers can move your seat to '
-          'this phone: enough of them approve, and their phones rebuild your key here. '
-          'Send them this code.',
+          'Lost your phone and your backup? Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -324,20 +319,16 @@ class RecoverBody extends StatelessWidget {
             child: const Text('Copy code'),
           ),
         ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          'Safety words',
-          style: AppTypography.labelLarge.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xxs),
-        if (checks.isEmpty)
+        // The safety words, once a co-signer has opened the code.
+        if (checks.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
           Text(
-            'When a co-signer opens your code, the words you both see appear here.',
-            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
-          )
-        else
+            'Safety words',
+            style: AppTypography.labelLarge.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
           for (final c in checks) ...[
             Text(
               'With co-signer ${shortKey(c.cosignerKeyHex)}',
@@ -353,14 +344,11 @@ class RecoverBody extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.xs),
           ],
-        const SizedBox(height: AppSpacing.xxs),
-        Text(
-          'Compare them with each co-signer who approves, on a call or in person: '
-          'their phone shows the same four words and their key. If the words differ, '
-          'or a co-signer you didn\'t ask shows up, don\'t go ahead: someone changed '
-          'the code.',
-          style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
-        ),
+          Text(
+            'Compare them with each co-signer on a call or in person. If the words differ, or someone you didn\'t ask appears, stop.',
+            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
+          ),
+        ],
         const SizedBox(height: AppSpacing.md),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -420,9 +408,8 @@ class VaultCheckBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Your key is back. Before saving "$name", make sure it is your vault: ask a '
-          'co-signer to open Zafe, Settings, Vault address, and read the last 8 '
-          'characters.',
+          'Your key is back. Before saving "$name", ask a co-signer to read you the '
+          'end of the vault address (Settings, Vault address).',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -448,8 +435,7 @@ class VaultCheckBody extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
-          'If it\'s different, don\'t save it: someone may be showing you a fake vault, '
-          'and money sent to its address wouldn\'t reach your vault.',
+          'If it\'s different, don\'t save it: it may be a fake vault.',
           style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
         ),
         const SizedBox(height: AppSpacing.md),

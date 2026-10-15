@@ -155,10 +155,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             children: [
               Text(
                 p.ready
-                    ? 'Signers stop working on it and its funds become available for new '
-                          'payments. Every signature is already in, though: until it expires, '
-                          'a signer could still send it. A new payment that uses the same '
-                          'funds makes it impossible to send.'
+                    ? 'Its funds become free for new payments. All signatures are in, so it can still be sent until it expires, unless a new payment uses the same funds.'
                     : 'Signers stop working on it and its funds become available for new '
                           'payments. This can\'t be undone.',
                 style: AppTypography.bodyMedium.copyWith(
@@ -261,7 +258,10 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       if (mounted) {
         showAppToast(
           context,
-          zafeErrorMessage(e, fallback: 'Couldn\'t propose it again. Try again.'),
+          zafeErrorMessage(
+            e,
+            fallback: 'Couldn\'t propose it again. Try again.',
+          ),
           iconName: AppIcons.warningCircle,
           tone: AppToastTone.destructive,
         );
@@ -357,8 +357,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     ),
     const SizedBox(height: AppSpacing.xs),
     Text(
-      'Your signature went into a signing round that didn\'t finish, or this phone '
-      'was restored from a backup. Approve again so a new round can include you.',
+      'Approve again: your last signing round didn\'t finish, or this phone was restored.',
       textAlign: TextAlign.center,
       style: note,
     ),
@@ -449,8 +448,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
-              'Starts a new signing round without the signers who didn\'t answer. '
-              'Signers who already signed this round need to approve again.',
+              'Starts over without the signers who didn\'t answer. Those who signed approve again.',
               textAlign: TextAlign.center,
               style: note,
             ),
@@ -474,8 +472,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     if (proposalExpired(p, height)) {
       return [
         Text(
-          'This payment expired before it was sent: its transaction can no longer be '
-          'added to the chain, and nothing left the vault.',
+          'This payment expired before it was sent. Nothing left the vault.',
           textAlign: TextAlign.center,
           style: note,
         ),
@@ -517,12 +514,8 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       return [
         Text(
           p.isMine
-              ? 'This payment can no longer get every signature: a signer\'s phone was '
-                    'restored or replaced while it was open. Nothing was sent. Propose it '
-                    'again and everyone approves once more, with one tap.'
-              : 'This payment can no longer get every signature: a signer\'s phone was '
-                    'restored or replaced while it was open. Nothing was sent. Ask the '
-                    'person who proposed it to propose it again.',
+              ? 'A signer\'s phone was replaced, so this payment can\'t be signed. Nothing was sent. Propose it again.'
+              : 'A signer\'s phone was replaced, so this payment can\'t be signed. Nothing was sent. Ask its proposer to propose it again.',
           textAlign: TextAlign.center,
           style: note,
         ),
@@ -579,8 +572,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
           Text(
             p.oneTap
                 ? 'Approving signs the payment on this device. It can\'t be withdrawn afterwards.'
-                : 'One-tap signing isn\'t available for this payment (not every signer had '
-                      'signing data ready), so approvers sign again when it\'s sent.',
+                : 'One-tap isn\'t available for this payment, so approvers sign again when it\'s sent.',
             textAlign: TextAlign.center,
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
@@ -606,7 +598,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
           const SizedBox(height: AppSpacing.xs),
           Text(
             p.autoSend
-                ? 'Every signature is in. It is sent automatically by the signer who approved last; you can also send it yourself.'
+                ? 'All signatures are in. The last approver\'s phone sends it, or you can send it now.'
                 : 'Every signature is in. Any signer can send it now; no one else needs to be online.',
             textAlign: TextAlign.center,
             style: AppTypography.bodySmall.copyWith(
@@ -654,9 +646,8 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       case rust.ProposalStage.cancelled when p.stillSendable:
         return [
           Text(
-            'Every signature for this payment was already in, so it could still be sent '
-            'until it expires. Move its funds back to the vault to make that impossible '
-            '(needs ${p.threshold} approvals).',
+            'All signatures were in, so it can still be sent until it expires. Move its '
+            'funds back to the vault to stop that (needs ${p.threshold} approvals).',
             textAlign: TextAlign.center,
             style: note,
           ),

@@ -129,7 +129,7 @@ void main() {
     await tester.tap(find.bySemanticsLabel(RegExp('^Grants')));
     await tester.pumpAndSettle();
     expect(find.text('Treasury'), findsNothing);
-    expect(_text('"Grants"'), findsOneWidget);
+    expect(_text('Grants'), findsWidgets);
     expect(_text('3 of 5'), findsWidgets);
 
     await tester.tap(find.bySemanticsLabel(RegExp('^I know who sent this')));

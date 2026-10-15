@@ -11,7 +11,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/confirm_option.dart';
-import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
@@ -82,46 +81,10 @@ class BackupPromptScreen extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpacing.s),
         Text(
-          'Your key share for this vault now exists only on this phone. If you lose the phone '
-          'without a backup, your seat is gone, and '
-          '${n == t ? 'if any member loses theirs' : 'if more than ${n - t} of the $n members lose theirs'}, '
-          'the vault\'s funds can never be moved.',
+          'Your key share exists only on this phone. Lose it without a backup and your '
+          'seat is gone.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        MobileSurfaceCard(
-          cornerRadius: AppRadii.large,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final (icon, text) in const [
-                (AppIcons.lock, 'Encrypted with a passphrase only you know'),
-                (
-                  AppIcons.share,
-                  'Save the file anywhere: cloud drive, password manager, USB',
-                ),
-                (AppIcons.key, 'Restores your seat on a new phone'),
-              ])
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                  child: Row(
-                    children: [
-                      AppIcon(icon, size: 20, color: colors.icon.muted),
-                      const SizedBox(width: AppSpacing.s),
-                      Expanded(
-                        child: Text(
-                          text,
-                          style: AppTypography.bodySmall.copyWith(
-                            color: colors.text.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
           ),
         ),
       ],

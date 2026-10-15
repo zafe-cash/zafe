@@ -76,16 +76,6 @@ class TorSheet extends ConsumerWidget {
               ),
             ),
           ],
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Tor hides this phone\'s IP address from the relay and the Zcash server; '
-            'it is slower, and servers on your local network can\'t be reached '
-            'through it. Push notifications still come through Google and carry '
-            'nothing about your vault.',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
           const SizedBox(height: AppSpacing.md),
           if (!tor.enabled)
             AppButton(

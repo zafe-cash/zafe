@@ -278,9 +278,22 @@ fn payment_flow_through_bridge() {
     );
     assert_eq!(own.err().map(|e| e.kind), Some(ZafeErrorKind::InvalidInput));
 
-    // A proposes 1 ZEC.
+    // A proposes 1 ZEC; the review screen's fee estimate is the fee the proposal pays.
     let b_before = sync(&members[1]);
     let a = &members[0];
+    let estimated = proposals::estimate_fee(
+        lwd.clone(),
+        a.db_dir.clone(),
+        a.db_key.clone(),
+        a.material.clone(),
+        vec![PaymentInput {
+            address: payee.clone(),
+            amount_zat: 100_000_000,
+            memo: "grant #1".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(estimated, 10_000);
     let id = proposals::propose_payment(
         relay.clone(),
         lwd.clone(),

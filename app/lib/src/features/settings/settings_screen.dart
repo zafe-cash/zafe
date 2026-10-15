@@ -321,10 +321,9 @@ class SettingsScreen extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'This deletes your key share, signing state and history for this vault from '
-                'this phone. You stay a member, but this phone can no longer approve or sign. '
-                'If fewer than $threshold members keep their shares, the vault\'s funds can never '
-                'be moved again.',
+                'This deletes your key share from this phone. You stay a member but can\'t '
+                'approve from here. If fewer than $threshold members keep their shares, the '
+                'funds are lost for good.',
                 style: AppTypography.bodyMedium.copyWith(
                   color: colors.text.accent,
                 ),

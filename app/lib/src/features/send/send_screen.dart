@@ -555,7 +555,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
               if (_confirming > BigInt.zero) ...[
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  '${amountWithTicker(ZecAmount.fromZatoshi(_confirming).balance.amountText, hide: ref.watch(privacyModeProvider))} more is still confirming and can\'t be spent yet.',
+                  '${amountWithTicker(ZecAmount.fromZatoshi(_confirming).balance.amountText, hide: ref.watch(privacyModeProvider))} more is still confirming.',
                   style: AppTypography.bodySmall.copyWith(
                     color: colors.text.secondary,
                   ),
@@ -615,15 +615,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                       ),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Center(
-                child: Text(
-                  'Network fee is added when the transaction is built',
-                  style: AppTypography.bodySmall.copyWith(
-                    color: colors.text.muted,
-                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -695,10 +686,26 @@ class _SendScreenState extends ConsumerState<SendScreen> {
 
   // --- Step 3 --------------------------------------------------------------------------
 
+  /// The exact fee for the payments on review, recomputed when they change.
+  Future<BigInt>? _fee;
+  String? _feeFor;
+
+  Future<BigInt> _feeOf(List<rust.PaymentInput> payments) {
+    final key = payments
+        .map((p) => '${p.address}|${p.amountZat}|${p.memo}')
+        .join(';');
+    if (key != _feeFor || _fee == null) {
+      _feeFor = key;
+      _fee = ref.read(proposalsProvider.notifier).estimateFee(payments);
+    }
+    return _fee!;
+  }
+
   Widget _reviewStep() {
     final colors = context.colors;
     final summary = ref.watch(vaultProvider).summary!;
     final payments = _payments;
+    final fee = _feeOf(payments);
     final total = payments.fold(BigInt.zero, (sum, p) => sum + p.amountZat);
     final amount = ZecAmount.fromZatoshi(total).receipt;
     final address = payments.first.address;
@@ -772,16 +779,26 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                     '${summary.threshold} of ${summary.members.length} signers',
               ),
               const DetailDivider(),
-              DetailRow(
-                label: 'Tx fee',
-                value: 'Set by ZIP 317',
-                trailing: AppTappable(
-                  onTap: () => showMobileTxFeeInfoSheet(context),
-                  semanticsLabel: 'About the network fee',
-                  child: AppIcon(
-                    AppIcons.help,
-                    size: 20,
-                    color: colors.icon.muted,
+              FutureBuilder<BigInt>(
+                future: fee,
+                builder: (context, snap) => DetailRow(
+                  label: 'Network fee',
+                  value: snap.hasData
+                      ? amountWithTicker(
+                          ZecAmount.fromZatoshi(snap.data!).fee.amountText,
+                          hide: false,
+                        )
+                      : snap.hasError
+                      ? 'Unavailable'
+                      : '…',
+                  trailing: AppTappable(
+                    onTap: () => showMobileTxFeeInfoSheet(context),
+                    semanticsLabel: 'About the network fee',
+                    child: AppIcon(
+                      AppIcons.help,
+                      size: 20,
+                      color: colors.icon.muted,
+                    ),
                   ),
                 ),
               ),
@@ -832,11 +849,23 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             ],
           ),
         ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'Nothing is sent yet. Each signer checks this payment on their own device and '
-          'approves with one tap; ${summary.threshold} approvals complete it.',
-          style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
+        // Proposing would fail the same way (e.g. not enough funds): say so now.
+        FutureBuilder<BigInt>(
+          future: fee,
+          builder: (context, snap) => snap.hasError
+              ? Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.sm),
+                  child: Text(
+                    zafeErrorMessage(
+                      snap.error!,
+                      fallback: 'Couldn\'t work out the fee.',
+                    ),
+                    style: AppTypography.bodySmall.copyWith(
+                      color: colors.text.warning,
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
         ),
         const SizedBox(height: AppSpacing.lg),
         AppButton(
@@ -968,8 +997,7 @@ class _CsvErrorsSheet extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Nothing was added. Fix these rows and import again. Each row is '
-            'address,amount,memo with the amount in ZEC (like 1.5); the memo is optional.',
+            'Nothing was added. Fix these rows and try again. Format: address,amount,memo (amount in ZEC, memo optional).',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),

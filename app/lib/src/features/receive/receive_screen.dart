@@ -66,15 +66,7 @@ class ReceiveScreen extends ConsumerWidget {
             ),
           ),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Center(
-          child: Text(
-            'Shielded address. Funds sent here are held by the vault and can only move with '
-            '${summary.threshold} of ${summary.members.length} signatures.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
-          ),
-        ),
+
         if (kIsBeta) ...[
           const SizedBox(height: AppSpacing.xs),
           Center(

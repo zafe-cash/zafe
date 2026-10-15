@@ -42,11 +42,9 @@ class VaultProtectionBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final spare = signers - threshold;
     final loss = spare == 0
-        ? 'If any signer loses both their phone and their backup, the funds '
-              'are lost for good. Nobody, including Zafe, can recover them.'
+        ? 'If any signer loses both their phone and backup, the funds are lost for good.'
         : 'If more than $spare of the $signers signers lose both their phone '
-              'and their backup, the funds are lost for good. Nobody, including '
-              'Zafe, can recover them.';
+              'and backup, the funds are lost for good.';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -54,27 +52,20 @@ class VaultProtectionBody extends StatelessWidget {
           icon: AppIcons.users,
           title: 'A payment needs $threshold of $signers signers',
           body:
-              'Each signer approves on their own phone. Your key share never '
-              'leaves this phone, and the full spending key never exists '
-              'anywhere, so no single signer, and not Zafe, can move funds.',
+              'Each signer approves on their own phone. The full key never exists, so no single signer, and not Zafe, can move funds.',
         ),
         const _Point(
           icon: AppIcons.eye,
           title: 'Every signer sees everything',
           body:
-              'All signers can see every past and future payment, memo and the '
-              'balance. This can\'t be taken back from a signer later.',
+              'Every signer sees all payments, memos and the balance, past and future. This can\'t be revoked.',
         ),
         _Point(icon: AppIcons.lock, title: 'Keep a backup', body: loss),
         const _Point(
           icon: AppIcons.warningCircle,
           title: 'Quantum computers',
           body:
-              'Vault keys follow Zcash\'s plan for recovering funds if quantum '
-              'computers ever break today\'s cryptography. Against such a '
-              'computer, though, one signer\'s copy of the vault secret would be '
-              'enough to spend. If that day comes, move the funds to a '
-              'quantum-safe vault as soon as Zcash offers one.',
+              'If quantum computers ever break today\'s cryptography, one signer\'s copy of the vault secret could be enough to spend. Then move the funds to a quantum-safe vault once Zcash offers one.',
           last: true,
         ),
       ],

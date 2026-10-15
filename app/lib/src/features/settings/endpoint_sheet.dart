@@ -299,15 +299,6 @@ class _LightwalletdSheetState extends ConsumerState<_LightwalletdSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'The lightwalletd server this phone reads the $kZafeNetwork chain '
-            'from. It sees which blocks this phone downloads, not the vault\'s '
-            'keys.${kLightwalletdPresets.length > 1 ? ' If a listed server stops answering, Zafe moves to the next one.' : ''}',
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
           LightwalletdServerList(
             presets: kLightwalletdPresets,
             selectedUrl: ref.watch(endpointsProvider).lightwalletdUrl,
@@ -417,18 +408,15 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _relay
-                ? 'Carries proposals, votes and signatures between members, '
-                      'encrypted. Every member of a vault must use the same relay.'
-                : 'The lightwalletd server this phone reads the $kZafeNetwork '
-                      'chain from. It sees which blocks this phone downloads, not '
-                      'the vault\'s keys.',
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
+          if (_relay) ...[
+            Text(
+              'All members of a vault must use the same relay.',
+              style: AppTypography.bodyMedium.copyWith(
+                color: colors.text.secondary,
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           MobileTextField(
             controller: _url,
             focusNode: _focus,

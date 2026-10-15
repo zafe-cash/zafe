@@ -309,6 +309,19 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return id;
   }
 
+  /// The exact network fee (zatoshis) proposing [payments] would pay now.
+  Future<BigInt> estimateFee(List<rust.PaymentInput> payments) async {
+    final vault = _vault;
+    final paths = await ZafePaths.get();
+    return rust.estimateFee(
+      lightwalletdUrl: _endpoints.lightwalletdUrl,
+      dbDir: paths.dbDir,
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
+      material: vault.material!,
+      payments: payments,
+    );
+  }
+
   Future<rust.ReviewInfo> review(String id) async {
     final vault = _vault;
     final paths = await ZafePaths.get();

@@ -276,10 +276,6 @@ class PaymentRequestView extends StatelessWidget {
     final selectedFunds = selected == null ? null : funds(selected);
     final canPay =
         selectedFunds != null && selectedFunds.check != FundsCheck.short;
-    final fee = amountWithTicker(
-      ZecAmount.fromZatoshi(minimumFeeZat(payments.length)).receipt.amountText,
-      hide: false,
-    );
     final sectionStyle = AppTypography.labelLarge.copyWith(
       color: colors.text.secondary,
     );
@@ -308,9 +304,7 @@ class PaymentRequestView extends StatelessWidget {
         const _Callout(
           title: 'Check who sent this',
           body:
-              'Anyone can make a Zcash payment link, and Zafe can\'t tell who made '
-              'this one. Continue only if you expected this request and trust where '
-              'it came from.',
+              'Zafe can\'t tell who made this payment link. Continue only if you trust where it came from.',
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
@@ -366,26 +360,12 @@ class PaymentRequestView extends StatelessWidget {
               ],
             ),
           ),
-        if (selected != null && canPay) ...[
-          const SizedBox(height: AppSpacing.s),
-          Text(
-            'Continue opens this payment in "${selected.name}" for review. '
-            'Nothing is sent until ${selected.threshold} of ${selected.members} '
-            'signers approve it.'
-            '${requested > BigInt.zero ? ' The network fee is at least $fee.' : ''}',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
-        ],
         if (selected != null && !canPay) ...[
           const SizedBox(height: AppSpacing.s),
           Text(
             vaults.length > 1
-                ? 'None of your vaults has enough to pay this request and the '
-                      'network fee (at least $fee).'
-                : '"${selected.name}" doesn\'t have enough to pay this request '
-                      'and the network fee (at least $fee).',
+                ? 'None of your vaults has enough to pay this request.'
+                : '"${selected.name}" doesn\'t have enough to pay this request.',
             style: AppTypography.bodySmall.copyWith(color: colors.text.warning),
           ),
         ],

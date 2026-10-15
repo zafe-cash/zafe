@@ -316,7 +316,7 @@ class _ReviewRows extends ConsumerWidget {
           ? Column(
               children: [
                 DetailRow(
-                  label: 'Tx fee',
+                  label: 'Network fee',
                   value: amountWithTicker(
                     ZecAmount.fromZatoshi(r.feeZat).fee.amountText,
                     hide: hide,
@@ -602,8 +602,7 @@ class SweepCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Spends the funds of a cancelled payment back to this vault, so that payment '
-            'can never be sent. Nothing leaves the vault except the network fee.',
+            'Moves a cancelled payment\'s funds back to this vault so it can never be sent. Only the network fee leaves.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),
@@ -663,36 +662,15 @@ Future<void> showDeviceCheckSheet(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Your approval signs the transaction itself, not this summary. So this '
-            'phone opened the transaction with the vault\'s keys and checked it '
-            'against what you see here, without trusting the proposer or the relay:',
+            'This phone checked the transaction itself, not just this summary:',
             style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
           ),
           const SizedBox(height: AppSpacing.sm),
-          point(
-            'Payments.',
-            'Each recipient, amount and memo is exactly as shown.',
-          ),
-          point('Funds.', 'It only spends money that belongs to the vault.'),
-          point(
-            'Change.',
-            'Everything left over comes back to the vault; nothing goes to a hidden '
-                'recipient.',
-          ),
-          point(
-            'Fee.',
-            'The fee is the standard network fee, not a way to pay someone extra.',
-          ),
-          point(
-            'Network.',
-            'It is valid on this network and expires as the vault expects.',
-          ),
-          Text(
-            '"Matches" means every check passed. If one fails you see "Does not '
-            'match" and the reason: don\'t approve it. The phone checks again just '
-            'before signing.',
-            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
-          ),
+          point('Payments.', 'Recipients, amounts and memos are as shown.'),
+          point('Funds.', 'Only the vault\'s money is spent.'),
+          point('Change.', 'Everything left over returns to the vault.'),
+          point('Fee.', 'The standard network fee.'),
+          point('Network.', 'Valid here, with the expected expiry.'),
         ],
       ),
     );

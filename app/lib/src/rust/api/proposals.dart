@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `visible_text`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `visible_text`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 
@@ -85,6 +85,23 @@ Future<void> retryRepair({
   material: material,
   replacement: replacement,
   stalledKeyHex: stalledKeyHex,
+);
+
+/// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
+/// last synced: the same note selection as `propose_payment`, nothing built or logged.
+/// Fails like a proposal would (e.g. not enough funds), so the review can say so first.
+Future<BigInt> estimateFee({
+  required String lightwalletdUrl,
+  required String dbDir,
+  required List<int> dbKey,
+  required List<int> material,
+  required List<PaymentInput> payments,
+}) => RustLib.instance.api.crateApiProposalsEstimateFee(
+  lightwalletdUrl: lightwalletdUrl,
+  dbDir: dbDir,
+  dbKey: dbKey,
+  material: material,
+  payments: payments,
 );
 
 /// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns

@@ -72,11 +72,9 @@ class ViewingKeyScreen extends ConsumerWidget {
               const SizedBox(width: AppSpacing.xs),
               Expanded(
                 child: note(
-                  'Anyone with this key sees every past and future payment of '
-                  '"${ref.watch(activeVaultNameProvider) ?? 'this vault'}": amounts, memos and '
-                  'balance. It can\'t spend. Share it only with someone you trust '
-                  'with the vault\'s history, like an auditor or accountant. It '
-                  'can\'t be revoked.',
+                  'Anyone with this key sees every payment, memo and balance of '
+                  '"${ref.watch(activeVaultNameProvider) ?? 'this vault'}", forever. It '
+                  'can\'t spend. Share it only with someone you trust, like an auditor.',
                   color: colors.text.accent,
                 ),
               ),

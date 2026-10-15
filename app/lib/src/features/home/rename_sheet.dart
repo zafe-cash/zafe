@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/theme/app_theme.dart';
@@ -28,9 +27,7 @@ Future<void> showRenameSignerSheet(
     context: context,
     builder: (sheet) => _RenameSheet(
       title: 'Name this signer',
-      body:
-          'Key ${shortKey(keyHex)}. Only you see this label. Without one, '
-          'you see the name they gave themselves, if any.',
+      body: 'Only you see this label.',
       hint: 'e.g. Alice (treasurer)',
       maxLength: MemberNames.maxLength,
       current: current,
@@ -51,9 +48,6 @@ Future<void> showMyNameSheet(BuildContext context, WidgetRef ref) async {
     context: context,
     builder: (sheet) => _RenameSheet(
       title: 'Your name',
-      body:
-          'The other signers of this vault see it next to your approvals. '
-          'Their own name for you comes first on their phones.',
       hint: 'e.g. Alice',
       maxLength: MemberNames.maxLength,
       current: current,
@@ -87,9 +81,7 @@ Future<void> showRenameVaultSheet(BuildContext context, WidgetRef ref) async {
     context: context,
     builder: (sheet) => _RenameSheet(
       title: 'Rename vault',
-      body:
-          'The name stays on this phone; other members keep seeing '
-          'their own. It was created as "$creator".',
+      body: 'Only on this phone. Created as "$creator".',
       hint: creator,
       maxLength: VaultName.maxLength,
       current: current.isEmpty ? creator : current,
@@ -106,14 +98,14 @@ Future<void> showRenameVaultSheet(BuildContext context, WidgetRef ref) async {
 class _RenameSheet extends StatefulWidget {
   const _RenameSheet({
     required this.title,
-    required this.body,
+    this.body,
     required this.hint,
     required this.maxLength,
     required this.current,
     this.removeLabel,
   });
   final String title;
-  final String body;
+  final String? body;
   final String hint;
   final int maxLength;
   final String current;
@@ -152,13 +144,15 @@ class _RenameSheetState extends State<_RenameSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            widget.body,
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
+          if (widget.body != null) ...[
+            Text(
+              widget.body!,
+              style: AppTypography.bodyMedium.copyWith(
+                color: colors.text.secondary,
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           MobileTextField(
             controller: _name,
             focusNode: _focus,

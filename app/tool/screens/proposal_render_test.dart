@@ -248,7 +248,7 @@ final _scenarios = <String, (String, List<Widget>)>{
             DetailDivider(),
             DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
             DetailDivider(),
-            DetailRow(label: 'Tx fee', value: 'Set by ZIP 317'),
+            DetailRow(label: 'Network fee', value: 'At least 0.0001 TAZ'),
           ],
         ),
       ),

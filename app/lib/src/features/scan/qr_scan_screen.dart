@@ -360,8 +360,7 @@ class _ScannerError extends StatelessWidget {
             const SizedBox(height: AppSpacing.xxs),
             Text(
               denied
-                  ? 'Allow camera access for Zafe in your phone\'s settings to scan '
-                        'invites, or go back and paste the invite instead.'
+                  ? 'Allow camera access in your phone\'s settings, or go back and paste the invite.'
                   : 'Try again, or go back and paste the invite instead.',
               textAlign: TextAlign.center,
               style: AppTypography.bodySmall.copyWith(
