@@ -1243,7 +1243,9 @@ Learned while studying it:
   (`zafe_zec_usd_v1`). Live tests: `price::tests::live_direct_price` and the Tor live test.
 - **In-app updates** (`services/app_update.dart`, `in_app_update` **4.2.5**: 5.x needs
   Flutter 3.44): Android Play installs only; checks at launch/unlock/resume (6 h apart).
-  Priority ≥ 4 (set per release in the Play Console/API) = immediate full-screen update,
+  Priority comes from the release's class (`docs/releases/<version>.md`: essential = 5,
+  optional = 2; set by `release-mainnet.yml` and `play-promote.yml`, never by hand: the Console
+  can't set it). Priority ≥ 4 = immediate full-screen update,
   except while a payment is sending; otherwise a background download, then a Home
   "Update ready" card whose Restart is refused mid-send. Debug/sideloaded installs get a
   Play error and nothing shows. Can only be tested end to end with a Play install

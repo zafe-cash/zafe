@@ -1,0 +1,48 @@
+name: Promote to Google Play production
+
+# Moves a tested build from Play's internal track to production, with the in-app update
+# priority and notes from docs/releases/<version>.md (scripts/play_promote.py). Manual only.
+#
+# Environment `play-production` (REQUIRED REVIEWERS, deploys only from `main`):
+#   secret PLAY_PRODUCTION_SERVICE_ACCOUNT_JSON   key of the second Play service account,
+#                                                 the only one allowed to release to
+#                                                 production; set ONLY here. The one in
+#                                                 `android-release` can only reach testing
+#                                                 tracks, so a tag workflow can't ship to users.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to promote, as tagged (e.g. 0.1.17)"
+        required: true
+        type: string
+      rollout_percent:
+        description: "Percent of users (essential releases must be 100)"
+        required: false
+        default: "100"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: play-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: play-production
+    steps:
+      - uses: actions/checkout@v5
+      - name: Promote
+        env:
+          PLAY_KEY: ${{ secrets.PLAY_PRODUCTION_SERVICE_ACCOUNT_JSON }}
+          VERSION: ${{ inputs.version }}
+          PERCENT: ${{ inputs.rollout_percent }}
+        run: |
+          [ -n "$PLAY_KEY" ] || { echo "::error::No PLAY_PRODUCTION_SERVICE_ACCOUNT_JSON in play-production"; exit 1; }
+          python3 -m pip install --quiet google-auth==2.35.0 requests==2.32.3
+          python3 scripts/play_promote.py "$VERSION" "$PERCENT"

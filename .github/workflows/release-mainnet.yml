@@ -7,6 +7,10 @@ name: Release (Android, mainnet)
 #
 #   git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
 #
+# Every mainnet version needs `docs/releases/<version>.md` (see docs/releasing.md,
+# "Release class"): `class: optional|essential` sets the Play in-app update priority (2 or
+# 5) and the notes become Play's "What's new" and the top of the GitHub release.
+#
 # Needs, see docs/releasing.md:
 #   repository variables
 #     ZAFE_LINK_HOST             required: host of the invite landing site (infra/site/),
@@ -58,6 +62,28 @@ jobs:
             echo "::error::Version '$v' is not like 1.2.3"; exit 1
           fi
           echo "name=$v" >> "$GITHUB_OUTPUT"
+
+      # Optional updates download in the background; essential ones (a Zcash network
+      # upgrade, a vault protocol change, a security fix) take over the screen until
+      # installed (app/lib/src/services/app_update.dart: priority >= 4 is immediate).
+      - name: Release class
+        id: class
+        run: |
+          f="docs/releases/${{ steps.version.outputs.name }}.md"
+          [ -f "$f" ] || { echo "::error::Missing $f (class + notes; docs/releasing.md)"; exit 1; }
+          class=$(head -1 "$f" | sed -n 's/^class: *//p')
+          case "$class" in
+            essential) priority=5 ;;
+            optional) priority=2 ;;
+            *) echo "::error::$f: class must be optional or essential, got '$class'"; exit 1 ;;
+          esac
+          # The notes: everything after the front line, as Play's "What's new" (500 max).
+          mkdir -p "$RUNNER_TEMP/whatsnew"
+          tail -n +2 "$f" | sed '/./,$!d' > "$RUNNER_TEMP/whatsnew/whatsnew-en-US"
+          n=$(wc -c < "$RUNNER_TEMP/whatsnew/whatsnew-en-US")
+          [ "$n" -gt 0 ] && [ "$n" -le 500 ] || { echo "::error::$f: notes must be 1-500 characters, got $n"; exit 1; }
+          echo "class=$class" >> "$GITHUB_OUTPUT"
+          echo "priority=$priority" >> "$GITHUB_OUTPUT"
 
       # Never publish a mainnet APK while the mainnet relay is down, or one signed with a debug key.
       - name: Check configuration
@@ -159,13 +185,17 @@ jobs:
           cert=$(grep -m1 'SHA-256 digest' dist/certs.txt | sed 's/.*: //')
           size=$(du -h "dist/$apk" | cut -f1)
           {
+            if [ '${{ steps.class.outputs.class }}' = essential ]; then
+              echo "**Essential update:** every member of a vault should install it."
+              echo
+            fi
+            cat "$RUNNER_TEMP/whatsnew/whatsnew-en-US"
+            echo
             echo "Zafe $v for **Zcash mainnet** (ZEC), **beta for early users**. The code has not had"
             echo "its external security audit yet: only use money you can afford to lose."
             echo
-            echo "**Update together:** every member of a vault must run the same version (this one"
-            echo "adds a vault event older versions skip). Zcash's next network upgrade (NU7) is"
-            echo "planned for 2026-11-05: a Zafe update that supports it will follow, and you will"
-            echo "need it before then to send. Funds are never at risk from a missed update."
+            echo "**Update together:** every member of a vault should run the same version. A missed"
+            echo "update never puts funds at risk."
             echo
             echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
             echo "installing from your browser or files app when Android asks."
@@ -210,6 +240,8 @@ jobs:
           track: internal
           status: completed
           releaseName: ${{ steps.version.outputs.name }}
+          inAppUpdatePriority: ${{ steps.class.outputs.priority }}
+          whatsNewDirectory: ${{ runner.temp }}/whatsnew
 
       - uses: softprops/action-gh-release@v2
         with:

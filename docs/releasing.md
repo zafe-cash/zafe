@@ -52,6 +52,23 @@ wallet + "non-custodial software wallet" confirmed per country, no licences; adv
 No) are recorded in the private GTM repo, `content/play-listing/listing.md`. A new app's first
 release can't use a staged rollout; later releases can.
 
+## Release class: optional or essential
+
+Every mainnet version has `docs/releases/<version>.md` (format in `docs/releases/README.md`):
+`class: optional` (Play in-app update priority 2: background download, then "Update ready"
+on Home) or `class: essential` (priority 5: full-screen update until installed; for a Zcash
+network upgrade, a vault protocol change, a security fix). `release-mainnet.yml` refuses a tag
+without it, uploads to internal with that priority and the notes as "What's new", and puts the
+notes at the top of the GitHub release.
+
+Production: run **Promote to Google Play production** (`play-promote.yml`, inputs: version,
+rollout percent; essential must be 100). It waits for approval in the `play-production`
+environment, then `scripts/play_promote.py` assigns the internal release named `<version>` to
+production with the class's priority and notes. Its key belongs to a second service account,
+the only one with production rights in Play Console; the uploader can reach testing tracks
+only. The Console can't set the priority, so promote with the workflow, not by hand. With
+managed publishing on, an approved release still waits for **Publish** in the Console.
+
 ## Locally
 
 `app/android/key.properties` (gitignored) with `storeFile`, `storePassword`, `keyAlias`,

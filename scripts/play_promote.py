@@ -1,0 +1,94 @@
+"""Promotes a build from Google Play's internal track to production, with its in-app update
+priority and notes. Run by .github/workflows/play-promote.yml; never by hand.
+
+    PLAY_KEY=<service account JSON> python3 scripts/play_promote.py <version> <rollout percent>
+
+The build is the internal-track release named <version> (release-mainnet.yml uploads each
+mainnet tag there under that name), so production only ever gets a bundle that was tested
+first. `docs/releases/<version>.md` gives the class: essential = priority 5 and 100% at
+once (members of a vault update together); optional = priority 2, any rollout. A new app's
+first production release can't be staged (Play refuses it).
+"""
+
+import json
+import os
+import re
+import sys
+
+import requests
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+
+PACKAGE = "xyz.zafe.zafe"
+API = f"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE}"
+
+
+def fail(msg):
+    print(f"::error::{msg}")
+    sys.exit(1)
+
+
+def release_file(version):
+    path = os.path.join(os.path.dirname(__file__), "..", "docs", "releases", f"{version}.md")
+    try:
+        text = open(path).read()
+    except FileNotFoundError:
+        fail(f"docs/releases/{version}.md is missing")
+    m = re.match(r"class: *(optional|essential)\s*\n(.*)", text, re.S)
+    if not m:
+        fail(f"docs/releases/{version}.md must start with 'class: optional|essential'")
+    notes = m.group(2).strip()
+    if not 0 < len(notes) <= 500:
+        fail(f"docs/releases/{version}.md: notes must be 1-500 characters")
+    return m.group(1), notes
+
+
+def main():
+    if len(sys.argv) != 3 or not re.fullmatch(r"\d+\.\d+\.\d+", sys.argv[1]):
+        fail("usage: play_promote.py <version like 1.2.3> <rollout percent>")
+    version, percent = sys.argv[1], float(sys.argv[2])
+    if not 0 < percent <= 100:
+        fail("rollout percent must be in (0, 100]")
+    cls, notes = release_file(version)
+    priority = 5 if cls == "essential" else 2
+    if cls == "essential" and percent != 100:
+        fail("an essential release goes to 100%: members of a vault update together")
+
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(os.environ["PLAY_KEY"]),
+        scopes=["https://www.googleapis.com/auth/androidpublisher"])
+    creds.refresh(Request())
+    s = requests.Session()
+    s.headers["Authorization"] = f"Bearer {creds.token}"
+
+    def call(method, path, **kw):
+        r = s.request(method, API + path, timeout=60, **kw)
+        if r.status_code >= 300:
+            fail(f"{method} {path}: {r.status_code} {r.text[:400]}")
+        return r.json() if r.text else {}
+
+    edit = call("POST", "/edits")["id"]
+    internal = call("GET", f"/edits/{edit}/tracks/internal")
+    codes = [c for rel in internal.get("releases", []) if rel.get("name") == version
+             for c in rel.get("versionCodes", [])]
+    if not codes:
+        fail(f"no internal-track release named {version}: tag mainnet-v{version} first")
+    release = {
+        "name": version,
+        "versionCodes": codes,
+        "inAppUpdatePriority": priority,
+        "releaseNotes": [{"language": "en-US", "text": notes}],
+    }
+    if percent == 100:
+        release["status"] = "completed"
+    else:
+        release.update(status="inProgress", userFraction=percent / 100)
+    call("PUT", f"/edits/{edit}/tracks/production",
+         json={"track": "production", "releases": [release]})
+    call("POST", f"/edits/{edit}:commit")
+    print(f"production: {version} (codes {', '.join(codes)}), {cls}, priority {priority}, "
+          f"{percent:g}% (sent for review; with managed publishing, publish it in the Console)")
+
+
+if __name__ == "__main__":
+    main()
