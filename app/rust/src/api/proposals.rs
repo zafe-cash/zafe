@@ -17,7 +17,10 @@ use zafe_core::{
     session::{NonceStore, ProposalId},
     state_dir,
     vault::{ProposalStatus, ProposedPayment, VaultState},
-    wallet::{connect_pooled as connect, PaymentRequest, ZafeNetwork},
+    wallet::{
+        self as zwallet, connect_pooled as connect, Client, PaymentRequest, VaultWallet,
+        ZafeNetwork,
+    },
 };
 use zcash_protocol::memo::{Memo, MemoBytes};
 
@@ -714,11 +717,15 @@ pub fn propose_payment(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let requests = payment_requests(&m, &payments)?;
+    let mut watch = crate::diag::Stopwatch::new("propose");
     let _guard = wallet_lock();
+    watch.lap("lock");
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
-        wallet.sync(&mut client).await?;
+        let scanned = catch_up(&mut wallet, &mut client).await?;
+        watch.lap(if scanned { "scan" } else { "noscan" });
         let relay = RelayClient::pooled(relay_url);
         Ok::<_, ZafeError>(
             node::propose(
@@ -735,7 +742,27 @@ pub fn propose_payment(
             .await?,
         )
     })?;
+    watch.lap("build");
+    watch.finish();
     Ok(hex::encode(id))
+}
+
+/// Brings the wallet up to the server's tip before building a transaction: one cheap
+/// height request, and a scan only when there is something new (the app's own sync
+/// usually ran seconds ago). The scan's round trips cost about 2 s on a phone even with
+/// nothing to fetch. No scan needed means the wallet is at the tip with nothing left to
+/// scan ([`VaultWallet::needs_scan`]), the same rule `sync_vault` follows. Returns whether
+/// it scanned.
+async fn catch_up(
+    wallet: &mut VaultWallet<ZafeNetwork>,
+    client: &mut Client,
+) -> Result<bool, ZafeError> {
+    let tip = zwallet::latest_height(client).await?;
+    if !wallet.needs_scan(tip)? {
+        return Ok(false);
+    }
+    wallet.sync(client).await?;
+    Ok(true)
 }
 
 /// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
@@ -756,7 +783,7 @@ pub fn propose_again(
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         let mut client = connect(&lightwalletd_url).await?;
-        wallet.sync(&mut client).await?;
+        catch_up(&mut wallet, &mut client).await?;
         Ok::<_, ZafeError>(
             node::propose_again(
                 &RelayClient::pooled(relay_url),
@@ -792,7 +819,7 @@ pub fn invalidate_proposal(
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         let mut client = connect(&lightwalletd_url).await?;
-        wallet.sync(&mut client).await?;
+        catch_up(&mut wallet, &mut client).await?;
         Ok::<_, ZafeError>(
             node::invalidate(
                 &RelayClient::pooled(relay_url),

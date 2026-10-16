@@ -504,6 +504,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   Tor lease isn't revoked; `tor::request()` revokes them all, tested in `tor_policy.rs`); endpoint checks keep
   `connect`. `sync_vault` skips the scan (`noscan` in timings) when `VaultWallet::needs_scan` says the server's
   tip equals the wallet's and no scan range is left: the scan's round trips cost 1.2-2 s even with nothing new.
+  Proposing (and propose-again, the cancel sweep) does the same through `catch_up` in
+  `api/proposals.rs` (2026-10-16: each used to run a full `wallet.sync` first, ~1.9 s on a
+  phone, so "Building transaction..." felt slow); `propose` is timed in the report too.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):

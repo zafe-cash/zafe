@@ -353,8 +353,9 @@ class _SendScreenState extends ConsumerState<SendScreen> {
         debugPrint('approving my own proposal failed: ${describeError(e)}');
       }
       if (!mounted) return;
-      context.go('/home');
-      unawaited(context.push('/proposal/$id'));
+      // The payment's page takes this screen's place (Back goes to Home): going Home
+      // first and pushing it showed Home for a moment in between.
+      context.pushReplacement('/proposal/$id');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
