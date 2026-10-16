@@ -9,6 +9,8 @@ import '../core/config/endpoints.dart';
 import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/network/tor_setting.dart' show kUseTorKey;
+import '../rust/api/error.dart' show ZafeError, ZafeErrorKind;
+import 'tor_provider.dart';
 import '../core/storage/vault_summaries.dart';
 import '../core/storage/my_name.dart';
 import '../core/storage/zafe_paths.dart';
@@ -560,8 +562,34 @@ class VaultNotifier extends Notifier<VaultState> {
           .read(serverFailoverProvider.notifier)
           .afterSyncFailure(e);
       state = state.copyWith(syncing: false, firstSync: false, syncError: e);
-      if (switched) await sync();
+      if (switched) {
+        await sync();
+      } else if (_retryOverTor(e)) {
+        // Through Tor the first stream to a server often fails while circuits are still
+        // being built (seen on a phone right after "Use Tor": "Can't reach Zcash server"
+        // for over a minute, until the next poll). One quick retry.
+        _torRetryAt = DateTime.now();
+        await Future<void>.delayed(const Duration(seconds: 4));
+        await sync();
+      }
     }
+  }
+
+  DateTime? _torRetryAt;
+
+  /// A network failure while "Use Tor" is on, and no quick retry in the last minute.
+  bool _retryOverTor(Object e) {
+    if (!ref.read(torProvider).enabled) return false;
+    if (e is! ZafeError ||
+        !const {
+          ZafeErrorKind.network,
+          ZafeErrorKind.networkTimeout,
+        }.contains(e.kind)) {
+      return false;
+    }
+    final last = _torRetryAt;
+    return last == null ||
+        DateTime.now().difference(last) > const Duration(minutes: 1);
   }
 }
 
