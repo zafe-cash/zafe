@@ -5,12 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/config/network_config.dart';
+import '../../core/errors/zafe_error_copy.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/security/unlock_gate.dart';
-import '../../core/widgets/action_button.dart';
 import '../../core/widgets/animated_keyed_column.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_tappable.dart';
@@ -22,6 +22,42 @@ import '../../providers/proposals_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
 import '../proposals/proposal_status.dart';
+
+/// Declines in flight (hidden at once, so the card leaves on the tap), and the ones that
+/// failed (the card comes back with the reason).
+class Declines {
+  const Declines({this.pending = const {}, this.failed = const {}});
+  final Set<String> pending;
+  final Map<String, String> failed;
+}
+
+class DeclinesNotifier extends Notifier<Declines> {
+  @override
+  Declines build() => const Declines();
+
+  /// Declining moves no money and needs no check, so the card leaves right away; the
+  /// vote (a log entry on the relay, a few seconds) finishes in the background.
+  Future<void> decline(String id) async {
+    state = Declines(
+      pending: {...state.pending, id},
+      failed: {...state.failed}..remove(id),
+    );
+    String? error;
+    try {
+      await ref.read(proposalsProvider.notifier).reject(id);
+    } catch (e) {
+      error = zafeErrorMessage(e, fallback: 'Couldn\'t decline. Try again.');
+    }
+    state = Declines(
+      pending: {...state.pending}..remove(id),
+      failed: {...state.failed, id: ?error},
+    );
+  }
+}
+
+final declinesProvider = NotifierProvider<DeclinesNotifier, Declines>(
+  DeclinesNotifier.new,
+);
 
 /// "Needs you" on Home: what the group is waiting on this member for, as request cards
 /// (a payment to approve or send, a seat move to check). Shown only when there is
@@ -37,9 +73,11 @@ class NeedsYou extends ConsumerWidget {
     final me = ref.watch(vaultProvider).myKeyHex;
     final names = ref.watch(signerNamesProvider);
     final hide = ref.watch(privacyModeProvider);
+    final declines = ref.watch(declinesProvider);
     final cards = <Widget>[
       for (final p in proposals.items)
-        if (needsMyAction(p, height: height))
+        if (needsMyAction(p, height: height) &&
+            !declines.pending.contains(p.id))
           RequestCard(
             key: ValueKey('p:${p.id}'),
             tileKey: p.author,
@@ -64,8 +102,9 @@ class NeedsYou extends ConsumerWidget {
             onDecline:
                 p.stage == rust.ProposalStage.open &&
                     p.myVote == rust.MyVote.none
-                ? () => ref.read(proposalsProvider.notifier).reject(p.id)
+                ? () => ref.read(declinesProvider.notifier).decline(p.id)
                 : null,
+            error: declines.failed[p.id],
           ),
       for (final m in proposals.seatMoves)
         if (m.oldKeyHex != me && !m.approvals.contains(me))
@@ -155,6 +194,7 @@ class RequestCard extends StatelessWidget {
     required this.onTap,
     this.onAction,
     this.onDecline,
+    this.error,
   });
 
   /// Key hex the signer tile is drawn from.
@@ -169,7 +209,10 @@ class RequestCard extends StatelessWidget {
   final VoidCallback? onAction;
 
   /// Shows "Decline" next to the action (a vote), done right on the card.
-  final Future<void> Function()? onDecline;
+  final VoidCallback? onDecline;
+
+  /// Why the last attempt on this card failed, shown under its buttons.
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
@@ -244,12 +287,12 @@ class RequestCard extends StatelessWidget {
             children: [
               if (onDecline != null) ...[
                 Expanded(
-                  child: ActionButton(
-                    label: 'Decline',
+                  child: AppButton(
+                    expand: true,
                     variant: AppButtonVariant.ghost,
                     size: AppButtonSize.medium,
-                    errorFallback: 'Couldn\'t decline. Try again.',
-                    onPressed: onDecline!,
+                    onPressed: onDecline,
+                    child: const Text('Decline'),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.xs),
@@ -267,6 +310,16 @@ class RequestCard extends StatelessWidget {
               ),
             ],
           ),
+          if (error != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              error!,
+              textAlign: TextAlign.center,
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.destructive,
+              ),
+            ),
+          ],
         ],
       ),
     );

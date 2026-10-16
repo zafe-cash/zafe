@@ -238,7 +238,7 @@ final _cases = <(String, String?, Widget)>[
           detail: 'Printer ink',
           action: 'Approve',
           onTap: _noop,
-          onDecline: _declineNoop,
+          onDecline: _noop,
         ),
         SizedBox(height: 12),
         RequestCard(
@@ -350,5 +350,3 @@ void main() {
 }
 
 void _noop() {}
-
-Future<void> _declineNoop() async {}
