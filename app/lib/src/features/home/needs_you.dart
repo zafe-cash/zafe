@@ -10,6 +10,7 @@ import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/security/unlock_gate.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/animated_keyed_column.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_tappable.dart';
@@ -50,15 +51,21 @@ class NeedsYou extends ConsumerWidget {
                 : ZecAmount.fromZatoshi(p.totalZat).activity.amountText,
             detail: _detail(p, height),
             onTap: () => context.push('/proposal/${p.id}'),
-            // A vote opens the request (recipient and this phone's check come first);
-            // a payment with every approval is sent right away, after the unlock.
+            // Approve opens the request (the recipient and this phone's check come
+            // first, then the fingerprint); Decline moves no money, so it acts here. A
+            // payment with every approval is sent right away, after the unlock.
             action: p.stage == rust.ProposalStage.approved && !p.needsReapproval
                 ? 'Send now'
-                : 'Approve or decline',
+                : 'Approve',
             onAction:
                 p.stage == rust.ProposalStage.approved && !p.needsReapproval
                 ? () => _send(context, ref, p.id)
                 : () => context.push('/proposal/${p.id}'),
+            onDecline:
+                p.stage == rust.ProposalStage.open &&
+                    p.myVote == rust.MyVote.none
+                ? () => ref.read(proposalsProvider.notifier).reject(p.id)
+                : null,
           ),
       for (final m in proposals.seatMoves)
         if (m.oldKeyHex != me && !m.approvals.contains(me))
@@ -147,6 +154,7 @@ class RequestCard extends StatelessWidget {
     required this.action,
     required this.onTap,
     this.onAction,
+    this.onDecline,
   });
 
   /// Key hex the signer tile is drawn from.
@@ -159,6 +167,9 @@ class RequestCard extends StatelessWidget {
   final String action;
   final VoidCallback onTap;
   final VoidCallback? onAction;
+
+  /// Shows "Decline" next to the action (a vote), done right on the card.
+  final Future<void> Function()? onDecline;
 
   @override
   Widget build(BuildContext context) {
@@ -229,14 +240,32 @@ class RequestCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.s),
-          AppButton(
-            expand: true,
-            size: AppButtonSize.medium,
-            enabledBackgroundColor: colors.background.brandAlpha,
-            enabledLabelColor: colors.text.brand,
-            enabledBorderColor: const Color(0x00000000),
-            onPressed: onAction ?? onTap,
-            child: Text(action),
+          Row(
+            children: [
+              if (onDecline != null) ...[
+                Expanded(
+                  child: ActionButton(
+                    label: 'Decline',
+                    variant: AppButtonVariant.ghost,
+                    size: AppButtonSize.medium,
+                    errorFallback: 'Couldn\'t decline. Try again.',
+                    onPressed: onDecline!,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+              ],
+              Expanded(
+                child: AppButton(
+                  expand: true,
+                  size: AppButtonSize.medium,
+                  enabledBackgroundColor: colors.background.brandAlpha,
+                  enabledLabelColor: colors.text.brand,
+                  enabledBorderColor: const Color(0x00000000),
+                  onPressed: onAction ?? onTap,
+                  child: Text(action),
+                ),
+              ),
+            ],
           ),
         ],
       ),

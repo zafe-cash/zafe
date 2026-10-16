@@ -236,8 +236,9 @@ final _cases = <(String, String?, Widget)>[
           who: 'd05aee...bd79',
           amount: '0.8',
           detail: 'Printer ink',
-          action: 'Approve or decline',
+          action: 'Approve',
           onTap: _noop,
+          onDecline: _declineNoop,
         ),
         SizedBox(height: 12),
         RequestCard(
@@ -349,3 +350,5 @@ void main() {
 }
 
 void _noop() {}
+
+Future<void> _declineNoop() async {}
