@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -421,52 +419,10 @@ class _InviteCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.xs),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => shareInviteQrImage(link, vaultName),
-            leading: const AppIcon(AppIcons.qr, size: 20),
-            child: const Text('Share QR image'),
-          ),
         ],
       ),
     );
   }
-}
-
-/// Shares the invite QR as a PNG (the screen itself blocks screenshots), for a co-signer
-/// to scan from another screen or pick with "Choose image" on Join. Same data as the
-/// link, so the same warning applies. Plain black squares on white with a quiet zone, so
-/// any scanner reads it, even shown on a dark background.
-Future<void> shareInviteQrImage(String link, String vaultName) async {
-  final qr = QrImage(
-    QrCode.fromData(data: link, errorCorrectLevel: QrErrorCorrectLevel.M),
-  );
-  final bytes = await qr.toImageAsBytes(
-    size: 1024,
-    decoration: const PrettyQrDecoration(
-      background: Color(0xFFFFFFFF),
-      quietZone: PrettyQrQuietZone.standard,
-    ),
-  );
-  if (bytes == null) return;
-  final safe = vaultName.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-');
-  final name = 'Zafe-invite-$safe.png';
-  final file = File('${(await getTemporaryDirectory()).path}/$name');
-  await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
-  await SharePlus.instance.share(
-    ShareParams(
-      files: [XFile(file.path, mimeType: 'image/png')],
-      fileNameOverrides: [name],
-      text:
-          'Zafe invite to "$vaultName". In Zafe, tap Join, then Scan QR code.',
-    ),
-  );
-  // The share sheet has copied or sent it; don't leave the invite in the cache.
-  try {
-    await file.delete();
-  } catch (_) {}
 }
 
 class _MembersCard extends StatelessWidget {

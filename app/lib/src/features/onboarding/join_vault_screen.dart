@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
+import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/vault.dart' as rust;
@@ -28,7 +29,6 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   final _invite = TextEditingController();
   final _focus = FocusNode();
   rust.InviteInfo? _info;
-  bool _busy = false;
   bool _fromLink = false;
 
   @override
@@ -94,15 +94,10 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   }
 
   Future<void> _join() async {
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(vaultProvider.notifier)
-          .joinVault(extractInvite(_invite.text) ?? _invite.text);
-      if (mounted) context.go('/setup');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await ref
+        .read(vaultProvider.notifier)
+        .joinVault(extractInvite(_invite.text) ?? _invite.text);
+    if (mounted) context.go('/setup');
   }
 
   @override
@@ -136,20 +131,37 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
             _fromLink = false;
             _parse();
           },
-          trailing: AppButton(
-            variant: AppButtonVariant.secondary,
-            size: AppButtonSize.mediumLarge,
-            onPressed: _paste,
-            child: const Text('Paste'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // The camera, as an icon: a QR glyph next to an invite field needs no
+              // words.
+              Tooltip(
+                message: 'Scan QR code',
+                child: AppTappable(
+                  semanticsLabel: 'Scan QR code',
+                  onTap: _scan,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: AppIcon(
+                        AppIcons.qr,
+                        size: 22,
+                        color: context.colors.icon.accent,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              AppButton(
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.mediumLarge,
+                onPressed: _paste,
+                child: const Text('Paste'),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
-          expand: true,
-          variant: AppButtonVariant.secondary,
-          onPressed: _busy ? null : _scan,
-          leading: const AppIcon(AppIcons.qr, size: 20),
-          child: const Text('Scan QR code'),
         ),
         const SizedBox(height: AppSpacing.md),
         if (info != null)
