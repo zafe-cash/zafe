@@ -1146,7 +1146,11 @@ Learned while studying it:
   `RequestCard`s (amount first with a gold ticker, then who and the message; a tonal full-width button
   naming the decision: "Approve or decline" opens the request, never approves from Home since the card
   lacks the address; "Send now" sends after the unlock; "Compare safety words" for seat moves) in an
-  `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms), above every notice except "Money left
+  `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms); from 3 requests they stack (`_FanStack`:
+  the first card in full, two edges under it, "N waiting"); tapping the top card or the edges fans them out
+  (300 ms), leaving for a payment folds it back. Decline is optimistic (`declinesProvider`: the card leaves on
+  the tap, a failure brings it back with the reason). Test: `test/needs_you_stack_test.dart`. Tip: phone
+  screenshots are scaled to 900 px wide; multiply by the stated factor before `adb shell input tap`, above every notice except "Money left
   without approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
   wants attention asked for only when the member must act.
 - **Privacy mode is app-wide** (`privacyModeProvider`, persisted in prefs, read in the
