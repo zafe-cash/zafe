@@ -446,6 +446,8 @@ class VaultNotifier extends Notifier<VaultState> {
         : state.activeId;
     state = state.copyWith(
       balances: {...state.balances}..remove(id),
+      // A restore of the same vault must show "First sync" again.
+      syncedAt: {...state.syncedAt}..remove(id),
       clearReturnTo: true,
     );
     await _reload(activeId: next, clearActive: next == null);

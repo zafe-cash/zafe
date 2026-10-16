@@ -311,8 +311,10 @@ class SeatMoveCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Approvals: $approvals of $needed. Compare safety words with $who before '
-            'approving.',
+            onApprove == null
+                ? 'Approvals: $approvals of $needed.'
+                : 'Approvals: $approvals of $needed. Compare safety words with $who '
+                      'before approving.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),

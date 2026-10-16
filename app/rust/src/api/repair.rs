@@ -54,11 +54,15 @@ pub fn parse_recovery_code(code: String) -> Result<RecoveryCodeInfo> {
 pub fn new_phone_words(relay_url: String, seeds: Vec<u8>, code: String) -> Result<Option<String>> {
     let me = identity(&seeds)?;
     let request = decode(&code)?;
-    Ok(runtime().block_on(repair::new_phone_words(
+    let mut watch = crate::diag::Stopwatch::new("seat-words");
+    let words = runtime().block_on(repair::new_phone_words(
         &RelayClient::pooled(relay_url),
         &me,
         &request.identity,
-    ))?)
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(words?)
 }
 
 fn decode(text: &str) -> Result<RecoveryRequest> {
@@ -94,7 +98,8 @@ pub fn approve_seat_move(
     if old == me.public().sig_pk {
         return Err(ZafeError::invalid("You can't approve moving your own seat"));
     }
-    Ok(runtime().block_on(repair::approve_replacement(
+    let mut watch = crate::diag::Stopwatch::new("seat-approve");
+    let moved = runtime().block_on(repair::approve_replacement(
         &RelayClient::pooled(relay_url),
         &me,
         &m,
@@ -102,7 +107,10 @@ pub fn approve_seat_move(
         &request,
         &words,
         &mut OsRng,
-    ))?)
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(moved?)
 }
 
 pub enum RecoveryStage {
@@ -139,7 +147,18 @@ pub struct CosignerWords {
 pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgress> {
     let me = identity(&seeds)?;
     let relay = RelayClient::pooled(relay_url);
-    let status = runtime().block_on(repair::try_recover(&relay, &me))?;
+    let mut watch = crate::diag::Stopwatch::new("recover");
+    // Both read the relay (~1 s each over Tor): at once. The safety check's next step
+    // (commit, then reveal once challenged) only matters while waiting for approvals.
+    let (status, checks) = runtime().block_on(async {
+        tokio::join!(
+            repair::try_recover(&relay, &me),
+            repair::recovery_checks(&relay, &me)
+        )
+    });
+    watch.lap("relay");
+    watch.finish();
+    let status = status?;
     let empty = |stage, received, needed| RecoveryProgress {
         stage,
         received,
@@ -151,20 +170,16 @@ pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgr
         checks: Vec::new(),
     };
     Ok(match status {
-        RecoveryStatus::Waiting => {
-            // The safety check's next step: commit, then reveal once challenged.
-            let checks = runtime().block_on(repair::recovery_checks(&relay, &me))?;
-            RecoveryProgress {
-                checks: checks
-                    .into_iter()
-                    .map(|c| CosignerWords {
-                        cosigner_key_hex: hex::encode(c.cosigner),
-                        words: c.words,
-                    })
-                    .collect(),
-                ..empty(RecoveryStage::Waiting, 0, 0)
-            }
-        }
+        RecoveryStatus::Waiting => RecoveryProgress {
+            checks: checks?
+                .into_iter()
+                .map(|c| CosignerWords {
+                    cosigner_key_hex: hex::encode(c.cosigner),
+                    words: c.words,
+                })
+                .collect(),
+            ..empty(RecoveryStage::Waiting, 0, 0)
+        },
         RecoveryStatus::SeatMoved { received, needed } => {
             empty(RecoveryStage::Repairing, received as u32, needed as u32)
         }

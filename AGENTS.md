@@ -415,7 +415,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   deletes all. Rust panics: `app/rust/src/diag.rs` (not in `api/`, so no FRB surface) installs a hook from
   `init_app` writing `<ts> panic at file:line:col` (never the message) to `diagnostics/rust-panics.log`;
   the directory is learned from the first `wallet_path(db_dir)` call (db dir = support dir), so a panic
-  before the first wallet call leaves no note. The report adds a "Rust panics" section and a "Slow steps" one (`timings.log`, written by `diag::Stopwatch` around `sync_vault` and `list_proposals`: step names and durations only, for calls over 1.5 s and the first of each kind per process; first-sync investigation 2026-10-12). `first_sync_timing` (zafe-core example) times a new wallet's create + first sync on a live server: ~3 s on desktop against testnet. The site says "no
+  before the first wallet call leaves no note. The report adds a "Rust panics" section and a "Slow steps" one (`timings.log`, written by `diag::Stopwatch` around the bridge calls a user waits on (2026-10-16: `sync`, `proposals`, `propose`, `review`, `approve`, `send`, `fee`, `reject`, `cancel`, `propose-again`, `sweep`, `respond`, `setup`, `create`, `join`, `seat-words`, `seat-approve`, `recover`; add one to any new such call: a clock read per step, a write only when slow or first): step names and durations only, for calls over 1.5 s and the first of each kind per process; first-sync investigation 2026-10-12). `first_sync_timing` (zafe-core example) times a new wallet's create + first sync on a live server: ~3 s on desktop against testnet. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
 - **Abandoning a locked setup** (2026-10-15, onboarding P0; relay rule relaxed 2026-10-16):
@@ -492,8 +492,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   this process issued (`LAST_SEQ`, shared by every counter). The WSL clock steps back by
   ~1 s every so often (measured 2026-10-15) and phones correct theirs, and since the safety
   words a member sends envelopes milliseconds before key generation: a fresh clock-only
-  counter then got 409 "replayed or reordered envelope". Two processes of one member can
-  still collide (the app and a background check); `respond` re-seals on 409.
+  counter then got 409 "replayed or reordered envelope". Two steps of one member can
+  still collide (the app and a background check, or the setup screen's 2 s poll and the
+  "They match" tap; over Tor each request takes its own circuit, so the later seq often
+  arrives first): every keygen, safety-word and signing-reply send goes through
+  `node::send_fresh`, which re-seals with a fresh seq on 409 (seen on a phone 2026-10-16
+  as "Couldn't start. Try again."; test `keygen_async::a_send_overtaken_...`). The setup
+  screen also runs one step at a time (`_step`).
 - **Relay connections are pooled in the app** (2026-10-16): the bridge makes every client with
   `RelayClient::pooled` (one process-wide `reqwest::Client`), so a call reuses the previous call's TLS
   connection; `RelayClient::new` (CLI, tests) builds its own, because pooled connections belong to the runtime
@@ -507,6 +512,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   Proposing (and propose-again, the cancel sweep) does the same through `catch_up` in
   `api/proposals.rs` (2026-10-16: each used to run a full `wallet.sync` first, ~1.9 s on a
   phone, so "Building transaction..." felt slow); `propose` is timed in the report too.
+- **Independent requests run together** (2026-10-16, measured with Tor on: propose was 6.9 s): over Tor every
+  relay request is a new circuit stream + TLS (~1 s), so serial round trips add up. `load_state` reads the
+  relay's member list (when its 60 s check is due) alongside the log, `propose` checks the branch alongside
+  `load_state`, `approve_replacement` re-checks the words alongside it, `setup_step` reads the chain tip
+  alongside the membership step on "They match", the bridge's `check_recovery` runs `try_recover` and
+  `recovery_checks` together. A `tokio::join!` inside these deep async fns needs `Box::pin` or rustc hits
+  its query depth limit (as `load_log` did).
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):
@@ -738,6 +750,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `infra/relay/README.md` "Mainnet"; audit scope: `docs/audit-scope.md`.
 - **Public testnet lightwalletd**: `https://testnet.zec.rocks:443` (Ironwood-aware;
   Ironwood live on testnet since block 4,134,000). Mainnet: `https://zec.rocks:443`.
+- **Killing `cargo` leaves its `rustc` children running** (they kept the machine at load 20 for 45 min,
+  2026-10-16): stop a build with Ctrl-C/`TaskStop`, or kill the `rustc` pids too. Run one cargo command at a
+  time; `nice -n 15 cargo ... -j 4` keeps the machine usable. Never `pkill -f` a pattern that appears in
+  your own command line: it kills the shell running it.
 - **A `CARGO_TARGET_DIR` shared between worktrees races** when their workspace crates
   differ: path crates hash relative to the workspace root, so every worktree writes the
   same `libzafe_proto-<hash>.rlib` and a concurrent build can hand yours another
@@ -1141,7 +1157,8 @@ Learned while studying it:
   `new_phone_words`, polled by the Replace screen) challenges with a value derived from a
   signature over (subject, commitment), refuses a commitment that changed after it
   challenged, checks the reveal and returns 4 words (`sas::recovery_words`).
-  `approve_replacement` takes the confirmed words and recomputes them. Both secrets are
+  `approve_replacement` takes the confirmed words and recomputes them (reading them and the
+  log at once). The new phone's `/recover` screen checks every 2 s: co-signers wait on it. Both secrets are
   signature-derived (nothing stored). Every approver does its own check, also when
   approving from the log's pending move. CLI: `zafe seat words <code>` then `zafe seat
   approve <old> <code> --words "..."`; `zafe recover` prints the words as they arrive. An

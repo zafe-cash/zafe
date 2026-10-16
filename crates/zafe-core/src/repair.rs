@@ -39,8 +39,8 @@ use zafe_proto::{
 
 use crate::{
     node::{
-        append_event, frost_id_of, load_log, load_state, members_by_pk, read_inbox, Invite,
-        NodeError, SeqCounter, VaultMaterial,
+        append_event, frost_id_of, load_log, load_state, members_by_pk, read_inbox, send_fresh,
+        Invite, NodeError, SeqCounter, VaultMaterial,
     },
     relay_client::RelayClient,
     vault::{Replacement, VaultEvent, VaultState},
@@ -270,15 +270,19 @@ pub async fn approve_replacement<R: RngCore + CryptoRng>(
     confirmed_words: &str,
     rng: &mut R,
 ) -> Result<bool, NodeError> {
-    let words = new_phone_words(relay, me, &request.identity)
-        .await?
+    // Both read the relay (over Tor each request is a new stream, ~1 s): at once.
+    let (words, loaded) = tokio::join!(
+        new_phone_words(relay, me, &request.identity),
+        load_state(relay, me, material)
+    );
+    let words = words?
         .ok_or_else(|| NodeError::NotReady("the new phone hasn't shown its words yet".into()))?;
     if crate::sas::normalize(confirmed_words) != words {
         return Err(NodeError::Verification(
             "those aren't the words this phone shows for the new phone: don't approve".into(),
         ));
     }
-    let (mut chain, mut state) = load_state(relay, me, material).await?;
+    let (mut chain, mut state) = loaded?;
     let approval = ReplaceApproval {
         mailbox: state.descriptor.vault_id,
         old,
@@ -488,17 +492,12 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
                     attempt: r.attempt,
                     delta: hs.deltas[pk].clone(),
                 };
-                let env = Envelope::sealed(
-                    me,
-                    to,
-                    mailbox,
-                    seq.next_seq(),
-                    Kind::RepairDelta,
-                    &version::encode(Format::Repair, &msg)?,
-                    rng,
-                )
-                .map_err(proto)?;
-                relay.send(&env).await?;
+                let payload = version::encode(Format::Repair, &msg)?;
+                send_fresh(relay, &mut seq, |n| {
+                    Envelope::sealed(me, to, mailbox, n, Kind::RepairDelta, &payload, rng)
+                        .map_err(proto)
+                })
+                .await?;
             }
             hs.sent = true;
             write_atomic(&state_path, &version::encode(Format::Repair, &hs)?)?;
@@ -533,17 +532,12 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
                 log_key: material.log_key,
             },
         };
-        let env = Envelope::sealed(
-            me,
-            &r.new,
-            mailbox,
-            seq.next_seq(),
-            Kind::RepairSigma,
-            &version::encode(Format::Repair, &msg)?,
-            rng,
-        )
-        .map_err(proto)?;
-        relay.send(&env).await?;
+        let payload = version::encode(Format::Repair, &msg)?;
+        send_fresh(relay, &mut seq, |n| {
+            Envelope::sealed(me, &r.new, mailbox, n, Kind::RepairSigma, &payload, rng)
+                .map_err(proto)
+        })
+        .await?;
         write_atomic(&helper_path(dir, r, DONE_EXT), b"")?;
         let _ = std::fs::remove_file(&state_path);
         let _ = relay.ack_inbox(me, mailbox, &cursors).await;

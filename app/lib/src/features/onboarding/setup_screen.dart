@@ -67,7 +67,28 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
+  /// The step running now. Polls skip while one runs (over Tor a step can take longer
+  /// than the poll interval) and "They match" waits for it: two steps of one member
+  /// sending at once can reach the relay out of order.
+  Future<void>? _step;
+
   Future<void> _refresh({String? confirmed}) async {
+    if (confirmed == null && _step != null) return;
+    for (var running = _step; running != null; running = _step) {
+      try {
+        await running;
+      } catch (_) {}
+    }
+    final step = _runStep(confirmed: confirmed);
+    _step = step;
+    try {
+      await step;
+    } finally {
+      if (identical(_step, step)) _step = null;
+    }
+  }
+
+  Future<void> _runStep({String? confirmed}) async {
     if (_leaving || _done) return;
     try {
       final p = await ref

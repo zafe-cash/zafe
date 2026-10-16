@@ -699,11 +699,17 @@ pub fn estimate_fee(
 ) -> Result<u64, ZafeError> {
     let m = self::material(&material)?;
     let requests = payment_requests(&m, &payments)?;
+    let mut watch = crate::diag::Stopwatch::new("fee");
     let _guard = wallet_lock();
-    runtime().block_on(async {
+    watch.lap("lock");
+    let fee = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         Ok(wallet.fee_for(&requests)?)
-    })
+    });
+    watch.lap("build");
+    watch.finish();
+    fee
 }
 
 /// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns
@@ -812,11 +818,15 @@ pub fn propose_again(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let target = parse_id(&proposal_id)?;
+    let mut watch = crate::diag::Stopwatch::new("propose-again");
     let _guard = wallet_lock();
+    watch.lap("lock");
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
-        catch_up(&mut wallet, &mut client, false).await?;
+        let scanned = catch_up(&mut wallet, &mut client, false).await?;
+        watch.lap(if scanned { "scan" } else { "noscan" });
         Ok::<_, ZafeError>(
             node::propose_again(
                 &RelayClient::pooled(relay_url),
@@ -830,8 +840,10 @@ pub fn propose_again(
             )
             .await?,
         )
-    })?;
-    Ok(hex::encode(id))
+    });
+    watch.lap("build");
+    watch.finish();
+    Ok(hex::encode(id?))
 }
 
 /// Proposes spending a cancelled proposal's notes back to the vault, so the cancelled
@@ -848,11 +860,15 @@ pub fn invalidate_proposal(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let target = parse_id(&proposal_id)?;
+    let mut watch = crate::diag::Stopwatch::new("sweep");
     let _guard = wallet_lock();
+    watch.lap("lock");
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
-        catch_up(&mut wallet, &mut client, false).await?;
+        let scanned = catch_up(&mut wallet, &mut client, false).await?;
+        watch.lap(if scanned { "scan" } else { "noscan" });
         Ok::<_, ZafeError>(
             node::invalidate(
                 &RelayClient::pooled(relay_url),
@@ -866,8 +882,10 @@ pub fn invalidate_proposal(
             )
             .await?,
         )
-    })?;
-    Ok(hex::encode(id))
+    });
+    watch.lap("build");
+    watch.finish();
+    Ok(hex::encode(id?))
 }
 
 /// This device's independent check of a proposal (spec §9.3).
@@ -1027,13 +1045,17 @@ pub fn reject_proposal(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let id = parse_id(&proposal_id)?;
-    runtime().block_on(node::reject(
+    let mut watch = crate::diag::Stopwatch::new("reject");
+    let result = runtime().block_on(node::reject(
         &RelayClient::pooled(relay_url),
         &me,
         &m,
         id,
         &mut OsRng,
-    ))?;
+    ));
+    watch.lap("relay");
+    watch.finish();
+    result?;
     Ok(())
 }
 
@@ -1089,13 +1111,17 @@ pub fn cancel_proposal(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let id = parse_id(&proposal_id)?;
-    runtime().block_on(node::cancel(
+    let mut watch = crate::diag::Stopwatch::new("cancel");
+    let result = runtime().block_on(node::cancel(
         &RelayClient::pooled(relay_url),
         &me,
         &m,
         id,
         &mut OsRng,
-    ))?;
+    ));
+    watch.lap("relay");
+    watch.finish();
+    result?;
     Ok(())
 }
 
@@ -1168,10 +1194,12 @@ pub fn answer_signing_requests(
     let mut store = nonce_store(&state_dir, &seeds, &m);
     // Runs even without stored nonces (one-tap members rarely hold any): the inbox still
     // has keygen messages, finished requests and old shares for the relay to delete.
+    let mut watch = crate::diag::Stopwatch::new("respond");
     let tip = match tip_height {
         Some(tip) => tip,
         None => local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?,
     };
+    watch.lap("tip");
     let report = runtime().block_on(node::respond(
         &RelayClient::pooled(relay_url),
         &me,
@@ -1180,8 +1208,10 @@ pub fn answer_signing_requests(
         tip,
         &mut store,
         &mut OsRng,
-    ))?;
-    Ok(report.answered.len() as u32)
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(report?.answered.len() as u32)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

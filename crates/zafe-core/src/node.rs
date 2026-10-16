@@ -209,6 +209,25 @@ impl SeqCounter {
     }
 }
 
+/// Sends an envelope sealed by `seal` with a fresh seq, sealing it again on a 409. Two
+/// steps of one member can send at nearly the same time (the app and a background check,
+/// or the setup screen's poll and a tap), and over Tor each request takes its own circuit,
+/// so the later seq can arrive first; the relay then refuses the earlier one ("replayed or
+/// reordered envelope").
+pub async fn send_fresh(
+    relay: &RelayClient,
+    seq: &mut SeqCounter,
+    mut seal: impl FnMut(u64) -> Result<Envelope, NodeError>,
+) -> Result<(), NodeError> {
+    let mut attempt = 0;
+    loop {
+        match relay.send(&seal(seq.next_seq())?).await {
+            Err(RelayClientError::Status { status: 409, .. }) if attempt < 3 => attempt += 1,
+            result => return Ok(result?),
+        }
+    }
+}
+
 /// A member's long-lived vault material after creation. `vault_secret`, `key_package` and
 /// `log_key` are secrets: on devices they belong in secure storage (spec §14).
 #[derive(Clone, Serialize, Deserialize)]
@@ -414,15 +433,10 @@ async fn safety_check(
         if SAFETY_SENT.lock().expect("not poisoned").contains(&key) {
             return Ok::<_, NodeError>(());
         }
-        let env = Envelope::public(
-            me,
-            mailbox,
-            SeqCounter::default().next_seq(),
-            kind,
-            &payload,
-        )
-        .map_err(proto)?;
-        relay.send(&env).await?;
+        send_fresh(relay, &mut SeqCounter::default(), |seq| {
+            Envelope::public(me, mailbox, seq, kind, &payload).map_err(proto)
+        })
+        .await?;
         SAFETY_SENT.lock().expect("not poisoned").insert(key);
         Ok(())
     };
@@ -763,16 +777,18 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         .map(|pk| Ok((frost_id(pk)?, *pk)))
         .collect::<Result<_, NodeError>>()?;
     let mut seq = SeqCounter::default();
-    let send_public = |kind: Kind, payload: Vec<u8>, seq: u64| async move {
-        relay
-            .send(&Envelope::public(me, invite.mailbox, seq, kind, &payload).map_err(proto)?)
-            .await?;
-        Ok::<_, NodeError>(())
+    let public = |kind: Kind, payload: Vec<u8>| {
+        move |n| Envelope::public(me, invite.mailbox, n, kind, &payload).map_err(proto)
     };
 
     // Round 1: broadcast, with a commitment to this member's `sk` contribution.
     if st.sent & SENT_ROUND1 == 0 {
-        send_public(Kind::DkgRound1, st.round1_msg.clone(), seq.next_seq()).await?;
+        send_fresh(
+            relay,
+            &mut seq,
+            public(Kind::DkgRound1, st.round1_msg.clone()),
+        )
+        .await?;
         st.sent |= SENT_ROUND1;
         st.save(&path, key)?;
     }
@@ -847,7 +863,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     // Members also agree on every `sk` commitment before any contribution counts.
     let echo = crate::keygen::echo_with_commitments(&round2.echo(), &commitments);
     if st.sent & SENT_ROUND2 == 0 {
-        send_public(Kind::DkgEcho, echo.to_vec(), seq.next_seq()).await?;
+        send_fresh(relay, &mut seq, public(Kind::DkgEcho, echo.to_vec())).await?;
         for (to_id, package) in &outgoing {
             let to = by_pk[&id_to_pk[to_id]];
             let bytes = package.serialize().map_err(proto)?;
@@ -855,20 +871,10 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
                 (Kind::DkgRound2, bytes.as_slice()),
                 (Kind::SkContribution, contribution.as_bytes().as_slice()),
             ] {
-                relay
-                    .send(
-                        &Envelope::sealed(
-                            me,
-                            &to,
-                            invite.mailbox,
-                            seq.next_seq(),
-                            kind,
-                            payload,
-                            rng,
-                        )
-                        .map_err(proto)?,
-                    )
-                    .await?;
+                send_fresh(relay, &mut seq, |n| {
+                    Envelope::sealed(me, &to, invite.mailbox, n, kind, payload, rng).map_err(proto)
+                })
+                .await?;
             }
         }
         st.sent |= SENT_ROUND2;
@@ -958,7 +964,12 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     // Ed25519 is deterministic: a resumed step makes the same signature.
     let my_sig = me.sign(&message).to_vec();
     if st.sent & SENT_SIGNATURE == 0 {
-        send_public(Kind::DescriptorSignature, my_sig.clone(), seq.next_seq()).await?;
+        send_fresh(
+            relay,
+            &mut seq,
+            public(Kind::DescriptorSignature, my_sig.clone()),
+        )
+        .await?;
         st.sent |= SENT_SIGNATURE;
         st.save(&path, key)?;
     }
@@ -991,20 +1002,11 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             for pk in &others {
                 let mut bytes = 0u32.to_le_bytes().to_vec();
                 bytes.extend_from_slice(log_key.as_bytes());
-                relay
-                    .send(
-                        &Envelope::sealed(
-                            me,
-                            &by_pk[pk],
-                            invite.mailbox,
-                            seq.next_seq(),
-                            Kind::LogKey,
-                            &bytes,
-                            rng,
-                        )
-                        .map_err(proto)?,
-                    )
-                    .await?;
+                send_fresh(relay, &mut seq, |n| {
+                    Envelope::sealed(me, &by_pk[pk], invite.mailbox, n, Kind::LogKey, &bytes, rng)
+                        .map_err(proto)
+                })
+                .await?;
             }
             let event = VaultEvent::Created {
                 descriptor: descriptor.clone(),
@@ -1298,6 +1300,47 @@ pub async fn check_relay_membership(
     me: &Identity,
     state: &VaultState,
 ) -> Result<(), NodeError> {
+    check_relay_membership_with(relay, me, state, None).await
+}
+
+/// Whether this relay's member list for `mailbox` was compared within
+/// [`MEMBERSHIP_RECHECK`] (a seat move since then still forces a new check).
+fn membership_checked_recently(relay: &RelayClient, mailbox: MailboxId) -> bool {
+    let cache_key = (relay.base_url().to_string(), mailbox);
+    membership_checks()
+        .lock()
+        .expect("lock")
+        .get(&cache_key)
+        .is_some_and(|(at, _)| at.elapsed() < MEMBERSHIP_RECHECK)
+}
+
+type RelayMembers = (Vec<IdentityPublic>, Option<u16>);
+
+/// The relay's members and threshold for `mailbox` (`None` from an older relay).
+async fn relay_members(
+    relay: &RelayClient,
+    me: &Identity,
+    mailbox: MailboxId,
+) -> Result<RelayMembers, NodeError> {
+    match relay.mailbox_info(me, mailbox).await {
+        Ok(info) => Ok((info.members, Some(info.threshold))),
+        Err(RelayClientError::Status { status: 404, .. }) => {
+            // Either an older relay without the route, or one that doesn't know the vault
+            // (the log load reports that); fall back to the older route.
+            Ok((relay.members(me, mailbox).await?.members, None))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// [`check_relay_membership`] with the relay's list already read (by `load_state`, at
+/// the same time as the log), if it was.
+async fn check_relay_membership_with(
+    relay: &RelayClient,
+    me: &Identity,
+    state: &VaultState,
+    fetched: Option<Result<RelayMembers, NodeError>>,
+) -> Result<(), NodeError> {
     let mailbox = state.descriptor.vault_id;
     let moves = state.replacements.len();
     let cache_key = (relay.base_url().to_string(), mailbox);
@@ -1306,14 +1349,9 @@ pub async fn check_relay_membership(
             return Ok(());
         }
     }
-    let (members, threshold) = match relay.mailbox_info(me, mailbox).await {
-        Ok(info) => (info.members, Some(info.threshold)),
-        Err(RelayClientError::Status { status: 404, .. }) => {
-            // Either an older relay without the route, or one that doesn't know the vault
-            // (the log load reports that); fall back to the older route.
-            (relay.members(me, mailbox).await?.members, None)
-        }
-        Err(e) => return Err(e.into()),
+    let (members, threshold) = match fetched {
+        Some(fetched) => fetched?,
+        None => relay_members(relay, me, mailbox).await?,
     };
     let mismatch = |why: String| Err(NodeError::RelayMembership(why));
     let mut held: Vec<IdentityPublic> = members;
@@ -1357,13 +1395,19 @@ pub async fn load_state(
 ) -> Result<(Chain, VaultState), NodeError> {
     // Boxed: callers nest this in large async functions, and the unboxed future made
     // their layout deeper than rustc's query depth limit.
-    let (chain, state) = Box::pin(load_log(
-        relay,
-        me,
-        material.descriptor.vault_id,
-        &material.log_key(),
-    ))
-    .await?;
+    // The relay's member list doesn't depend on the log: when it is due for a check, read
+    // both at once (over Tor each request is a new stream, ~1 s).
+    let mailbox = material.descriptor.vault_id;
+    let members = async {
+        match membership_checked_recently(relay, mailbox) {
+            true => None,
+            false => Some(relay_members(relay, me, mailbox).await),
+        }
+    };
+    let log_key = material.log_key();
+    let (log, members) =
+        Box::pin(async { tokio::join!(load_log(relay, me, mailbox, &log_key), members) }).await;
+    let (chain, state) = log?;
     let d = &state.descriptor;
     if d.group_public_key != material.descriptor.group_public_key
         || d.ufvk != material.descriptor.ufvk
@@ -1372,7 +1416,7 @@ pub async fn load_state(
             "the vault log belongs to another vault".into(),
         ));
     }
-    Box::pin(check_relay_membership(relay, me, &state)).await?;
+    Box::pin(check_relay_membership_with(relay, me, &state, members)).await?;
     Ok((chain, state))
 }
 
@@ -1830,9 +1874,15 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
         }
     }
     // A network upgrade this version doesn't know would get the payment rejected after
-    // everyone approved it: refuse up front.
-    crate::wallet::ensure_current_branch(lightwalletd, wallet.params()).await?;
-    let (mut chain, mut state) = load_state(relay, me, material).await?;
+    // everyone approved it: refuse up front. Read the log meanwhile (over Tor each
+    // request is a new circuit stream, ~1 s).
+    let params = wallet.params().clone();
+    let (branch, loaded) = tokio::join!(
+        crate::wallet::ensure_current_branch(lightwalletd, &params),
+        load_state(relay, me, material)
+    );
+    branch?;
+    let (mut chain, mut state) = loaded?;
     for _ in 0..3 {
         reserve_notes(&state, wallet, lightwalletd, sent).await?;
         let pczt = wallet.propose(payments, material.descriptor.proposal_expiry_blocks)?;
@@ -3276,29 +3326,21 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
         });
         match result {
             Ok(reply) => {
-                // The nonces are spent: these shares must get out. The app and a background
-                // check of the same member can send at nearly the same time, and the relay
-                // refuses a sequence number not above the last one it saw from us (409);
-                // seal again with a fresh one rather than lose the shares.
-                let mut attempt = 0;
-                loop {
-                    let env = Envelope::sealed(
+                // The nonces are spent: these shares must get out (sealed again on a 409
+                // rather than lost).
+                send_fresh(relay, &mut seq, |n| {
+                    Envelope::sealed(
                         me,
                         &leader,
                         material.descriptor.vault_id,
-                        seq.next_seq(),
+                        n,
                         Kind::SignatureShares,
                         &reply,
                         rng,
                     )
-                    .map_err(proto)?;
-                    match relay.send(&env).await {
-                        Err(RelayClientError::Status { status: 409, .. }) if attempt < 3 => {
-                            attempt += 1;
-                        }
-                        result => break result?,
-                    }
-                }
+                    .map_err(proto)
+                })
+                .await?;
                 store.drop_reply(&request_hash);
                 report.answered.push(msg.proposal);
                 done.push(cursor);

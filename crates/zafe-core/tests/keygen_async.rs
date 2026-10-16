@@ -12,7 +12,7 @@ use zafe_core::{
         KeygenOptions, KeygenProgress, NodeError, VaultMaterial,
     },
     nonce_store::NonceKey,
-    relay_client::RelayClient,
+    relay_client::{RelayClient, RelayClientError},
     wallet::regtest_network,
 };
 use zafe_proto::Identity;
@@ -226,4 +226,37 @@ async fn a_state_file_that_does_not_decrypt_is_an_error_not_a_fresh_start() {
     .await
     .unwrap_err();
     assert!(matches!(err, NodeError::Protocol(_)), "{err:?}");
+}
+
+/// The setup screen's poll and the "They match" tap can both send for one member, and
+/// over Tor the later seq can reach the relay first: the earlier send then gets 409. The
+/// keygen and safety sends seal again with a fresh seq instead of failing the tap.
+#[tokio::test]
+async fn a_send_overtaken_by_a_later_seq_is_sealed_again() {
+    use zafe_core::node::{send_fresh, SeqCounter};
+    use zafe_proto::envelope::{Envelope, Kind};
+
+    let (url, members, invite) = setup().await;
+    let relay = RelayClient::new(url);
+    let me = &members[1].id;
+    let public = |seq| Envelope::public(me, invite.mailbox, seq, Kind::DkgEcho, &[0; 32]).unwrap();
+    let mut seq = SeqCounter::default();
+    let (earlier, later) = (seq.next_seq(), seq.next_seq());
+    relay.send(&public(later)).await.unwrap();
+    assert!(matches!(
+        relay.send(&public(earlier)).await,
+        Err(RelayClientError::Status { status: 409, .. })
+    ));
+
+    let mut first = true;
+    send_fresh(&relay, &mut SeqCounter::default(), |n| {
+        let n = if std::mem::take(&mut first) {
+            earlier
+        } else {
+            n
+        };
+        Ok(public(n))
+    })
+    .await
+    .unwrap();
 }

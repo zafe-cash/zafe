@@ -72,7 +72,8 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       _error = null;
     });
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _check());
+    // Co-signers wait on this phone's part of each safety check: answer quickly.
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _check());
     unawaited(_check());
   }
 

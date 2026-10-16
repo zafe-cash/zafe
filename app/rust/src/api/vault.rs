@@ -120,20 +120,27 @@ pub fn create_vault(
 ) -> Result<String, ZafeError> {
     let me = identity(&seeds)?;
     let relay = RelayClient::pooled(relay_url);
+    let mut watch = crate::diag::Stopwatch::new("create");
     let invite = runtime().block_on(node::create_vault(
         &relay, &me, &name, threshold, members, &mut OsRng,
-    ))?;
-    Ok(invite.encode())
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(invite?.encode())
 }
 
 pub fn join_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
-    runtime().block_on(node::join_vault(
+    let mut watch = crate::diag::Stopwatch::new("join");
+    let joined = runtime().block_on(node::join_vault(
         &RelayClient::pooled(relay_url),
         &me,
         &invite,
-    ))?;
+    ));
+    watch.lap("relay");
+    watch.finish();
+    joined?;
     Ok(())
 }
 
@@ -185,9 +192,32 @@ pub fn setup_step(
     let dir = PathBuf::from(state_dir);
     let key = zafe_core::nonce_store::NonceKey::derive(&seeds, &invite.mailbox);
     let is_creator = me.public().sig_pk == invite.creator;
-    runtime().block_on(async {
-        let m = node::membership(&relay, &me, &invite).await?;
-        let m = node::seal_when_full(&relay, &me, &invite, m).await?;
+    let mut watch = crate::diag::Stopwatch::new("setup");
+    // "They match": key generation starts and needs the chain tip (the creator's birthday,
+    // a joiner's ceiling). Read it while the relay steps run (each ~1 s over Tor).
+    let starting = confirmed_safety_number.is_some()
+        && !node::keygen_started(&dir)
+        && !(is_creator && birthday_height.is_some());
+    let result = runtime().block_on(async {
+        let tip = async {
+            if !starting {
+                return None;
+            }
+            Some(
+                async {
+                    let mut client = connect(&lightwalletd_url).await?;
+                    Ok::<_, ZafeError>(latest_height(&mut client).await?)
+                }
+                .await,
+            )
+        };
+        let members = async {
+            let m = node::membership(&relay, &me, &invite).await?;
+            node::seal_when_full(&relay, &me, &invite, m).await
+        };
+        let (m, mut tip) = tokio::join!(members, tip);
+        let m = m?;
+        watch.lap("members");
         let mut out = SetupProgress {
             members: m.members.iter().map(|m| hex::encode(m.sig_pk)).collect(),
             sealed: m.sealed,
@@ -205,20 +235,27 @@ pub fn setup_step(
         let mut options = node::KeygenOptions::default();
         if !out.started {
             if is_creator {
-                let birthday = match birthday_height {
-                    Some(h) => h,
-                    None => latest_height(&mut connect(&lightwalletd_url).await?).await? + 1,
+                let birthday = match (birthday_height, tip.take()) {
+                    (Some(h), _) => h,
+                    (None, Some(tip)) => tip? + 1,
+                    (None, None) => {
+                        latest_height(&mut connect(&lightwalletd_url).await?).await? + 1
+                    }
                 };
                 options.creator_birthday_height = Some(birthday.max(2));
                 // 1152 blocks = 1 day.
                 options.creator_expiry_blocks = expiry_days.map(|d| d * 1152);
-            } else if let Ok(mut client) = connect(&lightwalletd_url).await {
+            } else {
                 // Joiners refuse a birthday ahead of the chain; best effort, as a server
                 // that can't be reached here shouldn't block the setup.
-                options.max_birthday = latest_height(&mut client)
-                    .await
-                    .ok()
-                    .map(|tip| tip + 1 + node::BIRTHDAY_LEEWAY_BLOCKS);
+                let tip = match tip.take() {
+                    Some(tip) => tip.ok(),
+                    None => match connect(&lightwalletd_url).await {
+                        Ok(mut client) => latest_height(&mut client).await.ok(),
+                        Err(_) => None,
+                    },
+                };
+                options.max_birthday = tip.map(|tip| tip + 1 + node::BIRTHDAY_LEEWAY_BLOCKS);
             }
         }
         let progress = node::keygen_step(
@@ -235,6 +272,7 @@ pub fn setup_step(
             &mut OsRng,
         )
         .await?;
+        watch.lap("keygen");
         out.started = node::keygen_started(&dir);
         match progress {
             node::KeygenProgress::Waiting { stage, missing } => {
@@ -251,11 +289,14 @@ pub fn setup_step(
                 {
                     eprintln!("commitment pool after keygen: {e}");
                 }
+                watch.lap("pool");
                 out.material = Some(material.to_bytes()?);
             }
         }
         Ok(out)
-    })
+    });
+    watch.finish();
+    result
 }
 
 /// Deletes this member's key-generation state, once the vault's material is saved (or
