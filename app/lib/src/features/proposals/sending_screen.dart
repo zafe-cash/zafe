@@ -10,7 +10,7 @@ import '../../core/widgets/mobile/mobile_transaction_progress_screen.dart';
 import '../../providers/payment_sounds_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
-import '../onboarding/onboarding_art.dart';
+import 'sent_art.dart';
 
 /// Transaction progress screen for sending a payment (spec: send status, 4.6).
 /// The send itself belongs to the provider, so leaving this screen doesn't stop it.
@@ -117,7 +117,9 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
       // The send continues in the background, so leaving is always safe.
       canPop: true,
       bodyMaxWidth: 260,
-      background: const IllustrationBackground('sent_slot'),
+      background: SentArt(
+        sent: phase == MobileTransactionProgressPhase.succeeded,
+      ),
       primaryActionLabel: switch (phase) {
         MobileTransactionProgressPhase.failed when reapprove => 'Approve again',
         MobileTransactionProgressPhase.failed => 'Try again',

@@ -478,9 +478,17 @@ def restore(p):
 
 
 # ---------------------------------------------------------------- (g) sent: coins leave through the vault's slot
-def sent(p):
+# The sent scene's coin trails (start in the slot, control point, end) and where each
+# coin sits on its trail. The app's "Sent" animation flies the coins along the same
+# curves (lib/src/features/proposals/sent_art.dart): change both together.
+SENT_TRAILS = [[(480, 300 + 20), (250, 560), (70, 1000)], [(600, 300 + 20), (840, 520), (1010, 940)]]
+SENT_COIN_U = (0.22, 0.48, 0.74)
+
+
+def sent(p, layer=None):
     """Full-page background behind the send progress screen: detail at the top and the
-    edges, the middle (status circle and text) left empty."""
+    edges, the middle (status circle and text) left empty. `layer`: "bg" (all but the
+    coins) or "coin<side><k>" (one coin in its place) for the app's animation."""
     W, H = 1080, 2340
     rnd = random.Random(31)
     cx, cy, R = 540, -150, 600
@@ -510,6 +518,7 @@ def sent(p):
         b.append(f'<circle cx="{cx + dx}" cy="{sy}" r="9" fill="{p["brand"]}" stroke="{p["ink"]}" stroke-width="3"/>')
     # coins drifting out to the edges along two dotted trails
     trails = [[(cx - 60, sy + 20), (250, 560), (70, 1000)], [(cx + 60, sy + 20), (840, 520), (1010, 940)]]
+    assert trails == SENT_TRAILS, "keep SENT_TRAILS (and the app) in step"
     for t in trails:
         b.append(f'<path d="M{t[0][0]} {t[0][1]}Q{t[1][0]} {t[1][1]} {t[2][0]} {t[2][1]}" fill="none" stroke="{p["gold"]}" stroke-width="4" stroke-dasharray="2 14" stroke-linecap="round" opacity=".7"/>')
 
@@ -517,11 +526,14 @@ def sent(p):
         (x0, y0), (x1, y1), (x2, y2) = t
         return ((1 - u) ** 2 * x0 + 2 * (1 - u) * u * x1 + u * u * x2,
                 (1 - u) ** 2 * y0 + 2 * (1 - u) * u * y1 + u * u * y2)
+    coins = {}
     for side, t in enumerate(trails):
-        for k, u in enumerate((0.22, 0.48, 0.74)):
+        for k, u in enumerate(SENT_COIN_U):
             x, y = on(t, u)
             r_ = 40 - k * 9
-            b.append(f'<g opacity="{1 - k * 0.22:.2f}">' + coin(p, x, y, r_, r_ * 0.45, (-24 + k * 14) * (1 if side else -1)) + "</g>")
+            coins[f"coin{side}{k}"] = f'<g opacity="{1 - k * 0.22:.2f}">' + coin(p, x, y, r_, r_ * 0.45, (-24 + k * 14) * (1 if side else -1)) + "</g>"
+            if layer is None:
+                b.append(coins[f"coin{side}{k}"])
     b.append(sparks(p, rnd, 10, 30, 420, 260, 1150))
     b.append(sparks(p, rnd, 10, 820, 420, 1050, 1150))
     # quiet ripples rising from the bottom edge
@@ -535,6 +547,8 @@ def sent(p):
              f'<stop offset="1" stop-color="{p["sky1"]}"/></linearGradient>'
              f'<radialGradient id="vigp" cx="50%" cy="50%" r="75%"><stop offset="60%" stop-color="{p["sky1"]}" stop-opacity="0"/>'
              f'<stop offset="100%" stop-color="{p["dot"]}" stop-opacity="{".45" if p["dark"] else ".08"}"/></radialGradient>')
+    if layer and layer.startswith("coin"):
+        return svg(W, H, defs(p, extra) + coins[layer], p["dot"])
     return svg(W, H, defs(p, extra) + "".join(b), p["dot"])
 
 
@@ -596,7 +610,8 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
           "sent_slot": sent, "empty_ledger": empty}
 
 # Scenes the app animates, and the layers it moves.
-LAYERS = {"key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"]}
+LAYERS = {"key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
+          "sent_slot": ["bg"] + [f"coin{s}{k}" for s in (0, 1) for k in (0, 1, 2)]}
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)

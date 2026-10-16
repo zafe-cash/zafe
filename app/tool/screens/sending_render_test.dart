@@ -16,7 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/mobile/mobile_transaction_progress_screen.dart';
-import 'package:zafe/src/features/onboarding/onboarding_art.dart';
+import 'package:zafe/src/features/proposals/sent_art.dart';
 
 Future<void> _loadFonts() async {
   final families = <String, List<String>>{
@@ -84,7 +84,9 @@ void main() {
                     body: body,
                     canPop: true,
                     bodyMaxWidth: 260,
-                    background: const IllustrationBackground('sent_slot'),
+                    background: SentArt(
+                      sent: phase == MobileTransactionProgressPhase.succeeded,
+                    ),
                     primaryActionLabel: action,
                     onPrimaryAction: action == null ? null : () {},
                   ),

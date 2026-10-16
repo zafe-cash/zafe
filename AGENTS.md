@@ -751,10 +751,12 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   a `RepaintBoundary`, and only transforms them (no re-rasterizing). First: `KeyShardsArt`
   (`key_shards`, the key screen): the shards drift, then close into the key's outline when keygen
   finishes and the backup prompt follows. They **stop short of touching** (`_gap`): the whole key
-  never exists, so the art must not show it whole. Offsets are shared with `SHARD_OFFSETS`. Frames:
-  `flutter test tool/screens/key_shards_render_test.dart`.
+  never exists, so the art must not show it whole. Offsets are shared with `SHARD_OFFSETS`. Second:
+  `SentArt` (`sent_slot`, the sending screen's background): the coins stay in the vault while it sends and
+  fly out along their trails on "Sent!" (trails shared with `SENT_TRAILS`). Frames:
+  `flutter test tool/screens/art_motion_render_test.dart`.
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
-  full-page background (`IllustrationBackground`), the Activity empty state.
+  full-page background (`SentArt`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":
   deep verdigris #004A46 tile, a block split by a Z-shaped channel into a pale #D9F5F2
   upper piece and a #51DDD2 lower piece, geometry = `marks.js` `seam()`; flat colours

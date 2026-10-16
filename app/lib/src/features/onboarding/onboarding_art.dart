@@ -84,23 +84,3 @@ class OnboardingBanner extends StatelessWidget {
     );
   }
 }
-
-/// Full-page art behind a screen's content (e.g. `MobileTransactionProgressScreen`'s
-/// `background`). The art fills the page, cropped equally top and bottom on
-/// shorter screens; its middle is left empty for the content.
-class IllustrationBackground extends StatelessWidget {
-  const IllustrationBackground(this.name, {super.key});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    // Its own layer: the sending screen animates a loader on top, and without the
-    // boundary the full-page SVG was repainted every frame.
-    return RepaintBoundary(
-      child: ExcludeSemantics(
-        child: SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
-      ),
-    );
-  }
-}
