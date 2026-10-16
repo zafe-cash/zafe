@@ -116,7 +116,7 @@ void main() {
       await shot('0000');
       await tester.pumpWidget(app(true));
       var t = 0;
-      for (final ms in [100, 250, 400, 550, 700, 1000]) {
+      for (final ms in [80, 160, 240, 320, 400, 500, 650, 800, 1000]) {
         await tester.pump(Duration(milliseconds: ms - t));
         t = ms;
         await shot(ms.toString().padLeft(4, '0'));

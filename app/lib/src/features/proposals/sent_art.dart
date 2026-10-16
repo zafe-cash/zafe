@@ -120,10 +120,6 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
       height: 64,
       fit: BoxFit.fill,
     );
-    final coins = [
-      for (var side = 0; side < 2; side++)
-        for (var k = 0; k < 3; k++) (side, k, layer('coin$side$k')),
-    ];
     return ExcludeSemantics(
       child: FittedBox(
         fit: BoxFit.cover,
@@ -148,7 +144,8 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
                 animation: _out,
                 builder: (context, _) => Stack(
                   children: [
-                    for (final (side, k, child) in coins) _coin(side, k, child),
+                    for (var side = 0; side < 2; side++)
+                      for (var k = 0; k < 3; k++) _coin(side, k, stream),
                   ],
                 ),
               ),
@@ -213,26 +210,33 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
         ),
       );
 
-  /// One coin, drawn in its resting place, moved back along its trail by how far it
-  /// still has to go. The nearest coins leave first; the far ones follow.
-  Widget _coin(int side, int k, Widget child) {
-    final start = k * 0.16 + side * 0.06;
-    final local = ((_out.value - start) / 0.62).clamp(0.0, 1.0);
+  /// The last coins of the stream, which stay: on each trail the farthest leaves first
+  /// and they land one after another, each slowing to a stop at its resting place in the
+  /// still scene (size, tilt and fade as drawn there). Same coin and same way out as the
+  /// stream, so "Sent!" reads as the stream settling, not a second set of coins.
+  Widget _coin(int side, int k, Widget coin) {
+    final u = _coinU[k];
+    final start = (2 - k) * 0.11 + side * 0.04;
+    final length = 0.42 + 0.3 * u / _coinU.last;
+    final local = ((_out.value - start) / length).clamp(0.0, 1.0);
     // Opacity 0 until it leaves, never removed: its picture stays loaded.
+    if (local == 0) return _streamPlaced(Matrix4.identity(), 0, coin);
     final e = Curves.easeOutCubic.transform(local);
-    final trail = _trails[side];
-    final rest = _on(trail, _coinU[k]);
-    final now = _on(trail, _coinU[k] * e);
-    final scale = 0.35 + 0.65 * e;
-    return Opacity(
-      opacity: math.min(1, local * 4),
-      child: Transform(
-        transform: Matrix4.identity()
-          ..translateByDouble(now.dx, now.dy, 0, 1)
-          ..scaleByDouble(scale, scale, 1, 1)
-          ..translateByDouble(-rest.dx, -rest.dy, 0, 1),
-        child: child,
-      ),
+    final pos = _on(_trails[side], u * e);
+    // The scene's coin: radius 40 - 9k (the asset's is 40), tilted -24 + 14k degrees
+    // (mirrored on the right), fading 22% per step along the trail.
+    final rest = (40 - 9 * k) / 40;
+    final scale = 0.9 + (rest - 0.9) * e;
+    final tilt = (-24 + 14 * k) * (side == 0 ? -1 : 1) * e * math.pi / 180;
+    final opacity = math.min(1.0, local * 6) * (1 - 0.22 * k * e);
+    return _streamPlaced(
+      Matrix4.identity()
+        ..translateByDouble(pos.dx, pos.dy, 0, 1)
+        ..rotateZ(tilt)
+        ..scaleByDouble(scale, scale, 1, 1)
+        ..translateByDouble(-50, -28, 0, 1),
+      opacity,
+      coin,
     );
   }
 }

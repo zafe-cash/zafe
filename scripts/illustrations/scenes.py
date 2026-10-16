@@ -551,8 +551,6 @@ def sent(p, layer=None):
         # One coin on its own small canvas (80 wide, centre 50,30): the app draws many
         # of them streaming out on "Sent!".
         return svg(100, 64, defs(p, extra) + coin(p, 50, 28, 40, 18), p["dot"])
-    if layer and layer.startswith("coin"):
-        return svg(W, H, defs(p, extra) + coins[layer], p["dot"])
     return svg(W, H, defs(p, extra) + "".join(b), p["dot"])
 
 
@@ -615,7 +613,7 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
 
 # Scenes the app animates, and the layers it moves.
 LAYERS = {"key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
-          "sent_slot": ["bg", "coin"] + [f"coin{s}{k}" for s in (0, 1) for k in (0, 1, 2)]}
+          "sent_slot": ["bg", "coin"]}
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
