@@ -301,6 +301,26 @@ Widget _request() => ZafeScreen(
   ],
 );
 
+// The same payment on Maya's phone: she proposed it (and so approved it), and waits
+// for one more signer.
+Widget _proposer() => ZafeScreen(
+  title: 'Awaiting votes',
+  children: [
+    ProposalBody(
+      proposal: _proposal(
+        'p1',
+        1250000000,
+        memo: 'Audit milestone 2',
+        approvals: const [_maya],
+        myVote: rust.MyVote.approved,
+      ),
+      members: _members,
+      me: _maya,
+      names: const {_me: 'Alex', _ravi: 'Ravi'},
+    ),
+  ],
+);
+
 // The Signers tab: backup health and each signer's phone.
 Widget _signers() => ZafeScreen(
   title: 'Signers',
@@ -349,7 +369,13 @@ void main() {
       ('signers', _signers),
       ('protection', _protection),
       ('keys', _keys),
+      ('proposer', _proposer),
     ]) {
+      // The key screen on a shorter phone (390 x 700): its art and words sit closer.
+      tester.view.physicalSize = Size(
+        390 * 3,
+        (name == 'keys' ? 700 : 844) * 3,
+      );
       for (final (theme, data) in [
         ('dark', AppThemeData.dark),
         ('light', AppThemeData.light),
