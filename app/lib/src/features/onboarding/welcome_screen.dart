@@ -13,6 +13,10 @@ import '../settings/endpoint_sheet.dart';
 import 'onboarding_art.dart';
 import 'welcome_art.dart';
 
+/// Taps on the Welcome door (one Welcome screen exists at a time): each replays its
+/// unlock.
+final _doorTaps = ValueNotifier<int>(0);
+
 class WelcomeScreen extends ConsumerWidget {
   const WelcomeScreen({super.key});
 
@@ -101,7 +105,7 @@ class WelcomeScreen extends ConsumerWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const OnboardingHero('welcome_vault', art: WelcomeArt()),
+          OnboardingHero('welcome_vault', art: WelcomeArt(replay: _doorTaps)),
           SafeArea(
             // Fills the screen when it fits; scrolls on short phones or with large
             // system text (it used to cut off the last buttons on a 360x640 phone).
@@ -115,6 +119,7 @@ class WelcomeScreen extends ConsumerWidget {
             ),
           ),
 
+          WelcomeDoorTap(onTap: () => _doorTaps.value++),
           if (adding)
             _CornerButton(
               alignment: Alignment.topLeft,

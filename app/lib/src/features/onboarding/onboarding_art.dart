@@ -38,20 +38,23 @@ class OnboardingHero extends StatelessWidget {
                   SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
             ),
             Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    // Soft scrim under the status bar, clear art, then a
-                    // fade into the window colour before the text starts.
-                    stops: const [0, 0.1, 0.4, 0.74],
-                    colors: [
-                      window.withValues(alpha: 0.85),
-                      window.withValues(alpha: 0),
-                      window.withValues(alpha: 0),
-                      window,
-                    ],
+              // Only paint: an animated scene below may take taps.
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      // Soft scrim under the status bar, clear art, then a
+                      // fade into the window colour before the text starts.
+                      stops: const [0, 0.1, 0.4, 0.74],
+                      colors: [
+                        window.withValues(alpha: 0.85),
+                        window.withValues(alpha: 0),
+                        window.withValues(alpha: 0),
+                        window,
+                      ],
+                    ),
                   ),
                 ),
               ),

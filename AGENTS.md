@@ -773,13 +773,12 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   the slot breathes; once sent no coin leaves, those in the air finish and the light dims. Words change after the
   pop (`AnimatedSwitcher`, halves never overlap), in a block that never shrinks (`_KeepTallest`) so the badge never
   moves. Review whole-screen frames: `flutter test tool/screens/sent_moment_render_test.dart`. Third: `WelcomeArt`
-  (`welcome_vault`): the unlock story, 3 of 5 keys turn one by one (glows), the gold arc grows (drawn in Dart), the
-  wheel spins once, the bolts slide back, a gold ripple; holds, locks again faster (the five-spoke wheel needn't
-  spin back), repeats (~11 s). A 30 deg wheel nudge every 7 s went unnoticed. Waits use one cancellable `Timer`
-  (pending `Future.delayed` outlives the screen and fails widget tests). **Never swap a moving layer for an empty
-  box when it hides**: its `SvgPicture` is recreated and reloads, so it comes back blank; keep it in the tree at
-  opacity 0. Frames:
-  `flutter test tool/screens/art_motion_render_test.dart`.
+  (`welcome_vault`, 2026-10-16): the 3-of-5 unlock, **once** when Welcome appears or comes back (Apple: repeated
+  animation tires; an auto-repeating loop and a 30 deg nudge every 7 s were both rejected), replayed by tapping the
+  door (`WelcomeDoorTap`, a translucent target above the screen's scroll view, which otherwise takes every touch;
+  haptic tick per key, a firmer one at the bolts; never haptics without a touch). Keys and wheel use `_WindUp`
+  (a little the other way, then the move with an overshoot), the bolts snap, the door settles with a small shake and
+  a gold ripple; once open a light runs along the arc every 5 s. The hero's gradient overlay is `IgnorePointer`.
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
   full-page background (`SentArt`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":
