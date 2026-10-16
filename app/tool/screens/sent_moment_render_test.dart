@@ -71,7 +71,7 @@ void main() {
       Future<void> shot(String name) => tester.runAsync(() async {
         final boundary =
             key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-        final image = await boundary.toImage(pixelRatio: 2);
+        final image = await boundary.toImage(pixelRatio: _scale);
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
         File(
           '${out.path}/sent_moment_${theme}_$name.png',
@@ -105,3 +105,8 @@ void main() {
     }
   });
 }
+
+// SCREEN_PREVIEW_SCALE renders larger (the store listing uses 3).
+final _scale = double.parse(
+  Platform.environment['SCREEN_PREVIEW_SCALE'] ?? '2',
+);
