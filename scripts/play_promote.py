@@ -73,10 +73,15 @@ def main():
 
     edit = call("POST", "/edits")["id"]
     internal = call("GET", f"/edits/{edit}/tracks/internal")
-    codes = [c for rel in internal.get("releases", []) if rel.get("name") == version
+    # CI names releases "<version>"; the Console's default is "<code> (<version>)".
+    names = [r.get("name", "") for r in internal.get("releases", [])]
+    codes = [c for rel in internal.get("releases", [])
+             if rel.get("name") in (version,) or rel.get("name", "").endswith(f"({version})")
              for c in rel.get("versionCodes", [])]
     if not codes:
-        fail(f"no internal-track release named {version}: tag mainnet-v{version} first")
+        call("DELETE", f"/edits/{edit}")
+        fail(f"no internal-track release for {version} (internal has {names}): "
+             f"tag mainnet-v{version} first")
     release = {
         "name": version,
         "versionCodes": codes,
