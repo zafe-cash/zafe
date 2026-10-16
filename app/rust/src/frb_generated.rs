@@ -3409,10 +3409,12 @@ impl SseDecode for crate::api::watch::VaultActivity {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_kind = <crate::api::watch::VaultActivityKind>::sse_decode(deserializer);
+        let mut var_inbox = <bool>::sse_decode(deserializer);
         let mut var_error = <Option<crate::api::error::ZafeError>>::sse_decode(deserializer);
         let mut var_retryInSecs = <u32>::sse_decode(deserializer);
         return crate::api::watch::VaultActivity {
             kind: var_kind,
+            inbox: var_inbox,
             error: var_error,
             retry_in_secs: var_retryInSecs,
         };
@@ -4381,6 +4383,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::watch::VaultActivity {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.kind.into_into_dart().into_dart(),
+            self.inbox.into_into_dart().into_dart(),
             self.error.into_into_dart().into_dart(),
             self.retry_in_secs.into_into_dart().into_dart(),
         ]
@@ -5212,6 +5215,7 @@ impl SseEncode for crate::api::watch::VaultActivity {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::watch::VaultActivityKind>::sse_encode(self.kind, serializer);
+        <bool>::sse_encode(self.inbox, serializer);
         <Option<crate::api::error::ZafeError>>::sse_encode(self.error, serializer);
         <u32>::sse_encode(self.retry_in_secs, serializer);
     }

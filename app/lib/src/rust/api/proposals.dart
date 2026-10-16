@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `visible_text`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `visible_text`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 

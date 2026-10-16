@@ -54,7 +54,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Other members' activity as it happens (relay long poll); the poll is the fallback.
   late final LiveVaultWatch _live = LiveVaultWatch(
     onRefresh: () => ref.read(proposalsProvider.notifier).refreshSoon(),
+    onInbox: () =>
+        ref.read(proposalsProvider.notifier).respondPolicy.inboxNews(),
     onPollIntervalChanged: (_) {
+      ref.read(proposalsProvider.notifier).respondPolicy.live =
+          _live.policy.live;
       if (_poll != null) _startPoll();
     },
   );

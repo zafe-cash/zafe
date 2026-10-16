@@ -520,17 +520,29 @@ pub fn sync_vault(
     let m = self::material(&material)?;
     crate::diag::remember_support_dir(&db_dir);
     let mut watch = crate::diag::Stopwatch::new("sync");
+    let relay = RelayClient::pooled(relay_url);
+    // The network-only steps first, together and without the wallet lock (each is ~1-2 s
+    // over Tor; a payment being proposed waits for this lock): the server's tip and
+    // network, and the vault log for the note holds.
+    let early = runtime().block_on(async {
+        let server = async {
+            let mut client = connect(&lightwalletd_url).await?;
+            // A server on another network says so here (it would fail the sync with an
+            // obscure error, or none); one behind this wallet is checked under the lock.
+            let tip = check_server(&mut client, &m.descriptor.network, None).await?;
+            Ok::<_, ZafeError>((client, tip))
+        };
+        tokio::join!(server, node::load_state(&relay, &me, &m))
+    });
+    watch.lap("network");
     let _guard = wallet_lock();
     watch.lap("lock");
     let result = runtime().block_on(async {
+        let (server, loaded) = early;
+        let (mut client, server_tip) = server?;
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         watch.lap("open");
-        let mut client = connect(&lightwalletd_url).await?;
-        // A server on another network or behind this wallet would fail the sync with an
-        // obscure error (or none): say so instead.
-        let server_tip =
-            check_server(&mut client, &m.descriptor.network, wallet.chain_height()?).await?;
-        watch.lap("server");
+        zafe_core::wallet::check_server_tip(server_tip, wallet.chain_height()?)?;
         // Nothing new on the server and nothing left to scan: skip the scan's round trips.
         if wallet.needs_scan(server_tip)? {
             // One pass is capped so a stalled stream can't hold the wallet lock forever;
@@ -550,9 +562,7 @@ pub fn sync_vault(
         }
         if wallet.chain_height()?.is_some() {
             // Locks persist in the wallet database, so a failure keeps the last holds.
-            if let Ok((_, state)) = node::load_state(&RelayClient::pooled(relay_url), &me, &m).await
-            {
-                watch.lap("relay");
+            if let Ok((_, state)) = loaded {
                 let sent = sent_txs(&db_dir, &m);
                 let _ = node::reserve_notes(&state, &mut wallet, &mut client, &sent).await;
                 watch.lap("holds");

@@ -77,6 +77,7 @@ class LiveVaultWatch {
   LiveVaultWatch({
     required this.onRefresh,
     required this.onPollIntervalChanged,
+    this.onInbox,
     WatchStarter? starter,
     WatchStopper? stopper,
   }) : _starter = starter ?? _rustStart,
@@ -87,6 +88,9 @@ class LiveVaultWatch {
 
   /// Called when the fallback poll should run at a new interval.
   final void Function(Duration interval) onPollIntervalChanged;
+
+  /// Called (before [onRefresh]) when something was delivered to this member.
+  final void Function()? onInbox;
 
   final WatchStarter _starter;
   final WatchStopper _stopper;
@@ -155,6 +159,7 @@ class LiveVaultWatch {
     }
     var refresh = false;
     _setLive(() => refresh = policy.onEvent(event.kind));
+    if (event.inbox) onInbox?.call();
     if (refresh) onRefresh();
   }
 

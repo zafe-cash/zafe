@@ -517,7 +517,12 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   relay's member list (when its 60 s check is due) alongside the log, `propose` checks the branch alongside
   `load_state`, `approve_replacement` re-checks the words alongside it, `setup_step` reads the chain tip
   alongside the membership step on "They match", the bridge's `check_recovery` runs `try_recover` and
-  `recovery_checks` together. A `tokio::join!` inside these deep async fns needs `Box::pin` or rustc hits
+  `recovery_checks` together, and `sync_vault` reads the server and the log **before taking the wallet lock**
+  (a sync held it 6-7 s over Tor while a payment being proposed waited: 17 s on dev7). Refreshes answer
+  signing requests only on inbox news (`VaultActivity.inbox`), when the live watch isn't connected, or once
+  a minute (`providers/respond_policy.dart`); `respond` is ~2 s over Tor and used to run on every refresh,
+  and each log append triggers one. The timings log keeps its newest half when it passes 16 KiB (it used
+  to restart, and with Tor the `respond` lines pushed everything else out). A `tokio::join!` inside these deep async fns needs `Box::pin` or rustc hits
   its query depth limit (as `load_log` did).
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.

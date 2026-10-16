@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `identity`, `material`, `network`, `note_count`, `open_wallet`, `remove_wallet_files`, `runtime`, `sent_txs`, `wallet_key`, `wallet_lock`, `wallet_path`
+// These functions are ignored because they are not marked as `pub`: `identity`, `material`, `network`, `note_count`, `open_wallet`, `record_synced_tip`, `remove_wallet_files`, `runtime`, `sent_txs`, `synced_tip`, `wallet_key`, `wallet_lock`, `wallet_path`
 
 IdentityInfo generateIdentity() =>
     RustLib.instance.api.crateApiVaultGenerateIdentity();

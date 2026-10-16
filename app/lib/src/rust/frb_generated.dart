@@ -3479,12 +3479,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   VaultActivity dco_decode_vault_activity(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return VaultActivity(
       kind: dco_decode_vault_activity_kind(arr[0]),
-      error: dco_decode_opt_box_autoadd_zafe_error(arr[1]),
-      retryInSecs: dco_decode_u_32(arr[2]),
+      inbox: dco_decode_bool(arr[1]),
+      error: dco_decode_opt_box_autoadd_zafe_error(arr[2]),
+      retryInSecs: dco_decode_u_32(arr[3]),
     );
   }
 
@@ -4328,10 +4329,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   VaultActivity sse_decode_vault_activity(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_kind = sse_decode_vault_activity_kind(deserializer);
+    var var_inbox = sse_decode_bool(deserializer);
     var var_error = sse_decode_opt_box_autoadd_zafe_error(deserializer);
     var var_retryInSecs = sse_decode_u_32(deserializer);
     return VaultActivity(
       kind: var_kind,
+      inbox: var_inbox,
       error: var_error,
       retryInSecs: var_retryInSecs,
     );
@@ -5068,6 +5071,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_vault_activity(VaultActivity self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_vault_activity_kind(self.kind, serializer);
+    sse_encode_bool(self.inbox, serializer);
     sse_encode_opt_box_autoadd_zafe_error(self.error, serializer);
     sse_encode_u_32(self.retryInSecs, serializer);
   }

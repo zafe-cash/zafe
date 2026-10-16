@@ -382,16 +382,23 @@ pub async fn check_server(
         });
     }
     let tip = u32::try_from(info.block_height).map_err(|_| server_error("height out of range"))?;
+    check_server_tip(tip, known_height)?;
+    Ok(tip)
+}
+
+/// The part of [`check_server`] that needs the wallet: lightwalletd at `server_tip` must not
+/// be behind `known_height` (the highest block the wallet has).
+pub fn check_server_tip(server_tip: u32, known_height: Option<u32>) -> Result<(), WalletError> {
     if let Some(known) = known_height {
         // A few blocks of slack: a server a moment behind another one is normal.
-        if tip.saturating_add(SERVER_LAG_SLACK) < known {
+        if server_tip.saturating_add(SERVER_LAG_SLACK) < known {
             return Err(WalletError::ServerBehind {
-                server_tip: tip,
+                server_tip,
                 wallet_tip: known,
             });
         }
     }
-    Ok(tip)
+    Ok(())
 }
 
 /// The expiry height of a proposal targeting `target`: [`crate::vault::expiry_height`], but

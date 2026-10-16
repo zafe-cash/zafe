@@ -19,6 +19,7 @@ import '../rust/api/repair.dart' as rust_repair;
 import 'endpoints_provider.dart';
 import 'vault_provider.dart';
 import '../core/storage/wallet_key.dart';
+import 'respond_policy.dart';
 
 /// A send in progress (or just failed) on this device.
 class SendState {
@@ -119,6 +120,9 @@ class ProposalsState {
 /// restarting the app).
 class ProposalsNotifier extends Notifier<ProposalsState> {
   bool _refreshing = false;
+
+  /// When a refresh also answers signing requests (Home tells it about the live watch).
+  final respondPolicy = RespondPolicy();
 
   /// A refresh was asked for while one was running (see [refreshSoon]).
   bool _again = false;
@@ -227,7 +231,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       );
       _autoSend();
       _prewarm();
-      await _answerRequests(paths);
+      if (respondPolicy.take(DateTime.now())) await _answerRequests(paths);
     } catch (e) {
       debugPrint('refresh failed: ${describeError(e)}');
       state = state.copyWith(error: e);
@@ -294,6 +298,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       );
     } catch (_) {
       // Not synced yet or offline: the next poll retries.
+      respondPolicy.failed();
     }
   }
 

@@ -35,17 +35,24 @@ void stopVaultWatch({required PlatformInt64 watchId}) =>
 
 class VaultActivity {
   final VaultActivityKind kind;
+
+  /// Something was delivered to this member (or may have been, on `Connected`): the
+  /// app answers signing requests only then, or after a minute (each answer reads the
+  /// inbox, ~2 s over Tor).
+  final bool inbox;
   final ZafeError? error;
   final int retryInSecs;
 
   const VaultActivity({
     required this.kind,
+    required this.inbox,
     this.error,
     required this.retryInSecs,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ error.hashCode ^ retryInSecs.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ inbox.hashCode ^ error.hashCode ^ retryInSecs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -53,6 +60,7 @@ class VaultActivity {
       other is VaultActivity &&
           runtimeType == other.runtimeType &&
           kind == other.kind &&
+          inbox == other.inbox &&
           error == other.error &&
           retryInSecs == other.retryInSecs;
 }

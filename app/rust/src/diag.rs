@@ -20,8 +20,9 @@ const FILE_NAME: &str = "rust-panics.log";
 const TIMINGS_FILE: &str = "timings.log";
 /// A call at least this slow is noted (so is the first of each kind in a process).
 const SLOW: Duration = Duration::from_millis(1500);
-/// Past this size the file is restarted, so it can't grow without bound.
-const MAX_BYTES: u64 = 8 * 1024;
+/// Past this size the file drops its older half, so it can't grow without bound. With Tor
+/// on most background calls are "slow", so the newest lines must survive a trim.
+const MAX_BYTES: u64 = 16 * 1024;
 
 static DIAG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -160,11 +161,30 @@ fn write_line(dir: &Path, file: &str, text: &str) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.create(true).append(true);
     if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
-        std::fs::remove_file(&path).ok();
+        keep_newest_half(&path);
     }
     let mut file = options.open(&path)?;
     // One write call per line (append mode): safe next to the other threads' panics.
     file.write_all(format!("{text}\n").as_bytes())
+}
+
+/// Keeps the newer half of the file's lines (or nothing, if it can't be read). Two
+/// processes trimming at once can only lose lines.
+fn keep_newest_half(path: &Path) {
+    let kept = std::fs::read(path).ok().and_then(|bytes| {
+        let half = bytes.len() / 2;
+        let start = half + bytes[half..].iter().position(|b| *b == b'\n')? + 1;
+        Some(bytes[start..].to_vec())
+    });
+    let tmp = path.with_extension("trim");
+    match kept {
+        Some(kept) if std::fs::write(&tmp, &kept).is_ok() => {
+            let _ = std::fs::rename(&tmp, path);
+        }
+        _ => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -190,15 +210,16 @@ mod tests {
     }
 
     #[test]
-    fn restarts_a_large_file() {
+    fn a_large_file_keeps_its_newest_lines() {
         let dir = std::env::temp_dir().join(format!("zafe-diag-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(FILE_NAME), vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
+        let lines: Vec<String> = (0..2000).map(|i| format!("line {i:05}")).collect();
+        std::fs::write(dir.join(FILE_NAME), lines.join("\n") + "\n").unwrap();
         write_line(&dir, FILE_NAME, "new").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(dir.join(FILE_NAME)).unwrap(),
-            "new\n"
-        );
+        let text = std::fs::read_to_string(dir.join(FILE_NAME)).unwrap();
+        assert!(text.len() as u64 <= MAX_BYTES);
+        assert!(text.starts_with("line ") && text.ends_with("line 01999\nnew\n"));
+        assert!(!text.contains("line 00000"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }
