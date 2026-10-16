@@ -27,7 +27,8 @@ def welcome(p, layer=None):
     the app's unlock animation (all on the scene's canvas, each part in its final place):
     "bg" (wall, floor, frame), "boltsL"/"boltsR", "door" (face and dial), "glow<k>" (behind a
     turned key), "locks" (escutcheons, keyholes), "key<k>" (a turned key), "wheel",
-    "glint" (the wheel's light, which stays put), "top" (floor coins, vignette). The gold
+    "rim" (the wheel's ring, which needn't turn), "glint" (its light, which stays put),
+    "wheel" (spokes, grips, hub: the part that turns), "top" (floor coins, vignette). The gold
     arc joining the keys is drawn by the app (it grows), so no layer has it.
     None: the whole still scene."""
     W, H = 1080, 1240
@@ -122,7 +123,9 @@ def welcome(p, layer=None):
             b.append(f'<path d="M{f(kx)} {f(ky-14)}a10 10 0 1 1 -.1 0zM{f(kx-6)} {f(ky-2)}h12l5 24h-22z" fill="{p["ink"]}"/>')
     # central hand wheel: rim, five spokes (one per member), brand grips
     assert (cx, cy) == WELCOME_WHEEL
-    b.tag = "wheel"
+    # The rim is a plain ring (it needn't turn); its light sits on it, under the spokes
+    # and grips that turn above both.
+    b.tag = "rim"
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["ink"]}" stroke-width="30"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["metal2"]}" stroke-width="20"/>')
     glint = [f'<path d="M{cx-110} {cy-30}A114 114 0 0 1 {cx-30} {cy-110}" fill="none" stroke="{p["hi"]}" stroke-width="5" stroke-linecap="round"/>',
@@ -663,7 +666,7 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
 
 # Scenes the app animates, and the layers it moves.
 LAYERS = {"welcome_vault": ["bg", "boltsL", "boltsR", "door", "glow0", "glow1", "glow4", "locks",
-                            "key0", "key1", "key4", "wheel", "glint", "top"],
+                            "key0", "key1", "key4", "rim", "glint", "wheel", "top"],
           "key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
           "sent_slot": ["bg", "glow", "fore", "coin"]}
 

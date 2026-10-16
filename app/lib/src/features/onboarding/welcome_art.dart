@@ -198,7 +198,10 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
       layer('locks'),
       for (final k in _keys) layer('key$k'),
     ];
-    final wheel = layer('wheel'), glint = layer('glint'), top = layer('top');
+    // The rim and its light stay still; the spokes, grips and hub turn above them (the
+    // light drawn over the turning grips cut across them).
+    final rim = layer('rim'), glint = layer('glint');
+    final wheel = layer('wheel'), top = layer('top');
     return FittedBox(
       fit: BoxFit.cover,
       child: SizedBox(
@@ -215,6 +218,8 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
               ),
             ),
             ...over,
+            rim,
+            glint,
             AnimatedBuilder(
               animation: _push,
               builder: (context, child) => Transform(
@@ -223,7 +228,6 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
               ),
               child: wheel,
             ),
-            glint,
             AnimatedBuilder(
               animation: _shine,
               builder: (context, _) => CustomPaint(
