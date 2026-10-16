@@ -1198,6 +1198,11 @@ Learned while studying it:
   `SendPrefill` has no `autoSend`). Confirmation sheets only for what can't be undone
   (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline, backup
   "Later" just leaves.
+- **The proposer approves when proposing** (2026-10-16, user's call after the testnet dry run, as Safe does):
+  `send_screen._propose` runs `propose` then `approve` under one unlock ("Propose and approve this payment"); a
+  failed approval leaves the payment open for this member's approval (the request page then says "You proposed
+  sending"). Before, the proposer's own payment came back as a request with Approve/Decline. The CLI still
+  proposes and approves separately.
 - **Needs you** (Home, 2026-10-16, `features/home/needs_you.dart`): payments where `needsMyAction`
   (`proposal_status.dart`; the same rule counts notifications) and seat moves this member can approve, as
   `RequestCard`s (amount first with a gold ticker, then who and the message; a tonal full-width button

@@ -172,7 +172,14 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
         Center(child: SignerTile(keyHex: p.author, size: 56)),
         const SizedBox(height: AppSpacing.s),
         Text(
-          payment == null ? '$who asks to move funds' : '$who asks to send',
+          // Your own payment can come here too (its approval failed after proposing).
+          p.author == widget.me
+              ? (payment == null
+                    ? 'You proposed moving funds'
+                    : 'You proposed sending')
+              : (payment == null
+                    ? '$who asks to move funds'
+                    : '$who asks to send'),
           textAlign: TextAlign.center,
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,

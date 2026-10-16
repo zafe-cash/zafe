@@ -319,7 +319,8 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     return own != null && own == address.trim();
   }
 
-  /// "Propose payment": the unlock, then the proposal; its page opens on success.
+  /// "Propose payment": one unlock, then the proposal and this member's approval of it
+  /// (as in Safe, whoever creates a payment signs it); its page opens on success.
   /// Failures show under the button.
   Future<void> _propose() async {
     if (_payments.any((p) => _isOwn(p.address))) {
@@ -327,7 +328,11 @@ class _SendScreenState extends ConsumerState<SendScreen> {
         'This payment goes to the vault\'s own address. Pick another recipient.',
       );
     }
-    if (!await confirmUnlock(context, ref, reason: 'Propose this payment')) {
+    if (!await confirmUnlock(
+      context,
+      ref,
+      reason: 'Propose and approve this payment',
+    )) {
       throw const ActionCancelled();
     }
     setState(() => _busy = true);
@@ -340,6 +345,13 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             // "Send").
             autoSend: true,
           );
+      // Under the same unlock. If it fails (offline a moment later), the payment
+      // stays open and waits for this member's approval like any other.
+      try {
+        await ref.read(proposalsProvider.notifier).approve(id);
+      } catch (e) {
+        debugPrint('approving my own proposal failed: ${describeError(e)}');
+      }
       if (!mounted) return;
       context.go('/home');
       unawaited(context.push('/proposal/$id'));
