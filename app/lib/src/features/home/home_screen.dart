@@ -35,6 +35,7 @@ import '../../providers/unapproved_spends_provider.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../proposals/activity_feed.dart';
 import '../proposals/proposal_status.dart' show needsMyAction;
+import '../../providers/other_vaults_waiting_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/zec_price_provider.dart';
 import '../../services/app_update.dart';
@@ -205,7 +206,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   (vault.syncing && (failure?.isTransient ?? true)),
               onSyncTap: () => showSyncStatusSheet(context, retry: _refresh),
               onAccountTap: () => showVaultSwitcher(context),
-              avatar: VaultEmblem(vaultId: vault.activeId!),
+              avatar: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  VaultEmblem(vaultId: vault.activeId!),
+                  // Another vault has a payment waiting for you (the switcher shows
+                  // which).
+                  if (ref.watch(otherVaultsWaitingProvider).value ?? false)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Semantics(
+                        label: 'Another vault needs you',
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: colors.background.brandStrong,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: colors.background.window,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
             Expanded(
               child: MobileTopScrollFade(

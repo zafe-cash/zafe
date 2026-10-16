@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'zafe_paths.dart';
 import 'zafe_secure_store.dart';
 
@@ -27,6 +29,18 @@ class VaultSummaryInfo {
 }
 
 class VaultSummaries {
+  /// Bumped after each write on this isolate (the app's refreshes, and the check a push
+  /// runs while the app is open), so what's derived from several vaults can re-read.
+  static final ValueNotifier<int> changes = ValueNotifier(0);
+
+  /// Whether any of [vaultIds] has a payment waiting for this member (file fields only).
+  static Future<bool> anyWaiting(Iterable<String> vaultIds) async {
+    for (final id in vaultIds) {
+      if ((await _readFile(id)).actionable > 0) return true;
+    }
+    return false;
+  }
+
   static Future<File> _file(String vaultId) async =>
       File('${(await ZafePaths.get()).vaultDir(vaultId)}/summary.json');
 
@@ -95,6 +109,7 @@ class VaultSummaries {
           }),
         );
         await tmp.rename(f.path);
+        changes.value++;
       } catch (_) {}
     });
     _queue = next;
