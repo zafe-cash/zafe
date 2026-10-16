@@ -171,11 +171,7 @@ final _scenarios = <String, (String, List<Widget>)>{
         members: _members,
         me: _me,
       ),
-      _actions(
-        'Send now',
-        note:
-            'Every signature is in. It is sent automatically by the signer who approved last; you can also send it yourself.',
-      ),
+      _actions('Send now'),
     ],
   ),
   'proposal_rejected': (

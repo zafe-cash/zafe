@@ -109,65 +109,6 @@ String formatTimestamp(BigInt unixSeconds) {
   return '${_months[t.month - 1]} ${t.day}, ${two(t.hour)}:${two(t.minute)}';
 }
 
-class ProposalStatusChip extends StatelessWidget {
-  const ProposalStatusChip({
-    super.key,
-    required this.proposal,
-    this.sending = false,
-    this.height,
-  });
-  final rust.ProposalInfo proposal;
-  final bool sending;
-
-  /// Synced chain tip, to show expiry (unknown: never shown as expired).
-  final int? height;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final (icon, label, color) = sending
-        ? (AppIcons.loader, 'Sending', colors.text.secondary)
-        : proposalExpired(proposal, height)
-        ? (AppIcons.time, 'Expired', colors.text.muted)
-        : switch (proposal.stage) {
-            rust.ProposalStage.open => (
-              AppIcons.time,
-              // The count is on the line below the chip.
-              'Collecting votes',
-              colors.text.secondary,
-            ),
-            rust.ProposalStage.approved => (
-              AppIcons.check,
-              'Approved',
-              colors.text.value,
-            ),
-            rust.ProposalStage.rejected => (
-              AppIcons.cross,
-              'Rejected',
-              colors.text.destructive,
-            ),
-            rust.ProposalStage.cancelled => (
-              AppIcons.cross,
-              'Cancelled',
-              colors.text.muted,
-            ),
-            rust.ProposalStage.sent => (
-              AppIcons.checkCircle,
-              'Completed',
-              colors.text.value,
-            ),
-          };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AppIcon(icon, size: 13, color: color, patina: color),
-        const SizedBox(width: AppSpacing.xxs),
-        Text(label, style: AppTypography.labelMedium.copyWith(color: color)),
-      ],
-    );
-  }
-}
-
 /// 44px activity row for a proposal.
 class ProposalRow extends StatelessWidget {
   const ProposalRow({

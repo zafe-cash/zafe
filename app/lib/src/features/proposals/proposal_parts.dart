@@ -19,6 +19,7 @@ import '../../providers/privacy_mode_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
 import 'proposal_status.dart';
+import 'proposal_timeline.dart';
 
 // The parts of the proposal screen below the nav bar, apart from the action buttons.
 // Public so tool/screens/ can render them with fake data.
@@ -58,6 +59,12 @@ class ProposalBody extends ConsumerWidget {
     final txid = p.txid ?? progress?.txid;
 
     final payment = p.payments.isEmpty ? null : p.payments.first;
+    final details = <Widget>[
+      if (payment != null && p.payments.length == 1 && payment.memo.isNotEmpty)
+        DetailRow(label: 'Message', value: payment.memo),
+      if (showReview) _ReviewRows(id: p.id),
+      if (txid != null) TxIdRow(txid: txid),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -84,50 +91,32 @@ class ProposalBody extends ConsumerWidget {
           RecipientsCard.fromProposal(p.payments),
         ],
         const SizedBox(height: AppSpacing.md),
-        ProposalApprovalsCard(
-          proposal: p,
-          members: members,
-          me: me,
-          sending: sending,
-          height: height,
-          names: names,
-        ),
-        const SizedBox(height: AppSpacing.md),
-        MobileSurfaceCard(
-          cornerRadius: AppRadii.large,
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm,
-            vertical: AppSpacing.md,
-          ),
-          child: Column(
-            children: [
-              DetailRow(
-                label: 'Proposed by',
-                value: memberLabel(
-                  p.author,
-                  me: me,
-                  names: names,
-                  withKey: true,
-                ),
-              ),
-              if (p.createdAt > BigInt.zero) ...[
-                const DetailDivider(),
-                DetailRow(
-                  label: 'Created',
-                  value: formatTimestamp(p.createdAt),
-                ),
-              ],
-              if (payment != null &&
-                  p.payments.length == 1 &&
-                  payment.memo.isNotEmpty) ...[
-                const DetailDivider(),
-                DetailRow(label: 'Message', value: payment.memo),
-              ],
-              if (showReview) ...[const DetailDivider(), _ReviewRows(id: p.id)],
-              if (txid != null) ...[const DetailDivider(), TxIdRow(txid: txid)],
-            ],
+        ProposalTimeline(
+          steps: timelineSteps(
+            p,
+            members: members,
+            me: me,
+            names: names,
+            height: height,
+            sending: sending,
           ),
         ),
+        // Message, this phone's check and the Tx ID, when there are any.
+        if (details.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          MobileSurfaceCard(
+            cornerRadius: AppRadii.large,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.md,
+            ),
+            child: Column(
+              children: [
+                ...details.expand((w) => [const DetailDivider(), w]).skip(1),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -341,13 +330,14 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      ProposalApprovalsCard(
-                        proposal: p,
-                        members: widget.members,
-                        me: widget.me,
-                        sending: false,
-                        height: widget.height,
-                        names: widget.names,
+                      ProposalTimeline(
+                        steps: timelineSteps(
+                          p,
+                          members: widget.members,
+                          me: widget.me,
+                          names: widget.names,
+                          height: widget.height,
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.md),
                       MobileSurfaceCard(
@@ -357,26 +347,7 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
                           vertical: AppSpacing.md,
                         ),
                         child: Column(
-                          children: [
-                            DetailRow(
-                              label: 'Proposed by',
-                              value: memberLabel(
-                                p.author,
-                                me: widget.me,
-                                names: widget.names,
-                                withKey: true,
-                              ),
-                            ),
-                            if (p.createdAt > BigInt.zero) ...[
-                              const DetailDivider(),
-                              DetailRow(
-                                label: 'Created',
-                                value: formatTimestamp(p.createdAt),
-                              ),
-                            ],
-                            const DetailDivider(),
-                            _ReviewRows(id: p.id, withCheck: false),
-                          ],
+                          children: [_ReviewRows(id: p.id, withCheck: false)],
                         ),
                       ),
                     ],
@@ -454,168 +425,6 @@ class _DeviceCheck extends ConsumerWidget {
                 ),
               ),
             ),
-    );
-  }
-}
-
-/// Status, the approval threshold as signer dots, and one row per signer with their
-/// vote. The signer list is folded away once the payment is finished (sent, rejected
-/// or cancelled) and open while votes still matter.
-class ProposalApprovalsCard extends StatefulWidget {
-  const ProposalApprovalsCard({
-    super.key,
-    required this.proposal,
-    required this.members,
-    required this.me,
-    this.sending = false,
-    this.height,
-    this.names = const {},
-  });
-  final rust.ProposalInfo proposal;
-  final List<String> members;
-  final String? me;
-  final bool sending;
-  final int? height;
-  final Map<String, String> names;
-
-  @override
-  State<ProposalApprovalsCard> createState() => _ProposalApprovalsCardState();
-}
-
-class _ProposalApprovalsCardState extends State<ProposalApprovalsCard> {
-  bool? _expanded;
-
-  bool get _finished => switch (widget.proposal.stage) {
-    _ when proposalExpired(widget.proposal, widget.height) => true,
-    rust.ProposalStage.open || rust.ProposalStage.approved => false,
-    _ => true,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final p = widget.proposal;
-    final members = widget.members;
-    final me = widget.me;
-    final sending = widget.sending;
-    final expanded = _expanded ?? !_finished;
-    return MobileSurfaceCard(
-      cornerRadius: AppRadii.large,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.sm,
-        AppSpacing.sm,
-        AppSpacing.sm,
-        AppSpacing.xs,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Wraps (status under the title) rather than squeeze "Approvals" on narrow
-          // phones with large system text.
-          SizedBox(
-            width: double.infinity,
-            child: Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: AppSpacing.xs,
-              runSpacing: AppSpacing.xxs,
-              children: [
-                Text(
-                  'Approvals',
-                  style: AppTypography.labelLarge.copyWith(
-                    color: colors.text.accent,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                ProposalStatusChip(
-                  proposal: p,
-                  sending: sending,
-                  height: widget.height,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
-          SizedBox(
-            width: double.infinity,
-            child: Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: AppSpacing.xs,
-              runSpacing: AppSpacing.xxs,
-              children: [
-                ApprovalDots(
-                  approved: p.approvals.length,
-                  rejected: p.rejections.length,
-                  members: members.length,
-                  threshold: p.threshold,
-                ),
-                Text(
-                  // Approvals so far, then the vault's rule (t of n), so a 2-of-3 vault never
-                  // reads as "2 of 2".
-                  '${p.approvals.length} approved · needs ${p.threshold} of ${members.length}',
-                  style: AppTypography.labelMedium.copyWith(
-                    color: colors.text.secondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
-          const SizedBox(height: AppSpacing.xs),
-          Container(height: 1, color: colors.border.regular),
-          AppTappable(
-            onTap: () => setState(() => _expanded = !expanded),
-            semanticsLabel: expanded ? 'Hide signers' : 'Show signers',
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.s),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      expanded ? 'Hide signers' : 'Show signers',
-                      style: AppTypography.labelMedium.copyWith(
-                        color: colors.text.secondary,
-                      ),
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: expanded ? -0.25 : 0.25,
-                    duration: const Duration(milliseconds: 200),
-                    child: AppIcon(
-                      AppIcons.chevronForward,
-                      size: 16,
-                      color: colors.icon.muted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            alignment: Alignment.topCenter,
-            child: expanded
-                ? Column(
-                    children: [
-                      for (final m in members)
-                        SignerRow(
-                          keyHex: m,
-                          me: me,
-                          name: widget.names[m],
-                          trailing: _VoteTag(
-                            approved: p.approvals.contains(m),
-                            rejected: p.rejections.contains(m),
-                            stage: p.stage,
-                          ),
-                        ),
-                    ],
-                  )
-                : const SizedBox(width: double.infinity),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -708,51 +517,6 @@ class _ReviewRows extends ConsumerWidget {
               ],
             ),
     );
-  }
-}
-
-class _VoteTag extends StatelessWidget {
-  const _VoteTag({
-    required this.approved,
-    required this.rejected,
-    required this.stage,
-  });
-  final bool approved;
-  final bool rejected;
-  final rust.ProposalStage stage;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    if (approved) {
-      return SignerTag(
-        icon: AppIcons.checkCircle,
-        iconColor: colors.icon.brand,
-        label: 'Approved',
-        color: colors.text.secondary,
-      );
-    }
-    if (rejected) {
-      return SignerTag(
-        icon: AppIcons.cross,
-        iconColor: colors.icon.destructive,
-        label: 'Rejected',
-        color: colors.text.secondary,
-      );
-    }
-    // A member who hasn't voted is only "waiting" while their vote can still matter.
-    return switch (stage) {
-      rust.ProposalStage.open => SignerTag(
-        icon: AppIcons.time,
-        label: 'Waiting',
-        color: colors.text.secondary,
-      ),
-      rust.ProposalStage.approved => SignerTag(
-        label: 'Not needed',
-        color: colors.text.muted,
-      ),
-      _ => SignerTag(label: 'Didn\'t vote', color: colors.text.muted),
-    };
   }
 }
 
