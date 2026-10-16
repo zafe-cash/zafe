@@ -486,6 +486,22 @@ pub struct VaultBalance {
     pub total: u64,
 }
 
+/// How many spendable notes the vault keeps for payments in flight at once: change is
+/// split into up to this many notes (each at least [`CHANGE_NOTE_MIN_ZAT`]) while the
+/// vault has fewer. Splitting adds outputs, so a payment that splits pays up to
+/// 5,000 zats more per extra action (members' checks compute the same ZIP 317 fee).
+pub const CHANGE_NOTES_TARGET: usize = 4;
+
+/// The smallest note change is split into (0.01 ZEC): below it, change stays in one note.
+pub const CHANGE_NOTE_MIN_ZAT: u64 = 1_000_000;
+
+fn change_split_policy() -> SplitPolicy {
+    SplitPolicy::with_min_output_value(
+        std::num::NonZeroUsize::new(CHANGE_NOTES_TARGET).expect("non-zero"),
+        Zatoshis::const_from_u64(CHANGE_NOTE_MIN_ZAT),
+    )
+}
+
 pub struct VaultWallet<P: Parameters + Clone + Send + 'static> {
     db: WalletDb<rusqlite::Connection, P, SystemClock, crate::zrng::ZRng>,
     params: P,
@@ -921,12 +937,15 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         )
         .map_err(|e| WalletError::Payment(format!("{e:?}")))?;
 
+        // Change comes back as several notes while the vault has fewer than
+        // CHANGE_NOTES_TARGET: each open proposal holds whole notes, so a vault with one
+        // note could only have one payment in flight ("funds are held by open payments").
         let change = MultiOutputChangeStrategy::new(
             StandardFeeRule::Zip317,
             None,
             ShieldedPool::Ironwood,
             DustOutputPolicy::default(),
-            SplitPolicy::single_output(),
+            change_split_policy(),
         );
         propose_transfer::<_, _, _, _, zcash_client_sqlite::wallet::commitment_tree::Error>(
             &mut self.db,

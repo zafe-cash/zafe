@@ -142,6 +142,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (recipient, amount, memo); change must belong to the vault **and trial-decrypt** with its IVK;
   fee must **equal** ZIP 317 (5000 × max(2, actions)); sighash computed locally.
 - **Proposals are built with `OvkPolicy::Sender`** and Ironwood change, or verification fails.
+- **Change is split** (2026-10-16, `wallet::change_split_policy`): while the vault has fewer than
+  `CHANGE_NOTES_TARGET` (4) spendable notes, change comes back as up to 4 notes of at least
+  `CHANGE_NOTE_MIN_ZAT` (0.01). Each open proposal reserves whole notes, so a one-note vault could
+  only have one payment in flight. Members' checks already accept any number of change outputs and
+  compute the fee from the action count (a splitting payment pays 5,000 zats per extra action;
+  seen live on testnet: 1 payment + 4 change = fee 25,000). A vault can never pay its own addresses
+  (`node::propose` refuses: members would count the output as change), so splitting is the only way
+  a single deposit becomes several notes. Vault addresses hold only an Orchard-format receiver
+  (Ironwood shares it): the testnet faucet rejects them as "not a valid address" (it pays Sapling/
+  transparent only); fund vaults from an Orchard-capable wallet.
 - **Note reservation** (spec §9.1): two layers.
   *Log rule* (`VaultState::apply`, deterministic): a `Proposal` whose PCZT spends a note
   of an earlier **open/approved** proposal with `expiry_height > new.tip_height` is
