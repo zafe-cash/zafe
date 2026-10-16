@@ -18,11 +18,11 @@ const kPaymentLinkTtl = Duration(minutes: 10);
 
 /// Shown when [kPaymentLinkTtl] ran out before the link could be shown.
 const kPaymentLinkExpiredMessage =
-    'A payment link expired before you unlocked. Open it again to pay';
+    'It expired before you unlocked. Open it again to pay.';
 
 /// Shown when a link arrives on a device with no vault to pay from.
 const kPaymentLinkNoVaultMessage =
-    'Set up or join a vault before paying a Zcash payment link';
+    'Set up or join a vault, then open the payment link again.';
 
 /// Whether [raw] is a ZIP 321 payment link (case-insensitive `zcash:` scheme). Matched
 /// on the string, since a malformed link must still reach the screen that says so.

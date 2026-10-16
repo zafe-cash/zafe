@@ -16,9 +16,9 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../notifications/notification_primer.dart';
 import '../../notifications/vault_watch.dart';
+import '../../providers/app_notices_provider.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../services/live_vault_watch.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
@@ -129,21 +129,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  /// Play installs the downloaded update and restarts the app: never in the middle of
-  /// sending a payment.
-  void _restartForUpdate(BuildContext context) {
-    final sending = ref
-        .read(proposalsProvider)
-        .sends
-        .values
-        .any((s) => s.running);
-    if (sending) {
-      showAppToast(context, 'Restart once the payment has been sent');
-      return;
-    }
-    unawaited(ref.read(appUpdateProvider.notifier).restart());
-  }
-
   /// The poll: proposals, then the wallet only if the chain tip moved (or proposals
   /// changed); `force` syncs regardless (resume, first open).
   Future<void> _refresh({bool force = false}) async {
@@ -192,194 +177,207 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              MobileTopNav.account(
-                accountName: ref.watch(activeVaultNameProvider) ?? summary.name,
-                syncLabel: syncLabel,
-                syncLabelColor:
-                    tor.failed ||
-                        (torLabel == null &&
-                            failure != null &&
-                            !failure.isTransient)
-                    ? colors.sync.textError
-                    : tor.enabled
-                    ? colors.sync.torText
-                    : colors.sync.text,
-                // Tor's purple while Tor is on, so the status line shows it.
-                syncIndicatorColor: tor.enabled ? colors.sync.torGlow : null,
-                syncAnimated:
-                    tor.connecting ||
-                    (vault.syncing && (failure?.isTransient ?? true)),
-                onSyncTap: () => showSyncStatusSheet(context, retry: _refresh),
-                onAccountTap: () => showVaultSwitcher(context),
-                avatar: VaultEmblem(vaultId: vault.activeId!),
-              ),
-              Expanded(
-                child: MobileTopScrollFade(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 64 + 48),
-                    children: [
-                      BalanceCard(
-                        totalZat: vault.balance?.totalZat,
-                        // The total includes money still confirming: what's pending
-                        // shows in the activity rows, not on the card.
-                        fiatText: vault.balance == null
-                            ? null
-                            : fiatText(
-                                vault.balance!.totalZat,
-                                ref.watch(zecPriceProvider),
-                              ),
-                        confirmingText: _confirmingText(
-                          vault.balance,
-                          hide: ref.watch(privacyModeProvider),
-                        ),
-                        hidden: ref.watch(privacyModeProvider),
-                        threshold: summary.threshold,
-                        members: summary.members.length,
-                        onToggle: () {
-                          AppHaptics.privacyToggle();
-                          ref.read(privacyModeProvider.notifier).toggle();
-                        },
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            MobileTopNav.account(
+              accountName: ref.watch(activeVaultNameProvider) ?? summary.name,
+              syncLabel: syncLabel,
+              syncLabelColor:
+                  tor.failed ||
+                      (torLabel == null &&
+                          failure != null &&
+                          !failure.isTransient)
+                  ? colors.sync.textError
+                  : tor.enabled
+                  ? colors.sync.torText
+                  : colors.sync.text,
+              // Tor's purple while Tor is on, so the status line shows it.
+              syncIndicatorColor: tor.enabled ? colors.sync.torGlow : null,
+              syncAnimated:
+                  tor.connecting ||
+                  (vault.syncing && (failure?.isTransient ?? true)),
+              onSyncTap: () => showSyncStatusSheet(context, retry: _refresh),
+              onAccountTap: () => showVaultSwitcher(context),
+              avatar: VaultEmblem(vaultId: vault.activeId!),
+            ),
+            Expanded(
+              child: MobileTopScrollFade(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 64 + 48),
+                  children: [
+                    BalanceCard(
+                      totalZat: vault.balance?.totalZat,
+                      // The total includes money still confirming: what's pending
+                      // shows in the activity rows, not on the card.
+                      fiatText: vault.balance == null
+                          ? null
+                          : fiatText(
+                              vault.balance!.totalZat,
+                              ref.watch(zecPriceProvider),
+                            ),
+                      confirmingText: _confirmingText(
+                        vault.balance,
+                        hide: ref.watch(privacyModeProvider),
                       ),
-                      const SizedBox(height: AppSpacing.s),
-                      // Only once the balance is known: while it loads, a vault with
-                      // history would flash the first-deposit prompt.
-                      if (vault.balance?.totalZat == BigInt.zero)
-                        AppButton(
-                          expand: true,
-                          onPressed: () => context.push('/receive'),
-                          leading: const AppIcon(AppIcons.addNew, size: 20),
-                          child: const Text(
-                            'Receive your first $kZcashDefaultCurrencyTicker',
+                      hidden: ref.watch(privacyModeProvider),
+                      threshold: summary.threshold,
+                      members: summary.members.length,
+                      onToggle: () {
+                        AppHaptics.privacyToggle();
+                        ref.read(privacyModeProvider.notifier).toggle();
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.s),
+                    // Only once the balance is known: while it loads, a vault with
+                    // history would flash the first-deposit prompt.
+                    if (vault.balance?.totalZat == BigInt.zero)
+                      AppButton(
+                        expand: true,
+                        onPressed: () => context.push('/receive'),
+                        leading: const AppIcon(AppIcons.addNew, size: 20),
+                        child: const Text(
+                          'Receive your first $kZcashDefaultCurrencyTicker',
+                        ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: AppButton(
+                              expand: true,
+                              onPressed: () => context.push('/send'),
+                              leading: const AppIcon(AppIcons.plane, size: 20),
+                              child: const Text('New payment'),
+                            ),
                           ),
+                          const SizedBox(width: AppSpacing.xs),
+                          Expanded(
+                            child: AppButton(
+                              expand: true,
+                              variant: AppButtonVariant.secondary,
+                              onPressed: () => context.push('/receive'),
+                              leading: const AppIcon(
+                                AppIcons.arrowDownCircle,
+                                size: 20,
+                              ),
+                              child: const Text('Receive'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: AppSpacing.md),
+                    if (ref.watch(unapprovedSpendsProvider).isNotEmpty) ...[
+                      NoticeCard(
+                        title: 'Money left without approval',
+                        body:
+                            'A transaction spent this vault\'s funds with no '
+                            'approved payment. Check with the other members now.',
+                        onTap: () => context.go('/activity'),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    // What the group is waiting on this member for, before any notice.
+                    NeedsYou(height: vault.balance?.height),
+                    // Things that happened on their own (a link expired, the server
+                    // changed): tap to dismiss.
+                    const AppNoticeCards(gap: AppSpacing.md),
+                    // Once the vault holds money, a missing backup outranks every
+                    // other notice (a lost phone could cost the group its funds).
+                    if (needsBackup && funded) ...[
+                      NoticeCard(
+                        title: 'Back up this vault',
+                        body:
+                            'It holds money, and your key share lives only on this '
+                            'phone',
+                        onTap: () => context.push('/export'),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (ref.watch(
+                          proposalsProvider.select(
+                            (p) => p.newerVersionEntries,
+                          ),
+                        ) >
+                        0) ...[
+                      const NoticeCard(
+                        title: 'Update Zafe',
+                        body:
+                            'Other members use a newer version. Some vault activity '
+                            'only shows after you update.',
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (ref.watch(appUpdateProvider) ==
+                        AppUpdateState.ready) ...[
+                      // Never in the middle of sending a payment: the card says so
+                      // and waits.
+                      if (ref
+                          .watch(proposalsProvider)
+                          .sends
+                          .values
+                          .any((s) => s.running))
+                        const NoticeCard(
+                          title: 'Update ready',
+                          body: 'Restarts after the payment is sent',
+                          warning: false,
                         )
                       else
-                        Row(
-                          children: [
-                            Expanded(
-                              child: AppButton(
-                                expand: true,
-                                onPressed: () => context.push('/send'),
-                                leading: const AppIcon(
-                                  AppIcons.plane,
-                                  size: 20,
-                                ),
-                                child: const Text('New payment'),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.xs),
-                            Expanded(
-                              child: AppButton(
-                                expand: true,
-                                variant: AppButtonVariant.secondary,
-                                onPressed: () => context.push('/receive'),
-                                leading: const AppIcon(
-                                  AppIcons.arrowDownCircle,
-                                  size: 20,
-                                ),
-                                child: const Text('Receive'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      const SizedBox(height: AppSpacing.md),
-                      if (ref.watch(unapprovedSpendsProvider).isNotEmpty) ...[
-                        NoticeCard(
-                          title: 'Money left without approval',
-                          body:
-                              'A transaction spent this vault\'s funds with no '
-                              'approved payment. Check with the other members now.',
-                          onTap: () => context.go('/activity'),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      // What the group is waiting on this member for, before any notice.
-                      NeedsYou(height: vault.balance?.height),
-                      // Once the vault holds money, a missing backup outranks every
-                      // other notice (a lost phone could cost the group its funds).
-                      if (needsBackup && funded) ...[
-                        NoticeCard(
-                          title: 'Back up this vault',
-                          body:
-                              'It holds money, and your key share lives only on this '
-                              'phone',
-                          onTap: () => context.push('/export'),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (ref.watch(
-                            proposalsProvider.select(
-                              (p) => p.newerVersionEntries,
-                            ),
-                          ) >
-                          0) ...[
-                        const NoticeCard(
-                          title: 'Update Zafe',
-                          body:
-                              'Other members use a newer version. Some vault activity '
-                              'only shows after you update.',
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (ref.watch(appUpdateProvider) ==
-                          AppUpdateState.ready) ...[
                         NoticeCard(
                           title: 'Update ready',
                           body: 'Restart Zafe to finish updating',
                           warning: false,
-                          onTap: () => _restartForUpdate(context),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (ref.watch(notificationsEnabledProvider).value ==
-                          false) ...[
-                        NoticeCard(
-                          title: 'Notifications are off',
-                          body:
-                              'You won\'t hear when a payment needs your approval',
-                          onTap: () => enableNotifications(ref),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (kIsBeta) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xxs,
-                          ),
-                          child: Text(
-                            betaNote,
-                            style: AppTypography.bodySmall.copyWith(
-                              color: colors.text.muted,
-                            ),
+                          onTap: () => unawaited(
+                            ref.read(appUpdateProvider.notifier).restart(),
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (needsBackup && !funded) ...[
-                        NoticeCard(
-                          title: 'Back up this vault',
-                          body: 'Your key share lives only on this phone',
-                          onTap: () => context.push('/export'),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      _Payments(
-                        proposals: ref.watch(proposalsProvider),
-                        received: ref.watch(receivedProvider),
-                        hideAmounts: ref.watch(privacyModeProvider),
-                        height: vault.balance?.height,
-                        funded: funded,
-                      ),
+                      const SizedBox(height: AppSpacing.md),
                     ],
-                  ),
+                    if (ref.watch(notificationsEnabledProvider).value ==
+                        false) ...[
+                      NoticeCard(
+                        title: 'Notifications are off',
+                        body:
+                            'You won\'t hear when a payment needs your approval',
+                        onTap: () => enableNotifications(ref),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (kIsBeta) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.xxs,
+                        ),
+                        child: Text(
+                          betaNote,
+                          style: AppTypography.bodySmall.copyWith(
+                            color: colors.text.muted,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (needsBackup && !funded) ...[
+                      NoticeCard(
+                        title: 'Back up this vault',
+                        body: 'Your key share lives only on this phone',
+                        onTap: () => context.push('/export'),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    _Payments(
+                      proposals: ref.watch(proposalsProvider),
+                      received: ref.watch(receivedProvider),
+                      hideAmounts: ref.watch(privacyModeProvider),
+                      height: vault.balance?.height,
+                      funded: funded,
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -761,6 +759,29 @@ class _Payments extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The app's notices ([appNoticesProvider]) as cards, each followed by [gap]; tapping
+/// one dismisses it.
+class AppNoticeCards extends ConsumerWidget {
+  const AppNoticeCards({super.key, this.gap = AppSpacing.s});
+  final double gap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final n in ref.watch(appNoticesProvider)) ...[
+        NoticeCard(
+          title: n.title,
+          body: n.body,
+          warning: false,
+          onTap: () => ref.read(appNoticesProvider.notifier).dismiss(n.id),
+        ),
+        SizedBox(height: gap),
+      ],
+    ],
+  );
 }
 
 /// Until this device's copy of the vault is backed up (spec §12.2 "backup health").

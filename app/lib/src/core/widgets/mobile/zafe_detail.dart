@@ -1,5 +1,8 @@
 import 'dart:math' as math;
 
+import 'dart:async';
+
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../config/block_explorer.dart';
@@ -7,7 +10,6 @@ import '../../config/network_config.dart';
 import '../../formatting/member_label.dart';
 import '../../privacy/privacy_mask.dart';
 import '../../theme/app_theme.dart';
-import '../app_copy_feedback.dart';
 import '../app_icon.dart';
 import '../app_tappable.dart';
 
@@ -433,24 +435,37 @@ class DetailRow extends StatelessWidget {
 
 /// A transaction id: tap opens it in the block explorer (ZecBlock), long-press copies
 /// it. Where there is no explorer (regtest) or nothing can open it, a tap copies.
-class TxIdRow extends StatelessWidget {
+class TxIdRow extends StatefulWidget {
   const TxIdRow({super.key, required this.txid});
   final String txid;
 
-  void _copy(BuildContext context) => copyTextWithToast(
-    context,
-    text: txid,
-    toastMessage: 'Transaction ID copied',
-  );
+  @override
+  State<TxIdRow> createState() => _TxIdRowState();
+}
+
+/// Tap opens the explorer (copies where there is none); long press copies. A copy
+/// turns the icon into a check for a moment, no toast.
+class _TxIdRowState extends State<TxIdRow> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.txid));
+    unawaited(HapticFeedback.lightImpact());
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _copied = false);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final txid = widget.txid;
     final explorer = explorerTxUri(txid) != null;
     return GestureDetector(
-      onLongPress: () => _copy(context),
+      onLongPress: _copy,
       child: AppTappable(
         onTap: () async {
-          if (!await openTxInExplorer(txid) && context.mounted) _copy(context);
+          if (!await openTxInExplorer(txid) && mounted) await _copy();
         },
         semanticsLabel: explorer
             ? 'Open transaction in block explorer'
@@ -460,10 +475,23 @@ class TxIdRow extends StatelessWidget {
           value: txid.length > 16
               ? '${txid.substring(0, 8)}...${txid.substring(txid.length - 8)}'
               : txid,
-          trailing: AppIcon(
-            explorer ? AppIcons.arrowUpRight : AppIcons.copy,
-            size: 16,
-            color: context.colors.icon.muted,
+          trailing: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            transitionBuilder: (child, a) =>
+                ScaleTransition(scale: a, child: child),
+            child: _copied
+                ? AppIcon(
+                    AppIcons.check,
+                    key: const ValueKey('copied'),
+                    size: 16,
+                    color: context.colors.icon.value,
+                  )
+                : AppIcon(
+                    explorer ? AppIcons.arrowUpRight : AppIcons.copy,
+                    key: const ValueKey('icon'),
+                    size: 16,
+                    color: context.colors.icon.muted,
+                  ),
           ),
         ),
       ),

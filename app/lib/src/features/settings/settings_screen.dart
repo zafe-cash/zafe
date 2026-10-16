@@ -9,7 +9,6 @@ import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_list_row.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/security/app_lock.dart';
@@ -78,153 +77,147 @@ class SettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              const MobileTopNav.back(title: 'Settings'),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.sm,
-                    AppSpacing.s,
-                    AppSpacing.sm,
-                    // Clears the floating tab bar.
-                    112,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            const MobileTopNav.back(title: 'Settings'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.sm,
+                  AppSpacing.s,
+                  AppSpacing.sm,
+                  // Clears the floating tab bar.
+                  112,
+                ),
+                children: [
+                  _Group(
+                    title: 'Security',
+                    rows: [
+                      row(
+                        icon: appLock == AppLockDelay.off
+                            ? AppIcons.unlock
+                            : AppIcons.lock,
+                        label: 'Lock app',
+                        value: appLock.label,
+                        chevron: true,
+                        onTap: () => _pickAppLock(context, ref, appLock),
+                      ),
+                      if (hasScreenLock == false) const _NoScreenLockNote(),
+                    ],
                   ),
-                  children: [
-                    _Group(
-                      title: 'Security',
-                      rows: [
-                        row(
-                          icon: appLock == AppLockDelay.off
-                              ? AppIcons.unlock
-                              : AppIcons.lock,
-                          label: 'Lock app',
-                          value: appLock.label,
-                          chevron: true,
-                          onTap: () => _pickAppLock(context, ref, appLock),
-                        ),
-                        if (hasScreenLock == false) const _NoScreenLockNote(),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _Group(
-                      title: 'Privacy',
-                      rows: [
-                        row(
-                          icon: hideAmounts ? AppIcons.eyeClosed : AppIcons.eye,
-                          label: 'Hide amounts',
-                          onTap: () =>
+                  const SizedBox(height: AppSpacing.md),
+                  _Group(
+                    title: 'Privacy',
+                    rows: [
+                      row(
+                        icon: hideAmounts ? AppIcons.eyeClosed : AppIcons.eye,
+                        label: 'Hide amounts',
+                        onTap: () =>
+                            ref.read(privacyModeProvider.notifier).toggle(),
+                        trailing: AppSwitch(
+                          value: hideAmounts,
+                          semanticsLabel: 'Hide amounts',
+                          onChanged: (_) =>
                               ref.read(privacyModeProvider.notifier).toggle(),
-                          trailing: AppSwitch(
-                            value: hideAmounts,
-                            semanticsLabel: 'Hide amounts',
-                            onChanged: (_) =>
-                                ref.read(privacyModeProvider.notifier).toggle(),
-                          ),
-                        ),
-                        TorSettingRow(rowStyle: rowStyle),
-                        row(
-                          icon: AppIcons.help,
-                          label: 'Diagnostic report',
-                          value: 'Stays on this phone',
-                          chevron: true,
-                          onTap: () => showDiagnosticsSheet(context),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _Group(
-                      title: 'System',
-                      rows: [
-                        MobileListRow(
-                          leading: AppIcon(
-                            AppIcons.theme,
-                            size: 20,
-                            color: colors.icon.muted,
-                          ),
-                          label: 'Theme',
-                          minRowHeight: _rowHeight,
-                          textStyle: rowStyle,
-                          trailing: AppSegmented<ThemeMode>(
-                            value: themeMode,
-                            options: const [
-                              (ThemeMode.system, AppIcons.monitor, 'System'),
-                              (ThemeMode.light, AppIcons.day, 'Light'),
-                              (ThemeMode.dark, AppIcons.night, 'Dark'),
-                            ],
-                            onChanged: (m) =>
-                                ref.read(themeModeProvider.notifier).set(m),
-                          ),
-                        ),
-                        row(
-                          icon: paymentSounds
-                              ? AppIcons.sound
-                              : AppIcons.soundOff,
-                          label: 'Payment sounds',
-                          onTap: () =>
-                              ref.read(paymentSoundsProvider.notifier).toggle(),
-                          trailing: AppSwitch(
-                            value: paymentSounds,
-                            semanticsLabel: 'Payment sounds',
-                            onChanged: (_) => ref
-                                .read(paymentSoundsProvider.notifier)
-                                .toggle(),
-                          ),
-                        ),
-                        row(
-                          icon: AppIcons.endpoint,
-                          label: 'Relay',
-                          value: endpoints.relayIsPlaceholder
-                              ? 'Not configured'
-                              : endpointHost(endpoints.relayUrl),
-                          chevron: true,
-                          onTap: () => showEndpointSheet(
-                            context,
-                            ref,
-                            EndpointKind.relay,
-                          ),
-                        ),
-                        row(
-                          icon: AppIcons.endpoint,
-                          label: 'Zcash server',
-                          value: endpointHost(endpoints.lightwalletdUrl),
-                          chevron: true,
-                          onTap: () => showEndpointSheet(
-                            context,
-                            ref,
-                            EndpointKind.lightwalletd,
-                          ),
-                        ),
-                        row(
-                          icon: AppIcons.book,
-                          label: 'Open-source licenses',
-                          chevron: true,
-                          onTap: () => showLicensePage(
-                            context: context,
-                            applicationName: 'Zafe',
-                            applicationVersion: _appVersion,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    const SizedBox(height: AppSpacing.base),
-                    Center(
-                      child: Text(
-                        'Zafe v$_appVersion',
-                        style: AppTypography.codeSmall.copyWith(
-                          color: colors.text.secondary,
                         ),
                       ),
+                      TorSettingRow(rowStyle: rowStyle),
+                      row(
+                        icon: AppIcons.help,
+                        label: 'Diagnostic report',
+                        value: 'Stays on this phone',
+                        chevron: true,
+                        onTap: () => showDiagnosticsSheet(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _Group(
+                    title: 'System',
+                    rows: [
+                      MobileListRow(
+                        leading: AppIcon(
+                          AppIcons.theme,
+                          size: 20,
+                          color: colors.icon.muted,
+                        ),
+                        label: 'Theme',
+                        minRowHeight: _rowHeight,
+                        textStyle: rowStyle,
+                        trailing: AppSegmented<ThemeMode>(
+                          value: themeMode,
+                          options: const [
+                            (ThemeMode.system, AppIcons.monitor, 'System'),
+                            (ThemeMode.light, AppIcons.day, 'Light'),
+                            (ThemeMode.dark, AppIcons.night, 'Dark'),
+                          ],
+                          onChanged: (m) =>
+                              ref.read(themeModeProvider.notifier).set(m),
+                        ),
+                      ),
+                      row(
+                        icon: paymentSounds
+                            ? AppIcons.sound
+                            : AppIcons.soundOff,
+                        label: 'Payment sounds',
+                        onTap: () =>
+                            ref.read(paymentSoundsProvider.notifier).toggle(),
+                        trailing: AppSwitch(
+                          value: paymentSounds,
+                          semanticsLabel: 'Payment sounds',
+                          onChanged: (_) =>
+                              ref.read(paymentSoundsProvider.notifier).toggle(),
+                        ),
+                      ),
+                      row(
+                        icon: AppIcons.endpoint,
+                        label: 'Relay',
+                        value: endpoints.relayIsPlaceholder
+                            ? 'Not configured'
+                            : endpointHost(endpoints.relayUrl),
+                        chevron: true,
+                        onTap: () =>
+                            showEndpointSheet(context, ref, EndpointKind.relay),
+                      ),
+                      row(
+                        icon: AppIcons.endpoint,
+                        label: 'Zcash server',
+                        value: endpointHost(endpoints.lightwalletdUrl),
+                        chevron: true,
+                        onTap: () => showEndpointSheet(
+                          context,
+                          ref,
+                          EndpointKind.lightwalletd,
+                        ),
+                      ),
+                      row(
+                        icon: AppIcons.book,
+                        label: 'Open-source licenses',
+                        chevron: true,
+                        onTap: () => showLicensePage(
+                          context: context,
+                          applicationName: 'Zafe',
+                          applicationVersion: _appVersion,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.base),
+                  Center(
+                    child: Text(
+                      'Zafe v$_appVersion',
+                      style: AppTypography.codeSmall.copyWith(
+                        color: colors.text.secondary,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

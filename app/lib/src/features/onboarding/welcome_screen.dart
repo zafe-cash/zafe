@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../home/home_screen.dart' show AppNoticeCards;
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
@@ -58,6 +59,7 @@ class WelcomeScreen extends ConsumerWidget {
           const Spacer(),
           const _InfoCard(),
           const SizedBox(height: AppSpacing.md),
+          const AppNoticeCards(),
           if (noRelay) ...[
             _NoRelayNote(onTap: servers),
             const SizedBox(height: AppSpacing.s),

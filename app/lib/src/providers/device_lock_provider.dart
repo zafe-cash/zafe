@@ -5,8 +5,6 @@ import '../core/security/app_lock.dart';
 import '../core/security/device_auth.dart';
 import 'vault_provider.dart';
 
-const kNoScreenLockWarnedKey = 'zafe_no_screen_lock_warned';
-
 final deviceAuthProvider = Provider<DeviceAuth>(
   (ref) => DeviceAuth(platformAuthenticator()),
 );
@@ -16,15 +14,6 @@ final deviceAuthProvider = Provider<DeviceAuth>(
 final hasScreenLockProvider = FutureProvider.autoDispose<bool>(
   (ref) => ref.read(deviceAuthProvider).hasScreenLock(),
 );
-
-/// True the first time it's called on this install, so the "no screen lock"
-/// toast shows once; Settings keeps the permanent warning.
-Future<bool> takeNoScreenLockWarning() async {
-  final prefs = await SharedPreferences.getInstance();
-  if (prefs.getBool(kNoScreenLockWarnedKey) ?? false) return false;
-  await prefs.setBool(kNoScreenLockWarnedKey, true);
-  return true;
-}
 
 const kAppLockKey = 'zafe_app_lock';
 

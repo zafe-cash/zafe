@@ -1130,10 +1130,12 @@ Learned while studying it:
 - **Actions and feedback (2026-10-16, polish pass)**: a tap that takes a moment or can fail
   uses `core/widgets/action_button.dart` `ActionButton` (spinner inside, optional
   `busyLabel`, `doneLabel` check, shake + inline error via `zafeErrorMessage`; throw
-  `ActionCancelled` to back out silently, `UserFacingError` for app-made messages). **No
-  toasts for the result of a tap**: the screen change or the button is the feedback;
-  `CopyButton` turns its icon into a check. Toasts remain only for events not caused by a
-  tap (payment links, no screen lock, update restart), to become banners. Switches use
+  `ActionCancelled` to back out silently, `UserFacingError` for app-made messages). **There
+  are no toasts** (the widget was deleted 2026-10-16): the screen change or the button is the
+  feedback; `CopyButton`/`TxIdRow` turn their icon into a check. Events not caused by a tap (a
+  payment link expired, sync moved server, a history export failed) go to `appNoticesProvider`,
+  shown as dismissible cards by `AppNoticeCards` on Home, Welcome and Activity. Unlock failures
+  are shown by the system prompt itself. Switches use
   `AppSwitch` (with `busy`), small exclusive choices `AppSegmented` (icons). Buttons press
   to 96% (`AppButton`). Payments that need your vote open as a request
   (`PaymentRequestView`, Approve/Decline pinned; the request stays on screen through

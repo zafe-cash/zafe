@@ -14,7 +14,8 @@ import '../../core/storage/zafe_paths.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
+import '../../providers/app_notices_provider.dart';
+import '../home/home_screen.dart' show AppNoticeCards;
 import '../../providers/endpoints_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/proposals_provider.dart';
@@ -69,17 +70,15 @@ Future<void> exportHistory(BuildContext context, WidgetRef ref) async {
     } catch (_) {}
   } catch (e) {
     debugPrint('history export failed: ${describeError(e)}');
-    if (context.mounted) {
-      showAppToast(
-        context,
-        zafeErrorMessage(
-          e,
-          fallback: 'Couldn\'t export the history. Try again.',
-        ),
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
-      );
-    }
+    ref
+        .read(appNoticesProvider.notifier)
+        .show(
+          AppNotice(
+            id: 'history-export',
+            title: 'History not exported',
+            body: zafeErrorMessage(e, fallback: 'Try again.'),
+          ),
+        );
   }
 }
 
@@ -100,55 +99,54 @@ class ActivityScreen extends ConsumerWidget {
     );
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              MobileTopNav.back(
-                title: 'Activity',
-                trailing: AppButton(
-                  variant: AppButtonVariant.secondary,
-                  size: AppButtonSize.small,
-                  leading: const AppIcon(AppIcons.share, size: 16),
-                  onPressed: () => exportHistory(context, ref),
-                  child: const Text('Export'),
-                ),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            MobileTopNav.back(
+              title: 'Activity',
+              trailing: AppButton(
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.small,
+                leading: const AppIcon(AppIcons.share, size: 16),
+                onPressed: () => exportHistory(context, ref),
+                child: const Text('Export'),
               ),
-              Expanded(
-                child: MobileTopScrollFade(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(4, 12, 4, 112),
-                    children: [
-                      if (sections.isEmpty && proposals.loaded)
-                        const _EmptyCard()
-                      else if (sections.isEmpty)
-                        _MessageCard(
-                          text: proposals.error != null
-                              ? 'Couldn\'t load activity. Try again in a moment.'
-                              : 'Loading activity...',
-                          error: proposals.error != null,
-                        ),
-                      for (final (title, rows) in sections) ...[
-                        _SectionCard(
-                          title: title,
-                          children: [
-                            for (final item in rows)
-                              ActivityRow(
-                                item: item,
-                                hideAmount: hide,
-                                height: height,
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
+            ),
+            Expanded(
+              child: MobileTopScrollFade(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(4, 12, 4, 112),
+                  children: [
+                    const AppNoticeCards(gap: AppSpacing.s),
+                    if (sections.isEmpty && proposals.loaded)
+                      const _EmptyCard()
+                    else if (sections.isEmpty)
+                      _MessageCard(
+                        text: proposals.error != null
+                            ? 'Couldn\'t load activity. Try again in a moment.'
+                            : 'Loading activity...',
+                        error: proposals.error != null,
+                      ),
+                    for (final (title, rows) in sections) ...[
+                      _SectionCard(
+                        title: title,
+                        children: [
+                          for (final item in rows)
+                            ActivityRow(
+                              item: item,
+                              hideAmount: hide,
+                              height: height,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.md),
                     ],
-                  ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -19,7 +19,6 @@ import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/decimal_amount_input_formatter.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_address_verify_sheet.dart';
 import '../../core/widgets/mobile/mobile_review_row.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -371,20 +370,18 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       child: Scaffold(
         backgroundColor: colors.background.window,
         resizeToAvoidBottomInset: true,
-        body: AppToastHost(
-          child: SafeArea(
-            child: Column(
-              children: [
-                MobileTopNav.back(title: _title, onBack: _busy ? null : _back),
-                Expanded(
-                  child: switch (_step) {
-                    _Step.recipient => _recipientStep(),
-                    _Step.amount => _amountStep(),
-                    _Step.review => _reviewStep(),
-                  },
-                ),
-              ],
-            ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              MobileTopNav.back(title: _title, onBack: _busy ? null : _back),
+              Expanded(
+                child: switch (_step) {
+                  _Step.recipient => _recipientStep(),
+                  _Step.amount => _amountStep(),
+                  _Step.review => _reviewStep(),
+                },
+              ),
+            ],
           ),
         ),
       ),

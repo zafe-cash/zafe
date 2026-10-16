@@ -14,7 +14,6 @@ import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
@@ -154,13 +153,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       // Back to "New vault", filled in. With other vaults on this device, the onboarding
       // screens are shown the same way "Add vault" does.
       if (ref.read(vaultProvider).hasVault) notifier.beginAddVault();
-      if (!result.deleted) {
-        showAppToast(
-          context,
-          'Cancelled here, but the relay didn\'t confirm. The old invite may still work for a while.',
-          iconName: AppIcons.warningCircle,
-        );
-      }
       context.go('/create');
     } else {
       context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');

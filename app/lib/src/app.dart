@@ -26,8 +26,6 @@ import 'features/proposals/proposal_screen.dart';
 import 'features/proposals/sending_screen.dart';
 import 'features/receive/receive_screen.dart';
 import 'features/received/received_screen.dart';
-import 'core/widgets/app_icon.dart';
-import 'core/widgets/app_toast.dart';
 import 'features/send/payment_link.dart';
 import 'features/send/payment_request_screen.dart';
 import 'features/send/send_screen.dart';
@@ -46,6 +44,7 @@ import 'notifications/vault_updates.dart'
     show kReceivedPrefix, kSeatMovePrefix, kUnapprovedPrefix;
 import 'notifications/vault_watch.dart';
 import 'features/vaults/manage_vaults_screen.dart';
+import 'providers/app_notices_provider.dart';
 import 'providers/vault_provider.dart';
 import 'services/app_update.dart';
 import 'services/invite_links.dart';
@@ -153,27 +152,20 @@ final _routerProvider = Provider<GoRouter>((ref) {
   void openPaymentLink() {
     final link = paymentLinks.value;
     if (link == null) return;
-    void tell(String message) {
-      final context = router.routerDelegate.navigatorKey.currentContext;
-      if (context == null) return;
-      showAppToast(
-        context,
-        message,
-        iconName: AppIcons.warningCircle,
-        duration: const Duration(seconds: 4),
-      );
-    }
+    void tell(String title, String body) => ref
+        .read(appNoticesProvider.notifier)
+        .show(AppNotice(id: 'payment-link', title: title, body: body));
 
     if (paymentLinkExpired(link, DateTime.now())) {
       paymentLinks.value = null;
-      tell(kPaymentLinkExpiredMessage);
+      tell('Payment link expired', kPaymentLinkExpiredMessage);
       return;
     }
     if (ref.read(appLockedProvider)) return;
     final vaults = ref.read(vaultProvider);
     if (!vaults.vaults.any((v) => v.ready)) {
       paymentLinks.value = null;
-      tell(kPaymentLinkNoVaultMessage);
+      tell('No vault yet', kPaymentLinkNoVaultMessage);
       return;
     }
     if (vaults.isSettingUp && (vaults.membership?.sealed ?? false)) return;
@@ -194,14 +186,16 @@ final _routerProvider = Provider<GoRouter>((ref) {
   });
   // Sync moved to another listed Zcash server: say so once.
   ref.listen(serverFailoverProvider, (_, moved) {
-    final context = router.routerDelegate.navigatorKey.currentContext;
-    if (moved == null || context == null) return;
-    showAppToast(
-      context,
-      moved.message,
-      iconName: AppIcons.warningCircle,
-      duration: const Duration(seconds: 4),
-    );
+    if (moved == null) return;
+    ref
+        .read(appNoticesProvider.notifier)
+        .show(
+          AppNotice(
+            id: 'server-failover',
+            title: 'Zcash server switched',
+            body: moved.message,
+          ),
+        );
   });
   WidgetsBinding.instance.addPostFrameCallback((_) {
     void retry() => scheduleMicrotask(openPaymentLink);
