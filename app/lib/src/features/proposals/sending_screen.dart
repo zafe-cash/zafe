@@ -121,6 +121,7 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
         sent: phase == MobileTransactionProgressPhase.succeeded,
         sending: phase == MobileTransactionProgressPhase.inProgress,
       ),
+      successEffect: const CoinFountain(),
       primaryActionLabel: switch (phase) {
         MobileTransactionProgressPhase.failed when reapprove => 'Approve again',
         MobileTransactionProgressPhase.failed => 'Try again',

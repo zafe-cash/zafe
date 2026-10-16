@@ -526,8 +526,9 @@ SENT_COIN_U = (0.22, 0.48, 0.74)
 
 def sent(p, layer=None):
     """Full-page background behind the send progress screen: detail at the top and the
-    edges, the middle (status circle and text) left empty. `layer`: "bg" (all but the
-    coins) or "coin<side><k>" (one coin in its place) for the app's animation."""
+    edges, the middle (status circle and text) left empty. `layer`, for the app's
+    animation: "bg" (below the slot's light), "glow" (the light), "fore" (slot, trails,
+    sparks, ripples; no coins), "coin" (one coin on a small canvas)."""
     W, H = 1080, 2340
     rnd = random.Random(31)
     cx, cy, R = 540, -150, 600
@@ -549,7 +550,10 @@ def sent(p, layer=None):
     b.append(f'<path d="M{f(cx - (R - 70) * 0.98)} {f(cy + (R - 70) * 0.2)}A{R - 70} {R - 70} 0 0 0 {f(cx - (R - 70) * 0.6)} {f(cy + (R - 70) * 0.8)}" fill="none" stroke="{p["hi"]}" stroke-width="4" stroke-linecap="round" opacity=".6"/>')
     # the slot, light pouring out
     sy = cy + R - 150
-    b.append(f'<ellipse cx="{cx}" cy="{sy + 60}" rx="340" ry="200" fill="url(#glow)"/>')
+    slot_glow = f'<ellipse cx="{cx}" cy="{sy + 60}" rx="340" ry="200" fill="url(#glow)"/>'
+    glow_at = len(b)  # "bg" ends here, "fore" starts: the glow sits between them
+    if layer is None:
+        b.append(slot_glow)
     b.append(f'<rect x="{cx - 150}" y="{sy - 18}" width="300" height="36" rx="18" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<rect x="{cx - 128}" y="{sy - 7}" width="256" height="14" rx="7" fill="{p["gold3"]}" stroke="{p["ink"]}" stroke-width="3"/>')
     # brand member marks around the slot (the signatures that let it out)
@@ -586,6 +590,13 @@ def sent(p, layer=None):
              f'<stop offset="1" stop-color="{p["sky1"]}"/></linearGradient>'
              f'<radialGradient id="vigp" cx="50%" cy="50%" r="75%"><stop offset="60%" stop-color="{p["sky1"]}" stop-opacity="0"/>'
              f'<stop offset="100%" stop-color="{p["dot"]}" stop-opacity="{".45" if p["dark"] else ".08"}"/></radialGradient>')
+    if layer == "bg":
+        return svg(W, H, defs(p, extra) + "".join(b[:glow_at]), p["dot"])
+    if layer == "fore":
+        return svg(W, H, defs(p, extra) + "".join(b[glow_at:]), p["dot"])
+    if layer == "glow":
+        # The light from the slot, its own layer so the app can breathe and dim it.
+        return svg(W, H, defs(p, extra) + slot_glow, p["dot"])
     if layer == "coin":
         # One coin on its own small canvas (80 wide, centre 50,30): the app draws many
         # of them streaming out on "Sent!".
@@ -654,7 +665,7 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
 LAYERS = {"welcome_vault": ["bg", "boltsL", "boltsR", "door", "glow0", "glow1", "glow4", "locks",
                             "key0", "key1", "key4", "wheel", "glint", "top"],
           "key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
-          "sent_slot": ["bg", "coin"]}
+          "sent_slot": ["bg", "glow", "fore", "coin"]}
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)

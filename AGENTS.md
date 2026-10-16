@@ -762,13 +762,17 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (`key_shards`, the key screen): the shards drift, then close into the key's outline when keygen
   finishes and the backup prompt follows. They **stop short of touching** (`_gap`): the whole key
   never exists, so the art must not show it whole. Offsets are shared with `SHARD_OFFSETS`. Second:
-  `SentArt` (`sent_slot`, the sending screen's background): a stream of coins (one small `coin` layer drawn
-  many times) pours along the trails while it sends; on "Sent!" it stops pouring, coins in flight finish and
-  the last three per trail slow to their resting places (same coin, size/tilt/fade from the scene), so it reads
-  as one motion (trails shared with `SENT_TRAILS`). Since 2026-10-16 the sending part is a calm trickle and "Sent!"
-  is a surge: the slot flashes and the stream's **own clock speeds up 4x**, so every coin in the air rushes out
-  together (a separate fast burst overtook the slow coins: rejected), then the resting coins settle once the rush
-  passed them. Stream coins move at a steady speed (easing in bunched them in the slot). Third: `WelcomeArt`
+  `SentArt` (`sent_slot`, layers bg/glow/fore/coin) + `CoinFountain` (2026-10-16, after researching Google
+  Wallet's M3 payment animation, CRED's "Paid" check, Apple's motion guidance): **the climax is at the status
+  badge**, the one focal point (`MobileTransactionProgressBadge`: the sending circle squeezes, the gold circle grows
+  from the centre with a spring, the check draws in, a thin gold wave; a wide filled ripple flooded the screen and a
+  teal-to-gold colour fade went through olive). `successEffect` (the fountain) sits behind the badge: coins tumble
+  face-on (|cos| squash, small tilt: tilted perspective coins read as leaves), launched low and wide so they fall away
+  past the words, not back up into the vault. Coins on trails move with `u` **linear in time**: a quadratic curve
+  walked steadily is a true gravity arc, easing made them less physical (and bunched them in the slot). While sending,
+  the slot breathes; once sent no coin leaves, those in the air finish and the light dims. Words change after the
+  pop (`AnimatedSwitcher`, halves never overlap), in a block that never shrinks (`_KeepTallest`) so the badge never
+  moves. Review whole-screen frames: `flutter test tool/screens/sent_moment_render_test.dart`. Third: `WelcomeArt`
   (`welcome_vault`): the unlock story, 3 of 5 keys turn one by one (glows), the gold arc grows (drawn in Dart), the
   wheel spins once, the bolts slide back, a gold ripple; holds, locks again faster (the five-spoke wheel needn't
   spin back), repeats (~11 s). A 30 deg wheel nudge every 7 s went unnoticed. Waits use one cancellable `Timer`
