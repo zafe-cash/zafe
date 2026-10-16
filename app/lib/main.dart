@@ -21,6 +21,11 @@ import 'src/rust/frb_generated.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Portrait only (also set in the Android manifest and iOS Info.plist): every
+  // screen is laid out for a phone held upright.
+  unawaited(
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]),
+  );
   // Local only (Settings > Diagnostic report): nothing is uploaded.
   CrashLog.instance = CrashLog.forDir(
     (await ZafePaths.get()).diagnosticsDir,
