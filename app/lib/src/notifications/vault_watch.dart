@@ -12,6 +12,7 @@ import 'package:workmanager/workmanager.dart';
 import '../core/config/endpoints.dart';
 import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
+import '../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../core/network/tor_setting.dart';
 import '../core/storage/member_names.dart';
 import '../core/storage/vault_name.dart';
@@ -305,6 +306,16 @@ Future<void> _logBackgroundError(
   StackTrace stack,
 ) async {
   debugPrint('vault check $source failed: ${describeError(error)}');
+  // Offline, a timeout or Tor still connecting is routine for a check that runs at any
+  // time: not logged, so it can't push real errors out of the 20-entry log.
+  if (error is ZafeError &&
+      const {
+        ZafeErrorKind.network,
+        ZafeErrorKind.networkTimeout,
+        ZafeErrorKind.torConnecting,
+      }.contains(error.kind)) {
+    return;
+  }
   await CrashLog.instance?.record('background-$source', error, stack);
 }
 

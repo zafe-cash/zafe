@@ -134,8 +134,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _refresh({bool force = false}) async {
     // Proposals first: answering signing requests needs the synced tip, which the
     // previous sync already stored.
-    await ref.read(proposalsProvider.notifier).refresh();
-    await ref.read(vaultProvider.notifier).sync(force: force);
+    // Both read before the first await: Home can be gone when the refresh ends (a
+    // vault removed or switched), and `ref` must not be used after that.
+    final proposals = ref.read(proposalsProvider.notifier);
+    final vault = ref.read(vaultProvider.notifier);
+    await proposals.refresh();
+    if (!mounted) return;
+    await vault.sync(force: force);
   }
 
   @override
