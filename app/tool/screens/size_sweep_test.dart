@@ -19,6 +19,7 @@ import 'package:zafe/src/core/widgets/confirm_option.dart';
 import 'package:zafe/src/core/widgets/mobile/mobile_list_row.dart';
 import 'package:zafe/src/core/widgets/mobile/zafe_detail.dart';
 import 'package:zafe/src/core/widgets/mobile_text_field.dart';
+import 'package:zafe/src/features/home/needs_you.dart' show RequestCard;
 import 'package:zafe/src/features/home/home_screen.dart'
     show BalanceCard, NoticeCard;
 import 'package:zafe/src/features/onboarding/setup_screen.dart';
@@ -223,6 +224,31 @@ final _cases = <(String, String?, Widget)>[
         isCoinbase: false,
       ),
       onTap: _noop,
+    ),
+  ),
+  (
+    'request_cards',
+    'Home',
+    const Column(
+      children: [
+        RequestCard(
+          tileKey: _key,
+          who: 'd05aee...bd79',
+          amount: '0.8',
+          detail: 'Printer ink',
+          action: 'Approve or decline',
+          onTap: _noop,
+        ),
+        SizedBox(height: 12),
+        RequestCard(
+          tileKey: _key2,
+          who: 'Treasurer Alice',
+          amount: '12,450.25',
+          detail: 'Q4 grants round, second tranche',
+          action: 'Send now',
+          onTap: _noop,
+        ),
+      ],
     ),
   ),
   (

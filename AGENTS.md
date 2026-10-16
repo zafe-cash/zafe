@@ -1133,7 +1133,9 @@ Learned while studying it:
   "Later" just leaves.
 - **Needs you** (Home, 2026-10-16, `features/home/needs_you.dart`): payments where `needsMyAction`
   (`proposal_status.dart`; the same rule counts notifications) and seat moves this member can approve, as
-  `RequestCard`s (proposer tile, name, message or "Ready to send", amount, a Review/Send/Check pill) in an
+  `RequestCard`s (amount first with a gold ticker, then who and the message; a tonal full-width button
+  naming the decision: "Approve or decline" opens the request, never approves from Home since the card
+  lacks the address; "Send now" sends after the unlock; "Compare safety words" for seat moves) in an
   `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms), above every notice except "Money left
   without approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
   wants attention asked for only when the member must act.
@@ -1533,7 +1535,7 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   re-run regtest/bridge e2e (`ths` must run NU7) and the testnet end-to-end send, then ship a mainnet release
   that users install before activation. Until then testnet sends can't be tested; use regtest.
 
-- **NU7 port (branch `nu7-migration`, 2026-10-12; not on `main` yet)**: orchard 0.16, pczt 0.10.0-pre.1,
+- **NU7 port (branch `nu7-migration`, 2026-10-12; merged into `main` as 91d600f)**: orchard 0.16, pczt 0.10.0-pre.1,
   zcash_primitives 0.31.0-pre.1, zcash_protocol 0.11.0-pre.0, zcash_keys 0.17.0-pre.1, zcash_client_backend
   0.25.0-pre.1, zcash_client_sqlite 0.23.0-pre.1, zip321 0.10.0-pre.1, zcash_address 0.14.0-pre.1,
   incrementalmerkletree 0.9, shardtree 0.8. These carry the real NU7 branch id `0x77190AD9` and testnet height

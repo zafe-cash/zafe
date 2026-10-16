@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,7 +9,9 @@ import '../../core/formatting/member_label.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/security/unlock_gate.dart';
 import '../../core/widgets/animated_keyed_column.dart';
+import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile/zafe_detail.dart';
@@ -43,13 +47,18 @@ class NeedsYou extends ConsumerWidget {
                 ? null
                 : hide
                 ? fixedPrivacyMask(length: 3)
-                : '${ZecAmount.fromZatoshi(p.totalZat).activity.amountText} '
-                      '$kZcashDefaultCurrencyTicker',
-            detail: p.stage == rust.ProposalStage.approved
-                ? 'Ready to send · ${_detail(p, height)}'
-                : _detail(p, height),
-            action: p.stage == rust.ProposalStage.approved ? 'Send' : 'Review',
+                : ZecAmount.fromZatoshi(p.totalZat).activity.amountText,
+            detail: _detail(p, height),
             onTap: () => context.push('/proposal/${p.id}'),
+            // A vote opens the request (recipient and this phone's check come first);
+            // a payment with every approval is sent right away, after the unlock.
+            action: p.stage == rust.ProposalStage.approved && !p.needsReapproval
+                ? 'Send now'
+                : 'Approve or decline',
+            onAction:
+                p.stage == rust.ProposalStage.approved && !p.needsReapproval
+                ? () => _send(context, ref, p.id)
+                : () => context.push('/proposal/${p.id}'),
           ),
       for (final m in proposals.seatMoves)
         if (m.oldKeyHex != me && !m.approvals.contains(me))
@@ -59,7 +68,7 @@ class NeedsYou extends ConsumerWidget {
             who: memberLabel(m.oldKeyHex, me: me, names: names),
             detail:
                 'Moving to a new phone · ${m.approvals.length} of ${m.needed} approved',
-            action: 'Check',
+            action: 'Compare safety words',
             onTap: () =>
                 context.push('/replace-signer', extra: (m.oldKeyHex, m.code)),
           ),
@@ -95,6 +104,17 @@ class NeedsYou extends ConsumerWidget {
     );
   }
 
+  /// "Send now" from Home: nothing is left to decide, so after the unlock it sends and
+  /// shows the sending screen.
+  static Future<void> _send(
+    BuildContext context,
+    WidgetRef ref,
+    String id,
+  ) async {
+    if (!await confirmUnlock(context, ref, reason: 'Send this payment')) return;
+    if (context.mounted) unawaited(context.push('/proposal/$id/send'));
+  }
+
   /// The message, else the recipient; with "expires in ..." when under a day is left.
   static String _detail(rust.ProposalInfo p, int? height) {
     final payment = p.payments.isEmpty ? null : p.payments.first;
@@ -113,8 +133,10 @@ class NeedsYou extends ConsumerWidget {
   }
 }
 
-/// One request: who it's from, a detail line (the message, or what is asked), and on
-/// the right the amount above a small pill naming the action. The whole card opens it.
+/// One request: who it's from, a detail line (the message, or what is asked) and the
+/// amount, then a button naming the decision across the card (tonal, so several cards
+/// don't drown out the screen's main action). The card itself opens the payment;
+/// [onAction] defaults to the same.
 class RequestCard extends StatelessWidget {
   const RequestCard({
     super.key,
@@ -124,15 +146,19 @@ class RequestCard extends StatelessWidget {
     required this.detail,
     required this.action,
     required this.onTap,
+    this.onAction,
   });
 
   /// Key hex the signer tile is drawn from.
   final String tileKey;
   final String who;
+
+  /// Without the ticker ("0.8"); the card adds it.
   final String? amount;
   final String detail;
   final String action;
   final VoidCallback onTap;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -141,68 +167,78 @@ class RequestCard extends StatelessWidget {
       color: colors.text.accent,
       fontWeight: FontWeight.w600,
     );
-    return AppTappable(
-      onTap: onTap,
-      semanticsLabel:
-          '$who${amount == null ? '' : ', $amount'}. $detail. $action',
-      child: MobileSurfaceCard(
-        cornerRadius: AppRadii.large,
-        padding: const EdgeInsets.all(AppSpacing.s),
-        child: Row(
-          children: [
-            SignerTile(keyHex: tileKey, size: 40),
-            const SizedBox(width: AppSpacing.s),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    who,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: strong,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    detail,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTypography.bodySmall.copyWith(
-                      color: colors.text.secondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: AppSpacing.s),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+    return MobileSurfaceCard(
+      cornerRadius: AppRadii.large,
+      padding: const EdgeInsets.all(AppSpacing.s),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppTappable(
+            onTap: onTap,
+            semanticsLabel: '${amount == null ? '' : '$amount. '}$who. $detail',
+            child: Row(
               children: [
-                if (amount != null) ...[
-                  Text(amount!, style: strong),
-                  const SizedBox(height: AppSpacing.xxs),
-                ],
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.s,
-                    vertical: AppSpacing.xxs,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colors.button.primary.bg,
-                    borderRadius: BorderRadius.circular(AppRadii.full),
-                  ),
-                  child: Text(
-                    action,
-                    style: AppTypography.labelMedium.copyWith(
-                      color: colors.button.primary.label,
-                      fontWeight: FontWeight.w600,
-                    ),
+                SignerTile(keyHex: tileKey, size: 40),
+                const SizedBox(width: AppSpacing.s),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // The amount leads (what is asked); who and why under it.
+                      if (amount == null)
+                        Text(
+                          who,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: strong,
+                        )
+                      else
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(text: amount),
+                              TextSpan(
+                                text: ' $kZcashDefaultCurrencyTicker',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: colors.text.value,
+                                ),
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: strong.copyWith(
+                            fontFamily: 'Space Grotesk',
+                            fontSize: 18,
+                          ),
+                        ),
+                      const SizedBox(height: 2),
+                      Text(
+                        amount == null ? detail : '$who · $detail',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.bodySmall.copyWith(
+                          color: colors.text.secondary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.s),
+          AppButton(
+            expand: true,
+            size: AppButtonSize.medium,
+            enabledBackgroundColor: colors.background.brandAlpha,
+            enabledLabelColor: colors.text.brand,
+            enabledBorderColor: const Color(0x00000000),
+            onPressed: onAction ?? onTap,
+            child: Text(action),
+          ),
+        ],
       ),
     );
   }
