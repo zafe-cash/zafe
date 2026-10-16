@@ -1,7 +1,10 @@
 """Promotes a build from Google Play's internal track to production, with its in-app update
 priority and notes. Run by .github/workflows/play-promote.yml; never by hand.
 
-    PLAY_KEY=<service account JSON> python3 scripts/play_promote.py <version> <rollout percent>
+    PLAY_KEY=<service account JSON> python3 scripts/play_promote.py <version> <rollout percent> [--dry-run]
+
+--dry-run does everything but the change: it opens an edit, reads the tracks, finds the
+build, then deletes the edit (a check that the key and its Play permissions work).
 
 The build is the internal-track release named <version> (release-mainnet.yml uploads each
 mainnet tag there under that name), so production only ever gets a bundle that was tested
@@ -44,8 +47,9 @@ def release_file(version):
 
 
 def main():
-    if len(sys.argv) != 3 or not re.fullmatch(r"\d+\.\d+\.\d+", sys.argv[1]):
-        fail("usage: play_promote.py <version like 1.2.3> <rollout percent>")
+    dry = "--dry-run" in sys.argv[3:]
+    if len(sys.argv) not in (3, 4) or not re.fullmatch(r"\d+\.\d+\.\d+", sys.argv[1]):
+        fail("usage: play_promote.py <version like 1.2.3> <rollout percent> [--dry-run]")
     version, percent = sys.argv[1], float(sys.argv[2])
     if not 0 < percent <= 100:
         fail("rollout percent must be in (0, 100]")
@@ -83,6 +87,13 @@ def main():
         release["status"] = "completed"
     else:
         release.update(status="inProgress", userFraction=percent / 100)
+    if dry:
+        production = call("GET", f"/edits/{edit}/tracks/production")
+        call("DELETE", f"/edits/{edit}")
+        live = [(r.get("name"), r.get("status")) for r in production.get("releases", [])]
+        print(f"dry run: would promote {version} (codes {', '.join(codes)}), {cls}, priority "
+              f"{priority}, {percent:g}%; production now {live}; edit discarded")
+        return
     call("PUT", f"/edits/{edit}/tracks/production",
          json={"track": "production", "releases": [release]})
     call("POST", f"/edits/{edit}:commit")

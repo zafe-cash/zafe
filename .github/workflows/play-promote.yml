@@ -22,6 +22,11 @@ on:
         required: false
         default: "100"
         type: string
+      dry_run:
+        description: "Only check the key, permissions and build; change nothing"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -42,7 +47,8 @@ jobs:
           PLAY_KEY: ${{ secrets.PLAY_PRODUCTION_SERVICE_ACCOUNT_JSON }}
           VERSION: ${{ inputs.version }}
           PERCENT: ${{ inputs.rollout_percent }}
+          DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
         run: |
           [ -n "$PLAY_KEY" ] || { echo "::error::No PLAY_PRODUCTION_SERVICE_ACCOUNT_JSON in play-production"; exit 1; }
           python3 -m pip install --quiet google-auth==2.35.0 requests==2.32.3
-          python3 scripts/play_promote.py "$VERSION" "$PERCENT"
+          python3 scripts/play_promote.py "$VERSION" "$PERCENT" $DRY
