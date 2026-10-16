@@ -29,14 +29,23 @@ class _Privacy extends PrivacyModeNotifier {
   bool build() => false;
 }
 
+/// Whether Home is the visible tab (other tabs mute its tickers).
+final _visible = ValueNotifier(true);
+
 Future<List<String>> _pump(WidgetTester tester, int n) async {
   final opened = <String>[];
   final router = GoRouter(
     routes: [
       GoRoute(
         path: '/',
-        builder: (_, _) => Scaffold(
-          body: SingleChildScrollView(child: const NeedsYou(height: 100)),
+        builder: (_, _) => ValueListenableBuilder(
+          valueListenable: _visible,
+          builder: (_, visible, _) => TickerMode(
+            enabled: visible,
+            child: const Scaffold(
+              body: SingleChildScrollView(child: NeedsYou(height: 100)),
+            ),
+          ),
         ),
       ),
       GoRoute(
@@ -97,5 +106,17 @@ void main() {
     await tester.tap(find.textContaining('1.5').first);
     await tester.pumpAndSettle();
     expect(opened, hasLength(1));
+  });
+
+  testWidgets('switching to another tab folds the stack', (tester) async {
+    await _pump(tester, 3);
+    await tester.tap(find.textContaining('1.5').first);
+    await tester.pumpAndSettle();
+    expect(find.text('3 waiting'), findsNothing);
+    _visible.value = false;
+    await tester.pumpAndSettle();
+    _visible.value = true;
+    await tester.pumpAndSettle();
+    expect(find.text('3 waiting'), findsOneWidget);
   });
 }

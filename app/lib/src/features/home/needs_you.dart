@@ -108,6 +108,14 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
   bool _open = false;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Home stays mounted behind the other tabs (their tickers are muted): leaving it
+    // folds the stack, so it's tidy on the way back.
+    if (!TickerMode.valuesOf(context).enabled) _open = false;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final height = widget.height;
     final colors = context.colors;
