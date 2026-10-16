@@ -778,7 +778,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   door (`WelcomeDoorTap`, a translucent target above the screen's scroll view, which otherwise takes every touch;
   haptic tick per key, a firmer one at the bolts; never haptics without a touch). Keys and wheel use `_WindUp`
   (a little the other way, then the move with an overshoot), the bolts snap, the door settles with a small shake and
-  a gold ripple; once open a faint gleam (a wide soft band, peak 8% dark / 16% light, added light) crosses the door in 4.5 s every 7 s; the user found 20%/42% and 2.6 s too bright and fast. The hero's gradient overlay is `IgnorePointer`.
+  a gold ripple; once open the gold **blooms in place** (0.9 s up, 0.8 s held, 0.6 s down, every 4.6 s; ~15% brighter at the peak, measured), matched to Vizor's welcome video, whose chest glow is ~2.3 s of light every 3.8 s at +21% (measured from `assets/animations/mobile_welcome.mp4`). A band sweeping across the door felt fast and loud even at 4.5 s / 8%: moving light reads faster than light that swells. The hero's gradient overlay is `IgnorePointer`.
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
   full-page background (`SentArt`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":

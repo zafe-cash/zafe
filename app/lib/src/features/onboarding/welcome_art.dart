@@ -52,9 +52,8 @@ class _WindUp extends Curve {
 /// three of five keys turn, each with a little wind-up, the gold arc joining them
 /// grows, the heavy wheel spins a full turn, the bolts slide back and the door settles
 /// with a gold ripple. It plays once when the screen appears (and when it comes back);
-/// tapping the door plays it again, with a haptic tick per key. Once open, a slow gleam
-/// sweeps across the door, over and over, lighting the gold arc as it passes. Reduced
-/// motion: the door open, still.
+/// tapping the door plays it again, with a haptic tick per key. Once open, the gold
+/// swells with light and settles, over and over. Reduced motion: the door open, still.
 class WelcomeArt extends StatefulWidget {
   const WelcomeArt({super.key, this.replay});
 
@@ -75,13 +74,23 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
     reverseDuration: const Duration(milliseconds: 500),
   );
 
-  /// Once open: a slow, faint gleam across the door, over and over (one cycle: 4.5 s
-  /// of light crossing, then a 2.5 s rest).
+  /// Once open: the gold swells with light in place and settles, over and over
+  /// (Vizor's welcome hero does the same over its treasure: ~2.3 s of light every
+  /// 3.8 s). One cycle: 0.9 s up, 0.8 s held, 0.6 s down, 2.3 s rest.
   late final AnimationController _shine = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 7000),
+    duration: const Duration(milliseconds: 4600),
   );
-  static const _gleam = 0.64; // share of a cycle the light is crossing
+
+  /// 0-1 light of the bloom now.
+  double get _bloom {
+    final s = _shine.value * 4.6;
+    if (s < 0.9) return Curves.easeOutSine.transform(s / 0.9);
+    if (s < 1.7) return 1;
+    if (s < 2.3) return 1 - Curves.easeInSine.transform((s - 1.7) / 0.6);
+    return 0;
+  }
+
   Timer? _startTimer;
 
   /// Locking again (before a replay) runs the unlock backwards, quickly, except the
@@ -247,11 +256,7 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
                       door,
                       CustomPaint(
                         size: const Size(1080, 1240),
-                        painter: _ArcPainter(
-                          arc,
-                          click,
-                          (_shine.value / _gleam).clamp(0.0, 1.0),
-                        ),
+                        painter: _ArcPainter(arc, click, _bloom),
                       ),
                       for (var i = 0; i < _keys.length; i++)
                         Opacity(
@@ -274,8 +279,8 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
                       glint,
                       CustomPaint(
                         size: const Size(1080, 1240),
-                        painter: _SheenPainter(
-                          (_shine.value / _gleam).clamp(0.0, 1.0),
+                        painter: _BloomPainter(
+                          _bloom,
                           identical(context.colors, AppColors.dark),
                         ),
                       ),
@@ -324,8 +329,7 @@ class WelcomeDoorTap extends StatelessWidget {
 }
 
 /// The gold arc joining the turned keys grown to `progress`, the "unlocked" ripple at
-/// `click` (0 and 1: none), and a light running along the arc at `shine` (0 and 1:
-/// none).
+/// `click` (0 and 1: none), and the arc warming with the bloom at `shine` (0-1).
 class _ArcPainter extends CustomPainter {
   _ArcPainter(this.progress, this.click, this.shine);
   final double progress, click, shine;
@@ -355,28 +359,20 @@ class _ArcPainter extends CustomPainter {
         ..strokeWidth = 10
         ..strokeCap = StrokeCap.round,
     );
-    if (shine > 0 && shine < 1 && progress >= 1) {
-      // A short bright segment travelling the arc, fading in and out.
-      final e = Curves.easeInOutSine.transform(shine);
-      const length = 0.24;
-      final at = -length + (1 + length) * e;
-      final from = at.clamp(0.0, 1.0), to = (at + length).clamp(0.0, 1.0);
-      if (to > from) {
-        canvas.drawArc(
-          rect,
-          _arcStart + _arcSweep * from,
-          _arcSweep * (to - from),
-          false,
-          Paint()
-            ..color = const Color(
-              0xFFFFF6DC,
-            ).withValues(alpha: 0.55 * math.sin(shine * math.pi))
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 9
-            ..strokeCap = StrokeCap.round
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-        );
-      }
+    if (shine > 0 && progress >= 1) {
+      // The whole arc warms with the bloom, in place.
+      canvas.drawArc(
+        rect,
+        _arcStart,
+        _arcSweep,
+        false,
+        Paint()
+          ..color = const Color(0xFFFFF0C2).withValues(alpha: 0.5 * shine)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 8
+          ..strokeCap = StrokeCap.round
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
+      );
     }
   }
 
@@ -385,53 +381,36 @@ class _ArcPainter extends CustomPainter {
       old.progress != progress || old.click != click || old.shine != shine;
 }
 
-/// A soft band of light sweeping diagonally across the door (clipped to its frame), at
-/// `t` (0 and 1: outside the door). Added light, so the metal and the gold gleam.
-class _SheenPainter extends CustomPainter {
-  _SheenPainter(this.t, this.dark);
-  final double t;
+/// The bloom: warm light swelling over the gold, around the three keys and the arc
+/// (added light, so the gold and the metal under it brighten), at `light` 0-1.
+class _BloomPainter extends CustomPainter {
+  _BloomPainter(this.light, this.dark);
+  final double light;
   final bool dark;
-
-  static const _door = 368.0; // the frame ring's outer radius
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (t <= 0 || t >= 1) return;
-    final e = Curves.easeInOutSine.transform(t);
-    canvas.save();
-    canvas.clipPath(
-      Path()..addOval(Rect.fromCircle(center: _centre, radius: _door)),
-    );
-    // From the upper left to the lower right, tilted 30 degrees.
-    const band = 440.0;
-    final reach = _door + band;
-    final along = -reach + 2 * reach * e;
-    final dir = Offset(math.cos(math.pi / 6), math.sin(math.pi / 6));
-    final c = _centre + dir * along;
-    final from = c - dir * band / 2, to = c + dir * band / 2;
-    // Faint: noticed, not shouted (0.2 / 0.42 read as a flash).
-    final peak = dark ? 0.08 : 0.16;
-    canvas.drawRect(
-      Rect.fromCircle(center: _centre, radius: _door),
-      Paint()
-        ..blendMode = BlendMode.plus
-        ..shader = ui.Gradient.linear(
-          from,
-          to,
-          // A soft band with a brighter core, like light on polished metal.
-          [
-            const Color(0x00FFF4DA),
-            const Color(0xFFFFF4DA).withValues(alpha: peak * 0.55),
-            const Color(0xFFFFF4DA).withValues(alpha: peak * 1.25),
-            const Color(0xFFFFF4DA).withValues(alpha: peak * 0.55),
-            const Color(0x00FFF4DA),
-          ],
-          [0, 0.38, 0.5, 0.62, 1],
-        ),
-    );
-    canvas.restore();
+    if (light <= 0) return;
+    // Between Zafe's faint gleam and Vizor's chest glow (21% brighter at its peak).
+    // Measured: 0.16 brightened the upper door 30% at its peak; this is ~15%.
+    final peak = (dark ? 0.08 : 0.12) * light;
+    final glow = Paint()..blendMode = BlendMode.plus;
+    void bloomAt(Offset c, double r, double a) {
+      glow.shader = ui.Gradient.radial(c, r, [
+        const Color(0xFFFFE7A8).withValues(alpha: a),
+        const Color(0x00FFE7A8),
+      ]);
+      canvas.drawCircle(c, r, glow);
+    }
+
+    // Over the upper door, where the arc runs, and a brighter heart at each key.
+    bloomAt(_centre - const Offset(0, 120), 360, peak * 0.7);
+    for (final k in _keys) {
+      bloomAt(_keyAt(k), 140, peak);
+    }
   }
 
   @override
-  bool shouldRepaint(_SheenPainter old) => old.t != t || old.dark != dark;
+  bool shouldRepaint(_BloomPainter old) =>
+      old.light != light || old.dark != dark;
 }
