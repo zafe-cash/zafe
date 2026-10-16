@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../core/formatting/member_label.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/animated_keyed_column.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_loading_icon.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -137,11 +138,12 @@ class ProposalTimeline extends StatelessWidget {
     );
     return MobileSurfaceCard(
       cornerRadius: AppRadii.large,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      // A vote that arrives while the page is open grows in as a new step.
+      child: AnimatedKeyedColumn(
         children: [
           for (var i = 0; i < steps.length; i++)
             IntrinsicHeight(
+              key: ValueKey('${steps[i].state}:${steps[i].title}'),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

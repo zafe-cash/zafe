@@ -207,27 +207,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 64 + 48),
                   children: [
-                    BalanceCard(
-                      totalZat: vault.balance?.totalZat,
-                      // The total includes money still confirming: what's pending
-                      // shows in the activity rows, not on the card.
-                      fiatText: vault.balance == null
-                          ? null
-                          : fiatText(
-                              vault.balance!.totalZat,
-                              ref.watch(zecPriceProvider),
-                            ),
-                      confirmingText: _confirmingText(
-                        vault.balance,
-                        hide: ref.watch(privacyModeProvider),
+                    CountUp(
+                      value: vault.balance?.totalZat,
+                      builder: (shown) => BalanceCard(
+                        totalZat: shown,
+                        // The total includes money still confirming: what's pending
+                        // shows in the activity rows, not on the card.
+                        fiatText: vault.balance == null
+                            ? null
+                            : fiatText(
+                                vault.balance!.totalZat,
+                                ref.watch(zecPriceProvider),
+                              ),
+                        confirmingText: _confirmingText(
+                          vault.balance,
+                          hide: ref.watch(privacyModeProvider),
+                        ),
+                        hidden: ref.watch(privacyModeProvider),
+                        threshold: summary.threshold,
+                        members: summary.members.length,
+                        onToggle: () {
+                          AppHaptics.privacyToggle();
+                          ref.read(privacyModeProvider.notifier).toggle();
+                        },
                       ),
-                      hidden: ref.watch(privacyModeProvider),
-                      threshold: summary.threshold,
-                      members: summary.members.length,
-                      onToggle: () {
-                        AppHaptics.privacyToggle();
-                        ref.read(privacyModeProvider.notifier).toggle();
-                      },
                     ),
                     const SizedBox(height: AppSpacing.s),
                     // Only once the balance is known: while it loads, a vault with
@@ -382,6 +385,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ),
     );
   }
+}
+
+/// Rolls a balance up to its new value when it grows (money arrived): 900 ms, easing
+/// out, from the old value. Decreases and the first value show at once, as does
+/// everything with reduced motion.
+class CountUp extends StatefulWidget {
+  const CountUp({super.key, required this.value, required this.builder});
+  final BigInt? value;
+  final Widget Function(BigInt? shown) builder;
+
+  @override
+  State<CountUp> createState() => _CountUpState();
+}
+
+class _CountUpState extends State<CountUp> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+  BigInt? _from;
+
+  @override
+  void didUpdateWidget(CountUp old) {
+    super.didUpdateWidget(old);
+    final before = old.value, now = widget.value;
+    if (before != null &&
+        now != null &&
+        now > before &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _from = _shown(old.value);
+      _c.forward(from: 0);
+    }
+  }
+
+  BigInt? _shown(BigInt? target) {
+    final from = _from;
+    if (target == null || from == null || !_c.isAnimating) return target;
+    final t = Curves.easeOutCubic.transform(_c.value);
+    final delta = (target - from).toDouble() * t;
+    return from + BigInt.from(delta.round());
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _c,
+    builder: (context, _) => widget.builder(_shown(widget.value)),
+  );
 }
 
 /// Zafe's vault card: the balance on the vault card (`colors.vaultCard`: ink in dark
