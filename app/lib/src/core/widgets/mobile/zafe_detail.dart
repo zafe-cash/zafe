@@ -388,28 +388,24 @@ class DetailRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // The label and its help icon stay together on the left (as the value and
+          // its icon do on the right).
           Flexible(
             flex: 2,
-            child: Text(
-              label,
-              style: AppTypography.labelLarge.copyWith(
-                color: colors.text.secondary,
-              ),
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    style: AppTypography.labelLarge.copyWith(
+                      color: colors.text.secondary,
+                    ),
+                  ),
+                ),
+                ?help,
+              ],
             ),
           ),
-          if (onHelp != null)
-            AppTappable(
-              onTap: onHelp,
-              semanticsLabel: 'What is "$label"?',
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xxs),
-                child: AppIcon(
-                  AppIcons.help,
-                  size: 16,
-                  color: colors.icon.muted,
-                ),
-              ),
-            ),
           const SizedBox(width: AppSpacing.sm),
           // The value and its icon sit together at the right edge (spread apart by
           // spaceBetween, a value with an icon floated mid-row).
