@@ -890,6 +890,11 @@ fn local_tip(
     lightwalletd_url: &str,
     m: &VaultMaterial,
 ) -> Result<u32, ZafeError> {
+    // The last sync's height when this process has one (see `vault::synced_tip`):
+    // opening the wallet waits for any sync holding it.
+    if let Some(tip) = super::vault::synced_tip(&m.descriptor.vault_id) {
+        return Ok(tip);
+    }
     let _guard = wallet_lock();
     let wallet = runtime().block_on(open_wallet(db_dir, db_key, lightwalletd_url, m))?;
     wallet
@@ -910,10 +915,16 @@ pub fn review_proposal(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
+    let mut watch = crate::diag::Stopwatch::new("review");
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
+    watch.lap("tip");
     let (_, state) =
         runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
-    match node::review(&state, &m, &net, tip, id) {
+    watch.lap("log");
+    let reviewed = node::review(&state, &m, &net, tip, id);
+    watch.lap("check");
+    watch.finish();
+    match reviewed {
         Ok(v) => Ok(ReviewInfo {
             verified: true,
             problem: String::new(),
@@ -969,7 +980,13 @@ pub fn approve_proposal(
     // Timed per step (diagnostic report, "Slow steps"): `lock` is the wait for a sync
     // holding the wallet, `tip` the chain height read, then the core's steps.
     let mut watch = crate::diag::Stopwatch::new("approve");
-    let tip = {
+    // The height the last sync stored, when there is one (see `vault::synced_tip`);
+    // otherwise read it from the wallet, waiting for a sync that holds it.
+    let cached = super::vault::synced_tip(&m.descriptor.vault_id);
+    let tip = if let Some(tip) = cached {
+        watch.lap("tip");
+        tip
+    } else {
         let _guard = wallet_lock();
         watch.lap("lock");
         let wallet = runtime().block_on(open_wallet(&db_dir, &db_key, &lightwalletd_url, &m))?;
@@ -1101,6 +1118,28 @@ pub fn restart_signing(state_dir: String, proposal_id: String) -> Result<(), Zaf
     Ok(())
 }
 
+/// A payment this phone just sent: store it in the wallet as unmined, so the balance
+/// stops counting the notes it spent and shows its change as pending. Block sync only sees
+/// it once mined, a minute or more later, and Home read "Sent" over the old balance until
+/// then. The same store the mempool watch uses; best effort (the next sync catches up).
+fn store_own_send(db_dir: &str, db_key: &[u8], m: &VaultMaterial, tip: u32, raw: &[u8]) {
+    let (Ok(net), Ok(key)) = (
+        network(&m.descriptor.network),
+        super::vault::wallet_key(db_key),
+    ) else {
+        return;
+    };
+    let Some(tx) = zafe_core::mempool::parse_mempool_tx(&net, tip, raw) else {
+        return;
+    };
+    let _guard = wallet_lock();
+    if let Ok(mut wallet) = VaultWallet::open(&super::vault::wallet_path(db_dir, m), &key, net) {
+        if let Err(e) = wallet.store_mempool_tx(&tx) {
+            eprintln!("storing the sent payment: {e}");
+        }
+    }
+}
+
 /// Builds the proving and verifying keys now (seconds on a phone, then kept for the
 /// process), so sending an approved payment starts proving at once. Returns when built.
 pub fn prewarm_prover() {
@@ -1226,13 +1265,16 @@ pub fn send_with_progress(
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
     let relay = RelayClient::pooled(relay_url);
+    let mut watch = crate::diag::Stopwatch::new("send");
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
+    watch.lap("tip");
     let req_path = request_file(&state_dir, &id);
     let silent = node::SilentSigners::at(leader_dir(&state_dir).join(state_dir::SILENT_SIGNERS));
     let io = |e: std::io::Error| ZafeError::new(ZafeErrorKind::Other, e.to_string());
 
     // One tap: the approvals already carry every signature; aggregate and send alone.
     let (_, state) = runtime().block_on(node::load_state(&relay, &me, &m))?;
+    watch.lap("log");
     // Already sent by another member, or by this app's other process (a background check
     // finishing an auto-send while the app sent it too): nothing left to do.
     if let Some(p) = state.proposals.get(&id) {
@@ -1263,9 +1305,14 @@ pub fn send_with_progress(
                     node::send_ready(&relay, &me, &m, &net, tip, id, &mut client, &mut OsRng)
                         .await?;
                 sent_txs(&db_dir, &m).put(&sent);
-                sent.txid
+                sent
             })
         })?;
+        watch.lap("prove+broadcast");
+        store_own_send(&db_dir, &db_key, &m, tip, &txid.raw);
+        watch.lap("store");
+        watch.finish();
+        let txid = txid.txid;
         let mut display = txid;
         display.reverse();
         on_progress(SendProgress {
@@ -1378,6 +1425,7 @@ pub fn send_with_progress(
             Err(e) => return Err(e.into()),
         };
         sent_txs(&db_dir, &m).put(&sent);
+        store_own_send(&db_dir, &db_key, &m, tip, &sent.raw);
         let txid = sent.txid;
         let _ = fs::remove_file(&req_path);
         let _ = fs::remove_file(&own_path);

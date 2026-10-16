@@ -210,6 +210,9 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     );
     if (cancel != true || !mounted) throw const ActionCancelled();
     await ref.read(proposalsProvider.notifier).cancel(widget.id);
+    // Leave from here, not from the button's onDone: cancelling refreshes the payment,
+    // the page rebuilds as "Cancelled" without this button, and its onDone never ran.
+    if (mounted) _leave();
   }
 
   /// The unlock prompt before an action; backing out cancels it quietly.
@@ -474,7 +477,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
               label: 'Cancel payment',
               variant: AppButtonVariant.ghost,
               onPressed: () => _cancel(p),
-              onDone: _leave,
             ),
           ],
         ],
@@ -513,7 +515,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
           label: 'Cancel payment',
           variant: AppButtonVariant.ghost,
           onPressed: () => _cancel(p),
-          onDone: _leave,
         ),
       ],
     ];

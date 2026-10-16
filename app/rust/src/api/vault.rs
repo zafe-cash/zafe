@@ -364,6 +364,24 @@ pub(crate) fn note_count(vault_id: &[u8; 16]) -> Option<usize> {
     NOTE_COUNTS.lock().ok()?.get(vault_id).copied()
 }
 
+/// Each vault's wallet chain height as of this process's last sync, so approving can
+/// check a payment's expiry without opening the wallet: that took the wallet lock and
+/// waited for any sync in progress (2.3 s on a phone, right after proposing). A height a
+/// few seconds old only narrows what is accepted (the upper expiry bound) or signs a
+/// payment a block past expiry, which can't be mined.
+static SYNCED_TIPS: std::sync::Mutex<std::collections::BTreeMap<[u8; 16], u32>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+pub(crate) fn synced_tip(vault_id: &[u8; 16]) -> Option<u32> {
+    SYNCED_TIPS.lock().ok()?.get(vault_id).copied()
+}
+
+pub(crate) fn record_synced_tip(vault_id: [u8; 16], tip: u32) {
+    if let Ok(mut tips) = SYNCED_TIPS.lock() {
+        tips.insert(vault_id, tip);
+    }
+}
+
 pub(crate) fn wallet_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|p| p.into_inner())
@@ -502,6 +520,9 @@ pub fn sync_vault(
         let b = wallet.balance()?;
         if let (Ok(n), Ok(mut counts)) = (wallet.unspent_note_count(), NOTE_COUNTS.lock()) {
             counts.insert(m.descriptor.vault_id, n);
+        }
+        if let Ok(Some(h)) = wallet.chain_height() {
+            record_synced_tip(m.descriptor.vault_id, h);
         }
         watch.lap("balance");
         // Before the vault's birthday block exists the wallet has no chain height yet.

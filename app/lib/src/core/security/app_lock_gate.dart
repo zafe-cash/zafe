@@ -57,7 +57,10 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _cover(state != AppLifecycleState.resumed);
+    // Not for our own unlock prompt: it makes the app inactive for a moment, and the
+    // cover then showed for a frame as the prompt closed (before `resumed` arrived).
+    // The recent-apps card stays blank anyway (no recents screenshot, MainActivity).
+    _cover(state != AppLifecycleState.resumed && !DeviceAuth.prompting);
     switch (state) {
       case AppLifecycleState.hidden || AppLifecycleState.paused:
         if (_awaySince == null) {

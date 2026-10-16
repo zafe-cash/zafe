@@ -240,16 +240,22 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     }
   }
 
-  /// Once any payment is approved, this device may be the one to send it: build the
-  /// proving key in the background (once per process) so the send doesn't wait for it.
+  /// Once this device may be the one to send a payment, build the proving key in the
+  /// background (once per process, 2-3 s on a phone) so the send doesn't wait for it:
+  /// a payment that is approved, or one waiting only for this member's approval (the
+  /// approval completes it and this phone sends at once; it used to build the key
+  /// during that send).
   void _prewarm() {
     if (_prewarmed) return;
-    final approved = state.items.any(
+    final sendable = state.items.any(
       (p) =>
-          p.stage == rust.ProposalStage.approved &&
-          !proposalExpired(p, _height),
+          !proposalExpired(p, _height) &&
+          (p.stage == rust.ProposalStage.approved ||
+              (p.stage == rust.ProposalStage.open &&
+                  p.myVote == rust.MyVote.none &&
+                  p.approvals.length + 1 >= p.threshold)),
     );
-    if (!approved) return;
+    if (!sendable) return;
     _prewarmed = true;
     unawaited(
       rust.prewarmProver().catchError((Object e) {

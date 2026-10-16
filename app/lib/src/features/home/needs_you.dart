@@ -150,6 +150,13 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
       };
     }
 
+    // Start this phone's check of each payment waiting for this member's vote now, so
+    // "Checked on this phone" is ready when the request opens (the page reuses it).
+    for (final p in proposals.items) {
+      if (p.stage == rust.ProposalStage.open && p.myVote == rust.MyVote.none) {
+        ref.watch(proposalReviewProvider(p.id));
+      }
+    }
     final cards = <Widget>[
       for (final p in proposals.items)
         if (needsMyAction(p, height: height) &&
