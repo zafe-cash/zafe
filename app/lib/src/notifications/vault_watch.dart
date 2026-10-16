@@ -21,6 +21,7 @@ import '../core/storage/zafe_paths.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../providers/privacy_mode_provider.dart' show kPrivacyModeKey;
+import '../providers/vault_provider.dart' show kActiveVaultKey;
 import '../rust/api/app.dart' show initLogCache;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/received.dart' as rust_received;
@@ -136,6 +137,9 @@ Future<void> scheduleSoonCheck() async {
 }
 
 /// FCM: only when the app was built with a Firebase config (google-services.json).
+/// Push registration runs again on a relay change: listen in the foreground once.
+bool _listeningInForeground = false;
+
 Future<void> _registerPush({bool askPermission = true}) async {
   try {
     await Firebase.initializeApp();
@@ -145,6 +149,16 @@ Future<void> _registerPush({bool askPermission = true}) async {
   }
   final messaging = FirebaseMessaging.instance;
   FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
+  // A push while the app is open: the open vault refreshes live (its relay watch), but
+  // the others had nothing (no notification, no dot in the vault switcher) until the app
+  // went to the background. Check them; the open one is the app's.
+  if (!_listeningInForeground) {
+    _listeningInForeground = true;
+    FirebaseMessaging.onMessage.listen((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      await checkVaultAndNotify(skipVaultId: prefs.getString(kActiveVaultKey));
+    });
+  }
   if (askPermission) await messaging.requestPermission();
   final token = await messaging.getToken();
   if (token != null) await _registerToken(token);
@@ -259,7 +273,9 @@ Future<void> _ensureRust() async {
 
 /// The background check: sync, read the vault log, answer interactive signing requests,
 /// finish an auto-send this member owes, and notify about changes. Never throws.
-Future<void> checkVaultAndNotify() async {
+/// [skipVaultId]: a vault the app shows live right now (a push while the app is open),
+/// left to the app so nothing on screen is also announced.
+Future<void> checkVaultAndNotify({String? skipVaultId}) async {
   await installBackgroundCrashLog();
   // One check at a time: the periodic task, the one-off after backgrounding and a push can
   // fire together (seen on the emulator); a lock older than 5 minutes is stale.
@@ -276,7 +292,7 @@ Future<void> checkVaultAndNotify() async {
     await lock.writeAsString('${DateTime.now()}');
   } catch (_) {}
   try {
-    await _check();
+    await _check(skipVaultId);
   } catch (e, st) {
     await _logBackgroundError('check', e, st);
   } finally {
@@ -319,7 +335,7 @@ Future<void> _logBackgroundError(
   await CrashLog.instance?.record('background-$source', error, stack);
 }
 
-Future<void> _check() async {
+Future<void> _check(String? skipVaultId) async {
   WidgetsFlutterBinding.ensureInitialized();
   await _ensureRust();
   await _initNotifications();
@@ -347,6 +363,7 @@ Future<void> _check() async {
   // The URLs the user set in Settings (read after the reload: prefs cache per isolate).
   final endpoints = ZafeEndpoints.fromPrefs(prefs);
   for (final v in vaults) {
+    if (v.id == skipVaultId) continue;
     if (v.ready) {
       await _checkVault(v, hideAmounts, endpoints);
     } else if (v.identity != null && v.invite != null) {
