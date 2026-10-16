@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../core/storage/my_name.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -28,6 +31,8 @@ class JoinVaultScreen extends ConsumerStatefulWidget {
 class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   final _invite = TextEditingController();
   final _focus = FocusNode();
+  final _myName = TextEditingController();
+  final _myNameFocus = FocusNode();
   rust.InviteInfo? _info;
   bool _fromLink = false;
 
@@ -35,6 +40,11 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   void initState() {
     super.initState();
     _prefill(widget.initialInvite);
+    unawaited(
+      MyName.lastUsed().then((n) {
+        if (mounted && _myName.text.isEmpty) _myName.text = n;
+      }),
+    );
   }
 
   @override
@@ -68,6 +78,8 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   void dispose() {
     _invite.dispose();
     _focus.dispose();
+    _myName.dispose();
+    _myNameFocus.dispose();
     super.dispose();
   }
 
@@ -96,7 +108,10 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   Future<void> _join() async {
     await ref
         .read(vaultProvider.notifier)
-        .joinVault(extractInvite(_invite.text) ?? _invite.text);
+        .joinVault(
+          extractInvite(_invite.text) ?? _invite.text,
+          myName: _myName.text,
+        );
     if (mounted) context.go('/setup');
   }
 
@@ -176,6 +191,21 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
               color: colors.text.destructive,
             ),
           ),
+        if (info != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Your name',
+            style: AppTypography.labelMedium.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          MobileTextField(
+            controller: _myName,
+            focusNode: _myNameFocus,
+            hintText: 'Shown to the other members',
+          ),
+        ],
         if (info != null && _fromLink) ...[
           const SizedBox(height: AppSpacing.sm),
           Text(

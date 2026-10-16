@@ -761,7 +761,9 @@ check. Fixed in the same change unless open:
 - [ ] P1: per-member confirmation of the safety words, QR in the same room. (Done
       2026-10-15: commit-then-reveal words for setup and seat recovery, M1/M2.)
 - [ ] P1: invite expiry (waiting room status and setup-time push done with async setup).
-- [ ] P1: name in setup. Threshold presets, the t = n sheet and the "before you invite" brief: dropped
+- [x] P1: name in setup (2026-10-16: "Your name" on Create and Join, prefilled with the last one; kept in
+      `<vaultDir>/my_name_pending.txt` and published as the shared `Name` by the first refresh once the vault
+      exists, unless the member already named themselves). Threshold presets, the t = n sheet and the "before you invite" brief: dropped
       (2026-10-16, user: people who set up a multisig know the numbers; the warning under the steppers stays).
 - [x] P1: recall check (2026-10-16): the backup passphrase is always 12 generated words, and the member
       types three of them back before export. Readiness card and the Receive interstitial: dropped (more

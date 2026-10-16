@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../core/storage/my_name.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -22,6 +25,8 @@ class CreateVaultScreen extends ConsumerStatefulWidget {
 class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   final _name = TextEditingController();
   final _nameFocus = FocusNode();
+  final _myName = TextEditingController();
+  final _myNameFocus = FocusNode();
   int _members = 3;
   int _threshold = 2;
   bool _busy = false;
@@ -34,6 +39,11 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(
+      MyName.lastUsed().then((n) {
+        if (mounted && _myName.text.isEmpty) _myName.text = n;
+      }),
+    );
     // Back from "Cancel setup": the details the creator had typed.
     final prefill = ref.read(createPrefillProvider);
     if (prefill != null) {
@@ -55,6 +65,8 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   void dispose() {
     _name.dispose();
     _nameFocus.dispose();
+    _myName.dispose();
+    _myNameFocus.dispose();
     super.dispose();
   }
 
@@ -68,6 +80,7 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
             threshold: _threshold,
             members: _members,
             expiryDays: _expiryDays,
+            myName: _myName.text,
           );
       if (mounted) context.go('/setup');
     } finally {
@@ -105,6 +118,19 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
           focusNode: _nameFocus,
           hintText: 'e.g. Grants committee',
           onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(
+          'Your name',
+          style: AppTypography.labelMedium.copyWith(
+            color: colors.text.secondary,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        MobileTextField(
+          controller: _myName,
+          focusNode: _myNameFocus,
+          hintText: 'Shown to the other members',
         ),
         const SizedBox(height: AppSpacing.md),
         MobileSurfaceCard(

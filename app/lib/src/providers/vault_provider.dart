@@ -10,6 +10,7 @@ import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
 import '../core/network/tor_setting.dart' show kUseTorKey;
 import '../core/storage/vault_summaries.dart';
+import '../core/storage/my_name.dart';
 import '../core/storage/zafe_paths.dart';
 import '../core/storage/wallet_key.dart';
 import '../core/storage/zafe_secure_store.dart';
@@ -263,6 +264,7 @@ class VaultNotifier extends Notifier<VaultState> {
     required int threshold,
     required int members,
     int expiryDays = 7,
+    String myName = '',
   }) async {
     // A fresh member identity per vault, so the relay can't link memberships.
     final id = rust.generateIdentity();
@@ -275,6 +277,7 @@ class VaultNotifier extends Notifier<VaultState> {
     );
     final vaultId = rust.parseInvite(invite: invite).vaultId;
     await _store.add(id: vaultId, identity: id.seeds, invite: invite);
+    await MyName.setPending(vaultId, myName);
     // Carried to the others by the creator's round-1 message (`stepSetup`).
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(expiryDaysKey(vaultId), expiryDays);
@@ -349,7 +352,7 @@ class VaultNotifier extends Notifier<VaultState> {
     return (creator: creator, deleted: deleted);
   }
 
-  Future<void> joinVault(String invite) async {
+  Future<void> joinVault(String invite, {String myName = ''}) async {
     final trimmed = invite.trim();
     final vaultId = rust
         .parseInvite(invite: trimmed)
@@ -365,6 +368,7 @@ class VaultNotifier extends Notifier<VaultState> {
       invite: trimmed,
     );
     await _store.add(id: vaultId, identity: id.seeds, invite: trimmed);
+    await MyName.setPending(vaultId, myName);
     state = state.copyWith(clearReturnTo: true);
     await _reload(activeId: vaultId);
   }

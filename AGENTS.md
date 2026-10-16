@@ -1156,6 +1156,10 @@ Learned while studying it:
   label wins, then the shared name, then the short key. Tiles stay key-derived, so a
   member calling themselves "Bob" still shows their own tile and key. "Your name" is the
   sheet behind your own row on the Signers tab; the CLI has `zafe name`.
+- **Name in setup** (2026-10-16): Create and Join take "Your name" (`core/storage/my_name.dart`, last one
+  in prefs `zafe_last_my_name` prefills); it can't be published before the vault exists (a `Name` is a log
+  entry), so it waits in `<vaultDir>/my_name_pending.txt` and `ProposalsNotifier._publishPendingName` sends it
+  on the first refresh with material, unless a shared name for this member exists already.
 - **CSV recipients import** (`features/send/recipients_csv.dart`): pure parser with the
   bridge validators injected (`checkAddress` for `kZafeNetwork`, `parseZec`,
   `memoLength`), so it's unit-tested without Rust. All-or-nothing.

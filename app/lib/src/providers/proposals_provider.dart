@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/endpoints.dart';
 import '../core/errors/zafe_error_copy.dart';
+import '../core/storage/my_name.dart';
 import '../core/storage/zafe_paths.dart';
 import '../core/storage/vault_summaries.dart';
 import '../notifications/vault_updates.dart' show actionableCount;
 import '../notifications/vault_watch.dart' show recordSeen, reregisterPush;
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../rust/api/error.dart';
+import '../rust/api/names.dart' show SignerName;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/relay_log.dart' as rust_relay_log;
 import '../rust/api/repair.dart' as rust_repair;
@@ -209,6 +211,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       if (!list.backedUp.contains(vault.myKeyHex)) {
         unawaited(_attestIfBackedUp(vault.activeId!));
       }
+      unawaited(_publishPendingName(vault.activeId!, list.sharedNames));
       // Seen on screen: never announced from the background. Only while the app is in
       // the foreground; a refresh running in the background must not swallow news.
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
@@ -372,6 +375,27 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     );
     await refreshFresh();
   }
+
+  /// The name chosen during setup (Create or Join), published once the vault exists;
+  /// a name already shared (the member renamed themselves since) wins. Best effort:
+  /// a failure leaves it pending for the next refresh.
+  Future<void> _publishPendingName(String id, List<SignerName> shared) async {
+    final name = await MyName.pending(id);
+    if (name == null || !_namePublishing.add(id)) return;
+    try {
+      final vault = _vault;
+      if (vault.activeId != id) return;
+      final mine = shared.where((n) => n.keyHex == vault.myKeyHex);
+      if (mine.isEmpty) await setMyName(name);
+      await MyName.clearPending(id);
+    } catch (e) {
+      debugPrint('publishing the setup name failed: ${describeError(e)}');
+    } finally {
+      _namePublishing.remove(id);
+    }
+  }
+
+  static final _namePublishing = <String>{};
 
   /// Vaults this session already tried to attest a backup for.
   static final _attested = <String>{};
