@@ -21,6 +21,7 @@ import '../../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
 import '../../notifications/notification_primer.dart' show startWatchWithPrimer;
+import 'key_shards_art.dart';
 import 'onboarding_art.dart';
 
 /// Vault setup: invite, members joining, comparing the safety words, and key generation
@@ -41,6 +42,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// The relay no longer has this setup: the creator cancelled it.
   bool _gone = false;
   String? _error;
+
+  /// The keys exist: the shards join, then the backup prompt opens.
+  bool _keysReady = false;
 
   @override
   void initState() {
@@ -67,10 +71,15 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           .read(vaultProvider.notifier)
           .setupStep(confirmed: confirmed);
       if (p.material != null && mounted && !_done) {
-        // The vault exists: its key share now lives only on this phone.
+        // The vault exists: its key share now lives only on this phone. On the key
+        // screen the shards join first, then the backup prompt.
         _done = true;
         _poll?.cancel();
-        context.go('/backup-prompt');
+        if (ref.read(vaultProvider).membership?.started ?? false) {
+          setState(() => _keysReady = true);
+        } else {
+          context.go('/backup-prompt');
+        }
         return;
       }
       if (mounted && (_error != null || _gone)) {
@@ -229,9 +238,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 
     // After "They match": the key shards while the keys are made, here or in the
     // background (Zafe can be closed).
-    if (started && membership != null) {
+    if ((started && membership != null) || _keysReady) {
       return CreatingKeysScreen(
-        waiting: membership.keygenWaitingFor.isEmpty
+        ready: _keysReady,
+        onReady: () {
+          if (mounted) context.go('/backup-prompt');
+        },
+        waiting: membership == null || membership.keygenWaitingFor.isEmpty
             ? null
             : waitingText(membership.keygenWaitingFor, me: _myKeyHex(vault)),
         onAbandon: _leaving ? null : _abandon,
@@ -661,7 +674,17 @@ String waitingText(List<String> missing, {String? me}) {
 /// The vault's keys being made (after this member confirmed the words): the key shards,
 /// who it waits for, and a way out if someone never comes back.
 class CreatingKeysScreen extends StatelessWidget {
-  const CreatingKeysScreen({super.key, this.waiting, this.onAbandon});
+  const CreatingKeysScreen({
+    super.key,
+    this.waiting,
+    this.onAbandon,
+    this.ready = false,
+    this.onReady,
+  });
+
+  /// The keys exist: the shards join into one key, then [onReady].
+  final bool ready;
+  final VoidCallback? onReady;
 
   /// "Waiting for ..." when other members haven't done their part yet.
   final String? waiting;
@@ -675,7 +698,10 @@ class CreatingKeysScreen extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const OnboardingHero('key_shards'),
+          OnboardingHero(
+            'key_shards',
+            art: KeyShardsArt(assembled: ready, onAssembled: onReady),
+          ),
           SafeArea(
             // Scrolls on small phones with large text; otherwise sits at the bottom.
             child: LayoutBuilder(
@@ -691,13 +717,15 @@ class CreatingKeysScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         AppIcon(
-                          AppIcons.loader,
+                          ready ? AppIcons.check : AppIcons.loader,
                           size: 24,
-                          color: colors.icon.accent,
+                          color: ready ? colors.icon.value : colors.icon.accent,
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         Text(
-                          'Creating your vault keys...',
+                          ready
+                              ? 'Vault keys ready'
+                              : 'Creating your vault keys...',
                           style: TextStyle(
                             fontFamily: 'Space Grotesk',
                             fontSize: 24,
@@ -707,7 +735,9 @@ class CreatingKeysScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: AppSpacing.xs),
                         Text(
-                          waiting == null
+                          ready
+                              ? 'Your share is on this phone.'
+                              : waiting == null
                               ? 'You can close Zafe. It tells you when the vault is ready.'
                               : '$waiting You can close Zafe. It tells you when the vault is ready.',
                           style: AppTypography.bodyMedium.copyWith(
@@ -718,7 +748,7 @@ class CreatingKeysScreen extends StatelessWidget {
                         AppButton(
                           expand: true,
                           variant: AppButtonVariant.ghost,
-                          onPressed: onAbandon,
+                          onPressed: ready ? null : onAbandon,
                           child: const Text('Abandon setup'),
                         ),
                       ],

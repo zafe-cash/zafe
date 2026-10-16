@@ -745,6 +745,14 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   must equal `background.window` (#080B0B / #F1F5F5), and `app/tool/illustrations/
   preview_test.dart` hardcodes the window colours too: update all three together (plus
   `app/tool/brand/render_test.dart`, `emblem_render_test.dart` and the launch colours).
+- **Animated art** (2026-10-16): a scene the app animates lists its layers in `scenes.py`
+  `LAYERS`; `scenes.py <scene>` also writes `assets/illustrations/layers/<scene>_<layer>_<theme>.svg`
+  on the scene's canvas (each moving part drawn in its rest place). The widget stacks them, each in
+  a `RepaintBoundary`, and only transforms them (no re-rasterizing). First: `KeyShardsArt`
+  (`key_shards`, the key screen): the shards drift, then close into the key's outline when keygen
+  finishes and the backup prompt follows. They **stop short of touching** (`_gap`): the whole key
+  never exists, so the art must not show it whole. Offsets are shared with `SHARD_OFFSETS`. Frames:
+  `flutter test tool/screens/key_shards_render_test.dart`.
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
   full-page background (`IllustrationBackground`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":

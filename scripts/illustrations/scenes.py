@@ -251,7 +251,17 @@ def key_shapes(p, fill, stroke, sw, extra=""):
     return "".join(out)
 
 
-def shards(p):
+# Where each shard sits apart from its place in the whole key (dx, dy, degrees). The
+# app's key-shards animation reads the same numbers (lib/src/features/onboarding/
+# key_shards_art.dart): change both together.
+SHARD_OFFSETS = [(-80, -18, -7), (-30, 48, 6), (0, -46, -4), (34, 42, 6), (84, -14, 10)]
+
+
+def shards(p, layer=None):
+    """The key cut into five shards, held apart. `layer` writes one layer of it for the
+    app's animation, on the same 1080 x 1240 canvas: "bg" (sky, rays, rings, the ghost
+    key), "piece0".."piece4" (one shard and its edges, in its place in the whole key),
+    "top" (sparks and the vignette). None: the whole still scene."""
     W, H = 1080, 1240
     rnd = random.Random(5)
     cx, cy = 540, 470
@@ -278,7 +288,10 @@ def shards(p):
         return pts_ if down else pts_[::-1]
 
     edges = [zig(c) for c in cuts]
-    offsets = [(-80, -18, -7), (-30, 48, 6), (0, -46, -4), (34, 42, 6), (84, -14, 10)]
+    # A layer piece sits in its place; the app moves it out and back.
+    offsets = [(0, 0, 0)] * 5 if layer and layer.startswith("piece") else SHARD_OFFSETS
+    bg_end = len(b)
+    pieces = {i: [] for i in range(5)}
     for i in range(5):
         left, right = edges[i], edges[i + 1]
         poly = left[::-1] + right  # up the left edge, down the right
@@ -299,6 +312,7 @@ def shards(p):
              f'<g clip-path="url(#c{i})">{body}</g>'
              "</g>")
         b.append(g)
+        pieces[i].append(g)
         # a member mark on each piece
         mx = max(-300, min(300, mid)) if i else -300
         gx = cx + dx + mx * math.cos(math.radians(rot + dr))
@@ -312,6 +326,8 @@ def shards(p):
                 continue
             b.append(f'<g transform="translate({f(cx+dx)} {f(cy+dy)}) rotate({rot+dr}) scale(1.04)"><clipPath id="k{i}{f(e[0][0]+500)}">{key_shapes(p, "#000", "none", 0)}</clipPath>'
                      f'<path clip-path="url(#k{i}{f(e[0][0]+500)})" d="{line_d(e)}" fill="none" stroke="{p["ink"]}" stroke-width="7" stroke-linejoin="round"/></g>')
+            pieces[i].append(b[-1])
+    top_start = len(b)
     for _ in range(30):
         a = math.radians(rnd.randint(0, 359))
         r = rnd.randint(300, 520)
@@ -319,6 +335,12 @@ def shards(p):
         s_ = rnd.randint(4, 10)
         b.append(f'<path d="M{f(x)} {f(y-s_)}L{f(x+s_/3)} {f(y)}L{f(x)} {f(y+s_)}L{f(x-s_/3)} {f(y)}Z" fill="{p["gold"]}"/>')
     b.append(f'<rect width="{W}" height="{H}" fill="url(#vig)"/>')
+    if layer == "bg":
+        return svg(W, H, defs(p) + "".join(b[:bg_end]), p["dot"])
+    if layer and layer.startswith("piece"):
+        return svg(W, H, defs(p) + "".join(pieces[int(layer[5:])]), p["dot"])
+    if layer == "top":
+        return svg(W, H, defs(p) + "".join(b[top_start:]), p["dot"])
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
@@ -573,6 +595,9 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
           "backup_seal": backup, "restore_key": restore,
           "sent_slot": sent, "empty_ledger": empty}
 
+# Scenes the app animates, and the layers it moves.
+LAYERS = {"key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"]}
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, default=ASSETS, help="output directory (default: app/assets/illustrations)")
@@ -585,6 +610,12 @@ def main():
             path.write_text(SCENES[name](pal))
             kb = path.stat().st_size / 1024
             print(f"{path}  {kb:.1f} KB" + ("  <-- over the 60 KB budget" if kb > 60 else ""))
+            # Layers for the app's animation of this scene.
+            for layer in LAYERS.get(name, []):
+                lp = args.out / "layers" / f"{name}_{layer}_{theme}.svg"
+                lp.parent.mkdir(parents=True, exist_ok=True)
+                lp.write_text(SCENES[name](pal, layer))
+                print(f"  {lp}  {lp.stat().st_size / 1024:.1f} KB")
 
 
 if __name__ == "__main__":

@@ -14,9 +14,12 @@ String _asset(BuildContext context, String name) {
 /// colour, so text and buttons below sit on a clean background
 /// (content sits at the bottom).
 class OnboardingHero extends StatelessWidget {
-  const OnboardingHero(this.name, {super.key});
+  const OnboardingHero(this.name, {super.key, this.art});
 
   final String name;
+
+  /// Drawn instead of the still scene (an animated version of it, same canvas).
+  final Widget? art;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +33,9 @@ class OnboardingHero extends StatelessWidget {
           children: [
             AspectRatio(
               aspectRatio: 1080 / 1240,
-              child: SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
+              child:
+                  art ??
+                  SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
             ),
             Positioned.fill(
               child: DecoratedBox(
