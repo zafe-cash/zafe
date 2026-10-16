@@ -1191,10 +1191,13 @@ Learned while studying it:
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:
   `xyz.zafe/haptics` and `window_appearance` have none yet (Dart swallows
   `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
-- Settings (`/settings` tab; the vault switcher's "Vault settings" goes there too): vault info
-  (name renames locally), signer key,
-  hide amounts, theme (`themeModeProvider`, persisted), endpoints (editable, see above),
-  open-source licenses (fonts + NOTICE registered in `main.dart`).
+- Settings (`/settings` tab) is app-only since 2026-10-16: Security (lock app), Privacy (hide
+  amounts, Tor, diagnostics), System (theme, payment sounds, relay, Zcash server, licenses; fonts +
+  NOTICE registered in `main.dart`). Vault things live in **Manage vaults** (`/vaults`,
+  `features/vaults/manage_vaults_screen.dart`, opened from the vault sheet `showVaultSwitcher`: the
+  open vault large, other vaults with a dot when something waits, [Manage vaults] [+]); each vault's ⋯
+  (`vault_actions.dart` `showVaultActions`) has Rename, Back up, Viewing key, How it's protected, Remove
+  (switching to that vault first where needed).
   "How it's protected" (`/vault-protection`, `VaultProtectionBody` takes plain data;
   preview `flutter test tool/screens/protection_render_test.dart`): the approval rule, full
   view access, what losing too many keys means, and the post-quantum caveat (spec §2.3).
