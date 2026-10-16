@@ -79,10 +79,7 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
   Future<void> _restore() async {
     setState(() => _busy = true);
     try {
-      final v = await rust.importVaultBackup(
-        data: _data!,
-        passphrase: _pass.text,
-      );
+      final v = await _open(_data!, _pass.text);
       final notifier = ref.read(vaultProvider.notifier);
       if (ref.read(vaultProvider).vaults.any((x) => x.id == v.vaultId)) {
         throw UserFacingError('"${v.name}" is already on this phone.');
@@ -103,6 +100,24 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       if (mounted) context.go('/home');
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Opens the backup with what was typed, exactly (a passphrase from before the
+  /// words were generated may care about case and spaces); if that fails and tidying
+  /// it changes something (spaces, line breaks, capitals around the 12 words), once
+  /// more tidied. The first error is the one shown.
+  static Future<rust.ImportedVault> _open(List<int> data, String typed) async {
+    try {
+      return await rust.importVaultBackup(data: data, passphrase: typed);
+    } catch (e, st) {
+      final tidy = typed.trim().toLowerCase().split(RegExp(r'\s+')).join(' ');
+      if (tidy == typed) rethrow;
+      try {
+        return await rust.importVaultBackup(data: data, passphrase: tidy);
+      } catch (_) {
+        Error.throwWithStackTrace(e, st);
+      }
     }
   }
 
@@ -165,7 +180,7 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
-          'Passphrase',
+          'Backup words',
           style: AppTypography.labelLarge.copyWith(
             color: colors.text.secondary,
           ),
@@ -175,7 +190,9 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
           secret: true,
           controller: _pass,
           focusNode: _passFocus,
-          hintText: 'The passphrase you chose when backing up',
+          // Backups made before the words were generated took a typed passphrase:
+          // it goes in the same field.
+          hintText: 'The 12 words, or your passphrase',
           onChanged: (_) => setState(() {}),
         ),
       ],

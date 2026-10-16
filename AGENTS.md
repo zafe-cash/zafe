@@ -1385,8 +1385,11 @@ Learned while studying it:
   restores. Restore writes the names to `names.json` (cleaned with `MemberNames.clean`,
   non-hex keys dropped) before the vault becomes active. Import checks
   the identity is a vault member and refuses KDF params below 64 MiB / 3 passes (or absurdly
-  high). Text form `zafe-backup-v1:` + base64url. Passphrase: 12+ words or zxcvbn 4
-  ("Suggest" = 12 BIP-39 words). The app prompts right after key generation
+  high). Text form `zafe-backup-v1:` + base64url. Passphrase: since 2026-10-16 the app
+  always generates it (12 BIP-39 words, 128 bits; `ExportScreen`, words shown once, "Copy words" through
+  `copySecret`) and the member types 3 random words back before export (the old "Suggest" filled both fields,
+  so nothing checked the words were saved). Restore takes the words or an old typed passphrase (`zxcvbn` 4 still
+  enforced in Rust for those), trying the input exactly, then trimmed/lowercased/single-spaced. The app prompts right after key generation
   (`/backup-prompt`) and shows a home reminder until `summary.json` has `backedUp`
   (set by export, and by restoring). CLI: `zafe backup --passphrase …` prints the text form.
   Testing tip: this emulator has no shell clipboard; paste into a field (e.g. Settings

@@ -761,8 +761,11 @@ check. Fixed in the same change unless open:
 - [ ] P1: per-member confirmation of the safety words, QR in the same room. (Done
       2026-10-15: commit-then-reveal words for setup and seat recovery, M1/M2.)
 - [ ] P1: invite expiry (waiting room status and setup-time push done with async setup).
-- [ ] P1: threshold presets, t = n confirmation, name in setup, "before you invite" brief.
-- [ ] P1: readiness card, Receive interstitial without a backup, passphrase recall check.
+- [ ] P1: name in setup. Threshold presets, the t = n sheet and the "before you invite" brief: dropped
+      (2026-10-16, user: people who set up a multisig know the numbers; the warning under the steppers stays).
+- [x] P1: recall check (2026-10-16): the backup passphrase is always 12 generated words, and the member
+      types three of them back before export. Readiness card and the Receive interstitial: dropped (more
+      cards and nags than they're worth; the backup card and signer dots cover it).
 - [ ] P2: guided test payment, one-time tips + Help hub, Welcome simplification,
       practice vault (test with users first).
 

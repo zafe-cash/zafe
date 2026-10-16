@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,11 +22,13 @@ import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
-import '../onboarding/onboarding_art.dart';
 import 'backup_prompt_screen.dart' show backupStatusProvider;
 import '../../rust/api/backup.dart' as rust;
 
 /// Export this device's copy of the vault as a passphrase-encrypted backup (spec §12.2).
+/// The passphrase is always generated: 12 words the member saves, then proves by typing
+/// three of them back (choosing one was left to people, and "Suggest" filled both
+/// fields, so nothing ever checked the words were written down).
 class ExportScreen extends ConsumerStatefulWidget {
   const ExportScreen({super.key});
 
@@ -34,34 +37,45 @@ class ExportScreen extends ConsumerStatefulWidget {
 }
 
 class _ExportScreenState extends ConsumerState<ExportScreen> {
-  final _pass = TextEditingController();
-  final _passFocus = FocusNode();
-  final _confirm = TextEditingController();
-  final _confirmFocus = FocusNode();
+  /// The 12 words, made once per visit.
+  late final List<String> _words = rust
+      .suggestBackupPassphrase()
+      .split(' ')
+      .where((w) => w.isNotEmpty)
+      .toList();
+
+  /// Which three words (0-based) the check asks for, in order.
+  late final List<int> _asked = () {
+    final rng = math.Random.secure();
+    final picked = <int>{};
+    while (picked.length < 3) {
+      picked.add(rng.nextInt(_words.length));
+    }
+    return picked.toList()..sort();
+  }();
+  final _answers = [for (var i = 0; i < 3; i++) TextEditingController()];
+  final _focus = [for (var i = 0; i < 3; i++) FocusNode()];
+
+  /// The words are on screen (false: the check).
+  bool _showWords = true;
   rust.ExportedBackup? _done;
 
   @override
   void dispose() {
-    _pass.dispose();
-    _passFocus.dispose();
-    _confirm.dispose();
-    _confirmFocus.dispose();
+    for (final c in _answers) {
+      c.dispose();
+    }
+    for (final f in _focus) {
+      f.dispose();
+    }
     super.dispose();
   }
 
-  rust.PassphraseCheck get _check =>
-      rust.checkBackupPassphrase(passphrase: _pass.text);
+  bool _matches(int i) =>
+      _answers[i].text.trim().toLowerCase() == _words[_asked[i]].toLowerCase();
 
-  bool get _ready =>
-      _pass.text.isNotEmpty && _check.ok && _confirm.text == _pass.text;
-
-  void _suggest() {
-    final words = rust.suggestBackupPassphrase();
-    setState(() {
-      _pass.text = words;
-      _confirm.text = words;
-    });
-  }
+  bool get _checked =>
+      [for (var i = 0; i < 3; i++) _matches(i)].every((m) => m);
 
   Future<void> _export() async {
     if (!await confirmUnlock(context, ref, reason: 'Export a backup')) {
@@ -73,7 +87,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       material: vault.material!,
       invite: vault.invite!,
       names: MemberNames.toSigners(await MemberNames.read(vault.activeId!)),
-      passphrase: _pass.text,
+      passphrase: _words.join(' '),
     );
     if (mounted) setState(() => _done = backup);
   }
@@ -155,80 +169,132 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       );
     }
 
-    final check = _check;
-    final mismatch = _confirm.text.isNotEmpty && _confirm.text != _pass.text;
+    if (_showWords) {
+      return ZafeScreen(
+        title: 'Back up vault',
+        bottom: AppButton(
+          expand: true,
+          onPressed: () => setState(() => _showWords = false),
+          child: const Text('I saved them'),
+        ),
+        children: [
+          _Note(
+            icon: AppIcons.lock,
+            iconColor: colors.icon.accent,
+            text:
+                'Anyone with the file and these words can sign for you in "$name".',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          BackupWordGrid(words: _words),
+          const SizedBox(height: AppSpacing.sm),
+          ActionButton(
+            label: 'Copy words',
+            icon: AppIcons.copy,
+            doneLabel: 'Copied',
+            resetAfterDone: true,
+            variant: AppButtonVariant.secondary,
+            onPressed: () => copySecret(_words.join(' ')),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Write them down or keep them in a password manager. Zafe can\'t show them again.',
+            style: AppTypography.bodySmall.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+        ],
+      );
+    }
+
     return ZafeScreen(
-      title: 'Back up vault',
+      title: 'Check your words',
       bottom: ActionButton(
         label: 'Create backup',
         busyLabel: 'Encrypting...',
-        enabled: _ready,
+        enabled: _checked,
         onPressed: _export,
       ),
       children: [
-        const OnboardingBanner('backup_seal'),
-        const SizedBox(height: AppSpacing.md),
-        _Note(
-          icon: AppIcons.lock,
-          iconColor: colors.icon.accent,
-          text:
-              'Anyone with the file and its passphrase can sign for you in "$name".',
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          'Passphrase',
-          style: AppTypography.labelLarge.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        MobileTextField(
-          secret: true,
-          controller: _pass,
-          focusNode: _passFocus,
-          hintText: '12 words, or a long unique phrase',
-          onChanged: (_) => setState(() {}),
-          trailing: _Pill(label: 'Suggest', onTap: _suggest),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        if (_pass.text.isNotEmpty)
+        for (var i = 0; i < 3; i++) ...[
           Text(
-            check.ok ? 'Strong passphrase' : check.hint,
-            style: AppTypography.bodySmall.copyWith(
-              color: check.ok ? colors.text.value : colors.text.destructive,
+            'Word ${_asked[i] + 1}',
+            style: AppTypography.labelLarge.copyWith(
+              color: colors.text.secondary,
             ),
           ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'Confirm passphrase',
-          style: AppTypography.labelLarge.copyWith(
-            color: colors.text.secondary,
+          const SizedBox(height: AppSpacing.xs),
+          MobileTextField(
+            secret: true,
+            controller: _answers[i],
+            focusNode: _focus[i],
+            onChanged: (_) => setState(() {}),
           ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        MobileTextField(
-          secret: true,
-          controller: _confirm,
-          focusNode: _confirmFocus,
-          hintText: 'Type it again',
-          onChanged: (_) => setState(() {}),
-        ),
-        if (mismatch)
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.xs),
-            child: Text(
-              "Passphrases don't match",
-              style: AppTypography.bodySmall.copyWith(
-                color: colors.text.destructive,
+          if (_answers[i].text.trim().isNotEmpty && !_matches(i))
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(
+                "That's not word ${_asked[i] + 1}",
+                style: AppTypography.bodySmall.copyWith(
+                  color: colors.text.destructive,
+                ),
               ),
             ),
-          ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'Write the passphrase down. Zafe can\'t recover it for you.',
-          style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        AppButton(
+          variant: AppButtonVariant.ghost,
+          onPressed: () => setState(() => _showWords = true),
+          child: const Text('Show the words again'),
         ),
       ],
+    );
+  }
+}
+
+/// The backup words, numbered: two columns, one with large text (two wrapped them).
+class BackupWordGrid extends StatelessWidget {
+  const BackupWordGrid({super.key, required this.words});
+  final List<String> words;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final oneColumn = MediaQuery.textScalerOf(context).scale(16) > 21;
+    final half = oneColumn ? words.length : (words.length / 2).ceil();
+    Widget column(int from, int to) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = from; i < to; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '${i + 1}'.padLeft(2),
+                      style: TextStyle(color: colors.text.secondary),
+                    ),
+                    TextSpan(text: '  ${words[i]}'),
+                  ],
+                ),
+                style: TextStyle(
+                  fontFamily: 'JetBrains Mono',
+                  fontSize: 16,
+                  height: 1.4,
+                  color: colors.text.primary,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    return MobileSurfaceCard(
+      cornerRadius: AppRadii.large,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [column(0, half), if (!oneColumn) column(half, words.length)],
+      ),
     );
   }
 }
@@ -262,33 +328,6 @@ class _Note extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: colors.background.neutralSubtleOpacity,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          label,
-          style: AppTypography.labelLarge.copyWith(color: colors.text.accent),
-        ),
       ),
     );
   }

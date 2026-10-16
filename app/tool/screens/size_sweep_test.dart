@@ -22,6 +22,7 @@ import 'package:zafe/src/core/widgets/mobile_text_field.dart';
 import 'package:zafe/src/features/home/needs_you.dart' show RequestCard;
 import 'package:zafe/src/features/home/home_screen.dart'
     show BalanceCard, NoticeCard;
+import 'package:zafe/src/features/backup/export_screen.dart';
 import 'package:zafe/src/features/onboarding/setup_screen.dart';
 import 'package:zafe/src/features/received/received_row.dart';
 import 'package:zafe/src/features/recover/recover_screen.dart';
@@ -260,6 +261,27 @@ final _cases = <(String, String?, Widget)>[
     ),
   ),
   ('sheet_primer', null, const NotificationPrimerSheet()),
+  (
+    'backup_words',
+    null,
+    // In ZafeScreen's ListView, as in the app: tall with large text, so it scrolls.
+    ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        BackupWordGrid(
+          words: [
+            'abandon',
+            'category',
+            'disorder',
+            'electric',
+            'february',
+            'general', //
+            'happy', 'industry', 'journey', 'kangaroo', 'language', 'mushroom',
+          ],
+        ),
+      ],
+    ),
+  ),
 ];
 
 /// Logical sizes (width x height) and the text scales tried on each.
