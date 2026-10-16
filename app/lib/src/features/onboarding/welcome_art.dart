@@ -75,13 +75,13 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
     reverseDuration: const Duration(milliseconds: 500),
   );
 
-  /// Once open: a slow gleam across the door, over and over (one cycle: 2.6 s of
-  /// light crossing, then a rest).
+  /// Once open: a slow, faint gleam across the door, over and over (one cycle: 4.5 s
+  /// of light crossing, then a 2.5 s rest).
   late final AnimationController _shine = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 4000),
+    duration: const Duration(milliseconds: 7000),
   );
-  static const _gleam = 0.65; // share of a cycle the light is crossing
+  static const _gleam = 0.64; // share of a cycle the light is crossing
   Timer? _startTimer;
 
   /// Locking again (before a replay) runs the unlock backwards, quickly, except the
@@ -370,7 +370,7 @@ class _ArcPainter extends CustomPainter {
           Paint()
             ..color = const Color(
               0xFFFFF6DC,
-            ).withValues(alpha: math.sin(shine * math.pi))
+            ).withValues(alpha: 0.55 * math.sin(shine * math.pi))
             ..style = PaintingStyle.stroke
             ..strokeWidth = 9
             ..strokeCap = StrokeCap.round
@@ -403,13 +403,14 @@ class _SheenPainter extends CustomPainter {
       Path()..addOval(Rect.fromCircle(center: _centre, radius: _door)),
     );
     // From the upper left to the lower right, tilted 30 degrees.
-    const band = 300.0;
+    const band = 440.0;
     final reach = _door + band;
     final along = -reach + 2 * reach * e;
     final dir = Offset(math.cos(math.pi / 6), math.sin(math.pi / 6));
     final c = _centre + dir * along;
     final from = c - dir * band / 2, to = c + dir * band / 2;
-    final peak = dark ? 0.2 : 0.42;
+    // Faint: noticed, not shouted (0.2 / 0.42 read as a flash).
+    final peak = dark ? 0.08 : 0.16;
     canvas.drawRect(
       Rect.fromCircle(center: _centre, radius: _door),
       Paint()
@@ -421,7 +422,7 @@ class _SheenPainter extends CustomPainter {
           [
             const Color(0x00FFF4DA),
             const Color(0xFFFFF4DA).withValues(alpha: peak * 0.55),
-            const Color(0xFFFFF4DA).withValues(alpha: peak * 1.5),
+            const Color(0xFFFFF4DA).withValues(alpha: peak * 1.25),
             const Color(0xFFFFF4DA).withValues(alpha: peak * 0.55),
             const Color(0x00FFF4DA),
           ],
