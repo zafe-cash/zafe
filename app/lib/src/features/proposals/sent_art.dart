@@ -69,7 +69,7 @@ Widget _placedCoin(
 /// The sending screen's background (scenes.py `sent_slot` layers). While [sending], the
 /// vault's slot glows and breathes, and coins are tossed out of it along both dotted
 /// trails: true gravity arcs, each coin tumbling. Once [sent] (or the send failed), no
-/// more coins leave, the ones in the air finish their arcs and the slot's light dims:
+/// more coins leave, the ones in the air fade away and the slot's light dims:
 /// the vault is closed. The celebration itself is [CoinFountain] at the status badge,
 /// the screen's one focal point. Reduced motion: still.
 class SentArt extends StatefulWidget {
@@ -94,8 +94,8 @@ class _SentArtState extends State<SentArt> with SingleTickerProviderStateMixin {
   void _tick(Duration elapsed) {
     _clock.value = elapsed.inMicroseconds / 1e6;
     final stop = _stoppedAt;
-    // The last coins have landed and the light has dimmed.
-    if (stop != null && _clock.value > stop + _period + 0.1) _ticker.stop();
+    // The coins have faded and the light has dimmed.
+    if (stop != null && _clock.value > stop + 0.7) _ticker.stop();
   }
 
   void _sync() {
@@ -175,10 +175,16 @@ class _SentArtState extends State<SentArt> with SingleTickerProviderStateMixin {
     final flip = phase * flips * math.pi + r * math.pi;
     final turn =
         ((r - 0.5) * 40 + phase * (side == 0 ? -30 : 30)) * math.pi / 180;
-    // Out of the slot in a blink; gone at the edge of the scene.
+    // Out of the slot in a blink; gone at the edge of the scene. Once the send ended,
+    // the ones still in the air fade within 0.6 s: seen on a phone, they drifted on
+    // through "Sent!" and pulled the eye from the badge.
+    final ended = stop == null
+        ? 1.0
+        : 1 - ((_clock.value - stop) / 0.6).clamp(0.0, 1.0);
     final opacity =
         math.min(1.0, phase * 14) *
-        (1 - ((phase - 0.75) / 0.25).clamp(0.0, 1.0));
+        (1 - ((phase - 0.75) / 0.25).clamp(0.0, 1.0)) *
+        ended;
     return _placedCoin(coin, pos, size, flip, turn, opacity * 0.92);
   }
 

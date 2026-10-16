@@ -476,6 +476,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `ZafeErrorKind::LogCopyInvalid` → `SyncFailureKind.logCopyInvalid`, "History damaged"),
   never a silent first load; `follow_relay` accepts it as well as a fork. `VaultKeys`'s
   `Debug` shows only `ak` (L10).
+- **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
+  task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
+  leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,
+  secrets) record black. The recording shows whatever is on screen, other apps included: look only at Zafe.
 - **Envelope seqs** (`node::SeqCounter`): microsecond clock, but never below the last seq
   this process issued (`LAST_SEQ`, shared by every counter). The WSL clock steps back by
   ~1 s every so often (measured 2026-10-15) and phones correct theirs, and since the safety
@@ -770,7 +774,8 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   face-on (|cos| squash, small tilt: tilted perspective coins read as leaves), launched low and wide so they fall away
   past the words, not back up into the vault. Coins on trails move with `u` **linear in time**: a quadratic curve
   walked steadily is a true gravity arc, easing made them less physical (and bunched them in the slot). While sending,
-  the slot breathes; once sent no coin leaves, those in the air finish and the light dims. Words change after the
+  the slot breathes; once sent no coin leaves, those in the air fade within 0.6 s (a phone recording showed them
+  drifting on through "Sent!", pulling the eye from the badge) and the light dims. Words change after the
   pop (`AnimatedSwitcher`, halves never overlap), in a block that never shrinks (`_KeepTallest`) so the badge never
   moves. Review whole-screen frames: `flutter test tool/screens/sent_moment_render_test.dart`. Third: `WelcomeArt`
   (`welcome_vault`, 2026-10-16, after several rounds): the still already tells the 3-of-5 story, so **only the hand
