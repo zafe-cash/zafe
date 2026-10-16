@@ -31,9 +31,10 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: relay-deploy
-  cancel-in-progress: false
+# Superseded runs stop where that's safe: a newer push cancels an older run's tests and
+# image build (job-level groups below), but never a deploy that has started: the deploy
+# job holds `relay-deploy` (shared with relay-mainnet.yml) without cancelling, so it
+# finishes and only a queued, not-yet-started deploy is replaced by the newer one.
 
 env:
   CARGO_TERM_COLOR: always
@@ -42,6 +43,9 @@ env:
 jobs:
   test:
     name: Relay tests
+    concurrency:
+      group: relay-test-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -56,6 +60,9 @@ jobs:
   image:
     name: Build and push the image
     needs: test
+    concurrency:
+      group: relay-image-${{ github.ref }}
+      cancel-in-progress: true
     # Only main builds are pushed (and attested): a manual run from a branch must not
     # produce an image the mainnet promotion's provenance check would accept, or move :main.
     if: github.ref == 'refs/heads/main'
@@ -100,6 +107,9 @@ jobs:
   deploy-testnet:
     name: Deploy to testnet
     needs: image
+    concurrency:
+      group: relay-deploy
+      cancel-in-progress: false
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15

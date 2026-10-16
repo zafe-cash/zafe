@@ -7,8 +7,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Only superseded pull-request runs are cancelled; every push to main gets a result.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer push supersedes a running check (it checks everything the older one would):
+  # nothing here deploys or publishes, so cancelling is always safe.
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
