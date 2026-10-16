@@ -73,10 +73,11 @@ def main():
 
     edit = call("POST", "/edits")["id"]
     internal = call("GET", f"/edits/{edit}/tracks/internal")
-    # CI names releases "<version>"; the Console's default is "<code> (<version>)".
+    # CI names releases "<version>"; by hand they may read "v0.1.16" or "2018 (0.1.16)".
+    # The version must appear as a whole token, so 0.1.1 never matches 0.1.16.
+    token = re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
     names = [r.get("name", "") for r in internal.get("releases", [])]
-    codes = [c for rel in internal.get("releases", [])
-             if rel.get("name") in (version,) or rel.get("name", "").endswith(f"({version})")
+    codes = [c for rel in internal.get("releases", []) if token.search(rel.get("name", ""))
              for c in rel.get("versionCodes", [])]
     if not codes:
         call("DELETE", f"/edits/{edit}")
