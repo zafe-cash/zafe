@@ -63,6 +63,8 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       _file = bytes;
       _fileName = picked.name;
       _text.clear();
+      // Next: the words.
+      _passFocus.requestFocus();
     });
   }
 
@@ -142,42 +144,48 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
           onPressed: _busy ? null : _pickFile,
           child: Text(_fileName ?? 'Choose backup file'),
         ),
-        const SizedBox(height: AppSpacing.s),
-        Center(
-          child: Text(
-            'or paste the backup text',
-            style: AppTypography.labelMedium.copyWith(color: colors.text.muted),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.s),
-        MobileTextField(
-          secret: true,
-          controller: _text,
-          focusNode: _textFocus,
-          hintText: 'zafe-backup-v1:...',
-          onChanged: (_) => setState(() {
-            _file = null;
-            _fileName = null;
-          }),
-          trailing: GestureDetector(
-            onTap: _pasteText,
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: colors.background.neutralSubtleOpacity,
-                borderRadius: BorderRadius.circular(10),
+        // A chosen file is the backup: no second way to give it (tap the file to
+        // choose another).
+        if (_fileName == null) ...[
+          const SizedBox(height: AppSpacing.s),
+          Center(
+            child: Text(
+              'or paste the backup text',
+              style: AppTypography.labelMedium.copyWith(
+                color: colors.text.muted,
               ),
-              child: Text(
-                'Paste',
-                style: AppTypography.labelLarge.copyWith(
-                  color: colors.text.accent,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.s),
+          MobileTextField(
+            secret: true,
+            controller: _text,
+            focusNode: _textFocus,
+            hintText: 'zafe-backup-v1:...',
+            onChanged: (_) => setState(() {
+              _file = null;
+              _fileName = null;
+            }),
+            trailing: GestureDetector(
+              onTap: _pasteText,
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: colors.background.neutralSubtleOpacity,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Paste',
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.accent,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
         const SizedBox(height: AppSpacing.md),
         Text(
           'Backup words',
