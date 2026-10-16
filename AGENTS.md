@@ -752,8 +752,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (`key_shards`, the key screen): the shards drift, then close into the key's outline when keygen
   finishes and the backup prompt follows. They **stop short of touching** (`_gap`): the whole key
   never exists, so the art must not show it whole. Offsets are shared with `SHARD_OFFSETS`. Second:
-  `SentArt` (`sent_slot`, the sending screen's background): the coins stay in the vault while it sends and
-  fly out along their trails on "Sent!" (trails shared with `SENT_TRAILS`). Frames:
+  `SentArt` (`sent_slot`, the sending screen's background): a stream of coins (one small `coin` layer drawn
+  many times) pours along the trails while it sends; on "Sent!" the stream stops, coins in flight finish and
+  the six resting coins fly out (trails shared with `SENT_TRAILS`). **Never swap a moving layer for an empty
+  box when it hides**: its `SvgPicture` is recreated and reloads, so it comes back blank; keep it in the tree at
+  opacity 0. Frames:
   `flutter test tool/screens/art_motion_render_test.dart`.
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
   full-page background (`SentArt`), the Activity empty state.

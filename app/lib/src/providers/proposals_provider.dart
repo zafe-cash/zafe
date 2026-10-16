@@ -337,7 +337,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
   }
 
   /// Approves (and, for one-tap proposals, signs). If this approval completed the
-  /// signatures and the proposer asked for auto-send, the refresh starts sending.
+  /// signatures, the sending screen (or the refresh that follows) starts sending.
   Future<rust.ApproveResult> approve(String id) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
@@ -355,7 +355,10 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     if (state.sends[id] case final send? when !send.running) {
       state = state.copyWith(sends: {...state.sends}..remove(id));
     }
-    await refreshFresh();
+    // Not awaited: the refresh can start the auto-send, and the caller opens the
+    // sending screen to show it. Awaiting it kept the Approve button spinning through
+    // the whole send.
+    refreshSoon();
     return result;
   }
 

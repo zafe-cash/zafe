@@ -88,7 +88,7 @@ void main() {
         builder: (context, child) => AppTheme(data: data, child: child!),
         home: RepaintBoundary(
           key: key,
-          child: SentArt(sent: sent),
+          child: SentArt(sent: sent, sending: !sent),
         ),
       );
       Future<void> shot(String name) => tester.runAsync(() async {
@@ -107,6 +107,12 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 16));
       }
+      // The stream while sending.
+      for (final ms in [600, 1400, 2600]) {
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(Duration(milliseconds: ms - 400));
+        await shot('stream_$ms');
+      }
       await shot('0000');
       await tester.pumpWidget(app(true));
       var t = 0;
@@ -115,6 +121,7 @@ void main() {
         t = ms;
         await shot(ms.toString().padLeft(4, '0'));
       }
+      await tester.pump(const Duration(seconds: 3));
       await tester.pumpWidget(const SizedBox());
     }
   });

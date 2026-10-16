@@ -119,6 +119,7 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
       bodyMaxWidth: 260,
       background: SentArt(
         sent: phase == MobileTransactionProgressPhase.succeeded,
+        sending: phase == MobileTransactionProgressPhase.inProgress,
       ),
       primaryActionLabel: switch (phase) {
         MobileTransactionProgressPhase.failed when reapprove => 'Approve again',
