@@ -123,6 +123,10 @@ jobs:
             echo "::warning::No GOOGLE_SERVICES_JSON: the APK relies on background checks, no push"
           fi
 
+      # Version code: Flutter adds 2000 for arm64 split APKs, so this ships 4100 + run
+      # number. The base moved up on 2026-10-16 (a local release build reached 4019 on a
+      # tester's phone; a lower code is a downgrade Android refuses). Testnet is sideloaded
+      # only, so its codes are free to jump.
       - name: Build
         working-directory: app
         run: |
@@ -133,7 +137,7 @@ jobs:
             --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
             --dart-define=ZAFE_VERSION='${{ steps.version.outputs.name }}' \
             --build-name='${{ steps.version.outputs.name }}' \
-            --build-number='${{ github.run_number }}'
+            --build-number=$((2100 + ${{ github.run_number }}))
 
       # The release notes are written here, at tag time, from this file as of the tagged commit:
       # a later change to this text reaches only the next tag (fix an old release with
