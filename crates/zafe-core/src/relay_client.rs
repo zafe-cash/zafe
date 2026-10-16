@@ -215,6 +215,24 @@ impl RelayClient {
         }
     }
 
+    /// Like [`RelayClient::new`], but every client made this way shares one connection
+    /// pool, so a call reuses the TLS connection the previous one opened instead of a new
+    /// handshake (~0.7 s to the hosted relay from a phone: most of an approval's time).
+    /// Only for a process whose relay calls all run on **one long-lived runtime** (the
+    /// app's bridge): pooled connections belong to the runtime that opened them, so tests
+    /// and tools that start a runtime per call use [`RelayClient::new`]. Tor is unaffected:
+    /// with Tor on no request takes the direct path, so pooled connections sit unused.
+    pub fn pooled(base: impl Into<String>) -> Self {
+        static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        Self {
+            base: base.into().trim_end_matches('/').to_owned(),
+            http: HTTP
+                .get_or_init(|| http_builder().build().unwrap_or_default())
+                .clone(),
+            log_cache: crate::log_cache::configured(),
+        }
+    }
+
     /// Replaces the log copy this client keeps and checks the relay against (the default
     /// is the one set with [`crate::log_cache::configure`]).
     pub fn with_log_cache(mut self, cache: Option<crate::log_cache::LogCache>) -> Self {

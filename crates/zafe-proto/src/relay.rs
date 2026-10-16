@@ -138,6 +138,10 @@ pub struct InboxAckResponse {
     pub deleted: u64,
 }
 
+/// Most items one read returns (log entries, inbox envelopes). A log read that returns
+/// fewer has reached the end of the log, so a client needs no second read to learn that.
+pub const READ_PAGE: u64 = 500;
+
 /// Reads log entries from index `from`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogRead {

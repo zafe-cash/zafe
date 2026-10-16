@@ -38,7 +38,8 @@ pub fn unapproved_spends(
     let net = network(&m.descriptor.network)?;
     let key = wallet_key(&db_key)?;
     let path = wallet_path(&db_dir, &m);
-    let (_, state) = runtime().block_on(node::load_state(&RelayClient::new(relay_url), &me, &m))?;
+    let (_, state) =
+        runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
     let _guard = wallet_lock();
     if !path.exists() {
         return Ok(vec![]);

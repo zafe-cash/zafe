@@ -23,7 +23,7 @@ pub fn restore_relay(
 ) -> Result<u32, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let out = runtime().block_on(node::reseed_relay(
         &relay,
         &me,
@@ -48,7 +48,7 @@ pub fn follow_relay(
 ) -> Result<u32, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let out = runtime().block_on(node::follow_relay(
         &relay,
         &me,

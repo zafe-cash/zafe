@@ -27,7 +27,8 @@ pub fn export_history_csv(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
-    let (_, state) = runtime().block_on(node::load_state(&RelayClient::new(relay_url), &me, &m))?;
+    let (_, state) =
+        runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
 
     let key = wallet_key(&db_key)?;
     let path = wallet_path(&db_dir, &m);

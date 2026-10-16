@@ -62,8 +62,9 @@ pub const RECOVERY_RETENTION_SECS: u64 = 7 * 24 * 3600;
 /// approvers, few enough that a stranger can't bury the real ones.
 pub const MAX_RECOVERY_CHALLENGES: i64 = 16;
 
-/// Largest number of items returned by one read.
-const PAGE: i64 = 500;
+/// Largest number of items returned by one read (clients rely on it: a shorter log read
+/// is the end of the log).
+const PAGE: i64 = zafe_proto::relay::READ_PAGE as i64;
 
 /// Largest request body. The biggest real bodies are log entries carrying a proposal's
 /// PCZT (tens of KB for a few payments; a 50-recipient batch stays well under this) and

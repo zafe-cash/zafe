@@ -463,7 +463,7 @@ pub fn list_proposals(
 ) -> Result<ProposalList, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let mut pool = pool_store(&state_dir, &seeds, &m);
     // A device just restored from a backup retires the commitments its previous device
     // published (see `node::top_up_pool`); the marker is removed once that is logged.
@@ -547,7 +547,7 @@ pub fn retry_repair(
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| ZafeError::invalid("not a signer key"))?;
     runtime().block_on(repair::retry_repair(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         replacement,
@@ -719,7 +719,7 @@ pub fn propose_payment(
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         let mut client = connect(&lightwalletd_url).await?;
         wallet.sync(&mut client).await?;
-        let relay = RelayClient::new(relay_url);
+        let relay = RelayClient::pooled(relay_url);
         Ok::<_, ZafeError>(
             node::propose(
                 &relay,
@@ -759,7 +759,7 @@ pub fn propose_again(
         wallet.sync(&mut client).await?;
         Ok::<_, ZafeError>(
             node::propose_again(
-                &RelayClient::new(relay_url),
+                &RelayClient::pooled(relay_url),
                 &me,
                 &m,
                 &mut wallet,
@@ -795,7 +795,7 @@ pub fn invalidate_proposal(
         wallet.sync(&mut client).await?;
         Ok::<_, ZafeError>(
             node::invalidate(
-                &RelayClient::new(relay_url),
+                &RelayClient::pooled(relay_url),
                 &me,
                 &m,
                 &mut wallet,
@@ -851,7 +851,8 @@ pub fn review_proposal(
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
-    let (_, state) = runtime().block_on(node::load_state(&RelayClient::new(relay_url), &me, &m))?;
+    let (_, state) =
+        runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
     match node::review(&state, &m, &net, tip, id) {
         Ok(v) => Ok(ReviewInfo {
             verified: true,
@@ -921,7 +922,7 @@ pub fn approve_proposal(
     let mut store = nonce_store(&state_dir, &seeds, &m);
     let mut pool = pool_store(&state_dir, &seeds, &m);
     let approved = runtime().block_on(node::approve(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         &net,
@@ -950,7 +951,7 @@ pub fn reject_proposal(
     let m = self::material(&material)?;
     let id = parse_id(&proposal_id)?;
     runtime().block_on(node::reject(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         id,
@@ -970,7 +971,7 @@ pub fn set_my_name(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     runtime().block_on(node::set_name(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         &name,
@@ -992,7 +993,7 @@ pub fn attest_backup(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     runtime().block_on(node::attest_backup(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         at,
@@ -1012,7 +1013,7 @@ pub fn cancel_proposal(
     let m = self::material(&material)?;
     let id = parse_id(&proposal_id)?;
     runtime().block_on(node::cancel(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         id,
@@ -1073,7 +1074,7 @@ pub fn answer_signing_requests(
         None => local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?,
     };
     let report = runtime().block_on(node::respond(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         &net,
@@ -1164,7 +1165,7 @@ pub fn send_with_progress(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
     let req_path = request_file(&state_dir, &id);
     let silent = node::SilentSigners::at(leader_dir(&state_dir).join(state_dir::SILENT_SIGNERS));

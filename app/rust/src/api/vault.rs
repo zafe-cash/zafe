@@ -117,7 +117,7 @@ pub fn create_vault(
     members: u16,
 ) -> Result<String, ZafeError> {
     let me = identity(&seeds)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let invite = runtime().block_on(node::create_vault(
         &relay, &me, &name, threshold, members, &mut OsRng,
     ))?;
@@ -127,7 +127,11 @@ pub fn create_vault(
 pub fn join_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
-    runtime().block_on(node::join_vault(&RelayClient::new(relay_url), &me, &invite))?;
+    runtime().block_on(node::join_vault(
+        &RelayClient::pooled(relay_url),
+        &me,
+        &invite,
+    ))?;
     Ok(())
 }
 
@@ -175,7 +179,7 @@ pub fn setup_step(
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     let net = network(&network_name)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let dir = PathBuf::from(state_dir);
     let key = zafe_core::nonce_store::NonceKey::derive(&seeds, &invite.mailbox);
     let is_creator = me.public().sig_pk == invite.creator;
@@ -266,7 +270,7 @@ pub fn cancel_setup(relay_url: String, seeds: Vec<u8>, invite: String) -> Result
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     Ok(runtime().block_on(node::cancel_setup(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &invite,
     ))?)
@@ -467,7 +471,8 @@ pub fn sync_vault(
         watch.lap("scan");
         if wallet.chain_height()?.is_some() {
             // Locks persist in the wallet database, so a failure keeps the last holds.
-            if let Ok((_, state)) = node::load_state(&RelayClient::new(relay_url), &me, &m).await {
+            if let Ok((_, state)) = node::load_state(&RelayClient::pooled(relay_url), &me, &m).await
+            {
                 watch.lap("relay");
                 let sent = sent_txs(&db_dir, &m);
                 let _ = node::reserve_notes(&state, &mut wallet, &mut client, &sent).await;
@@ -519,6 +524,6 @@ pub fn register_push(
         other => return Err(ZafeError::invalid(format!("unknown push platform {other}"))),
     };
     runtime()
-        .block_on(RelayClient::new(relay_url).register_push(&me, vault_id, platform, token))?;
+        .block_on(RelayClient::pooled(relay_url).register_push(&me, vault_id, platform, token))?;
     Ok(())
 }

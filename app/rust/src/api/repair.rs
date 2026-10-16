@@ -55,7 +55,7 @@ pub fn new_phone_words(relay_url: String, seeds: Vec<u8>, code: String) -> Resul
     let me = identity(&seeds)?;
     let request = decode(&code)?;
     Ok(runtime().block_on(repair::new_phone_words(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &request.identity,
     ))?)
@@ -95,7 +95,7 @@ pub fn approve_seat_move(
         return Err(ZafeError::invalid("You can't approve moving your own seat"));
     }
     Ok(runtime().block_on(repair::approve_replacement(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         old,
@@ -138,7 +138,7 @@ pub struct CosignerWords {
 /// `Done` the key has been checked against the vault (spec §10.4.2).
 pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgress> {
     let me = identity(&seeds)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
     let status = runtime().block_on(repair::try_recover(&relay, &me))?;
     let empty = |stage, received, needed| RecoveryProgress {
         stage,

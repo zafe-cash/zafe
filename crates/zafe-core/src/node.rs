@@ -1441,7 +1441,7 @@ pub async fn load_log(
     mailbox: MailboxId,
     key: &LogKey,
 ) -> Result<(Chain, VaultState), NodeError> {
-    let (mut chain, mut state, saved_len) = match load_copy(relay, mailbox, key)? {
+    let (mut chain, mut state, saved_len, rest) = match load_copy(relay, mailbox, key)? {
         Some((mut chain, mut state)) => {
             let saved_len = chain.len();
             // The copy is the anchor: the relay must still hold its last entry, and the
@@ -1465,20 +1465,25 @@ pub async fn load_log(
             if first.header.index != from || first.hash().map_err(proto)? != last_hash {
                 return Err(NodeError::RelayForked { index: from });
             }
+            let rest = page.len() as u64 >= zafe_proto::relay::READ_PAGE;
             extend_chain(&mut chain, &mut state, page.into_iter().skip(1), key)?;
-            (chain, state, saved_len)
+            (chain, state, saved_len, rest)
         }
         None => {
             let first_page = relay.read_log(me, mailbox, 0).await?;
             let first = first_page.first().ok_or(NodeError::Invalid(
                 crate::vault::VaultError::NotCreatedFirst,
             ))?;
+            let rest = first_page.len() as u64 >= zafe_proto::relay::READ_PAGE;
             let (mut chain, mut state) = start_chain(first, mailbox, key)?;
             extend_chain(&mut chain, &mut state, first_page.into_iter().skip(1), key)?;
-            (chain, state, 0)
+            (chain, state, 0, rest)
         }
     };
-    catch_up(relay, me, key, &mut chain, &mut state).await?;
+    // A short page was the end of the log: one round trip instead of two.
+    if rest {
+        catch_up(relay, me, key, &mut chain, &mut state).await?;
+    }
     if saved_len == 0 || chain.len() > saved_len {
         save_copy(relay, &chain);
     }

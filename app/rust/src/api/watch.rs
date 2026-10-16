@@ -131,7 +131,7 @@ pub fn watch_vault_with(
     let mailbox = self::material(&material)?.descriptor.vault_id;
     watches().send_modify(|w| w.latest = w.latest.max(watch_id));
     runtime().spawn(watch_loop(
-        RelayClient::new(relay_url),
+        RelayClient::pooled(relay_url),
         me,
         mailbox,
         watch_id,
