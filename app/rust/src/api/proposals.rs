@@ -475,13 +475,18 @@ pub fn list_proposals(
     let mut watch = crate::diag::Stopwatch::new("proposals");
     let state = runtime().block_on(async {
         let notes = super::vault::note_count(&m.descriptor.vault_id);
-        node::top_up_pool(&relay, &me, &m, &mut pool, reset, notes, &mut OsRng).await?;
+        // One load of the log for both: the pool top-up keeps `state` current with
+        // whatever it appends (it used to load the log a second time).
+        let (mut chain, mut state) = node::load_state(&relay, &me, &m).await?;
+        watch.lap("log");
+        node::top_up_pool_loaded(
+            &relay, &me, &m, &mut pool, reset, notes, &mut chain, &mut state, &mut OsRng,
+        )
+        .await?;
         if reset {
             let _ = std::fs::remove_file(&reset_marker);
         }
         watch.lap("pool");
-        let (_, state) = node::load_state(&relay, &me, &m).await?;
-        watch.lap("log");
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
@@ -724,23 +729,44 @@ pub fn propose_payment(
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
-        let scanned = catch_up(&mut wallet, &mut client).await?;
+        let scanned = catch_up(&mut wallet, &mut client, true).await?;
         watch.lap(if scanned { "scan" } else { "noscan" });
         let relay = RelayClient::pooled(relay_url);
-        Ok::<_, ZafeError>(
-            node::propose(
-                &relay,
-                &me,
-                &m,
-                &mut wallet,
-                &mut client,
-                &sent_txs(&db_dir, &m),
-                &requests,
-                auto_send,
-                &mut OsRng,
-            )
-            .await?,
+        let sent = sent_txs(&db_dir, &m);
+        let first = node::propose(
+            &relay,
+            &me,
+            &m,
+            &mut wallet,
+            &mut client,
+            &sent,
+            &requests,
+            auto_send,
+            &mut OsRng,
         )
+        .await;
+        // Built without scanning and the wallet refused (e.g. funds it hasn't seen yet):
+        // scan and try once more, so skipping the scan only ever costs time.
+        let id = match first {
+            Err(node::NodeError::Wallet(_)) if !scanned => {
+                wallet.sync(&mut client).await?;
+                watch.lap("rescan");
+                node::propose(
+                    &relay,
+                    &me,
+                    &m,
+                    &mut wallet,
+                    &mut client,
+                    &sent,
+                    &requests,
+                    auto_send,
+                    &mut OsRng,
+                )
+                .await?
+            }
+            other => other?,
+        };
+        Ok::<_, ZafeError>(id)
     })?;
     watch.lap("build");
     watch.finish();
@@ -748,17 +774,24 @@ pub fn propose_payment(
 }
 
 /// Brings the wallet up to the server's tip before building a transaction: one cheap
-/// height request, and a scan only when there is something new (the app's own sync
-/// usually ran seconds ago). The scan's round trips cost about 2 s on a phone even with
-/// nothing to fetch. No scan needed means the wallet is at the tip with nothing left to
-/// scan ([`VaultWallet::needs_scan`]), the same rule `sync_vault` follows. Returns whether
-/// it scanned.
+/// height request, and a scan only when needed. The scan's round trips cost about 2 s on
+/// a phone even for a single new block. `lenient`: a wallet that has scanned everything
+/// it knows of and is at most a few blocks behind builds as it is
+/// ([`VaultWallet::can_build_without_scan`]); the caller retries after a full sync if the
+/// build fails. Strict: scan whenever the server has anything new (as `sync_vault` does).
+/// Returns whether it scanned.
 async fn catch_up(
     wallet: &mut VaultWallet<ZafeNetwork>,
     client: &mut Client,
+    lenient: bool,
 ) -> Result<bool, ZafeError> {
     let tip = zwallet::latest_height(client).await?;
-    if !wallet.needs_scan(tip)? {
+    let skip = if lenient {
+        wallet.can_build_without_scan(tip)?
+    } else {
+        !wallet.needs_scan(tip)?
+    };
+    if skip {
         return Ok(false);
     }
     wallet.sync(client).await?;
@@ -783,7 +816,7 @@ pub fn propose_again(
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         let mut client = connect(&lightwalletd_url).await?;
-        catch_up(&mut wallet, &mut client).await?;
+        catch_up(&mut wallet, &mut client, false).await?;
         Ok::<_, ZafeError>(
             node::propose_again(
                 &RelayClient::pooled(relay_url),
@@ -819,7 +852,7 @@ pub fn invalidate_proposal(
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
         let mut client = connect(&lightwalletd_url).await?;
-        catch_up(&mut wallet, &mut client).await?;
+        catch_up(&mut wallet, &mut client, false).await?;
         Ok::<_, ZafeError>(
             node::invalidate(
                 &RelayClient::pooled(relay_url),

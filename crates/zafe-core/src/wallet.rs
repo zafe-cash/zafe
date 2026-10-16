@@ -53,6 +53,10 @@ use zip321::{Payment, TransactionRequest};
 
 pub type Client = CompactTxStreamerClient<Channel>;
 
+/// How far behind the server a wallet may be and still build a transaction without
+/// scanning ([`VaultWallet::can_build_without_scan`]): about one sync interval of blocks.
+pub const BUILD_LAG_BLOCKS: u32 = 3;
+
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
     #[error("wallet database: {0}")]
@@ -718,6 +722,30 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             return Ok(true);
         }
         Ok(!self.db.suggest_scan_ranges().map_err(db_err)?.is_empty())
+    }
+
+    /// Whether a transaction can be built now without scanning first, with the server at
+    /// `server_tip`: the wallet has scanned everything it knows of, is at most
+    /// [`BUILD_LAG_BLOCKS`] behind, and no network upgrade falls in between (the build
+    /// would otherwise use the old branch). Confirmations are counted from the wallet's
+    /// own tip, so a wallet a few blocks behind can only treat a note as less confirmed
+    /// than it is (3 needed for change, 10 for other notes), never spend one too early;
+    /// what the unscanned blocks can hide (a note spent meanwhile by another proposal of
+    /// this vault) is caught by note reservation and at broadcast, as with any race.
+    /// Saves the scan's ~2 s of round trips.
+    pub fn can_build_without_scan(&self, server_tip: u32) -> Result<bool, WalletError> {
+        use zcash_protocol::consensus::BranchId;
+        let Some(known) = self.chain_height()? else {
+            return Ok(false);
+        };
+        if server_tip < known || server_tip - known > BUILD_LAG_BLOCKS {
+            return Ok(false);
+        }
+        let branch = |h: u32| BranchId::for_height(&self.params, BlockHeight::from_u32(h + 1));
+        if branch(known) != branch(server_tip) {
+            return Ok(false);
+        }
+        Ok(self.db.suggest_scan_ranges().map_err(db_err)?.is_empty())
     }
 
     pub fn chain_height(&self) -> Result<Option<u32>, WalletError> {

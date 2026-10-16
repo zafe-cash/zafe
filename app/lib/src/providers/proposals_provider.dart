@@ -292,9 +292,12 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
   }
 
   /// Logs a proposal paying `payments` (one, or a batch of up to 50).
+  /// Proposes [payments]. [refresh]: false when the caller refreshes itself (the
+  /// proposer approves first, then refreshes once).
   Future<String> propose({
     required List<rust.PaymentInput> payments,
     required bool autoSend,
+    bool refresh = true,
   }) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
@@ -308,7 +311,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       payments: payments,
       autoSend: autoSend,
     );
-    await refreshFresh();
+    if (refresh) await refreshFresh();
     return id;
   }
 
@@ -341,7 +344,9 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
 
   /// Approves (and, for one-tap proposals, signs). If this approval completed the
   /// signatures, the sending screen (or the refresh that follows) starts sending.
-  Future<rust.ApproveResult> approve(String id) async {
+  /// Approves [id]. [refresh]: false when the caller awaits its own refresh (the
+  /// proposer, whose page must open with the approval already shown).
+  Future<rust.ApproveResult> approve(String id, {bool refresh = true}) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
     final result = await rust.approveProposal(
@@ -361,7 +366,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     // Not awaited: the refresh can start the auto-send, and the caller opens the
     // sending screen to show it. Awaiting it kept the Approve button spinning through
     // the whole send.
-    refreshSoon();
+    if (refresh) refreshSoon();
     return result;
   }
 

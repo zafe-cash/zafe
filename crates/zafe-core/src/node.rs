@@ -2500,6 +2500,27 @@ pub async fn top_up_pool<R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<usize, NodeError> {
     let (mut chain, mut state) = load_state(relay, me, material).await?;
+    top_up_pool_loaded(
+        relay, me, material, pool, reset, notes, &mut chain, &mut state, rng,
+    )
+    .await
+}
+
+/// [`top_up_pool`] on a log the caller already loaded (`load_state`), which it keeps up
+/// to date: anything appended here is applied to `chain` and `state`. Saves a second
+/// load (a relay round trip and a replay) when the caller needs the state anyway.
+#[allow(clippy::too_many_arguments)]
+pub async fn top_up_pool_loaded<R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    pool: &mut impl PoolStore,
+    reset: bool,
+    notes: Option<usize>,
+    chain: &mut Chain,
+    state: &mut VaultState,
+    rng: &mut R,
+) -> Result<usize, NodeError> {
     if reset
         && state
             .pools
@@ -2510,8 +2531,8 @@ pub async fn top_up_pool<R: RngCore + CryptoRng>(
             relay,
             me,
             material,
-            &mut chain,
-            &mut state,
+            chain,
+            state,
             &VaultEvent::PoolReset,
             rng,
         )
@@ -2536,8 +2557,8 @@ pub async fn top_up_pool<R: RngCore + CryptoRng>(
             relay,
             me,
             material,
-            &mut chain,
-            &mut state,
+            chain,
+            state,
             &VaultEvent::Commitments { batch },
             rng,
         )
