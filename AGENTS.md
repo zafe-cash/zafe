@@ -766,10 +766,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   many times) pours along the trails while it sends; on "Sent!" it stops pouring, coins in flight finish and
   the last three per trail slow to their resting places (same coin, size/tilt/fade from the scene), so it reads
   as one motion (trails shared with `SENT_TRAILS`). Since 2026-10-16 the sending part is a calm trickle and "Sent!"
-  is a surge (gold flash from the slot, a burst of quick coins, then the resting ones): the user found a stream
-  that just stops at success anticlimactic. Third: `WelcomeArt` (`welcome_vault`): every 7 s the door's wheel
-  turns ~30 deg and springs back (short moments, nothing animates between them; the rim's glints are their own
-  layer so the light doesn't rotate). **Never swap a moving layer for an empty
+  is a surge: the slot flashes and the stream's **own clock speeds up 4x**, so every coin in the air rushes out
+  together (a separate fast burst overtook the slow coins: rejected), then the resting coins settle once the rush
+  passed them. Stream coins move at a steady speed (easing in bunched them in the slot). Third: `WelcomeArt`
+  (`welcome_vault`): the unlock story, 3 of 5 keys turn one by one (glows), the gold arc grows (drawn in Dart), the
+  wheel spins once, the bolts slide back, a gold ripple; holds, locks again faster (the five-spoke wheel needn't
+  spin back), repeats (~11 s). A 30 deg wheel nudge every 7 s went unnoticed. Waits use one cancellable `Timer`
+  (pending `Future.delayed` outlives the screen and fails widget tests). **Never swap a moving layer for an empty
   box when it hides**: its `SvgPicture` is recreated and reloads, so it comes back blank; keep it in the tree at
   opacity 0. Frames:
   `flutter test tool/screens/art_motion_render_test.dart`.

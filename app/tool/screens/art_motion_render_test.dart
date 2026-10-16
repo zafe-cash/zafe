@@ -149,10 +149,10 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 16));
     }
-    // The first turn starts 1.4 s in.
-    await tester.pump(const Duration(milliseconds: 1400));
+    // The unlock starts 0.7 s in.
+    await tester.pump(const Duration(milliseconds: 700));
     var t = 0;
-    for (final ms in [0, 350, 700, 900, 1150, 1400, 1700]) {
+    for (final ms in [0, 300, 600, 900, 1200, 1500, 1800, 2200, 2650, 3100]) {
       await tester.pump(Duration(milliseconds: ms - t));
       t = ms;
       await tester.runAsync(() async {
@@ -166,5 +166,6 @@ void main() {
       });
     }
     await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 10));
   });
 }

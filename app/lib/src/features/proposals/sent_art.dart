@@ -20,10 +20,10 @@ Offset _on(List<Offset> t, double u) =>
     t[0] * ((1 - u) * (1 - u)) + t[1] * (2 * (1 - u) * u) + t[2] * (u * u);
 
 /// The sending screen's background, animated from its layers (scenes.py `LAYERS`): while
-/// the payment is [sending], a calm trickle of coins leaves the slot along both dotted
-/// trails; once [sent], it surges: the slot flashes gold, a burst of quick coins rushes
-/// out, and the last ones settle in their resting places (1 s, inside the time "Sent!"
-/// stays up). Drawn once per
+/// the payment is [sending], a calm stream of coins leaves the slot along both dotted
+/// trails; once [sent], the slot flashes gold and the whole stream speeds up, every coin
+/// rushing out together, then the coins that stay settle in their resting places (1 s,
+/// inside the time "Sent!" stays up). Drawn once per
 /// layer and only moved; the sending screen's loader already draws every frame, so the
 /// stream adds no frames. Reduced motion: no stream, the coins at rest once sent.
 class SentArt extends StatefulWidget {
@@ -36,33 +36,41 @@ class SentArt extends StatefulWidget {
 }
 
 class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
-  /// Stream clock (seconds since the stream started), when the trickle stopped, and
-  /// when the payment was sent (the surge starts there).
+  /// The stream's own clock. It runs at real speed while sending and speeds up when the
+  /// payment is sent, so every coin in the air rushes out together and new ones follow
+  /// closer: one motion, nothing overtakes anything (a separate burst passed the slow
+  /// coins and looked wrong).
   late final Ticker _ticker = createTicker(_tick);
   final ValueNotifier<double> _clock = ValueNotifier(0);
-  double? _stoppedAt;
-  double? _sentAt;
+  double _real = 0; // seconds since the ticker started
+  double? _sentReal; // real time of "Sent!"
+  double? _stoppedAt; // stream time after which no coin leaves
 
-  /// The calm trickle while sending: a few coins per trail, slow.
-  static const _period = 2.8;
-  static const _perTrail = 5;
-
-  /// The surge on "Sent!": a burst of quick coins per trail.
-  static const _burst = 9;
-  static const _burstPeriod = 0.95;
-  static const _burstSpacing = 0.05;
+  static const _period = 3.0; // stream seconds a coin takes along its trail
+  static const _perTrail = 7;
+  static const _rush = 4.0; // the clock's speed once sent
+  static const _rushRamp = 0.3; // real seconds to reach it
+  static const _rushPour =
+      1.6; // stream seconds coins keep leaving after "Sent!"
 
   void _tick(Duration elapsed) {
-    _clock.value = elapsed.inMicroseconds / 1e6;
-    // Every coin of the trickle and the surge has left the screen.
+    final now = elapsed.inMicroseconds / 1e6;
+    final dt = now - _real;
+    _real = now;
+    final sent = _sentReal;
+    final rate = sent == null
+        ? 1.0
+        : 1 +
+              (_rush - 1) *
+                  Curves.easeIn.transform(
+                    ((now - sent) / _rushRamp).clamp(0.0, 1.0),
+                  );
+    _clock.value += dt * rate;
     final stop = _stoppedAt;
-    final end = math.max(
-      stop == null ? 0.0 : stop + _period,
-      _sentAt == null ? 0.0 : _sentAt! + _burst * _burstSpacing + _burstPeriod,
-    );
-    if (stop != null && _clock.value > end) {
+    if (stop != null && _clock.value > stop + _period) {
       _ticker.stop();
       _clock.value = 0;
+      _real = 0;
     }
   }
 
@@ -70,11 +78,15 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
     final still = MediaQuery.disableAnimationsOf(context);
     if (widget.sending && !widget.sent && !still) {
       _stoppedAt = null;
-      _sentAt = null;
+      _sentReal = null;
       if (!_ticker.isActive) unawaited(_ticker.start());
-    } else if (_ticker.isActive) {
-      _stoppedAt ??= _clock.value;
-      if (widget.sent) _sentAt ??= _clock.value;
+    } else if (_ticker.isActive && _stoppedAt == null) {
+      if (widget.sent) {
+        _sentReal = _real;
+        _stoppedAt = _clock.value + _rushPour;
+      } else {
+        _stoppedAt = _clock.value; // failed: the trickle just ends
+      }
     }
   }
 
@@ -153,9 +165,6 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
                     for (var side = 0; side < 2; side++)
                       for (var i = 0; i < _perTrail; i++)
                         _streamCoin(side, i, stream),
-                    for (var side = 0; side < 2; side++)
-                      for (var j = 0; j < _burst; j++)
-                        _burstCoin(side, j, stream),
                   ],
                 ),
               ),
@@ -194,34 +203,16 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
       side,
       (t % _period) / _period,
       side * 13 + i * 7 + start * 3.1,
-      Curves.easeIn,
+      Curves.linear,
       1,
-      coin,
-    );
-  }
-
-  /// One coin of the surge: they leave the slot one right after another, fast at first
-  /// and slowing as they spread out.
-  Widget _burstCoin(int side, int j, Widget coin) {
-    final hidden = _streamPlaced(Matrix4.identity(), 0, coin);
-    final sent = _sentAt;
-    if (!_ticker.isActive || sent == null) return hidden;
-    final t = _clock.value - (sent + j * _burstSpacing + side * 0.02);
-    if (t < 0 || t > _burstPeriod) return hidden;
-    return _trip(
-      side,
-      t / _burstPeriod,
-      101 + side * 17 + j * 5,
-      Curves.easeOutCubic,
-      1.1,
       coin,
     );
   }
 
   /// A gold flash from the slot as the payment goes out.
   Widget _flash(BuildContext context) {
-    final sent = _sentAt;
-    final t = sent == null ? 1.0 : (_clock.value - sent) / 0.7;
+    final sent = _sentReal;
+    final t = sent == null ? 1.0 : (_real - sent) / 0.7;
     final glow = t < 0 || t >= 1 ? 0.0 : math.sin(t * math.pi) * 0.55;
     final gold = context.colors.icon.value;
     return Positioned(
@@ -288,26 +279,23 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
         ),
       );
 
-  /// The last coins of the stream, which stay: on each trail the farthest leaves first
-  /// and they land one after another, each slowing to a stop at its resting place in the
-  /// still scene (size, tilt and fade as drawn there). Same coin and same way out as the
-  /// stream, so "Sent!" reads as the stream settling, not a second set of coins.
+  /// The coins that stay, settling into their places in the still scene (size, tilt and
+  /// fade as drawn there) once the rush has passed them, nearest first: a short drop
+  /// along the trail and a small bounce, so they read as coins coming to rest.
   Widget _coin(int side, int k, Widget coin) {
     final u = _coinU[k];
-    // After the surge's first coins, so the surge leads and these settle last.
-    final start = 0.2 + (2 - k) * 0.09 + side * 0.03;
-    final length = 0.36 + 0.24 * u / _coinU.last;
-    final local = ((_out.value - start) / length).clamp(0.0, 1.0);
-    // Opacity 0 until it leaves, never removed: its picture stays loaded.
+    final start = 0.42 + k * 0.13 + side * 0.04;
+    final local = ((_out.value - start) / 0.34).clamp(0.0, 1.0);
+    // Opacity 0 until it lands, never removed: its picture stays loaded.
     if (local == 0) return _streamPlaced(Matrix4.identity(), 0, coin);
-    final e = Curves.easeOutCubic.transform(local);
-    final pos = _on(_trails[side], u * e);
+    final e = Curves.easeOutBack.transform(local);
+    final pos = _on(_trails[side], u - 0.06 * (1 - e));
     // The scene's coin: radius 40 - 9k (the asset's is 40), tilted -24 + 14k degrees
     // (mirrored on the right), fading 22% per step along the trail.
     final rest = (40 - 9 * k) / 40;
-    final scale = 0.9 + (rest - 0.9) * e;
-    final tilt = (-24 + 14 * k) * (side == 0 ? -1 : 1) * e * math.pi / 180;
-    final opacity = math.min(1.0, local * 6) * (1 - 0.22 * k * e);
+    final scale = rest * (0.7 + 0.3 * e);
+    final tilt = (-24 + 14 * k) * (side == 0 ? -1 : 1) * math.pi / 180;
+    final opacity = math.min(1.0, local * 3) * (1 - 0.22 * k);
     return _streamPlaced(
       Matrix4.identity()
         ..translateByDouble(pos.dx, pos.dy, 0, 1)

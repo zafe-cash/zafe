@@ -23,13 +23,27 @@ WELCOME_WHEEL = (540, 560)
 
 
 def welcome(p, layer=None):
-    """The vault door. `layer` (for the app's animation): "bg" (all below the wheel),
-    "wheel" (rim, spokes, grips, hub), "glint" (the rim's light, which stays put while
-    the wheel turns), "top" (floor coins, vignette). None: the whole still scene."""
+    """The vault door: three of five keys turned, so it opens. `layer` writes one part for
+    the app's unlock animation (all on the scene's canvas, each part in its final place):
+    "bg" (wall, floor, frame), "boltsL"/"boltsR", "door" (face and dial), "glow<k>" (behind a
+    turned key), "locks" (escutcheons, keyholes), "key<k>" (a turned key), "wheel",
+    "glint" (the wheel's light, which stays put), "top" (floor coins, vignette). The gold
+    arc joining the keys is drawn by the app (it grows), so no layer has it.
+    None: the whole still scene."""
     W, H = 1080, 1240
     rnd = random.Random(7)
     cx, cy = 540, 560
-    b = [f'<rect width="{W}" height="{H}" fill="{p["sky1"]}"/>']
+    parts = []  # (layer, svg) in drawing order
+
+    class _B(list):
+        tag = "bg"
+
+        def append(self, x):
+            parts.append((self.tag, x))
+            super().append(x)
+
+    b = _B()
+    b.append(f'<rect width="{W}" height="{H}" fill="{p["sky1"]}"/>')
     b.append(stone_wall(p, rnd, 0, 0, W, 930, hole=(cx, cy, 395)))
     b.append(f'<rect width="{W}" height="{H}" fill="url(#grit)" opacity=".55"/>')
     # floor
@@ -51,10 +65,12 @@ def welcome(p, layer=None):
         b.append(f'<circle cx="{f(cx+352*math.cos(r))}" cy="{f(cy+352*math.sin(r))}" r="6" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="2.5"/>')
     # locking bolts at left/right into the frame
     for side in (-1, 1):
+        b.tag = "boltsL" if side < 0 else "boltsR"
         for dy in (-120, 0, 120):
             x = cx + side * 318
             b.append(f'<rect x="{f(x - 40 if side > 0 else x - 20)}" y="{cy+dy-14}" width="60" height="28" rx="6" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="3.5"/>')
     # door face
+    b.tag = "door"
     b.append(f'<circle cx="{cx}" cy="{cy}" r="318" fill="{p["stone2"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="318" fill="url(#grit)" opacity=".4"/>')
     # lower-right shading on the door (crescent of hatch)
@@ -68,15 +84,19 @@ def welcome(p, layer=None):
     ang = [-90 + 72 * k for k in range(5)]
     turned = [0, 1, 4]
     a0, a1 = math.radians(ang[4]), math.radians(ang[1])
+    b.tag = "arc"
     b.append(f'<path d="M{f(cx+ring*math.cos(a0))} {f(cy+ring*math.sin(a0))}A{ring} {ring} 0 0 1 {f(cx+ring*math.cos(a1))} {f(cy+ring*math.sin(a1))}" fill="none" stroke="{p["gold"]}" stroke-width="10" stroke-linecap="round" opacity=".9"/>')
+    b.tag = "door"
     b.append(f'<circle cx="{cx}" cy="{cy}" r="{ring}" fill="none" stroke="{p["ink"]}" stroke-width="2.5" stroke-dasharray="4 10" opacity=".8"/>')
     for k, a in enumerate(ang):
         r = math.radians(a)
         kx, ky = cx + ring * math.cos(r), cy + ring * math.sin(r)
         on = k in turned
         if on:
+            b.tag = f"glow{k}"
             b.append(f'<circle cx="{f(kx)}" cy="{f(ky)}" r="110" fill="url(#glow)"/>')
         # escutcheon
+        b.tag = "locks"
         b.append(f'<circle cx="{f(kx)}" cy="{f(ky)}" r="38" fill="{p["metal2"] if not on else p["gold2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
         b.append(f'<circle cx="{f(kx)}" cy="{f(ky)}" r="28" fill="none" stroke="{p["ink"]}" stroke-width="2"/>')
         if on:
@@ -86,6 +106,7 @@ def welcome(p, layer=None):
             lobes = "".join(
                 f'<circle cx="{f(bx + 24*math.cos(math.radians(q)))}" cy="{f(by + 24*math.sin(math.radians(q)))}" r="22" fill="url(#goldg)" stroke="{p["ink"]}" stroke-width="4"/>'
                 for q in (-90, 30, 150))
+            b.tag = f"key{k}"
             b.append(f'<g transform="rotate({f(t)} {f(kx)} {f(ky)})">'
                      f'<rect x="{f(kx-8)}" y="{f(ky-76)}" width="16" height="70" rx="3" fill="url(#goldg)" stroke="{p["ink"]}" stroke-width="4"/>'
                      f'<rect x="{f(kx-17)}" y="{f(ky-50)}" width="34" height="12" rx="4" fill="{p["gold2"]}" stroke="{p["ink"]}" stroke-width="3.5"/>'
@@ -97,15 +118,19 @@ def welcome(p, layer=None):
                      "</g>")
         else:
             # empty keyhole
+            b.tag = "locks"
             b.append(f'<path d="M{f(kx)} {f(ky-14)}a10 10 0 1 1 -.1 0zM{f(kx-6)} {f(ky-2)}h12l5 24h-22z" fill="{p["ink"]}"/>')
     # central hand wheel: rim, five spokes (one per member), brand grips
     assert (cx, cy) == WELCOME_WHEEL
-    wheel_start = len(b)
+    b.tag = "wheel"
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["ink"]}" stroke-width="30"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["metal2"]}" stroke-width="20"/>')
     glint = [f'<path d="M{cx-110} {cy-30}A114 114 0 0 1 {cx-30} {cy-110}" fill="none" stroke="{p["hi"]}" stroke-width="5" stroke-linecap="round"/>',
              f'<path d="M{cx+116} {cy+20}A118 118 0 0 1 {cx+20} {cy+116}" fill="none" stroke="{p["ink"]}" stroke-width="6" stroke-linecap="round" opacity=".6"/>']
-    b.extend(glint)
+    b.tag = "glint"
+    for g in glint:
+        b.append(g)
+    b.tag = "wheel"
     for k, a in enumerate(ang):
         r = math.radians(a + 36)
         x2, y2 = cx + 110 * math.cos(r), cy + 110 * math.sin(r)
@@ -117,18 +142,14 @@ def welcome(p, layer=None):
     b.append(f'<circle cx="{cx}" cy="{cy}" r="50" fill="{p["metal"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="50" fill="url(#hatch2)" opacity=".35"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="22" fill="{p["brand2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
-    wheel_end = len(b)
+    b.tag = "top"
     # coins on the floor
     for (x, y, rx, rot) in [(150, 1010, 34, -8), (205, 1040, 30, 6), (930, 1000, 36, 10),
                             (880, 1060, 28, -4), (990, 1075, 32, 0), (120, 1090, 26, 12)]:
         b.append(coin(p, x, y, rx, rx * 0.42, rot))
     b.append(f'<rect width="{W}" height="{H}" fill="url(#vig)"/>')
     if layer:
-        part = {"bg": b[:wheel_start],
-                "wheel": [x for x in b[wheel_start:wheel_end] if x not in glint],
-                "glint": glint,
-                "top": b[wheel_end:]}[layer]
-        return svg(W, H, defs(p) + "".join(part), p["dot"])
+        return svg(W, H, defs(p) + "".join(x for t, x in parts if t == layer), p["dot"])
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
@@ -630,7 +651,8 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
           "sent_slot": sent, "empty_ledger": empty}
 
 # Scenes the app animates, and the layers it moves.
-LAYERS = {"welcome_vault": ["bg", "wheel", "glint", "top"],
+LAYERS = {"welcome_vault": ["bg", "boltsL", "boltsR", "door", "glow0", "glow1", "glow4", "locks",
+                            "key0", "key1", "key4", "wheel", "glint", "top"],
           "key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
           "sent_slot": ["bg", "coin"]}
 
