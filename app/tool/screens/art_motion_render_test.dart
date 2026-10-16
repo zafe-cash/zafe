@@ -149,23 +149,25 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 16));
     }
-    // The unlock starts 0.6 s in.
-    await tester.pump(const Duration(milliseconds: 600));
+    // The first push starts 0.7 s in.
+    await tester.pump(const Duration(milliseconds: 700));
     var t = 0;
     for (final ms in [
       0,
+      200,
+      400,
       600,
+      800,
+      1000,
       1200,
+      1500,
       1800,
+      2100,
       2400,
+      2700,
       3000,
-      3200,
-      3500,
-      3800,
-      4100,
-      4500,
-      4900,
-      5500,
+      3600,
+      4200,
     ]) {
       await tester.pump(Duration(milliseconds: ms - t));
       t = ms;

@@ -27,38 +27,18 @@ Offset _keyAt(int k) {
   return _centre + Offset(math.cos(a), math.sin(a)) * _ring;
 }
 
-/// A small move the other way first (anticipation), then the move with an overshoot
-/// that settles: how a key or a heavy wheel turns by hand.
-class _WindUp extends Curve {
-  const _WindUp(this.back, this.overshoot, {this.windUp = 0.2});
-  final double back; // fraction of the move, the other way
-  final double overshoot; // easeOutBack's tension
-  final double windUp; // share of the time spent winding up
-
-  @override
-  double transformInternal(double t) {
-    if (t < windUp) {
-      return -back * math.sin(t / windUp * math.pi / 2);
-    }
-    final u = (t - windUp) / (1 - windUp);
-    final s = overshoot;
-    final p = u - 1;
-    final out = p * p * ((s + 1) * p + s) + 1; // easeOutBack with tension s
-    return -back + (1 + back) * out;
-  }
-}
-
-/// The Welcome vault door, from its layers (scenes.py `LAYERS`), telling what Zafe is:
-/// three of five keys turn, each with a little wind-up, the gold arc joining them
-/// grows, the heavy wheel spins a full turn, the bolts slide back and the door settles
-/// with a gold ripple. It plays once when the screen appears (and when it comes back);
-/// tapping the door plays it again, with a haptic tick per key. Once open, the gold
-/// swells with light and settles, over and over. Reduced motion: the door open, still.
+/// The Welcome vault door, from its layers (scenes.py `LAYERS`). The still already tells
+/// the story (three of five keys turned, the gold arc joining them), so only the heavy
+/// hand wheel moves: it is worked by hand, in uneven pushes (20-50 degrees, a little
+/// give-back as the hand lets go, pauses of uneven length), never quite the same rhythm.
+/// Now and then the gold blooms with light in place (as Vizor's welcome hero does over
+/// its treasure). Tapping the door gives the wheel one strong full turn, with a haptic
+/// tick. Nothing is drawn between moves. Reduced motion: still.
 class WelcomeArt extends StatefulWidget {
   const WelcomeArt({super.key, this.replay});
 
-  /// Plays the unlock again (with haptic ticks) each time it notifies: the screen's
-  /// tap target over the door (the art itself sits under the screen's scroll view).
+  /// Gives the wheel a full turn (with haptics) each time it notifies: the screen's tap
+  /// target over the door (the art itself sits under the screen's scroll view).
   final Listenable? replay;
 
   @override
@@ -66,116 +46,122 @@ class WelcomeArt extends StatefulWidget {
 }
 
 class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
-  static const _unlock = 3.2; // seconds
+  /// One push of the wheel: from [_from] by [_by] degrees.
+  late final AnimationController _push = AnimationController(vsync: this);
+  double _from = 0, _by = 0;
 
-  late final AnimationController _open = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 3200),
-    reverseDuration: const Duration(milliseconds: 500),
-  );
-
-  /// Once open: the gold swells with light in place and settles, over and over
-  /// (Vizor's welcome hero does the same over its treasure: ~2.3 s of light every
-  /// 3.8 s). One cycle: 0.9 s up, 0.8 s held, 0.6 s down, 2.3 s rest.
+  /// The gold's light: 0.9 s up, 0.8 s held, 0.6 s down; then a rest.
   late final AnimationController _shine = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 4600),
+    duration: const Duration(milliseconds: 2300),
   );
 
-  /// 0-1 light of the bloom now.
-  double get _bloom {
-    final s = _shine.value * 4.6;
-    if (s < 0.9) return Curves.easeOutSine.transform(s / 0.9);
-    if (s < 1.7) return 1;
-    if (s < 2.3) return 1 - Curves.easeInSine.transform((s - 1.7) / 0.6);
-    return 0;
-  }
-
-  Timer? _startTimer;
-
-  /// Locking again (before a replay) runs the unlock backwards, quickly, except the
-  /// wheel: five spokes look the same after a full turn, so it stays.
-  bool _locking = false;
+  Timer? _nextPush, _nextBloom;
+  final _rng = math.Random(7);
   bool _visible = false;
-  bool _haptics = false;
-  final _ticked = <int>{};
 
   bool get _still => MediaQuery.disableAnimationsOf(context);
+
+  double get _wheelDegrees {
+    final u = _push.value;
+    // The hand pushes (ease in and out) a touch past, then the wheel gives back.
+    const give = 0.07;
+    if (u < 0.82) {
+      return _from +
+          _by * (1 + give) * Curves.easeInOutCubic.transform(u / 0.82);
+    }
+    final back = Curves.easeOutSine.transform(
+      ((u - 0.82) / 0.18).clamp(0.0, 1.0),
+    );
+    return _from + _by * (1 + give - give * back);
+  }
+
+  double get _bloom {
+    final s = _shine.value * 2.3;
+    if (s <= 0 || s >= 2.3) return 0;
+    if (s < 0.9) return Curves.easeOutSine.transform(s / 0.9);
+    if (s < 1.7) return 1;
+    return 1 - Curves.easeInSine.transform(((s - 1.7) / 0.6).clamp(0.0, 1.0));
+  }
 
   @override
   void initState() {
     super.initState();
-    _open.addListener(_hapticTicks);
-    widget.replay?.addListener(_replay);
-  }
-
-  void _replay() {
-    if (!_still) unawaited(_play(haptics: true));
+    widget.replay?.addListener(_fullTurn);
   }
 
   @override
   void didUpdateWidget(WelcomeArt old) {
     super.didUpdateWidget(old);
     if (old.replay != widget.replay) {
-      old.replay?.removeListener(_replay);
-      widget.replay?.addListener(_replay);
+      old.replay?.removeListener(_fullTurn);
+      widget.replay?.addListener(_fullTurn);
     }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_still) {
-      _open.value = 1;
-      return;
-    }
-    // Visible again (first build, or back from a screen on top): play it.
-    final visible = TickerMode.valuesOf(context).enabled;
+    final visible = !_still && TickerMode.valuesOf(context).enabled;
     if (visible && !_visible) {
-      _startTimer?.cancel();
-      _startTimer = Timer(const Duration(milliseconds: 600), () => _play());
+      _schedulePush(const Duration(milliseconds: 700));
+      _scheduleBloom(const Duration(milliseconds: 2600));
+    } else if (!visible) {
+      _nextPush?.cancel();
+      _nextBloom?.cancel();
     }
     _visible = visible;
   }
 
-  Future<void> _play({bool haptics = false}) async {
-    if (!mounted || _open.isAnimating) return;
-    _shine.stop();
-    _shine.value = 0;
-    if (_open.value > 0) {
-      _locking = true;
-      await _open.reverse().orCancel.catchError((_) {});
+  void _schedulePush(Duration after) {
+    _nextPush?.cancel();
+    _nextPush = Timer(after, () => _turn());
+  }
+
+  void _scheduleBloom(Duration after) {
+    _nextBloom?.cancel();
+    _nextBloom = Timer(after, () async {
       if (!mounted) return;
-    }
-    _locking = false;
-    _haptics = haptics;
-    _ticked.clear();
-    await _open.forward(from: 0).orCancel.catchError((_) {});
-    if (!mounted) return;
-    // A covered screen's ticker is muted, so the repeat costs nothing there.
-    unawaited(_shine.repeat());
-  }
-
-  /// When replayed by a tap: a light tick as each key turns, a firmer one as the bolts
-  /// clear. Never when it plays by itself (no haptics without a touch).
-  void _hapticTicks() {
-    if (!_haptics || _locking) return;
-    final s = _open.value * _unlock;
-    for (var i = 0; i < _keys.length; i++) {
-      if (s >= _keyStart(i) + 0.2 && _ticked.add(i)) {
-        unawaited(HapticFeedback.selectionClick());
+      await _shine.forward(from: 0).orCancel.catchError((_) {});
+      // Rarer than Vizor's (every 3.8 s): the wheel already gives the door life.
+      if (mounted && _visible) {
+        _scheduleBloom(const Duration(milliseconds: 5200));
       }
-    }
-    if (s >= 2.55 && _ticked.add(99)) unawaited(HapticFeedback.lightImpact());
+    });
   }
 
-  static double _keyStart(int i) => 0.1 + i * 0.32;
+  /// One uneven push by hand, then a pause of uneven length before the next.
+  Future<void> _turn({double? by, Duration? over}) async {
+    if (!mounted) return;
+    _from = _wheelDegrees % 360;
+    _by = by ?? 20 + _rng.nextDouble() * 30;
+    _push.duration =
+        over ?? Duration(milliseconds: 600 + (_rng.nextDouble() * 500).round());
+    await _push.forward(from: 0).orCancel.catchError((_) {});
+    if (!mounted || !_visible) return;
+    // Now and then two pushes close together, like re-gripping.
+    final pause = _rng.nextDouble() < 0.3
+        ? 250 + _rng.nextInt(250)
+        : 700 + _rng.nextInt(1300);
+    _schedulePush(Duration(milliseconds: pause));
+  }
+
+  /// A tap: one strong full turn, a tick as the hand takes it and a firmer one as it
+  /// lands.
+  Future<void> _fullTurn() async {
+    if (_still || _push.isAnimating) return;
+    _nextPush?.cancel();
+    unawaited(HapticFeedback.selectionClick());
+    await _turn(by: 360, over: const Duration(milliseconds: 1500));
+    if (mounted) unawaited(HapticFeedback.lightImpact());
+  }
 
   @override
   void dispose() {
-    widget.replay?.removeListener(_replay);
-    _startTimer?.cancel();
-    _open.dispose();
+    widget.replay?.removeListener(_fullTurn);
+    _nextPush?.cancel();
+    _nextBloom?.cancel();
+    _push.dispose();
     _shine.dispose();
     super.dispose();
   }
@@ -183,16 +169,6 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
   String _layer(BuildContext context, String name) {
     final dark = identical(context.colors, AppColors.dark);
     return 'assets/illustrations/layers/welcome_vault_${name}_${dark ? 'dark' : 'light'}.svg';
-  }
-
-  /// Progress of a step running from `from` for `length` seconds of the unlock.
-  double _step(
-    double from,
-    double length, [
-    Curve curve = Curves.easeInOutCubic,
-  ]) {
-    final s = _open.value * _unlock;
-    return curve.transform(((s - from) / length).clamp(0.0, 1.0));
   }
 
   static Matrix4 _about(Offset c, double radians) => Matrix4.identity()
@@ -210,87 +186,53 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
         fit: BoxFit.fill,
       ),
     );
-    final bg = layer('bg'), door = layer('door'), locks = layer('locks');
-    final boltsL = layer('boltsL'), boltsR = layer('boltsR');
+    final dark = identical(context.colors, AppColors.dark);
+    final still = [
+      layer('bg'),
+      layer('boltsL'),
+      layer('boltsR'),
+      layer('door'),
+    ];
+    final over = [
+      for (final k in _keys) layer('glow$k'),
+      layer('locks'),
+      for (final k in _keys) layer('key$k'),
+    ];
     final wheel = layer('wheel'), glint = layer('glint'), top = layer('top');
-    final glows = {for (final k in _keys) k: layer('glow$k')};
-    final keys = {for (final k in _keys) k: layer('key$k')};
     return FittedBox(
       fit: BoxFit.cover,
       child: SizedBox(
         width: 1080,
         height: 1240,
-        child: AnimatedBuilder(
-          animation: Listenable.merge([_open, _shine]),
-          builder: (context, _) {
-            const turn = _WindUp(0.09, 2.2);
-            final turns = [
-              for (var i = 0; i < _keys.length; i++)
-                _step(_keyStart(i), 0.55, turn),
-            ];
-            final arc = _step(0.3, 1.05);
-            // The heavy wheel: winds back a little, spins, overshoots a few degrees.
-            final spin = _locking
-                ? 0.0
-                : _step(1.4, 1.15, const _WindUp(0.035, 0.6, windUp: 0.22));
-            // The bolts snap back once the wheel has nearly stopped.
-            final bolts = _step(2.25, 0.32, Curves.easeInCubic) * 34;
-            // Unlocked: the door settles with a small shake and a gold ripple.
-            final settle = _locking ? 0.0 : _step(2.55, 0.45, Curves.linear);
-            final shake = settle <= 0 || settle >= 1
-                ? 0.0
-                : math.sin(settle * math.pi * 3) * 4 * (1 - settle);
-            final click = _locking
-                ? 0.0
-                : _step(2.55, 0.65, Curves.easeOutCubic);
-            final face = Offset(0, shake);
-            return Stack(
-              children: [
-                bg,
-                Transform.translate(offset: Offset(bolts, 0), child: boltsL),
-                Transform.translate(offset: Offset(-bolts, 0), child: boltsR),
-                Transform.translate(
-                  offset: face,
-                  child: Stack(
-                    children: [
-                      door,
-                      CustomPaint(
-                        size: const Size(1080, 1240),
-                        painter: _ArcPainter(arc, click, _bloom),
-                      ),
-                      for (var i = 0; i < _keys.length; i++)
-                        Opacity(
-                          opacity: turns[i].clamp(0.0, 1.0),
-                          child: glows[_keys[i]],
-                        ),
-                      locks,
-                      for (var i = 0; i < _keys.length; i++)
-                        Transform(
-                          transform: _about(
-                            _keyAt(_keys[i]),
-                            -(1 - turns[i]) * math.pi / 2,
-                          ),
-                          child: keys[_keys[i]],
-                        ),
-                      Transform(
-                        transform: _about(_centre, spin * 2 * math.pi),
-                        child: wheel,
-                      ),
-                      glint,
-                      CustomPaint(
-                        size: const Size(1080, 1240),
-                        painter: _BloomPainter(
-                          _bloom,
-                          identical(context.colors, AppColors.dark),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                top,
-              ],
-            );
-          },
+        child: Stack(
+          children: [
+            ...still,
+            AnimatedBuilder(
+              animation: _shine,
+              builder: (context, _) => CustomPaint(
+                size: const Size(1080, 1240),
+                painter: _ArcPainter(_bloom),
+              ),
+            ),
+            ...over,
+            AnimatedBuilder(
+              animation: _push,
+              builder: (context, child) => Transform(
+                transform: _about(_centre, _wheelDegrees * math.pi / 180),
+                child: child,
+              ),
+              child: wheel,
+            ),
+            glint,
+            AnimatedBuilder(
+              animation: _shine,
+              builder: (context, _) => CustomPaint(
+                size: const Size(1080, 1240),
+                painter: _BloomPainter(_bloom, dark),
+              ),
+            ),
+            top,
+          ],
         ),
       ),
     );
@@ -328,30 +270,19 @@ class WelcomeDoorTap extends StatelessWidget {
   );
 }
 
-/// The gold arc joining the turned keys grown to `progress`, the "unlocked" ripple at
-/// `click` (0 and 1: none), and the arc warming with the bloom at `shine` (0-1).
+/// The gold arc joining the turned keys (scene: from the upper-left key over the top
+/// to the upper-right one, width 10, 90%), warming with the bloom at `shine` (0-1).
 class _ArcPainter extends CustomPainter {
-  _ArcPainter(this.progress, this.click, this.shine);
-  final double progress, click, shine;
+  _ArcPainter(this.shine);
+  final double shine;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Rect.fromCircle(center: _centre, radius: _ring);
-    if (click > 0 && click < 1) {
-      canvas.drawCircle(
-        _centre,
-        _ring + 130 * click,
-        Paint()
-          ..color = _gold.withValues(alpha: 0.85 * (1 - click))
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 14 * (1 - click) + 2,
-      );
-    }
-    if (progress <= 0) return;
     canvas.drawArc(
       rect,
       _arcStart,
-      _arcSweep * progress,
+      _arcSweep,
       false,
       Paint()
         ..color = _gold.withValues(alpha: 0.9)
@@ -359,8 +290,7 @@ class _ArcPainter extends CustomPainter {
         ..strokeWidth = 10
         ..strokeCap = StrokeCap.round,
     );
-    if (shine > 0 && progress >= 1) {
-      // The whole arc warms with the bloom, in place.
+    if (shine > 0) {
       canvas.drawArc(
         rect,
         _arcStart,
@@ -377,8 +307,7 @@ class _ArcPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ArcPainter old) =>
-      old.progress != progress || old.click != click || old.shine != shine;
+  bool shouldRepaint(_ArcPainter old) => old.shine != shine;
 }
 
 /// The bloom: warm light swelling over the gold, around the three keys and the arc

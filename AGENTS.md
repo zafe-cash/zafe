@@ -773,12 +773,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   the slot breathes; once sent no coin leaves, those in the air finish and the light dims. Words change after the
   pop (`AnimatedSwitcher`, halves never overlap), in a block that never shrinks (`_KeepTallest`) so the badge never
   moves. Review whole-screen frames: `flutter test tool/screens/sent_moment_render_test.dart`. Third: `WelcomeArt`
-  (`welcome_vault`, 2026-10-16): the 3-of-5 unlock, **once** when Welcome appears or comes back (Apple: repeated
-  animation tires; an auto-repeating loop and a 30 deg nudge every 7 s were both rejected), replayed by tapping the
-  door (`WelcomeDoorTap`, a translucent target above the screen's scroll view, which otherwise takes every touch;
-  haptic tick per key, a firmer one at the bolts; never haptics without a touch). Keys and wheel use `_WindUp`
-  (a little the other way, then the move with an overshoot), the bolts snap, the door settles with a small shake and
-  a gold ripple; once open the gold **blooms in place** (0.9 s up, 0.8 s held, 0.6 s down, every 4.6 s; ~15% brighter at the peak, measured), matched to Vizor's welcome video, whose chest glow is ~2.3 s of light every 3.8 s at +21% (measured from `assets/animations/mobile_welcome.mp4`). A band sweeping across the door felt fast and loud even at 4.5 s / 8%: moving light reads faster than light that swells. The hero's gradient overlay is `IgnorePointer`.
+  (`welcome_vault`, 2026-10-16, after several rounds): the still already tells the 3-of-5 story, so **only the hand
+  wheel moves**, worked by hand: uneven pushes (20-50 deg over 0.6-1.1 s, a 7% give-back), uneven pauses
+  (sometimes two pushes close together), nothing drawn between them. The gold blooms in place now and then (2.3 s:
+  0.9 up, 0.8 held, 0.6 down; ~15% brighter, measured; every ~7.5 s), after Vizor's welcome video (chest glow ~2.3 s
+  of light every 3.8 s at +21%, measured from `assets/animations/mobile_welcome.mp4`). Tapping the door
+  (`WelcomeDoorTap`, a translucent target above the screen's scroll view, which otherwise takes every touch) gives a
+  full turn with a haptic tick. Rejected along the way: a 30 deg nudge every 7 s (unnoticed), a looping 3.2 s unlock
+  with keys, arc, wheel, bolts, shake and ripple (too much), a band sweeping across the door (loud and fast even at
+  4.5 s / 8%). The hero's gradient overlay is `IgnorePointer`. Clamp curve inputs (`(u - a) / b` can exceed 1 by
+  rounding; `Curve.transform` asserts).
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
   full-page background (`SentArt`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":
