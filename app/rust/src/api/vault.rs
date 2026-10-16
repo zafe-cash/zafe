@@ -218,13 +218,14 @@ pub fn setup_step(
         };
         let members = async {
             // Sealed with the words known: members and words can't change any more, so
-            // key generation steps reuse them (the membership step is ~4 s over Tor).
+            // "They match" and key generation steps reuse them (the membership step is
+            // ~4 s over Tor). Steps before the tap still ask the relay (a cancelled setup).
             let key = (
                 relay.base_url().to_owned(),
                 invite.mailbox,
                 me.public().sig_pk,
             );
-            if node::keygen_started(&dir) {
+            if confirmed_safety_number.is_some() || node::keygen_started(&dir) {
                 if let Some(m) = SEALED.lock().ok().and_then(|c| c.get(&key).cloned()) {
                     return Ok(m);
                 }

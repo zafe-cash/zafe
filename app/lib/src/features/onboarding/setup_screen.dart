@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/formatting/member_label.dart';
@@ -71,6 +72,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// longer than the poll interval). "They match" doesn't wait for it: two steps sending
   /// at once is safe (the relay's out-of-order refusal is retried in Rust).
   Future<void>? _step;
+
+  /// The "They match" step running now: polls skip while it runs too.
+  Future<void>? _tap;
   DateTime? _lastPoll;
 
   /// While the words are on screen waiting for "They match", nothing changes but a
@@ -78,8 +82,17 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   static const _wordsPoll = Duration(seconds: 10);
 
   Future<void> _refresh({String? confirmed}) async {
-    if (confirmed != null) return _runStep(confirmed: confirmed);
-    if (_step != null) return;
+    if (confirmed != null) {
+      final step = _runStep(confirmed: confirmed);
+      _tap = step;
+      try {
+        await step;
+      } finally {
+        if (identical(_tap, step)) _tap = null;
+      }
+      return;
+    }
+    if (_step != null || _tap != null) return;
     final m = ref.read(vaultProvider).membership;
     final waitingForTap =
         m != null && m.sealed && m.safetyNumber != null && !m.started;
@@ -254,9 +267,33 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
   }
 
-  /// "They match": starts this member's part of key generation (the screen then shows
-  /// the keys being made). A failure shows under the button.
-  Future<void> _confirm(String words) => _refresh(confirmed: words);
+  /// "They match" was tapped: the key screen shows at once (the step takes 10-20 s over
+  /// Tor, and that screen is a wait anyway).
+  bool _confirming = false;
+
+  /// Why the last "They match" failed (kept until the next tap; polls don't clear it).
+  String? _tapError;
+
+  /// "They match": starts this member's part of key generation. A failure brings the
+  /// words back with the reason.
+  Future<void> _confirm(String words) async {
+    setState(() {
+      _confirming = true;
+      _tapError = null;
+    });
+    try {
+      await _refresh(confirmed: words);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _confirming = false;
+        _tapError = zafeErrorMessage(
+          e,
+          fallback: 'Couldn\'t start. Try again.',
+        );
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -273,7 +310,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 
     // After "They match": the key shards while the keys are made, here or in the
     // background (Zafe can be closed).
-    if ((started && membership != null) || _keysReady) {
+    if ((started && membership != null) || _keysReady || _confirming) {
       return CreatingKeysScreen(
         ready: _keysReady,
         onReady: () {
@@ -344,9 +381,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 : membership?.waitingFor ?? const [],
           ),
           const SizedBox(height: AppSpacing.md),
-          if (_error != null)
+          if (_tapError ?? _error case final error?)
             Text(
-              _error!,
+              error,
               style: AppTypography.bodySmall.copyWith(
                 color: context.colors.text.warning,
               ),

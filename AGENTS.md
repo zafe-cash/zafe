@@ -100,8 +100,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   in the bridge) and re-derives it.
 - **Async setup** (2026-10-16): keygen is a step function, `node::keygen_step` (plus
   `seal_when_full`: the creator's step locks a full setup; once sealed with the words known the bridge keeps
-  the membership in memory (`SEALED`) and keygen steps skip the ~4 s membership step; the setup screen polls
-  every 10 s while the words wait for "They match", and the tap doesn't wait for a running poll; bridge `setup_step` does
+  the membership in memory (`SEALED`) and the "They match" step and later keygen steps skip the ~4 s membership
+  step; the setup screen polls every 10 s while the words wait for "They match", the tap doesn't wait for a
+  running poll (polls skip while the tap's step runs), and the key screen shows on the tap (`_confirming`; a
+  failure brings the words back with `_tapError`): the tap's step is 10-15 s over Tor (keygen round trips); bridge `setup_step` does
   membership, seal, safety check and keygen in one call; `node::run_keygen` loops it for the
   CLI/tests, 1 step/s to stay under the hosted rate). State between steps:
   `state_dir::KEYGEN` (`keygen.state`, `KEYGEN_STATE` 1, sealed with the vault's
