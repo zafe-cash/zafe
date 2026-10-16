@@ -1419,6 +1419,17 @@ html.world-on .foot-slim { background: var(--window); max-width: none; padding-l
 .nowrap { white-space: nowrap; }
 
 /* 404 (404.astro): one calm line and the way home. */
+/* Privacy policy (and any other long-form page): one readable column. */
+.legal { max-width: 44rem; margin: 0 auto; padding: 140px 20px 96px; }
+.legal h1 { font-size: clamp(36px, 5vw, 56px); line-height: 1.05; margin: 0 0 8px; }
+.legal-date { color: var(--text-secondary); margin: 0 0 40px; }
+.legal h2 { font-family: var(--display); font-size: 24px; line-height: 1.2; margin: 48px 0 12px; }
+.legal h3 { font-size: 18px; margin: 28px 0 8px; }
+.legal p, .legal li { font-size: 17px; line-height: 1.6; color: var(--text); }
+.legal p { margin: 0 0 14px; }
+.legal ul { margin: 0 0 14px; padding-left: 1.2em; }
+.legal li { margin: 0 0 8px; }
+.legal a { color: var(--brand); }
 .nf { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 120px 20px 80px; }
 .nf h1 { font-size: clamp(40px, 5vw, 64px); line-height: 1.02; margin: 24px 0 16px; }
 .nf .sub { font-size: 18px; color: var(--text-secondary); margin-bottom: 32px; }

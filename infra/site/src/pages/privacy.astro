@@ -1,0 +1,124 @@
+---
+// The privacy policy (Google Play needs its URL). Every claim here is checked against the
+// code: keep it true when the app, the relay or the hosting changes (AGENTS.md "No
+// telemetry", relay retention in crates/zafe-relay, Caddy's "no access log").
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+
+const updated = '16 October 2026';
+---
+
+<Base
+  title="Privacy policy · Zafe"
+  description="What Zafe keeps on your phone, what leaves it, and who can see what."
+  bodyClass="legal-page"
+>
+  <Nav light links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
+  <main class="legal">
+    <h1>Privacy policy</h1>
+    <p class="legal-date">Last updated {updated}</p>
+
+    <p>
+      Zafe is a shielded multisig wallet for Zcash, made by Anmol Bansal, a sole
+      proprietorship in India ("we"). It is non-custodial: your key share never leaves your
+      phone, and we can't see or move your funds. There are no accounts, no analytics, no
+      ads and no tracking.
+    </p>
+
+    <h2>What stays on your phone</h2>
+    <ul>
+      <li>Your key share and vault keys, in the phone's secure storage (backed by the Android Keystore).</li>
+      <li>Your vaults' balances and payment history, in an encrypted database.</li>
+      <li>The names you give vaults and co-signers on this phone.</li>
+      <li>
+        A log of errors, with addresses, amounts and other personal details removed. It
+        leaves your phone only if you share it yourself, from Settings.
+      </li>
+    </ul>
+
+    <h2>What leaves your phone, and who can see it</h2>
+
+    <h3>The relay (run by us)</h3>
+    <p>
+      The members of a vault reach each other through a relay. It passes on messages and
+      keeps the vault's history so every member sees the same payments. The relay sees:
+    </p>
+    <ul>
+      <li>
+        Each member's public keys, and messages and history that are end-to-end encrypted
+        between the vault's members. It can't read them. It does see their size and when
+        they were sent.
+      </li>
+      <li>
+        If you allow notifications, a notification token, so it can wake your phone through
+        Google's Firebase Cloud Messaging. Notifications carry no content.
+      </li>
+      <li>
+        The name you give yourself in a vault, encrypted like the rest of the history.
+      </li>
+    </ul>
+    <p>
+      The relay keeps no access logs and doesn't record IP addresses. It uses them only
+      briefly, in memory, to limit abuse. Messages waiting for a member are deleted once
+      picked up, and in any case after 30 days; recovery checks after 7 days. A vault's
+      encrypted history is kept while the vault exists, and a setup that is cancelled is
+      deleted. We keep backups of the relay's data to recover from failures.
+    </p>
+
+    <h3>The Zcash server</h3>
+    <p>
+      To show balances and send payments, the app talks to a public Zcash server (Zec.rocks
+      by default; you can choose another, or your own, in Settings). Like any Zcash wallet, it
+      downloads blocks and pending transactions and submits your vault's signed transactions.
+      The server sees your IP address and when you connect. It doesn't receive your keys or
+      your vault's viewing key.
+    </p>
+
+    <h3>Prices</h3>
+    <p>
+      The mainnet app shows dollar values. It asks CoinGecko for the ZEC price, or, with Tor
+      on, several exchanges through Tor. The request contains nothing about you or your vault.
+    </p>
+
+    <h3>Tor</h3>
+    <p>
+      With "Use Tor" on (Settings), the app reaches the relay, the Zcash server and price
+      sources through Tor, so they don't see your IP address. Notifications still arrive
+      through Google.
+    </p>
+
+    <h3>Google Play</h3>
+    <p>
+      If you installed Zafe from Google Play, the app asks Play whether an update is
+      available. Google's privacy policy applies to Play.
+    </p>
+
+    <h2>Camera, backups, unlock</h2>
+    <ul>
+      <li>The camera is used only to scan QR codes (invites, addresses). Nothing is recorded or sent.</li>
+      <li>
+        Backups you export are encrypted with your backup words and saved where you choose.
+        We never receive them, and we can't recover your words.
+      </li>
+      <li>Fingerprint or screen-lock checks are done by your phone; Zafe never sees them.</li>
+    </ul>
+
+    <h2>What we don't do</h2>
+    <p>
+      No analytics, crash reporting, advertising or tracking libraries. We don't sell or
+      share data, and we have no account of yours to delete: removing a vault from the app
+      deletes its data from your phone.
+    </p>
+
+    <h2>Children</h2>
+    <p>Zafe isn't meant for anyone under 18.</p>
+
+    <h2>Changes</h2>
+    <p>When this policy changes, we update this page and its date.</p>
+
+    <h2>Contact</h2>
+    <p><a href="mailto:privacy@zafe.cash">privacy@zafe.cash</a></p>
+  </main>
+  <Footer />
+</Base>
