@@ -905,7 +905,19 @@ pub fn approve_proposal(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
-    let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
+    // Timed per step (diagnostic report, "Slow steps"): `lock` is the wait for a sync
+    // holding the wallet, `tip` the chain height read, then the core's steps.
+    let mut watch = crate::diag::Stopwatch::new("approve");
+    let tip = {
+        let _guard = wallet_lock();
+        watch.lap("lock");
+        let wallet = runtime().block_on(open_wallet(&db_dir, &db_key, &lightwalletd_url, &m))?;
+        let tip = wallet.chain_height()?.ok_or_else(|| {
+            ZafeError::new(ZafeErrorKind::NotReady, "The vault has not synced yet")
+        })?;
+        watch.lap("tip");
+        tip
+    };
     let mut store = nonce_store(&state_dir, &seeds, &m);
     let mut pool = pool_store(&state_dir, &seeds, &m);
     let approved = runtime().block_on(node::approve(
@@ -919,6 +931,8 @@ pub fn approve_proposal(
         &mut pool,
         &mut OsRng,
     ))?;
+    watch.steps(&approved.timings);
+    watch.finish();
     Ok(ApproveResult {
         signed: approved.signed,
         completed: approved.completed,

@@ -120,6 +120,12 @@ impl Stopwatch {
         self.last = now;
     }
 
+    /// Steps timed elsewhere (e.g. inside a core call) that ran since the last lap.
+    pub(crate) fn steps(&mut self, steps: &[(&'static str, u128)]) {
+        self.steps.extend_from_slice(steps);
+        self.last = Instant::now();
+    }
+
     pub(crate) fn finish(self) {
         static SEEN: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
         let total = self.start.elapsed();

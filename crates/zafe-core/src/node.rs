@@ -2171,6 +2171,23 @@ pub struct Approved {
     pub completed: bool,
     /// The proposer asked for the completing member to send right away.
     pub auto_send: bool,
+    /// How long each step took (ms): `history` (log read), `sign` (check + sign),
+    /// `post` (the vote's append). For the app's diagnostic timings; nothing else.
+    pub timings: Vec<(&'static str, u128)>,
+}
+
+/// Step timer for [`Approved::timings`].
+struct Laps(Instant, Vec<(&'static str, u128)>);
+
+impl Laps {
+    fn new() -> Self {
+        Self(Instant::now(), Vec::new())
+    }
+    fn lap(&mut self, step: &'static str) {
+        let now = Instant::now();
+        self.1.push((step, now.duration_since(self.0).as_millis()));
+        self.0 = now;
+    }
 }
 
 /// Verifies a proposal independently and, if it passes, votes Approve. For a preprocessed
@@ -2189,7 +2206,9 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     pool: &mut impl PoolStore,
     rng: &mut R,
 ) -> Result<Approved, NodeError> {
+    let mut laps = Laps::new();
     let (mut chain, mut state) = load_state(relay, me, material).await?;
+    laps.lap("history");
     let (pczt, payments) = proposal_pczt(&state, &proposal)?;
     let expected = expectations(
         network,
@@ -2217,11 +2236,13 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
         pool.drop_vote(&proposal, &pczt_hash);
         let verified = verify_pczt(&pczt, keys.fvk(), &expected)
             .map_err(|e| NodeError::Verification(e.to_string()))?;
+        laps.lap("sign");
         return Ok(Approved {
             verified,
             signed: true,
             completed: p.completed_by == Some(my_pk),
             auto_send,
+            timings: laps.1,
         });
     }
     if let Some(bytes) = pool.kept_vote(&proposal, &pczt_hash) {
@@ -2236,7 +2257,9 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
             let verified = verify_pczt(&pczt, keys.fvk(), &expected)
                 .map_err(|e| NodeError::Verification(e.to_string()))?;
             check_signing_spends(&verified, signing_spends)?;
+            laps.lap("sign");
             append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+            laps.lap("post");
             pool.drop_vote(&proposal, &pczt_hash);
             let p = &state.proposals[&proposal];
             return Ok(Approved {
@@ -2244,6 +2267,7 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
                 signed: true,
                 completed: p.completed_by == Some(my_pk),
                 auto_send,
+                timings: laps.1,
             });
         }
         pool.drop_vote(&proposal, &pczt_hash);
@@ -2329,7 +2353,9 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
         };
         (event, verified, false)
     };
+    laps.lap("sign");
     append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+    laps.lap("post");
     if signed {
         pool.drop_vote(&proposal, &pczt_hash);
     }
@@ -2339,6 +2365,7 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
         signed,
         completed: p.completed_by == Some(my_pk),
         auto_send,
+        timings: laps.1,
     })
 }
 
