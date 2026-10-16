@@ -155,7 +155,10 @@ class PaymentCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (address != null) ...[
+                // One recipient: its address and "Full address". Several: the
+                // recipients list under the card shows each one (here the first one's
+                // address and a "Full address" read as the only recipient).
+                if (address != null && recipients == 1) ...[
                   const SizedBox(height: AppSpacing.md),
                   _Recipient(
                     address: address!,
