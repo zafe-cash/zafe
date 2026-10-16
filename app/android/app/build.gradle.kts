@@ -89,6 +89,18 @@ android {
     }
 }
 
+// Release builds ship arm64 only: the Rust core (librust_lib_zafe.so) is built for arm64
+// alone, while plugins (ML Kit) bring armeabi-v7a/x86/x86_64 libraries too. An App Bundle
+// with those would install on such phones and crash at start; without them Play offers
+// the app to arm64 devices only. Debug builds keep everything (the x86_64 emulator).
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.packaging.jniLibs.excludes.addAll(
+            listOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**"),
+        )
+    }
+}
+
 flutter {
     source = "../.."
 }
