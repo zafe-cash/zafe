@@ -61,10 +61,16 @@ List<TimelineStep> timelineSteps(
       );
     case rust.ProposalStage.open:
       final need = p.threshold - p.approvals.length;
-      final waiting = [
+      final open = [
         for (final m in members)
-          if (!p.approvals.contains(m) && !p.rejections.contains(m)) who(m),
+          if (!p.approvals.contains(m) && !p.rejections.contains(m)) m,
       ];
+      // Only this member can complete it: say so plainly.
+      if (need == 1 && open.length == 1 && open.single == me) {
+        steps.add(const TimelineStep(StepState.current, 'Waiting for you'));
+        break;
+      }
+      final waiting = [for (final m in open) who(m)];
       steps.add(
         TimelineStep(
           StepState.current,
