@@ -27,6 +27,7 @@ import 'package:zafe/src/core/widgets/mobile/mobile_surface_card.dart';
 import 'package:zafe/src/core/widgets/mobile/zafe_detail.dart';
 import 'package:zafe/src/features/home/home_screen.dart';
 import 'package:zafe/src/features/home/needs_you.dart';
+import 'package:zafe/src/features/onboarding/setup_screen.dart';
 import 'package:zafe/src/features/proposals/proposal_parts.dart';
 import 'package:zafe/src/features/proposals/proposal_status.dart';
 import 'package:zafe/src/features/received/received_row.dart';
@@ -324,6 +325,9 @@ Widget _signers() => ZafeScreen(
   ],
 );
 
+// Key generation: each member's shard drifts on its own (the whole key never exists).
+Widget _keys() => CreatingKeysScreen(onAbandon: () {});
+
 Widget _protection() => const ZafeScreen(
   title: 'How it\'s protected',
   children: [VaultProtectionBody(threshold: 2, signers: 3)],
@@ -344,6 +348,7 @@ void main() {
       ('request', _request),
       ('signers', _signers),
       ('protection', _protection),
+      ('keys', _keys),
     ]) {
       for (final (theme, data) in [
         ('dark', AppThemeData.dark),
@@ -370,7 +375,8 @@ void main() {
             ),
           ),
         );
-        for (var i = 0; i < 6; i++) {
+        // Enough frames for the key art to load and close.
+        for (var i = 0; i < 12; i++) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 50)),
           );
