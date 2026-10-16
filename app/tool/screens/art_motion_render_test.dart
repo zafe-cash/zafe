@@ -13,6 +13,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/features/onboarding/key_shards_art.dart';
+import 'package:zafe/src/features/onboarding/welcome_art.dart';
 import 'package:zafe/src/features/proposals/sent_art.dart';
 
 void main() {
@@ -124,5 +125,46 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
       await tester.pumpWidget(const SizedBox());
     }
+  });
+
+  testWidgets('render welcome wheel frames', (tester) async {
+    final out = Directory(
+      Platform.environment['SCREEN_PREVIEW_OUT'] ?? 'build/screen_preview',
+    )..createSync(recursive: true);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(540, 620);
+    addTearDown(tester.view.reset);
+    final key = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        builder: (context, child) =>
+            AppTheme(data: AppThemeData.dark, child: child!),
+        home: RepaintBoundary(key: key, child: const WelcomeArt()),
+      ),
+    );
+    for (var i = 0; i < 6; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 200)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    // The first turn starts 1.4 s in.
+    await tester.pump(const Duration(milliseconds: 1400));
+    var t = 0;
+    for (final ms in [0, 350, 700, 900, 1150, 1400, 1700]) {
+      await tester.pump(Duration(milliseconds: ms - t));
+      t = ms;
+      await tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        File(
+          '${out.path}/welcome_wheel_${ms.toString().padLeft(4, '0')}.png',
+        ).writeAsBytesSync(bytes!.buffer.asUint8List());
+      });
+    }
+    await tester.pumpWidget(const SizedBox());
   });
 }

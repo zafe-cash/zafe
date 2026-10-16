@@ -765,7 +765,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `SentArt` (`sent_slot`, the sending screen's background): a stream of coins (one small `coin` layer drawn
   many times) pours along the trails while it sends; on "Sent!" it stops pouring, coins in flight finish and
   the last three per trail slow to their resting places (same coin, size/tilt/fade from the scene), so it reads
-  as one motion (trails shared with `SENT_TRAILS`). **Never swap a moving layer for an empty
+  as one motion (trails shared with `SENT_TRAILS`). Since 2026-10-16 the sending part is a calm trickle and "Sent!"
+  is a surge (gold flash from the slot, a burst of quick coins, then the resting ones): the user found a stream
+  that just stops at success anticlimactic. Third: `WelcomeArt` (`welcome_vault`): every 7 s the door's wheel
+  turns ~30 deg and springs back (short moments, nothing animates between them; the rim's glints are their own
+  layer so the light doesn't rotate). **Never swap a moving layer for an empty
   box when it hides**: its `SvgPicture` is recreated and reloads, so it comes back blank; keep it in the tree at
   opacity 0. Frames:
   `flutter test tool/screens/art_motion_render_test.dart`.

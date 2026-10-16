@@ -11,6 +11,7 @@ import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../settings/endpoint_sheet.dart';
 import 'onboarding_art.dart';
+import 'welcome_art.dart';
 
 class WelcomeScreen extends ConsumerWidget {
   const WelcomeScreen({super.key});
@@ -100,7 +101,7 @@ class WelcomeScreen extends ConsumerWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const OnboardingHero('welcome_vault'),
+          const OnboardingHero('welcome_vault', art: WelcomeArt()),
           SafeArea(
             // Fills the screen when it fits; scrolls on short phones or with large
             // system text (it used to cut off the last buttons on a 360x640 phone).

@@ -17,7 +17,15 @@ ASSETS = Path(__file__).resolve().parents[2] / "app" / "assets" / "illustrations
 
 
 # ---------------------------------------------------------------- (a) welcome vault
-def welcome(p):
+# The Welcome door's hand wheel centre; the app turns the wheel layer around it
+# (lib/src/features/onboarding/welcome_art.dart).
+WELCOME_WHEEL = (540, 560)
+
+
+def welcome(p, layer=None):
+    """The vault door. `layer` (for the app's animation): "bg" (all below the wheel),
+    "wheel" (rim, spokes, grips, hub), "glint" (the rim's light, which stays put while
+    the wheel turns), "top" (floor coins, vignette). None: the whole still scene."""
     W, H = 1080, 1240
     rnd = random.Random(7)
     cx, cy = 540, 560
@@ -91,10 +99,13 @@ def welcome(p):
             # empty keyhole
             b.append(f'<path d="M{f(kx)} {f(ky-14)}a10 10 0 1 1 -.1 0zM{f(kx-6)} {f(ky-2)}h12l5 24h-22z" fill="{p["ink"]}"/>')
     # central hand wheel: rim, five spokes (one per member), brand grips
+    assert (cx, cy) == WELCOME_WHEEL
+    wheel_start = len(b)
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["ink"]}" stroke-width="30"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["metal2"]}" stroke-width="20"/>')
-    b.append(f'<path d="M{cx-110} {cy-30}A114 114 0 0 1 {cx-30} {cy-110}" fill="none" stroke="{p["hi"]}" stroke-width="5" stroke-linecap="round"/>')
-    b.append(f'<path d="M{cx+116} {cy+20}A118 118 0 0 1 {cx+20} {cy+116}" fill="none" stroke="{p["ink"]}" stroke-width="6" stroke-linecap="round" opacity=".6"/>')
+    glint = [f'<path d="M{cx-110} {cy-30}A114 114 0 0 1 {cx-30} {cy-110}" fill="none" stroke="{p["hi"]}" stroke-width="5" stroke-linecap="round"/>',
+             f'<path d="M{cx+116} {cy+20}A118 118 0 0 1 {cx+20} {cy+116}" fill="none" stroke="{p["ink"]}" stroke-width="6" stroke-linecap="round" opacity=".6"/>']
+    b.extend(glint)
     for k, a in enumerate(ang):
         r = math.radians(a + 36)
         x2, y2 = cx + 110 * math.cos(r), cy + 110 * math.sin(r)
@@ -106,11 +117,18 @@ def welcome(p):
     b.append(f'<circle cx="{cx}" cy="{cy}" r="50" fill="{p["metal"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="50" fill="url(#hatch2)" opacity=".35"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="22" fill="{p["brand2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
+    wheel_end = len(b)
     # coins on the floor
     for (x, y, rx, rot) in [(150, 1010, 34, -8), (205, 1040, 30, 6), (930, 1000, 36, 10),
                             (880, 1060, 28, -4), (990, 1075, 32, 0), (120, 1090, 26, 12)]:
         b.append(coin(p, x, y, rx, rx * 0.42, rot))
     b.append(f'<rect width="{W}" height="{H}" fill="url(#vig)"/>')
+    if layer:
+        part = {"bg": b[:wheel_start],
+                "wheel": [x for x in b[wheel_start:wheel_end] if x not in glint],
+                "glint": glint,
+                "top": b[wheel_end:]}[layer]
+        return svg(W, H, defs(p) + "".join(part), p["dot"])
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
@@ -612,7 +630,8 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
           "sent_slot": sent, "empty_ledger": empty}
 
 # Scenes the app animates, and the layers it moves.
-LAYERS = {"key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
+LAYERS = {"welcome_vault": ["bg", "wheel", "glint", "top"],
+          "key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
           "sent_slot": ["bg", "coin"]}
 
 def main():

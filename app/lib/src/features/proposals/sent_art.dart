@@ -20,9 +20,10 @@ Offset _on(List<Offset> t, double u) =>
     t[0] * ((1 - u) * (1 - u)) + t[1] * (2 * (1 - u) * u) + t[2] * (u * u);
 
 /// The sending screen's background, animated from its layers (scenes.py `LAYERS`): while
-/// the payment is [sending], a stream of coins pours from the slot along both dotted
-/// trails; once [sent], the stream stops (coins in flight finish) and the six resting
-/// coins fly out, nearest first (1 s, inside the time "Sent!" stays up). Drawn once per
+/// the payment is [sending], a calm trickle of coins leaves the slot along both dotted
+/// trails; once [sent], it surges: the slot flashes gold, a burst of quick coins rushes
+/// out, and the last ones settle in their resting places (1 s, inside the time "Sent!"
+/// stays up). Drawn once per
 /// layer and only moved; the sending screen's loader already draws every frame, so the
 /// stream adds no frames. Reduced motion: no stream, the coins at rest once sent.
 class SentArt extends StatefulWidget {
@@ -35,19 +36,31 @@ class SentArt extends StatefulWidget {
 }
 
 class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
-  /// Stream clock (seconds since the stream started) and when it stopped pouring.
+  /// Stream clock (seconds since the stream started), when the trickle stopped, and
+  /// when the payment was sent (the surge starts there).
   late final Ticker _ticker = createTicker(_tick);
   final ValueNotifier<double> _clock = ValueNotifier(0);
   double? _stoppedAt;
+  double? _sentAt;
 
-  static const _period = 2.2; // seconds a stream coin takes along its trail
-  static const _perTrail = 7;
+  /// The calm trickle while sending: a few coins per trail, slow.
+  static const _period = 2.8;
+  static const _perTrail = 5;
+
+  /// The surge on "Sent!": a burst of quick coins per trail.
+  static const _burst = 9;
+  static const _burstPeriod = 0.95;
+  static const _burstSpacing = 0.05;
 
   void _tick(Duration elapsed) {
     _clock.value = elapsed.inMicroseconds / 1e6;
-    // Every coin poured before the stop has left the screen.
+    // Every coin of the trickle and the surge has left the screen.
     final stop = _stoppedAt;
-    if (stop != null && _clock.value > stop + _period) {
+    final end = math.max(
+      stop == null ? 0.0 : stop + _period,
+      _sentAt == null ? 0.0 : _sentAt! + _burst * _burstSpacing + _burstPeriod,
+    );
+    if (stop != null && _clock.value > end) {
       _ticker.stop();
       _clock.value = 0;
     }
@@ -57,9 +70,11 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
     final still = MediaQuery.disableAnimationsOf(context);
     if (widget.sending && !widget.sent && !still) {
       _stoppedAt = null;
+      _sentAt = null;
       if (!_ticker.isActive) unawaited(_ticker.start());
     } else if (_ticker.isActive) {
       _stoppedAt ??= _clock.value;
+      if (widget.sent) _sentAt ??= _clock.value;
     }
   }
 
@@ -134,9 +149,13 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
                 animation: _clock,
                 builder: (context, _) => Stack(
                   children: [
+                    _flash(context),
                     for (var side = 0; side < 2; side++)
                       for (var i = 0; i < _perTrail; i++)
                         _streamCoin(side, i, stream),
+                    for (var side = 0; side < 2; side++)
+                      for (var j = 0; j < _burst; j++)
+                        _burstCoin(side, j, stream),
                   ],
                 ),
               ),
@@ -171,12 +190,71 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
     final start = (t / _period).floorToDouble() * _period + offset;
     final stop = _stoppedAt;
     if (stop != null && start > stop) return hidden;
-    final phase = (t % _period) / _period;
-    // A fixed wobble per trip, so the stream doesn't march in step.
-    final seed =
-        math.sin((side * 13 + i * 7 + start * 3.1) * 12.9898) * 43758.5453;
-    final r = seed - seed.floorToDouble();
-    final u = Curves.easeIn.transform(phase) * (1.02 + r * 0.08);
+    return _trip(
+      side,
+      (t % _period) / _period,
+      side * 13 + i * 7 + start * 3.1,
+      Curves.easeIn,
+      1,
+      coin,
+    );
+  }
+
+  /// One coin of the surge: they leave the slot one right after another, fast at first
+  /// and slowing as they spread out.
+  Widget _burstCoin(int side, int j, Widget coin) {
+    final hidden = _streamPlaced(Matrix4.identity(), 0, coin);
+    final sent = _sentAt;
+    if (!_ticker.isActive || sent == null) return hidden;
+    final t = _clock.value - (sent + j * _burstSpacing + side * 0.02);
+    if (t < 0 || t > _burstPeriod) return hidden;
+    return _trip(
+      side,
+      t / _burstPeriod,
+      101 + side * 17 + j * 5,
+      Curves.easeOutCubic,
+      1.1,
+      coin,
+    );
+  }
+
+  /// A gold flash from the slot as the payment goes out.
+  Widget _flash(BuildContext context) {
+    final sent = _sentAt;
+    final t = sent == null ? 1.0 : (_clock.value - sent) / 0.7;
+    final glow = t < 0 || t >= 1 ? 0.0 : math.sin(t * math.pi) * 0.55;
+    final gold = context.colors.icon.value;
+    return Positioned(
+      left: 540 - 300,
+      top: 300 - 220,
+      child: Opacity(
+        opacity: glow,
+        child: Container(
+          width: 600,
+          height: 440,
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              colors: [gold.withValues(alpha: 0.9), gold.withValues(alpha: 0)],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A coin `phase` (0-1) of the way along its trail: a little past the end, shrinking
+  /// and turning, fading in and out, nudged sideways by a fixed wobble from `seed`.
+  Widget _trip(
+    int side,
+    double phase,
+    double seed,
+    Curve curve,
+    double size,
+    Widget coin,
+  ) {
+    final w = math.sin(seed * 12.9898) * 43758.5453;
+    final r = w - w.floorToDouble();
+    final u = curve.transform(phase) * (1.02 + r * 0.08);
     final trail = _trails[side];
     final at = _on(trail, u);
     final dir = _on(trail, u + 0.01) - at;
@@ -184,7 +262,7 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
         ? Offset.zero
         : Offset(-dir.dy, dir.dx) / dir.distance;
     final pos = at + normal * ((r - 0.5) * 36);
-    final scale = (0.95 - 0.55 * u) * (0.8 + r * 0.35);
+    final scale = (0.95 - 0.55 * u) * (0.8 + r * 0.35) * size;
     final turn =
         ((r - 0.5) * 50 + phase * (side == 0 ? -40 : 40)) * math.pi / 180;
     final opacity =
@@ -216,8 +294,9 @@ class _SentArtState extends State<SentArt> with TickerProviderStateMixin {
   /// stream, so "Sent!" reads as the stream settling, not a second set of coins.
   Widget _coin(int side, int k, Widget coin) {
     final u = _coinU[k];
-    final start = (2 - k) * 0.11 + side * 0.04;
-    final length = 0.42 + 0.3 * u / _coinU.last;
+    // After the surge's first coins, so the surge leads and these settle last.
+    final start = 0.2 + (2 - k) * 0.09 + side * 0.03;
+    final length = 0.36 + 0.24 * u / _coinU.last;
     final local = ((_out.value - start) / length).clamp(0.0, 1.0);
     // Opacity 0 until it leaves, never removed: its picture stays loaded.
     if (local == 0) return _streamPlaced(Matrix4.identity(), 0, coin);
