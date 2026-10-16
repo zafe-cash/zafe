@@ -488,6 +488,10 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   that opened them and tests start one per test. A new TLS connection to the hosted relay costs ~0.7 s; before
   this every bridge call paid it (approve's `history` step was 1.26 s of 1.6 s on a phone). `load_log` skips the
   extra catch-up read when a page is shorter than `relay::READ_PAGE` (500; the relay's page size, shared).
+  Same for lightwalletd: the bridge uses `wallet::connect_pooled` (one channel per endpoint, reused while its
+  Tor lease isn't revoked; `tor::request()` revokes them all, tested in `tor_policy.rs`); endpoint checks keep
+  `connect`. `sync_vault` skips the scan (`noscan` in timings) when `VaultWallet::needs_scan` says the server's
+  tip equals the wallet's and no scan range is left: the scan's round trips cost 1.2-2 s even with nothing new.
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):

@@ -13,7 +13,9 @@ use zafe_core::{
     nonce_store::FilePoolStore,
     relay_client::RelayClient,
     state_dir,
-    wallet::{check_server, connect, latest_height, VaultWallet, WalletKey, ZafeNetwork},
+    wallet::{
+        check_server, connect_pooled as connect, latest_height, VaultWallet, WalletKey, ZafeNetwork,
+    },
 };
 use zafe_proto::{Identity, IdentitySeeds, ProtoError};
 
@@ -455,20 +457,26 @@ pub fn sync_vault(
         let mut client = connect(&lightwalletd_url).await?;
         // A server on another network or behind this wallet would fail the sync with an
         // obscure error (or none): say so instead.
-        check_server(&mut client, &m.descriptor.network, wallet.chain_height()?).await?;
+        let server_tip =
+            check_server(&mut client, &m.descriptor.network, wallet.chain_height()?).await?;
         watch.lap("server");
-        // One pass is capped so a stalled stream can't hold the wallet lock forever; sync is
-        // incremental, so the next pass continues where this one stopped.
-        tokio::time::timeout(SYNC_PASS_TIMEOUT, wallet.sync(&mut client))
-            .await
-            .map_err(|_| {
-                ZafeError::new(
-                    ZafeErrorKind::NetworkTimeout,
-                    "sync took too long; it will continue on the next try",
-                )
-                .at(ZafeEndpoint::Lightwalletd)
-            })??;
-        watch.lap("scan");
+        // Nothing new on the server and nothing left to scan: skip the scan's round trips.
+        if wallet.needs_scan(server_tip)? {
+            // One pass is capped so a stalled stream can't hold the wallet lock forever;
+            // sync is incremental, so the next pass continues where this one stopped.
+            tokio::time::timeout(SYNC_PASS_TIMEOUT, wallet.sync(&mut client))
+                .await
+                .map_err(|_| {
+                    ZafeError::new(
+                        ZafeErrorKind::NetworkTimeout,
+                        "sync took too long; it will continue on the next try",
+                    )
+                    .at(ZafeEndpoint::Lightwalletd)
+                })??;
+            watch.lap("scan");
+        } else {
+            watch.lap("noscan");
+        }
         if wallet.chain_height()?.is_some() {
             // Locks persist in the wallet database, so a failure keeps the last holds.
             if let Ok((_, state)) = node::load_state(&RelayClient::pooled(relay_url), &me, &m).await

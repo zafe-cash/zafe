@@ -264,6 +264,14 @@ pub async fn connect(endpoint: &str) -> Result<Client, WalletError> {
         }
         Route::Direct(lease) => lease,
     };
+    connect_direct(endpoint, lease).await
+}
+
+/// A direct channel to `endpoint` that dies when Tor is turned on (see [`connect`]).
+async fn connect_direct(
+    endpoint: &str,
+    lease: crate::tor::DirectLease,
+) -> Result<Client, WalletError> {
     let mut channel = Channel::from_shared(endpoint.to_owned()).map_err(|e| remote_error(&e))?;
     if endpoint.starts_with("https://") {
         channel = channel
@@ -284,6 +292,42 @@ pub async fn connect(endpoint: &str) -> Result<Client, WalletError> {
         .await
         .map_err(|e| remote_error(&e))?;
     Ok(CompactTxStreamerClient::new(channel))
+}
+
+/// Like [`connect`], but reuses this process's channel to `endpoint` while it may still be
+/// used: a direct channel whose lease Tor hasn't revoked (tonic reconnects by itself when
+/// the server drops the connection, and the connector refuses once Tor is on). Saves a TCP
+/// and TLS handshake per call (~0.4 s from a phone). Through Tor nothing is reused. Only for
+/// a process whose calls run on **one long-lived runtime** (the app's bridge): a channel's
+/// worker task lives on the runtime that made it.
+pub async fn connect_pooled(endpoint: &str) -> Result<Client, WalletError> {
+    use crate::tor::{self, Purpose, Route};
+    use std::collections::HashMap;
+    static POOL: std::sync::Mutex<Option<HashMap<String, (tor::DirectLease, Client)>>> =
+        std::sync::Mutex::new(None);
+    // Turning Tor on revokes every direct lease at once, so a revoked one means: not this.
+    if let Ok(pool) = POOL.lock() {
+        if let Some((lease, client)) = pool.as_ref().and_then(|p| p.get(endpoint)) {
+            if !lease.is_revoked() {
+                return Ok(client.clone());
+            }
+        }
+    }
+    let route = tor::route(Purpose::Lightwalletd, tor::ROUTE_WAIT)
+        .await
+        .map_err(|b| WalletError::Remote {
+            failure: b.into(),
+            message: b.to_string(),
+        })?;
+    let Route::Direct(lease) = route else {
+        return connect(endpoint).await;
+    };
+    let client = connect_direct(endpoint, lease.clone()).await?;
+    if let Ok(mut pool) = POOL.lock() {
+        pool.get_or_insert_with(HashMap::new)
+            .insert(endpoint.to_owned(), (lease, client.clone()));
+    }
+    Ok(client)
 }
 
 /// Upper bound for opening a lightwalletd channel through Tor.
@@ -660,6 +704,20 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
     /// The network this wallet is on.
     pub fn params(&self) -> &P {
         &self.params
+    }
+
+    /// Whether a sync would have work to do with the server at `server_tip`: the server
+    /// has blocks this wallet hasn't heard of, or part of the known chain is still
+    /// unscanned (an earlier pass stopped, or the wallet is new). When false, a sync only
+    /// makes the server round trips to find that out (1-2 s on a phone).
+    pub fn needs_scan(&self, server_tip: u32) -> Result<bool, WalletError> {
+        let Some(known) = self.chain_height()? else {
+            return Ok(true);
+        };
+        if server_tip != known {
+            return Ok(true);
+        }
+        Ok(!self.db.suggest_scan_ranges().map_err(db_err)?.is_empty())
     }
 
     pub fn chain_height(&self) -> Result<Option<u32>, WalletError> {

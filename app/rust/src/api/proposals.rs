@@ -17,7 +17,7 @@ use zafe_core::{
     session::{NonceStore, ProposalId},
     state_dir,
     vault::{ProposalStatus, ProposedPayment, VaultState},
-    wallet::{connect, PaymentRequest, ZafeNetwork},
+    wallet::{connect_pooled as connect, PaymentRequest, ZafeNetwork},
 };
 use zcash_protocol::memo::{Memo, MemoBytes};
 
