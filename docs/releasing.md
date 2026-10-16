@@ -43,8 +43,15 @@ Firebase project's Google Cloud project; key only in the `android-release` secre
 `PLAY_SERVICE_ACCOUNT_JSON`). In Play Console it may only release to testing tracks:
 **production is always a manual promotion** of a tested internal build. Release builds
 ship arm64 native libraries only (`build.gradle.kts`), so Play offers the app to arm64
-phones only. Play re-signs installs with its own key: its SHA-256 (App integrity → App
-signing) must be in `infra/site/public/.well-known/assetlinks.json` for invite links.
+phones only. Play re-signs installs with its own key: `48:8C:C7:3B:92:D0:A4:7F:96:89:F9:4C:DE:96:CA:E4:38:8E:C1:B8:90:E3:DB:07:92:49:5C:AE:58:32:8B:BC`
+(App integrity → App signing). The site's `assetlinks.json` is built from the repo variable
+`ZAFE_ANDROID_CERT_SHA256` (comma-separated: upload key, then Play's key), and a Play install
+reports `zafe.cash: verified` (checked 2026-10-16, `adb shell pm get-app-links xyz.zafe.zafe`).
+First production release 0.1.16 (2018) sent for review 2026-10-16 with managed publishing
+on, all countries. Play Console answers (listing, Data safety, financial features: crypto
+wallet + "non-custodial software wallet" confirmed per country, no licences; advertising ID:
+No) are recorded in the private GTM repo, `content/play-listing/listing.md`. A new app's first
+release can't use a staged rollout; later releases can.
 
 ## Locally
 
