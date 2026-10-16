@@ -411,22 +411,31 @@ class DetailRow extends StatelessWidget {
               ),
             ),
           const SizedBox(width: AppSpacing.sm),
+          // The value and its icon sit together at the right edge (spread apart by
+          // spaceBetween, a value with an icon floated mid-row).
           Flexible(
             flex: 3,
-            child: Text(
-              value,
-              textAlign: TextAlign.end,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.labelLarge.copyWith(
-                color: colors.text.accent,
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    value,
+                    textAlign: TextAlign.end,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.labelLarge.copyWith(
+                      color: colors.text.accent,
+                    ),
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: AppSpacing.xs),
+                  trailing!,
+                ],
+              ],
             ),
           ),
-          if (trailing != null) ...[
-            const SizedBox(width: AppSpacing.xs),
-            trailing!,
-          ],
         ],
       ),
     );
