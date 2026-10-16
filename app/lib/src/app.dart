@@ -45,6 +45,7 @@ import 'providers/theme_mode_provider.dart';
 import 'notifications/vault_updates.dart'
     show kReceivedPrefix, kSeatMovePrefix, kUnapprovedPrefix;
 import 'notifications/vault_watch.dart';
+import 'features/vaults/manage_vaults_screen.dart';
 import 'providers/vault_provider.dart';
 import 'services/app_update.dart';
 import 'services/invite_links.dart';
@@ -227,6 +228,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
         '/signers',
         '/viewing-key',
         '/vault-protection',
+        '/vaults',
         '/replace-signer',
         '/export',
         '/activity',
@@ -330,6 +332,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
           final args = state.extra as (String, String)?;
           return page(ReplaceSignerScreen(signer: args?.$1, code: args?.$2));
         },
+      ),
+      GoRoute(
+        path: '/vaults',
+        pageBuilder: (_, _) => page(const ManageVaultsScreen()),
       ),
       GoRoute(
         path: '/vault-protection',

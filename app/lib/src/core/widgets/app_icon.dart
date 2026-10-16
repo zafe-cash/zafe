@@ -19,6 +19,7 @@ abstract final class AppIcons {
   static const arrowDown = 'arrow_down';
   static const arrowDownCircle = 'arrow_down_circle';
   static const arrowUpRight = 'arrow_up_right';
+  static const more = 'more';
   static const book = 'book';
   static const cameraDenied = 'camera_denied';
   static const cancel = 'cancel';

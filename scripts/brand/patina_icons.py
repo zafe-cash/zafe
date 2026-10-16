@@ -35,6 +35,7 @@ MAP = {
     "arrow_down": "arrow-down",
     "arrow_down_circle": "arrow-circle-down",
     "arrow_up_right": "arrow-up-right",
+    "more": "dots-three",
     "book": "book-open",
     "camera_denied": "camera-slash",
     "cancel": "minus",
@@ -86,7 +87,7 @@ MAP = {
 # behind the arrows), so they use the
 # regular weight, outline only.
 LINE_ONLY = {"cross", "check", "chevron_forward", "chevron_backward", "arrow_down",
-             "arrow_up_right",
+             "arrow_up_right", "more",
              "plus", "cancel", "renew"}
 
 OUTLINE = 'fill="#000000" stroke="#000000" stroke-width="2" stroke-linejoin="round"'
