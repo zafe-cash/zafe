@@ -33,13 +33,12 @@ waitlist or address collected.
 
 ## Google Play
 
-App `xyz.zafe.zafe` in the organization account "Zafe" (owner `dev@zafe.cash`). The first
+App `xyz.zafe.zafe` in the organization account "Zafe". The first
 bundle (0.1.16, version code 2018) was uploaded by hand to internal testing, which also
 enrolled Play App Signing (the API can't create a new app's first release). Since then
 every `mainnet-v*` tag also builds an App Bundle (version code 3000 + run number) and
 `release-mainnet.yml` uploads it to the **internal** track with the service account
-`play-publisher@zafe-18c4d.iam.gserviceaccount.com` (Play Developer API enabled in the
-Firebase project's Google Cloud project; key only in the `android-release` secret
+a Play publisher service account (Play Developer API on; key only in the `android-release` secret
 `PLAY_SERVICE_ACCOUNT_JSON`). In Play Console it may only release to testing tracks:
 **production is always a manual promotion** of a tested internal build. Release builds
 ship arm64 native libraries only (`build.gradle.kts`), so Play offers the app to arm64

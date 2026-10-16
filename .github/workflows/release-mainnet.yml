@@ -18,7 +18,7 @@ name: Release (Android, mainnet)
 #     ANDROID_KEY_ALIAS
 #     ANDROID_KEY_PASSWORD
 #     GOOGLE_SERVICES_JSON       optional: Firebase config for push notifications
-#     PLAY_SERVICE_ACCOUNT_JSON  optional: key of play-publisher@zafe-18c4d (Play Console:
+#     PLAY_SERVICE_ACCOUNT_JSON  optional: the Play publisher service account's key (Play Console:
 #                                "release to testing tracks" only); with it the same build
 #                                also goes to Google Play's internal testing track as an
 #                                App Bundle. Production stays a manual promotion in the
