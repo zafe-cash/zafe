@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -51,8 +52,9 @@ class _WindUp extends Curve {
 /// three of five keys turn, each with a little wind-up, the gold arc joining them
 /// grows, the heavy wheel spins a full turn, the bolts slide back and the door settles
 /// with a gold ripple. It plays once when the screen appears (and when it comes back);
-/// tapping the door plays it again, with a haptic tick per key. Once open, a light
-/// runs along the gold arc now and then. Reduced motion: the door open, still.
+/// tapping the door plays it again, with a haptic tick per key. Once open, a slow gleam
+/// sweeps across the door, over and over, lighting the gold arc as it passes. Reduced
+/// motion: the door open, still.
 class WelcomeArt extends StatefulWidget {
   const WelcomeArt({super.key, this.replay});
 
@@ -73,12 +75,13 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
     reverseDuration: const Duration(milliseconds: 500),
   );
 
-  /// The light along the arc, every few seconds once open.
+  /// Once open: a slow gleam across the door, over and over (one cycle: 2.6 s of
+  /// light crossing, then a rest).
   late final AnimationController _shine = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1100),
+    duration: const Duration(milliseconds: 4000),
   );
-  Timer? _shineTimer;
+  static const _gleam = 0.65; // share of a cycle the light is crossing
   Timer? _startTimer;
 
   /// Locking again (before a replay) runs the unlock backwards, quickly, except the
@@ -128,7 +131,8 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
 
   Future<void> _play({bool haptics = false}) async {
     if (!mounted || _open.isAnimating) return;
-    _shineTimer?.cancel();
+    _shine.stop();
+    _shine.value = 0;
     if (_open.value > 0) {
       _locking = true;
       await _open.reverse().orCancel.catchError((_) {});
@@ -139,11 +143,8 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
     _ticked.clear();
     await _open.forward(from: 0).orCancel.catchError((_) {});
     if (!mounted) return;
-    _shineTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted && TickerMode.valuesOf(context).enabled) {
-        _shine.forward(from: 0);
-      }
-    });
+    // A covered screen's ticker is muted, so the repeat costs nothing there.
+    unawaited(_shine.repeat());
   }
 
   /// When replayed by a tap: a light tick as each key turns, a firmer one as the bolts
@@ -165,7 +166,6 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
   void dispose() {
     widget.replay?.removeListener(_replay);
     _startTimer?.cancel();
-    _shineTimer?.cancel();
     _open.dispose();
     _shine.dispose();
     super.dispose();
@@ -247,7 +247,11 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
                       door,
                       CustomPaint(
                         size: const Size(1080, 1240),
-                        painter: _ArcPainter(arc, click, _shine.value),
+                        painter: _ArcPainter(
+                          arc,
+                          click,
+                          (_shine.value / _gleam).clamp(0.0, 1.0),
+                        ),
                       ),
                       for (var i = 0; i < _keys.length; i++)
                         Opacity(
@@ -268,6 +272,13 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
                         child: wheel,
                       ),
                       glint,
+                      CustomPaint(
+                        size: const Size(1080, 1240),
+                        painter: _SheenPainter(
+                          (_shine.value / _gleam).clamp(0.0, 1.0),
+                          identical(context.colors, AppColors.dark),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -347,7 +358,7 @@ class _ArcPainter extends CustomPainter {
     if (shine > 0 && shine < 1 && progress >= 1) {
       // A short bright segment travelling the arc, fading in and out.
       final e = Curves.easeInOutSine.transform(shine);
-      const length = 0.16;
+      const length = 0.24;
       final at = -length + (1 + length) * e;
       final from = at.clamp(0.0, 1.0), to = (at + length).clamp(0.0, 1.0);
       if (to > from) {
@@ -358,10 +369,10 @@ class _ArcPainter extends CustomPainter {
           false,
           Paint()
             ..color = const Color(
-              0xFFFFF4D6,
-            ).withValues(alpha: 0.9 * math.sin(shine * math.pi))
+              0xFFFFF6DC,
+            ).withValues(alpha: math.sin(shine * math.pi))
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 7
+            ..strokeWidth = 9
             ..strokeCap = StrokeCap.round
             ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
         );
@@ -372,4 +383,54 @@ class _ArcPainter extends CustomPainter {
   @override
   bool shouldRepaint(_ArcPainter old) =>
       old.progress != progress || old.click != click || old.shine != shine;
+}
+
+/// A soft band of light sweeping diagonally across the door (clipped to its frame), at
+/// `t` (0 and 1: outside the door). Added light, so the metal and the gold gleam.
+class _SheenPainter extends CustomPainter {
+  _SheenPainter(this.t, this.dark);
+  final double t;
+  final bool dark;
+
+  static const _door = 368.0; // the frame ring's outer radius
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (t <= 0 || t >= 1) return;
+    final e = Curves.easeInOutSine.transform(t);
+    canvas.save();
+    canvas.clipPath(
+      Path()..addOval(Rect.fromCircle(center: _centre, radius: _door)),
+    );
+    // From the upper left to the lower right, tilted 30 degrees.
+    const band = 300.0;
+    final reach = _door + band;
+    final along = -reach + 2 * reach * e;
+    final dir = Offset(math.cos(math.pi / 6), math.sin(math.pi / 6));
+    final c = _centre + dir * along;
+    final from = c - dir * band / 2, to = c + dir * band / 2;
+    final peak = dark ? 0.2 : 0.42;
+    canvas.drawRect(
+      Rect.fromCircle(center: _centre, radius: _door),
+      Paint()
+        ..blendMode = BlendMode.plus
+        ..shader = ui.Gradient.linear(
+          from,
+          to,
+          // A soft band with a brighter core, like light on polished metal.
+          [
+            const Color(0x00FFF4DA),
+            const Color(0xFFFFF4DA).withValues(alpha: peak * 0.55),
+            const Color(0xFFFFF4DA).withValues(alpha: peak * 1.5),
+            const Color(0xFFFFF4DA).withValues(alpha: peak * 0.55),
+            const Color(0x00FFF4DA),
+          ],
+          [0, 0.38, 0.5, 0.62, 1],
+        ),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_SheenPainter old) => old.t != t || old.dark != dark;
 }

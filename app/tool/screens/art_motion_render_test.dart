@@ -168,6 +168,11 @@ void main() {
       2750,
       3000,
       3200,
+      3700,
+      4200,
+      4700,
+      5200,
+      5700,
     ]) {
       await tester.pump(Duration(milliseconds: ms - t));
       t = ms;
