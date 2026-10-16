@@ -302,28 +302,36 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     }
   }
 
-  /// Logs a proposal paying `payments` (one, or a batch of up to 50).
-  /// Proposes [payments]. [refresh]: false when the caller refreshes itself (the
-  /// proposer approves first, then refreshes once).
-  Future<String> propose({
+  /// Proposes [payments] (one, or a batch of up to 50) and approves them as this member,
+  /// in one bridge call under the caller's unlock (the approval reuses the log the
+  /// proposal read). The new payment is in [state] when this returns, already showing
+  /// this member's approval; if the approval failed, the payment stays open for it.
+  Future<String> proposeAndApprove({
     required List<rust.PaymentInput> payments,
     required bool autoSend,
-    bool refresh = true,
   }) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
-    final id = await rust.proposePayment(
+    final out = await rust.proposeAndApprove(
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
       dbKey: walletKeyFor(vault.identity!, vault.activeId!),
+      stateDir: await paths.stateDir(vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       payments: payments,
       autoSend: autoSend,
     );
-    if (refresh) await refreshFresh();
-    return id;
+    if (out.approveError case final e?) {
+      debugPrint('approving my own proposal failed: ${describeError(e)}');
+    }
+    state = state.copyWith(items: out.items, loaded: true);
+    // Proposals hold notes: the next wallet sync runs in full.
+    ref.read(vaultProvider.notifier).markDirty();
+    // The rest of a refresh (auto-send, seen, summaries) follows in the background.
+    refreshSoon();
+    return out.id;
   }
 
   /// The exact network fee (zatoshis) proposing [payments] would pay now.

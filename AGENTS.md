@@ -99,7 +99,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   Keygen still takes the confirmed string (`--safety-number` in the CLI, `confirmedSafetyNumber`
   in the bridge) and re-derives it.
 - **Async setup** (2026-10-16): keygen is a step function, `node::keygen_step` (plus
-  `seal_when_full`: the creator's step locks a full setup; bridge `setup_step` does
+  `seal_when_full`: the creator's step locks a full setup; once sealed with the words known the bridge keeps
+  the membership in memory (`SEALED`) and keygen steps skip the ~4 s membership step; the setup screen polls
+  every 10 s while the words wait for "They match", and the tap doesn't wait for a running poll; bridge `setup_step` does
   membership, seal, safety check and keygen in one call; `node::run_keygen` loops it for the
   CLI/tests, 1 step/s to stay under the hosted rate). State between steps:
   `state_dir::KEYGEN` (`keygen.state`, `KEYGEN_STATE` 1, sealed with the vault's
@@ -1224,9 +1226,12 @@ Learned while studying it:
   (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline, backup
   "Later" just leaves.
 - **The proposer approves when proposing** (2026-10-16, user's call after the testnet dry run, as Safe does):
-  `send_screen._propose` runs `propose` then `approve` under one unlock ("Propose and approve this payment"); a
-  failed approval leaves the payment open for this member's approval (the request page then says "You proposed
-  sending"). Before, the proposer's own payment came back as a request with Approve/Decline. The CLI still
+  `send_screen._propose` runs bridge `propose_and_approve` under one unlock ("Propose and approve this payment"):
+  `node::propose_loaded` then `node::approve_after_propose` with the log state the proposal left (2026-10-17, one
+  log read fewer), returning the proposal list so the page opens at once; a failed approval comes back as
+  `approve_error` and leaves the payment open for this member's approval (the request page then says "You proposed
+  sending"). Proposing reads lightwalletd's tip and branch in one `GetLightdInfo` (`tip_on_current_branch`)
+  alongside the log, before the wallet lock (`propose_inner`). Before, the proposer's own payment came back as a request with Approve/Decline. The CLI still
   proposes and approves separately.
 - **Needs you** (Home, 2026-10-16, `features/home/needs_you.dart`): payments where `needsMyAction`
   (`proposal_status.dart`; the same rule counts notifications) and seat moves this member can approve, as

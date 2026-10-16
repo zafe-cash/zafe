@@ -8,7 +8,8 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `visible_text`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `visible_text`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Proposed`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 
@@ -120,6 +121,31 @@ Future<String> proposePayment({
   lightwalletdUrl: lightwalletdUrl,
   dbDir: dbDir,
   dbKey: dbKey,
+  seeds: seeds,
+  material: material,
+  payments: payments,
+  autoSend: autoSend,
+);
+
+/// Proposes `payments` and approves them as this member, in one call: the approval uses
+/// the log state the proposal left (one read of the log fewer, ~1.5 s over Tor). A
+/// failed approval is reported in the outcome, not as an error: the payment exists.
+Future<ProposeOutcome> proposeAndApprove({
+  required String relayUrl,
+  required String lightwalletdUrl,
+  required String dbDir,
+  required List<int> dbKey,
+  required String stateDir,
+  required List<int> seeds,
+  required List<int> material,
+  required List<PaymentInput> payments,
+  required bool autoSend,
+}) => RustLib.instance.api.crateApiProposalsProposeAndApprove(
+  relayUrl: relayUrl,
+  lightwalletdUrl: lightwalletdUrl,
+  dbDir: dbDir,
+  dbKey: dbKey,
+  stateDir: stateDir,
   seeds: seeds,
   material: material,
   payments: payments,
@@ -620,6 +646,41 @@ enum ProposalStage {
   rejected,
   cancelled,
   sent,
+}
+
+/// What [`propose_and_approve`] gets back.
+class ProposeOutcome {
+  final String id;
+
+  /// This member's approval, given under the same unlock (`None` if it failed).
+  final ApproveResult? approved;
+
+  /// Why the approval failed: the payment then stays open for this member's approval.
+  final ZafeError? approveError;
+
+  /// The vault's proposals right after, so the app shows the new payment at once.
+  final List<ProposalInfo> items;
+
+  const ProposeOutcome({
+    required this.id,
+    this.approved,
+    this.approveError,
+    required this.items,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ approved.hashCode ^ approveError.hashCode ^ items.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProposeOutcome &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          approved == other.approved &&
+          approveError == other.approveError &&
+          items == other.items;
 }
 
 /// A moved seat whose key the helpers are still rebuilding on the new phone.

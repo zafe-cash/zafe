@@ -433,6 +433,22 @@ pub async fn ensure_current_branch<P: Parameters>(
     check_branch(&info.consensus_branch_id, tip, params)
 }
 
+/// lightwalletd's tip, after the [`ensure_current_branch`] check: one request for both
+/// (each is a new stream over Tor, ~1.5 s).
+pub async fn tip_on_current_branch<P: Parameters>(
+    client: &mut Client,
+    params: &P,
+) -> Result<u32, WalletError> {
+    let info = client
+        .get_lightd_info(service::Empty {})
+        .await
+        .map_err(|e| status_error(&e))?
+        .into_inner();
+    let tip = u32::try_from(info.block_height).map_err(|_| server_error("height out of range"))?;
+    check_branch(&info.consensus_branch_id, tip, params)?;
+    Ok(tip)
+}
+
 /// The comparison behind [`ensure_current_branch`]: `server_branch` is lightwalletd's hex
 /// branch id for the block at `tip`. An id the server doesn't give (or in a form we can't
 /// read) is not held against the app.

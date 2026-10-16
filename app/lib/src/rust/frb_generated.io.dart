@@ -67,6 +67,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  ApproveResult dco_decode_box_autoadd_approve_result(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -151,6 +154,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  ApproveResult? dco_decode_opt_box_autoadd_approve_result(dynamic raw);
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -179,6 +185,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProposalStage dco_decode_proposal_stage(dynamic raw);
+
+  @protected
+  ProposeOutcome dco_decode_propose_outcome(dynamic raw);
 
   @protected
   ReceivedInfo dco_decode_received_info(dynamic raw);
@@ -295,6 +304,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  ApproveResult sse_decode_box_autoadd_approve_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -391,6 +405,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  ApproveResult? sse_decode_opt_box_autoadd_approve_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -421,6 +440,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProposalStage sse_decode_proposal_stage(SseDeserializer deserializer);
+
+  @protected
+  ProposeOutcome sse_decode_propose_outcome(SseDeserializer deserializer);
 
   @protected
   ReceivedInfo sse_decode_received_info(SseDeserializer deserializer);
@@ -547,6 +569,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_approve_result(
+    ApproveResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -667,6 +695,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_approve_result(
+    ApproveResult? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
@@ -704,6 +738,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_proposal_stage(ProposalStage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_propose_outcome(
+    ProposeOutcome self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_received_info(ReceivedInfo self, SseSerializer serializer);

@@ -166,6 +166,11 @@ pub struct SetupProgress {
     pub material: Option<Vec<u8>>,
 }
 
+/// Sealed setups' membership by (relay, mailbox, member): see `setup_step`.
+type SealedKey = (String, zafe_proto::MailboxId, [u8; 32]);
+static SEALED: std::sync::Mutex<std::collections::BTreeMap<SealedKey, node::Membership>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
 /// One step of a vault setup for this member; the setup screen and background checks
 /// call it repeatedly, so nobody has to be online at the same time. Locks membership when
 /// this member is the creator and every seat is taken. With `confirmed_safety_number`
@@ -212,8 +217,26 @@ pub fn setup_step(
             )
         };
         let members = async {
+            // Sealed with the words known: members and words can't change any more, so
+            // key generation steps reuse them (the membership step is ~4 s over Tor).
+            let key = (
+                relay.base_url().to_owned(),
+                invite.mailbox,
+                me.public().sig_pk,
+            );
+            if node::keygen_started(&dir) {
+                if let Some(m) = SEALED.lock().ok().and_then(|c| c.get(&key).cloned()) {
+                    return Ok(m);
+                }
+            }
             let m = node::membership(&relay, &me, &invite).await?;
-            node::seal_when_full(&relay, &me, &invite, m).await
+            let m = node::seal_when_full(&relay, &me, &invite, m).await?;
+            if m.sealed && m.safety_words.is_some() {
+                if let Ok(mut cache) = SEALED.lock() {
+                    cache.insert(key, m.clone());
+                }
+            }
+            Ok::<_, node::NodeError>(m)
         };
         let (m, mut tip) = tokio::join!(members, tip);
         let m = m?;

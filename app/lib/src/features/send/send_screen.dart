@@ -337,25 +337,17 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     }
     setState(() => _busy = true);
     try {
+      // Under the same unlock, in one call. If the approval fails (offline a moment
+      // later), the payment stays open and waits for this member's approval like any
+      // other. The returned list already shows this member's approval, so the payment's
+      // page opens right away without the Approve/Decline request flashing first.
       final id = await ref
           .read(proposalsProvider.notifier)
-          .propose(
+          .proposeAndApprove(
             payments: _payments,
-            // Always: the last approval sends it (no one has to come back to tap
-            // "Send").
+            // Always: the last approval sends it (no one has to come back to tap "Send").
             autoSend: true,
-            refresh: false,
           );
-      // Under the same unlock. If it fails (offline a moment later), the payment
-      // stays open and waits for this member's approval like any other.
-      try {
-        await ref.read(proposalsProvider.notifier).approve(id, refresh: false);
-      } catch (e) {
-        debugPrint('approving my own proposal failed: ${describeError(e)}');
-      }
-      // One refresh, awaited: the payment's page then opens showing this member's
-      // approval (opening it first flashed the Approve/Decline request for a moment).
-      await ref.read(proposalsProvider.notifier).refreshFresh();
       if (!mounted) return;
       // The payment's page takes this screen's place (Back goes to Home): going Home
       // first and pushing it showed Home for a moment in between.

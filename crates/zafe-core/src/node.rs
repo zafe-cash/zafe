@@ -1861,18 +1861,7 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
     auto_send: bool,
     rng: &mut R,
 ) -> Result<ProposalId, NodeError> {
-    let fvk = material.vault_keys()?.fvk().clone();
-    // Every member's check would reject it: an output to the vault counts as change.
-    for p in payments {
-        if orchard_receiver(wallet.params(), &p.address)
-            .is_ok_and(|a| fvk.scope_for_address(&a).is_some())
-        {
-            return Err(crate::wallet::WalletError::Payment(
-                "that is this vault's own address".into(),
-            )
-            .into());
-        }
-    }
+    check_payees(material, wallet.params(), payments)?;
     // A network upgrade this version doesn't know would get the payment rejected after
     // everyone approved it: refuse up front. Read the log meanwhile (over Tor each
     // request is a new circuit stream, ~1 s).
@@ -1883,8 +1872,65 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
     );
     branch?;
     let (mut chain, mut state) = loaded?;
+    propose_loaded(
+        relay,
+        me,
+        material,
+        wallet,
+        lightwalletd,
+        sent,
+        payments,
+        auto_send,
+        &mut chain,
+        &mut state,
+        rng,
+    )
+    .await
+}
+
+/// Refuses payments every member's check would reject: an output to the vault itself
+/// counts as change.
+pub fn check_payees<P: Parameters>(
+    material: &VaultMaterial,
+    params: &P,
+    payments: &[PaymentRequest],
+) -> Result<(), NodeError> {
+    let fvk = material.vault_keys()?.fvk().clone();
+    for p in payments {
+        if orchard_receiver(params, &p.address).is_ok_and(|a| fvk.scope_for_address(&a).is_some()) {
+            return Err(crate::wallet::WalletError::Payment(
+                "that is this vault's own address".into(),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// [`propose`] with the log already loaded and the branch already checked (the caller
+/// read both at once, without the wallet lock). `chain`/`state` include the proposal
+/// afterwards, so the proposer can approve without reading the log again.
+#[allow(clippy::too_many_arguments)]
+pub async fn propose_loaded<
+    P: Parameters + Clone + Send + Sync + 'static,
+    R: RngCore + CryptoRng,
+>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    wallet: &mut VaultWallet<P>,
+    lightwalletd: &mut Client,
+    sent: &SentTxs,
+    payments: &[PaymentRequest],
+    auto_send: bool,
+    chain: &mut Chain,
+    state: &mut VaultState,
+    rng: &mut R,
+) -> Result<ProposalId, NodeError> {
+    check_payees(material, wallet.params(), payments)?;
+    let fvk = material.vault_keys()?.fvk().clone();
     for _ in 0..3 {
-        reserve_notes(&state, wallet, lightwalletd, sent).await?;
+        reserve_notes(state, wallet, lightwalletd, sent).await?;
         let pczt = wallet.propose(payments, material.descriptor.proposal_expiry_blocks)?;
         let tip = wallet
             .chain_height()
@@ -1917,7 +1963,7 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
             signing_spends,
             auto_send,
         };
-        match append_event(relay, me, material, &mut chain, &mut state, &event, rng).await {
+        match append_event(relay, me, material, chain, state, &event, rng).await {
             Ok(_) => return Ok(id),
             // `state` now includes the proposal that won the notes: hold them and rebuild.
             Err(NodeError::Invalid(VaultError::NotesInUse(_))) => continue,
@@ -2279,7 +2325,62 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     let mut laps = Laps::new();
     let (mut chain, mut state) = load_state(relay, me, material).await?;
     laps.lap("history");
-    let (pczt, payments) = proposal_pczt(&state, &proposal)?;
+    approve_loaded(
+        relay, me, material, network, tip_height, proposal, store, pool, rng, &mut chain,
+        &mut state, laps,
+    )
+    .await
+}
+
+/// [`approve`] by the proposer right after [`propose_loaded`], with the log state its
+/// proposal left (no second read of the log).
+#[allow(clippy::too_many_arguments)]
+pub async fn approve_after_propose<P: Parameters, R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    network: &P,
+    tip_height: u32,
+    proposal: ProposalId,
+    store: &mut impl NonceStore,
+    pool: &mut impl PoolStore,
+    rng: &mut R,
+    chain: &mut Chain,
+    state: &mut VaultState,
+) -> Result<Approved, NodeError> {
+    approve_loaded(
+        relay,
+        me,
+        material,
+        network,
+        tip_height,
+        proposal,
+        store,
+        pool,
+        rng,
+        chain,
+        state,
+        Laps::new(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    network: &P,
+    tip_height: u32,
+    proposal: ProposalId,
+    store: &mut impl NonceStore,
+    pool: &mut impl PoolStore,
+    rng: &mut R,
+    chain: &mut Chain,
+    state: &mut VaultState,
+    mut laps: Laps,
+) -> Result<Approved, NodeError> {
+    let (pczt, payments) = proposal_pczt(state, &proposal)?;
     let expected = expectations(
         network,
         &payments,
@@ -2328,7 +2429,7 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
                 .map_err(|e| NodeError::Verification(e.to_string()))?;
             check_signing_spends(&verified, signing_spends)?;
             laps.lap("sign");
-            append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+            append_event(relay, me, material, chain, state, &event, rng).await?;
             laps.lap("post");
             pool.drop_vote(&proposal, &pczt_hash);
             let p = &state.proposals[&proposal];
@@ -2424,7 +2525,7 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
         (event, verified, false)
     };
     laps.lap("sign");
-    append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+    append_event(relay, me, material, chain, state, &event, rng).await?;
     laps.lap("post");
     if signed {
         pool.drop_vote(&proposal, &pczt_hash);

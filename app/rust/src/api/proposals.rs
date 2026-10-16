@@ -22,6 +22,7 @@ use zafe_core::{
         ZafeNetwork,
     },
 };
+use zafe_proto::{Chain, Identity};
 use zcash_protocol::memo::{Memo, MemoBytes};
 
 use super::{
@@ -729,25 +730,163 @@ pub fn propose_payment(
     let m = self::material(&material)?;
     let requests = payment_requests(&m, &payments)?;
     let mut watch = crate::diag::Stopwatch::new("propose");
+    let relay = RelayClient::pooled(relay_url);
+    let proposed = propose_inner(
+        &mut watch,
+        &relay,
+        &me,
+        &m,
+        &lightwalletd_url,
+        &db_dir,
+        &db_key,
+        &requests,
+        auto_send,
+    );
+    watch.finish();
+    Ok(hex::encode(proposed?.id))
+}
+
+/// What [`propose_and_approve`] gets back.
+pub struct ProposeOutcome {
+    pub id: String,
+    /// This member's approval, given under the same unlock (`None` if it failed).
+    pub approved: Option<ApproveResult>,
+    /// Why the approval failed: the payment then stays open for this member's approval.
+    pub approve_error: Option<ZafeError>,
+    /// The vault's proposals right after, so the app shows the new payment at once.
+    pub items: Vec<ProposalInfo>,
+}
+
+/// Proposes `payments` and approves them as this member, in one call: the approval uses
+/// the log state the proposal left (one read of the log fewer, ~1.5 s over Tor). A
+/// failed approval is reported in the outcome, not as an error: the payment exists.
+#[allow(clippy::too_many_arguments)]
+pub fn propose_and_approve(
+    relay_url: String,
+    lightwalletd_url: String,
+    db_dir: String,
+    db_key: Vec<u8>,
+    state_dir: String,
+    seeds: Vec<u8>,
+    material: Vec<u8>,
+    payments: Vec<PaymentInput>,
+    auto_send: bool,
+) -> Result<ProposeOutcome, ZafeError> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
+    let net = network(&m.descriptor.network)?;
+    let requests = payment_requests(&m, &payments)?;
+    let mut watch = crate::diag::Stopwatch::new("propose-approve");
+    let relay = RelayClient::pooled(relay_url);
+    let proposed = propose_inner(
+        &mut watch,
+        &relay,
+        &me,
+        &m,
+        &lightwalletd_url,
+        &db_dir,
+        &db_key,
+        &requests,
+        auto_send,
+    );
+    let mut p = match proposed {
+        Ok(p) => p,
+        Err(e) => {
+            watch.finish();
+            return Err(e);
+        }
+    };
+    let mut store = nonce_store(&state_dir, &seeds, &m);
+    let mut pool = pool_store(&state_dir, &seeds, &m);
+    let approved = runtime().block_on(node::approve_after_propose(
+        &relay,
+        &me,
+        &m,
+        &net,
+        p.tip,
+        p.id,
+        &mut store,
+        &mut pool,
+        &mut OsRng,
+        &mut p.chain,
+        &mut p.state,
+    ));
+    watch.lap("approve");
+    watch.finish();
+    let (approved, approve_error) = match approved {
+        Ok(a) => (
+            Some(ApproveResult {
+                signed: a.signed,
+                completed: a.completed,
+                auto_send: a.auto_send,
+            }),
+            None,
+        ),
+        Err(e) => (None, Some(e.into())),
+    };
+    Ok(ProposeOutcome {
+        id: hex::encode(p.id),
+        approved,
+        approve_error,
+        items: info(&p.state, me.public().sig_pk, &state_dir, &seeds, &m),
+    })
+}
+
+/// A logged proposal, the log state that includes it, and the wallet's synced tip.
+struct Proposed {
+    id: ProposalId,
+    chain: Chain,
+    state: VaultState,
+    tip: u32,
+}
+
+/// Proposing, timed into `watch`. The network-only steps run first, together and without
+/// the wallet lock: lightwalletd's tip and branch (one request) and the vault log. Then,
+/// under the lock, the wallet catches up to that tip (a scan only if needed) and builds.
+#[allow(clippy::too_many_arguments)]
+fn propose_inner(
+    watch: &mut crate::diag::Stopwatch,
+    relay: &RelayClient,
+    me: &Identity,
+    m: &VaultMaterial,
+    lightwalletd_url: &str,
+    db_dir: &str,
+    db_key: &[u8],
+    requests: &[PaymentRequest],
+    auto_send: bool,
+) -> Result<Proposed, ZafeError> {
+    let params = network(&m.descriptor.network)?;
+    node::check_payees(m, &params, requests)?;
+    let (server, loaded) = runtime().block_on(async {
+        let server = async {
+            let mut client = connect(lightwalletd_url).await?;
+            let tip = zwallet::tip_on_current_branch(&mut client, &params).await?;
+            Ok::<_, ZafeError>((client, tip))
+        };
+        tokio::join!(server, node::load_state(relay, me, m))
+    });
+    watch.lap("network");
+    let (mut client, server_tip) = server?;
+    let (mut chain, mut state) = loaded?;
     let _guard = wallet_lock();
     watch.lap("lock");
-    let id = runtime().block_on(async {
-        let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+    runtime().block_on(async {
+        let mut wallet = open_wallet(db_dir, db_key, lightwalletd_url, m).await?;
         watch.lap("open");
-        let mut client = connect(&lightwalletd_url).await?;
-        let scanned = catch_up(&mut wallet, &mut client, true).await?;
+        let scanned = catch_up_to(&mut wallet, &mut client, server_tip, true).await?;
         watch.lap(if scanned { "scan" } else { "noscan" });
-        let relay = RelayClient::pooled(relay_url);
-        let sent = sent_txs(&db_dir, &m);
-        let first = node::propose(
-            &relay,
-            &me,
-            &m,
+        let sent = sent_txs(db_dir, m);
+        let first = node::propose_loaded(
+            relay,
+            me,
+            m,
             &mut wallet,
             &mut client,
             &sent,
-            &requests,
+            requests,
             auto_send,
+            &mut chain,
+            &mut state,
             &mut OsRng,
         )
         .await;
@@ -757,26 +896,32 @@ pub fn propose_payment(
             Err(node::NodeError::Wallet(_)) if !scanned => {
                 wallet.sync(&mut client).await?;
                 watch.lap("rescan");
-                node::propose(
-                    &relay,
-                    &me,
-                    &m,
+                node::propose_loaded(
+                    relay,
+                    me,
+                    m,
                     &mut wallet,
                     &mut client,
                     &sent,
-                    &requests,
+                    requests,
                     auto_send,
+                    &mut chain,
+                    &mut state,
                     &mut OsRng,
                 )
                 .await?
             }
             other => other?,
         };
-        Ok::<_, ZafeError>(id)
-    })?;
-    watch.lap("build");
-    watch.finish();
-    Ok(hex::encode(id))
+        watch.lap("build");
+        let tip = wallet.chain_height()?.unwrap_or(server_tip);
+        Ok(Proposed {
+            id,
+            chain,
+            state,
+            tip,
+        })
+    })
 }
 
 /// Brings the wallet up to the server's tip before building a transaction: one cheap
@@ -792,6 +937,16 @@ async fn catch_up(
     lenient: bool,
 ) -> Result<bool, ZafeError> {
     let tip = zwallet::latest_height(client).await?;
+    catch_up_to(wallet, client, tip, lenient).await
+}
+
+/// [`catch_up`] with the server's tip already read.
+async fn catch_up_to(
+    wallet: &mut VaultWallet<ZafeNetwork>,
+    client: &mut Client,
+    tip: u32,
+    lenient: bool,
+) -> Result<bool, ZafeError> {
     let skip = if lenient {
         wallet.can_build_without_scan(tip)?
     } else {

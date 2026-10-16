@@ -67,19 +67,30 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
-  /// The step running now. Polls skip while one runs (over Tor a step can take longer
-  /// than the poll interval) and "They match" waits for it: two steps of one member
-  /// sending at once can reach the relay out of order.
+  /// The poll's step running now: a poll skips while one runs (over Tor a step can take
+  /// longer than the poll interval). "They match" doesn't wait for it: two steps sending
+  /// at once is safe (the relay's out-of-order refusal is retried in Rust).
   Future<void>? _step;
+  DateTime? _lastPoll;
+
+  /// While the words are on screen waiting for "They match", nothing changes but a
+  /// cancelled setup: check less often.
+  static const _wordsPoll = Duration(seconds: 10);
 
   Future<void> _refresh({String? confirmed}) async {
-    if (confirmed == null && _step != null) return;
-    for (var running = _step; running != null; running = _step) {
-      try {
-        await running;
-      } catch (_) {}
+    if (confirmed != null) return _runStep(confirmed: confirmed);
+    if (_step != null) return;
+    final m = ref.read(vaultProvider).membership;
+    final waitingForTap =
+        m != null && m.sealed && m.safetyNumber != null && !m.started;
+    final last = _lastPoll;
+    if (waitingForTap &&
+        last != null &&
+        DateTime.now().difference(last) < _wordsPoll) {
+      return;
     }
-    final step = _runStep(confirmed: confirmed);
+    _lastPoll = DateTime.now();
+    final step = _runStep();
     _step = step;
     try {
       await step;
