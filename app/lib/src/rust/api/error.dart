@@ -124,4 +124,7 @@ enum ZafeErrorKind {
 
   /// Key generation timed out because some members never took part (`members`).
   keygenIncomplete,
+
+  /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
+  inviteExpired,
 }

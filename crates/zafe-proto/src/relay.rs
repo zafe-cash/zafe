@@ -94,6 +94,19 @@ pub struct CancelSetup {
     pub mailbox: MailboxId,
 }
 
+/// How long an invite lets a new member join, in seconds, from when it was issued or
+/// last renewed. An invite is a bearer credential until the setup locks: this bounds a
+/// leaked one. Members already in the setup can always rejoin.
+pub const INVITE_TTL_SECS: u64 = 72 * 3600;
+
+/// Restarts an unlocked setup's invite clock ([`INVITE_TTL_SECS`]). Signed by the creator
+/// (`POST /v1/mailbox/renew`, a newer route: a relay without it answers 404, and its
+/// invites never expire).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewInvite {
+    pub mailbox: MailboxId,
+}
+
 /// Joins a mailbox using the invite's token. Signed by the joining member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Join {

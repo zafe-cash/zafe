@@ -268,6 +268,18 @@ pub fn forget_keygen(state_dir: String) -> Result<(), ZafeError> {
 /// Creator only, before membership is locked: deletes the setup on the relay so the
 /// invite stops working. `false` when the relay had nothing to delete (an older relay, or
 /// the setup is already gone); the app forgets the vault locally in every case.
+/// Creator only: the invite works for 72 more hours (until the setup locks). Called when
+/// the creator shares it again. `false`: the relay doesn't expire invites.
+pub fn renew_invite(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<bool, ZafeError> {
+    let me = identity(&seeds)?;
+    let invite = Invite::decode(&invite)?;
+    Ok(runtime().block_on(node::renew_invite(
+        &RelayClient::pooled(relay_url),
+        &me,
+        &invite,
+    ))?)
+}
+
 pub fn cancel_setup(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<bool, ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;

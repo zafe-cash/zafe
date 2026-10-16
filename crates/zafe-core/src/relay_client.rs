@@ -8,9 +8,9 @@ use zafe_proto::{
         decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
         InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
         MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
-        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, ReplaceApproval,
-        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
-        WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, RenewInvite,
+        ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed,
+        WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
     Envelope, Identity, LogEntry, MailboxId, ProtoError,
@@ -510,6 +510,23 @@ impl RelayClient {
     ) -> Result<bool, RelayClientError> {
         match self
             .signed::<_, ()>("/v1/mailbox/cancel", creator, CancelSetup { mailbox })
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(RelayClientError::Status { status: 404, .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Restarts the invite's clock (creator only, before the setup locks). `Ok(false)`:
+    /// a relay without the route (its invites never expire).
+    pub async fn renew_invite(
+        &self,
+        creator: &Identity,
+        mailbox: MailboxId,
+    ) -> Result<bool, RelayClientError> {
+        match self
+            .signed::<_, ()>("/v1/mailbox/renew", creator, RenewInvite { mailbox })
             .await
         {
             Ok(()) => Ok(true),

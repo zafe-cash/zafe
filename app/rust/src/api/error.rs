@@ -66,6 +66,8 @@ pub enum ZafeErrorKind {
     Other,
     /// Key generation timed out because some members never took part (`members`).
     KeygenIncomplete,
+    /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
+    InviteExpired,
 }
 
 /// Which server an error came from, when it came from one.
@@ -169,6 +171,9 @@ impl From<NodeError> for ZafeError {
                 if body.contains("unknown mailbox") =>
             {
                 ZafeErrorKind::VaultNotOnRelay
+            }
+            NodeError::Relay(RelayClientError::Status { status: 410, .. }) => {
+                ZafeErrorKind::InviteExpired
             }
             NodeError::Relay(RelayClientError::RateLimited { .. }) => ZafeErrorKind::NotReady,
             NodeError::Relay(RelayClientError::StorageFull { .. }) => {

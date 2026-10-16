@@ -758,9 +758,10 @@ check. Fixed in the same change unless open:
       `notification_primer.dart`, shown once on Home; "Notifications are off" card with
       "Turn on" = system prompt or app settings). Not yet on the Signers tab.
 - [x] P0: empty-state copy (2026-10-16: "Receive funds first" at zero balance).
-- [ ] P1: per-member confirmation of the safety words, QR in the same room. (Done
+- [x] P1: per-member confirmation of the safety words (same-room QR dropped 2026-10-16: reading the words aloud works). (Done
       2026-10-15: commit-then-reveal words for setup and seat recovery, M1/M2.)
-- [ ] P1: invite expiry (waiting room status and setup-time push done with async setup).
+- [x] P1: invite expiry (2026-10-16): 72 h for new members, enforced by the relay (HTTP 410), renewed when
+      the creator opens the setup or shares the invite again. Waiting room and setup push: done with async setup.
 - [x] P1: name in setup (2026-10-16: "Your name" on Create and Join, prefilled with the last one; kept in
       `<vaultDir>/my_name_pending.txt` and published as the shared `Name` by the first refresh once the vault
       exists, unless the member already named themselves). Threshold presets, the t = n sheet and the "before you invite" brief: dropped

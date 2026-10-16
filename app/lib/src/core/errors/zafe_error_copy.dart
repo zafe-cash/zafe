@@ -28,6 +28,8 @@ String zafeErrorMessage(
     ZafeErrorKind.keygenIncomplete =>
       'Key generation stopped: some members never took part. Ask them to open Zafe, '
           'then try again together.',
+    ZafeErrorKind.inviteExpired =>
+      'This invite expired. Ask the vault\'s creator to share it again.',
     ZafeErrorKind.timeout =>
       'Other signers haven\'t answered yet. Ask them to open Zafe, then try again.',
     ZafeErrorKind.verification =>

@@ -285,6 +285,25 @@ class VaultNotifier extends Notifier<VaultState> {
     await _reload(activeId: vaultId);
   }
 
+  /// The creator's invite works for 72 more hours (the relay refuses new members after
+  /// that). Run when the setup screen shows the invite and when it's shared. Best effort.
+  Future<void> renewInvite() async {
+    final seeds = state.identity, invite = state.invite;
+    if (seeds == null || invite == null) return;
+    final creator =
+        state.inviteInfo?.creatorHex == rust.identityPublicKey(seeds: seeds);
+    if (!creator || (state.membership?.sealed ?? false)) return;
+    try {
+      await rust.renewInvite(
+        relayUrl: _endpoints.relayUrl,
+        seeds: seeds,
+        invite: invite,
+      );
+    } catch (e) {
+      debugPrint('renewing the invite failed: $e');
+    }
+  }
+
   /// Gives up on a setup whose membership is locked but whose keys were never made (a
   /// member never came back). The creator also deletes it on the relay (allowed until
   /// the vault's first log entry), so the others see it was cancelled.

@@ -480,6 +480,21 @@ pub async fn cancel_setup(
     Ok(relay.cancel_setup(creator, invite.mailbox).await?)
 }
 
+/// Creator only: restarts the invite's 72-hour clock (before the setup locks), e.g. when
+/// it is shared again. `Ok(false)`: the relay doesn't have invite expiry.
+pub async fn renew_invite(
+    relay: &RelayClient,
+    creator: &Identity,
+    invite: &Invite,
+) -> Result<bool, NodeError> {
+    if creator.public().sig_pk != invite.creator {
+        return Err(NodeError::Verification(
+            "only the creator can renew an invite".to_owned(),
+        ));
+    }
+    Ok(relay.renew_invite(creator, invite.mailbox).await?)
+}
+
 /// Creator only: freezes membership once all `n` members have joined.
 pub async fn seal(
     relay: &RelayClient,

@@ -438,6 +438,14 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   setup" on the setup screen, Android back asks the same. Tests: `relay.rs`
   (`the_creator_can_cancel_...`), `zafe-core/tests/cancel_setup.rs`,
   `test/create_prefill_test.dart`.
+- **Invite expiry** (2026-10-16, onboarding P1): an invite lets a **new** member join for
+  `relay::INVITE_TTL_SECS` (72 h) after it was issued or renewed (`mailboxes.created_at`, otherwise unused; no
+  `RELAY_DB` bump); members already in can rejoin; then `RelayError::InviteExpired` = HTTP 410 →
+  `ZafeErrorKind::InviteExpired` ("ask the creator to share it again"). The creator renews with
+  `POST /v1/mailbox/renew` (`RenewInvite`, creator-signed, refused once sealed; new route, no `RELAY_API` bump,
+  404 = older relay whose invites never expire): the app calls it when the creator opens the setup screen and on
+  "Share link" (`VaultNotifier.renewInvite`). Enforced by the relay because the threat is whoever holds a leaked
+  link. Test: `relay.rs` `an_invite_expires_after_72_hours_unless_the_creator_renews_it`.
 - **Relay membership check**: `reseed` lets the restorer choose members and threshold and
   the blind relay can't verify them, so `node::check_relay_membership` (route
   `POST /v1/mailbox/info`, body `MembersRead`, response `MailboxInfo`; no `RELAY_API` bump,

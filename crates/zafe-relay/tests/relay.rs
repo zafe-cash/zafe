@@ -13,8 +13,8 @@ use tower::ServiceExt;
 use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxRead,
-        InboxResponse, Join, LogRead, LogResponse, MembersRead, MembersResponse, Remove, Seal,
-        Signed,
+        InboxResponse, Join, LogRead, LogResponse, MembersRead, MembersResponse, Remove,
+        RenewInvite, Seal, Signed, INVITE_TTL_SECS,
     },
     Chain, Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -472,6 +472,79 @@ async fn member_cap_and_creator_removal() {
     )
     .await;
     assert_eq!(joined.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_invite_expires_after_72_hours_unless_the_creator_renews_it() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let clock = Arc::new(AtomicU64::new(NOW));
+    let app = Relay::with_clock({
+        let clock = clock.clone();
+        Arc::new(move || clock.load(Ordering::SeqCst))
+    })
+    .router();
+    let mut rng = StdRng::seed_from_u64(9);
+    let ids: Vec<Identity> = (0..4).map(|_| Identity::generate(&mut rng)).collect();
+    let mut token = [0u8; 32];
+    rng.fill_bytes(&mut token);
+    let create = CreateMailbox {
+        mailbox: MAILBOX,
+        join_token_hash: join_token_hash(&token),
+        max_members: 4,
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/create", &ids[0], create).await.0,
+        StatusCode::OK
+    );
+    let join = || Join {
+        mailbox: MAILBOX,
+        join_token: token,
+    };
+    let renew = || RenewInvite { mailbox: MAILBOX };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[1], join()).await.0,
+        StatusCode::OK
+    );
+
+    // Just past 72 hours: a new member is turned away, one already in can rejoin.
+    clock.store(NOW + INVITE_TTL_SECS + 1, Ordering::SeqCst);
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[2], join()).await.0,
+        StatusCode::GONE
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[1], join()).await.0,
+        StatusCode::OK
+    );
+
+    // Only the creator renews; then the invite works again for 72 hours.
+    assert_eq!(
+        signed(&app, "/v1/mailbox/renew", &ids[1], renew()).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/renew", &ids[0], renew()).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[2], join()).await.0,
+        StatusCode::OK
+    );
+
+    // A locked setup's invite can't be renewed (nobody else can join anyway).
+    let members = ids[..3].iter().map(|i| i.public().sig_pk).collect();
+    let seal = Seal {
+        mailbox: MAILBOX,
+        members,
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/seal", &ids[0], seal).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/renew", &ids[0], renew()).await.0,
+        StatusCode::FORBIDDEN
+    );
 }
 
 #[tokio::test]

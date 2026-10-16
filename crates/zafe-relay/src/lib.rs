@@ -47,9 +47,10 @@ use zafe_proto::{
         encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
         InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
         MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
-        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, ReplaceMember,
-        Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest, WaitResponse,
-        MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, RenewInvite,
+        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
+        WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
+        UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -117,6 +118,9 @@ pub enum RelayError {
     Forbidden,
     #[error("unknown mailbox")]
     NotFound,
+    /// The invite is older than `INVITE_TTL_SECS` and wasn't renewed (HTTP 410 Gone).
+    #[error("this invite expired")]
+    InviteExpired,
     #[error("mailbox already exists")]
     Exists,
     #[error("request timestamp outside the allowed window")]
@@ -176,6 +180,7 @@ impl IntoResponse for RelayError {
             RelayError::Unauthenticated => StatusCode::UNAUTHORIZED,
             RelayError::Forbidden => StatusCode::FORBIDDEN,
             RelayError::NotFound => StatusCode::NOT_FOUND,
+            RelayError::InviteExpired => StatusCode::GONE,
             RelayError::Exists | RelayError::Replay => StatusCode::CONFLICT,
             RelayError::Storage | RelayError::UnsupportedVersion(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -402,6 +407,7 @@ impl Relay {
             .route("/v1/mailbox/seal", post(seal))
             .route("/v1/mailbox/remove", post(remove))
             .route("/v1/mailbox/cancel", post(cancel_setup))
+            .route("/v1/mailbox/renew", post(renew_invite))
             .route("/v1/mailbox/members", post(members))
             .route("/v1/mailbox/info", post(mailbox_info))
             .route("/v1/mailbox/threshold", post(set_threshold))
@@ -547,6 +553,8 @@ struct MailboxRow {
     max_members: u16,
     sealed: bool,
     threshold: u16,
+    /// When the invite was issued or last renewed (`created_at`, seconds).
+    issued_at: u64,
 }
 
 fn arr32(v: Vec<u8>) -> Result<[u8; 32], RelayError> {
@@ -556,7 +564,7 @@ fn arr32(v: Vec<u8>) -> Result<[u8; 32], RelayError> {
 fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
     let row = db
         .query_row(
-            "SELECT creator, join_token_hash, max_members, sealed, threshold
+            "SELECT creator, join_token_hash, max_members, sealed, threshold, created_at
              FROM mailboxes WHERE id = ?1",
             params![&id[..]],
             |r| {
@@ -566,6 +574,7 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
                 ))
             },
         )
@@ -577,6 +586,7 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
         max_members: u16::try_from(row.2).map_err(|_| RelayError::Storage)?,
         sealed: row.3 != 0,
         threshold: u16::try_from(row.4).map_err(|_| RelayError::Storage)?,
+        issued_at: u64::try_from(row.5).unwrap_or(0),
     })
 }
 
@@ -702,9 +712,16 @@ async fn join(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::Forbidden);
     }
     let current = members_of(&tx, &req.payload.mailbox)?;
-    if !current.iter().any(|m| m.sig_pk == req.signer.sig_pk)
-        && current.len() >= usize::from(mb.max_members)
+    let already = current.iter().any(|m| m.sig_pk == req.signer.sig_pk);
+    // A new member needs a live invite; one already in can always rejoin.
+    if !already
+        && relay.now()
+            > mb.issued_at
+                .saturating_add(zafe_proto::relay::INVITE_TTL_SECS)
     {
+        return Err(RelayError::InviteExpired);
+    }
+    if !already && current.len() >= usize::from(mb.max_members) {
         return Err(RelayError::Forbidden);
     }
     tx.execute(
@@ -762,6 +779,23 @@ async fn remove(State(relay): State<Relay>, body: Bytes) -> RelayResult {
 /// gone (their next read answers 404). Only before sealing and only while the log is
 /// empty: a vault that exists is never deleted by this. Byte counters live on the
 /// mailbox row, so they go with it.
+/// The creator restarts the invite's clock (`INVITE_TTL_SECS`), until the setup locks.
+async fn renew_invite(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RenewInvite>(&relay, &body)?;
+    let id = &req.payload.mailbox;
+    let db = relay.db.lock().expect("lock");
+    let mb = mailbox(&db, id)?;
+    if req.signer.sig_pk != mb.creator || mb.sealed {
+        return Err(RelayError::Forbidden);
+    }
+    let now = i64::try_from(relay.now()).unwrap_or(i64::MAX);
+    db.execute(
+        "UPDATE mailboxes SET created_at = ?1 WHERE id = ?2",
+        params![now, &id[..]],
+    )?;
+    ok(&())
+}
+
 async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<CancelSetup>(&relay, &body)?;
     let id = &req.payload.mailbox;

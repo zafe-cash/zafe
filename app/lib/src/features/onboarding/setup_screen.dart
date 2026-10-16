@@ -55,6 +55,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     // when it's time to compare words; the primer comes first, once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(startWatchWithPrimer(context));
+      // The creator is looking at the invite: it gets another 3 days (a setup nobody
+      // returns to lets its invite lapse).
+      if (mounted) unawaited(ref.read(vaultProvider.notifier).renewInvite());
     });
   }
 
@@ -288,7 +291,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             const SizedBox(height: AppSpacing.md),
           ],
           if (!sealed && isCreator) ...[
-            _InviteCard(invite: vault.invite!, vaultName: info.name),
+            _InviteCard(
+              invite: vault.invite!,
+              vaultName: info.name,
+              // Sharing it again gives it another 3 days.
+              onShare: () =>
+                  unawaited(ref.read(vaultProvider.notifier).renewInvite()),
+            ),
             const SizedBox(height: AppSpacing.md),
           ],
           _MembersCard(
@@ -352,9 +361,14 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 }
 
 class _InviteCard extends StatelessWidget {
-  const _InviteCard({required this.invite, required this.vaultName});
+  const _InviteCard({
+    required this.invite,
+    required this.vaultName,
+    required this.onShare,
+  });
   final String invite;
   final String vaultName;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -375,7 +389,7 @@ class _InviteCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xxs),
           Text(
-            'Send it only to your co-signers, over a channel you trust. Until you lock membership, anyone with it can join.',
+            'Send it only to your co-signers, over a channel you trust. Anyone with it can join, for 3 days.',
             textAlign: TextAlign.center,
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
@@ -403,12 +417,15 @@ class _InviteCard extends StatelessWidget {
               Expanded(
                 child: AppButton(
                   variant: AppButtonVariant.secondary,
-                  onPressed: () => SharePlus.instance.share(
-                    ShareParams(
-                      subject: 'Zafe vault invite',
-                      text: 'Join "$vaultName" on Zafe: $link',
-                    ),
-                  ),
+                  onPressed: () {
+                    onShare();
+                    SharePlus.instance.share(
+                      ShareParams(
+                        subject: 'Zafe vault invite',
+                        text: 'Join "$vaultName" on Zafe: $link',
+                      ),
+                    );
+                  },
                   leading: const AppIcon(AppIcons.share, size: 20),
                   child: const Text('Share link'),
                 ),

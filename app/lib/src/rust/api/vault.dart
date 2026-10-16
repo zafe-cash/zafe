@@ -81,6 +81,18 @@ Future<void> forgetKeygen({required String stateDir}) =>
 /// Creator only, before membership is locked: deletes the setup on the relay so the
 /// invite stops working. `false` when the relay had nothing to delete (an older relay, or
 /// the setup is already gone); the app forgets the vault locally in every case.
+/// Creator only: the invite works for 72 more hours (until the setup locks). Called when
+/// the creator shares it again. `false`: the relay doesn't expire invites.
+Future<bool> renewInvite({
+  required String relayUrl,
+  required List<int> seeds,
+  required String invite,
+}) => RustLib.instance.api.crateApiVaultRenewInvite(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  invite: invite,
+);
+
 Future<bool> cancelSetup({
   required String relayUrl,
   required List<int> seeds,
