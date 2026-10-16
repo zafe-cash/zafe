@@ -31,6 +31,21 @@ workflows start `site.yml` after publishing (`actions: write`). Store badges say
 until the listings exist; launch news goes out on X (@zafecash, `src/config.ts`), no
 waitlist or address collected.
 
+## Google Play
+
+App `xyz.zafe.zafe` in the organization account "Zafe" (owner `dev@zafe.cash`). The first
+bundle (0.1.16, version code 2018) was uploaded by hand to internal testing, which also
+enrolled Play App Signing (the API can't create a new app's first release). Since then
+every `mainnet-v*` tag also builds an App Bundle (version code 3000 + run number) and
+`release-mainnet.yml` uploads it to the **internal** track with the service account
+`play-publisher@zafe-18c4d.iam.gserviceaccount.com` (Play Developer API enabled in the
+Firebase project's Google Cloud project; key only in the `android-release` secret
+`PLAY_SERVICE_ACCOUNT_JSON`). In Play Console it may only release to testing tracks:
+**production is always a manual promotion** of a tested internal build. Release builds
+ship arm64 native libraries only (`build.gradle.kts`), so Play offers the app to arm64
+phones only. Play re-signs installs with its own key: its SHA-256 (App integrity → App
+signing) must be in `infra/site/public/.well-known/assetlinks.json` for invite links.
+
 ## Locally
 
 `app/android/key.properties` (gitignored) with `storeFile`, `storePassword`, `keyAlias`,

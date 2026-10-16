@@ -1,7 +1,8 @@
 name: Release (Android, mainnet)
 
 # Builds a signed MAINNET APK (package xyz.zafe.zafe, relay https://relay.zafe.cash, beta
-# label) and publishes it as a GitHub pre-release for early users. Testnet APKs stay on
+# label) and publishes it as a GitHub pre-release for early users, and uploads the same
+# version as an App Bundle to Google Play's internal testing track. Testnet APKs stay on
 # release.yml (tags v*).
 #
 #   git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
@@ -17,6 +18,11 @@ name: Release (Android, mainnet)
 #     ANDROID_KEY_ALIAS
 #     ANDROID_KEY_PASSWORD
 #     GOOGLE_SERVICES_JSON       optional: Firebase config for push notifications
+#     PLAY_SERVICE_ACCOUNT_JSON  optional: key of play-publisher@zafe-18c4d (Play Console:
+#                                "release to testing tracks" only); with it the same build
+#                                also goes to Google Play's internal testing track as an
+#                                App Bundle. Production stays a manual promotion in the
+#                                Play Console.
 
 on:
   push:
@@ -171,6 +177,39 @@ jobs:
           } > dist/notes.md
           rm dist/certs.txt
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      # Google Play: the same code as an App Bundle (arm64 native libraries only, see
+      # build.gradle.kts). Its version code is 3000 + this workflow's run number: always
+      # above the first bundle, uploaded by hand as 2018, and increasing with every tag.
+      - name: Build the App Bundle (Google Play)
+        id: bundle
+        working-directory: app
+        env:
+          PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$PLAY_KEY" ]; then
+            echo "::warning::No PLAY_SERVICE_ACCOUNT_JSON: nothing goes to Google Play"
+            echo "upload=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          flutter build appbundle --release --target-platform android-arm64 \
+            --dart-define=ZAFE_NETWORK=main \
+            --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
+            --dart-define=ZAFE_VERSION='${{ steps.version.outputs.name }}' \
+            --build-name='${{ steps.version.outputs.name }}' \
+            --build-number=$((3000 + ${{ github.run_number }}))
+          echo "upload=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Google Play (internal testing)
+        if: steps.bundle.outputs.upload == 'true'
+        # Pinned to the v1.1.5 commit: it holds the Play key.
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: xyz.zafe.zafe
+          releaseFiles: app/build/app/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+          releaseName: ${{ steps.version.outputs.name }}
 
       - uses: softprops/action-gh-release@v2
         with:
