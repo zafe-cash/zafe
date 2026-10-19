@@ -876,10 +876,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
 
 ## Regtest (infra/regtest)
 
-- **Regtest is `ths`** (thus-spoke-zakura, pinned `THS_VERSION` in `up.sh`, currently 0.3.0:
-  Zakura 1.6.0 + its lightwalletd, NU5..NU6.3 at height 1), so our tests also exercise ths
+- **Regtest is `ths`** (thus-spoke-zakura, pinned `THS_VERSION` in `up.sh`, currently 0.4.0
+  (2026-10-19): Zakura 1.6.0 + its lightwalletd, NU5..NU7 at height 1, so `regtest_network()` sets
+  `nu7` to 1 too; the test fixtures' `common::nu6_3_network()` stays NU6.3 for fixed PCZTs), so our tests also exercise ths
   and catch its bugs. Keep the pin on the latest ths release. Install:
-  `curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zcashlabs/thus-spoke-zakura/main/install.sh | THS_VERSION=0.3.0 sh`
+  `curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zcashlabs/thus-spoke-zakura/main/install.sh | THS_VERSION=0.4.0 sh`
   (to `~/.local/bin`; `THS=/path/to/ths` overrides). `up.sh` refuses another version.
 - `up.sh` runs `ths --name $ZAFE_REGTEST_NAME start --no-open --port-offset
   $ZAFE_REGTEST_PORT_OFFSET` under `setsid nohup` (it stays in the foreground and deletes
@@ -887,8 +888,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   "is ready" (~10 s). Ports: RPC 18232, lightwalletd 9067, dashboard 32805, each + offset
   (multiple of 10, at most 32730). Offsets in use: harness 0, `regtest_e2e` 30000,
   `bridge_e2e` 30100, `m0-e2e.sh` 30200. `down.sh` sends SIGINT, then `ths stop`.
-  Gotcha (0.3.0): `ths stop` deletes the environment but leaves the foreground launcher
-  running; only SIGINT ends it (fix: thus-spoke-zakura PR #146, issue #145).
+  Since 0.4.0 `ths stop` also ends the foreground launcher (our PR #146). `ths start --detach`
+  (our PR #308, open) would replace the `setsid nohup` once released. Seen once on 0.4.0: `ths start`
+  failed with "docker start -a ...: timed out" in its init step; a re-run passed.
 - **Funding**: ths mines to its own wallet, so vaults are funded from the faucet:
   `fund.sh <ua> [notes]` = `notes` x 5 ZEC (the faucet's maximum) to the Ironwood receiver,
   then 12 blocks so they pass the default confirmation policy. One note per proposal that
@@ -1660,7 +1662,7 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   `rand10` for those calls only, `zafe_core::zrng`: stateless OS generator, `Clone` because the wallet migrator
   needs it; our own crypto stays on 0.6); `UnifiedFullViewingKey::encode` is fallible; `from_receivers` and
   `create_pczt_from_proposal` take extra args; `alpha` moves between pasta_curves 0.5 (reddsa/FROST) and 0.6
-  (orchard) through its canonical bytes; `LocalNetwork` has `nu7` (regtest keeps `None`: ths 0.3.0 has no NU7).
+  (orchard) through its canonical bytes; `LocalNetwork` has `nu7` (regtest: NU7 at height 1 since ths 0.4.0).
   The ZIP 2005 vectors still pass, so key and address encoding did not change. v6 transactions stay valid under
   NU7 (v4 is disabled); the ZIP 233 fee change is behind an unstable flag, so the ZIP 317 fee check is unchanged.
   **`VaultWallet::open` now runs `init_wallet_db`**: it used to migrate only in `create`, which was harmless until a

@@ -205,8 +205,8 @@ fn open_wallet_db<P: Parameters>(
     ))
 }
 
-/// A regtest network with every upgrade through NU6.3 active at height 1, matching
-/// `infra/regtest/zakurad.toml.template`.
+/// A regtest network with every upgrade through NU7 active at height 1, as a fresh `ths`
+/// (0.4.0+) environment runs it.
 pub fn regtest_network() -> LocalNetwork {
     let one = Some(BlockHeight::from_u32(1));
     LocalNetwork {
@@ -220,8 +220,7 @@ pub fn regtest_network() -> LocalNetwork {
         nu6_1: one,
         nu6_2: one,
         nu6_3: one,
-        // ths 0.3.0 runs NU5..NU6.3 only; set this when regtest runs NU7.
-        nu7: None,
+        nu7: one,
     }
 }
 

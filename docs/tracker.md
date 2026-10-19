@@ -600,8 +600,8 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       phone's testnet app updated in place (vault, balance kept; its old wallet DB migrated), flagged a proposal built
       for NU6.3 as "consensus branch ID 0x37a5165b does not match expected 0x77190ad9", and a new 0.01 TAZ payment
       (CLI co-signer + phone) was broadcast and mined on NU7 testnet (txid 8cfb8247...). Live regtest suites
-      (`regtest_e2e`, `bridge_e2e`) also pass on the new stack (ths 0.3.0 has no NU7: PR zcashlabs/thus-spoke-zakura#132 is
-      open; bump the pin and set `nu7` in `regtest_network` when it ships). **Still open before a mainnet release:**
+      (`regtest_e2e`, `bridge_e2e`) also pass on the new stack (ths 0.3.0 had no NU7; since 2026-10-19 ths 0.4.0 is
+      pinned and `regtest_network` sets `nu7` at height 1). **Still open before a mainnet release:**
       mainnet's NU7 height is `None` in the pre-releases (set it ourselves if no crate has it by ~Oct 27); merge the
       branch to `main`; the guard items below; a release-signed in-place update test on the mainnet app.
 - [x] A payment that fails the device check (e.g. built for the old network) can now be cancelled by its author, and the
@@ -830,10 +830,12 @@ check. Fixed in the same change unless open:
       in the background, vaults are funded from the faucet (`fund.sh`), mined with `ths mine`;
       `regtest_e2e`, `bridge_e2e` and `m0-e2e.sh` pass (faster: bridge 98 s → 40 s). Lost:
       coverage of coinbase receipts (`is_coinbase`), since ths mines to its own wallet
-- [ ] `ths stop` leaves a foreground `ths start` running (0.3.0): issue zcashlabs/thus-spoke-zakura#145,
-      fix PR #146 (2026-10-04). Follow up until merged; then `down.sh` could drop the SIGINT
-- [ ] Proposed `ths start --detach` for scripts/CI (thus-spoke-zakura#147, 2026-10-04): opt-in,
-      foreground stays the default (their #14). If accepted, send the PR; then `up.sh` becomes
+- [x] `ths stop` leaves a foreground `ths start` running (0.3.0): issue zcashlabs/thus-spoke-zakura#145,
+      fix PR #146 merged 2026-10-11, in ths v0.4.0; Zafe pins 0.4.0 since 2026-10-19 (NU7 at height 1 on regtest;
+      `regtest_e2e`, `bridge_e2e`, `m0-e2e.sh` pass). `down.sh` keeps the SIGINT as a fallback
+- [ ] Proposed `ths start --detach` for scripts/CI (thus-spoke-zakura#147, 2026-10-04; PR
+      https://github.com/zcashlabs/thus-spoke-zakura/pull/308 open, merged with v0.4.0 2026-10-19): opt-in,
+      foreground stays the default (their #14). Once released, `up.sh` becomes
       `ths start --detach` and `down.sh` `ths stop`
 - [ ] **ZIP 321 link security** (zodl-project#60, open since 2024, `I-SECURITY`): proposal
       posted 2026-10-04

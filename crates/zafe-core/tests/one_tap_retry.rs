@@ -15,13 +15,13 @@ use zafe_core::{
     relay_client::RelayClient,
     session::{pczt_hash, GroupPlan, Member, MemoryNonceStore, MemoryPoolStore, PoolStore},
     vault::{GroupShares, VaultEvent},
-    wallet::regtest_network,
 };
 use zafe_proto::Identity;
 use zcash_protocol::memo::MemoBytes;
 
 mod common;
-use common::{build_pczt, receive_ironwood_note, witness, Out, TARGET_HEIGHT};
+// The fixture PCZTs are built for this network (NU6.3, no NU7), so the checks use it too.
+use common::{build_pczt, nu6_3_network, receive_ironwood_note, witness, Out, TARGET_HEIGHT};
 
 async fn start_relay() -> RelayClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -65,7 +65,7 @@ async fn vault(
         a
     })
     .unwrap();
-    let net = regtest_network();
+    let net = nu6_3_network();
     let runs = ids.iter().enumerate().map(|(i, id)| {
         let (relay, invite, number, net) = (&relay, &invite, &number, &net);
         async move {
@@ -186,7 +186,7 @@ async fn sign_and_lose(
     };
     let pczt = pczt::Pczt::parse(&p.pczt).unwrap();
     let expected = zafe_core::node::expectations(
-        &regtest_network(),
+        &nu6_3_network(),
         &[],
         TARGET_HEIGHT - 1,
         m.descriptor.proposal_expiry_blocks,
@@ -213,7 +213,7 @@ async fn sign_and_lose(
 #[tokio::test]
 async fn a_lost_one_tap_vote_is_posted_again() {
     let (relay, ids, materials, mut pools) = vault(2, 2).await;
-    let net = regtest_network();
+    let net = nu6_3_network();
     let tip = TARGET_HEIGHT - 1;
     let proposal = propose_sweep(&relay, &ids, &materials[0]).await;
     let mut rng = StdRng::seed_from_u64(1);
@@ -280,7 +280,7 @@ async fn a_lost_one_tap_vote_is_posted_again() {
 #[tokio::test]
 async fn a_useless_interactive_approval_is_refused() {
     let (relay, ids, materials, mut pools) = vault(2, 2).await;
-    let net = regtest_network();
+    let net = nu6_3_network();
     let tip = TARGET_HEIGHT - 1;
     let proposal = propose_sweep(&relay, &ids, &materials[0]).await;
     let mut rng = StdRng::seed_from_u64(2);
