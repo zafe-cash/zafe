@@ -354,8 +354,8 @@ class _ScannerError extends StatelessWidget {
             const SizedBox(height: AppSpacing.xxs),
             Text(
               denied
-                  ? 'Allow camera access in your phone\'s settings, or go back and paste the invite.'
-                  : 'Try again, or go back and paste the invite instead.',
+                  ? 'Allow camera access in your phone\'s settings, or go back and paste it instead.'
+                  : 'Try again, or go back and paste it instead.',
               textAlign: TextAlign.center,
               style: AppTypography.bodySmall.copyWith(
                 color: light.withValues(alpha: 0.75),

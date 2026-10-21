@@ -158,7 +158,7 @@ Future<String?> tryEndpoint(EndpointKind kind, String url) async {
       _ =>
         kind == EndpointKind.relay
             ? 'This doesn\'t look like a Zafe relay.'
-            : 'This doesn\'t look like a lightwalletd server.',
+            : 'This doesn\'t look like a Zcash server.',
     };
   }
 }

@@ -818,7 +818,7 @@ class _Payments extends StatelessWidget {
                   children: [
                     Text(
                       proposals.loaded
-                          ? 'No activity, yet...'
+                          ? 'No activity yet'
                           : 'Loading activity...',
                       style: AppTypography.headlineSmall.copyWith(
                         color: colors.text.accent,

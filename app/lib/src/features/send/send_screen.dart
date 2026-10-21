@@ -916,7 +916,7 @@ class _CsvErrorsSheet extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Nothing was added. Fix these rows and try again. Format: address,amount,memo (amount in ZEC, memo optional).',
+            'Nothing was added. Fix these rows and try again. Format: address,amount,memo (amount in $kZcashDefaultCurrencyTicker, memo optional).',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),
@@ -1017,7 +1017,8 @@ class _MemoSheetState extends State<_MemoSheet> {
               decoration: InputDecoration(
                 border: InputBorder.none,
                 isCollapsed: true,
-                hintText: 'Only the recipient can read this',
+                hintText:
+                    'Only the recipient and this vault\'s signers can read this',
                 hintStyle: AppTypography.bodyMedium.copyWith(
                   color: colors.text.disabled,
                 ),

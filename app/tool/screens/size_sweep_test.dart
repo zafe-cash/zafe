@@ -165,7 +165,7 @@ final _cases = <(String, String?, Widget)>[
         SizedBox(height: 12),
         DetailRow(label: 'Network fee', value: '0.0001 TAZ', onHelp: _noop),
         DetailRow(
-          label: 'Checked on this device',
+          label: 'Checked on this phone',
           value: 'Matches',
           onHelp: _noop,
         ),

@@ -71,9 +71,9 @@ void main() {
     expect(r.ok, isFalse);
     expect(r.errors, [
       'Row 3: not a Zcash address',
-      'Row 4: "abc" isn\'t a ZEC amount (up to 8 decimals)',
+      'Row 4: "abc" isn\'t a valid amount (up to 8 decimals)',
       'Row 5: amount must be more than 0',
-      'Row 6: "1.123456789" isn\'t a ZEC amount (up to 8 decimals)',
+      'Row 6: "1.123456789" isn\'t a valid amount (up to 8 decimals)',
       'Row 7: expected address,amount and an optional memo',
       'Row 8: address missing',
       'Row 9: memo is 513 bytes (at most 512)',

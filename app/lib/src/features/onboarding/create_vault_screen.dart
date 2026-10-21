@@ -171,7 +171,7 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
         if (_threshold == _members) ...[
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Every member must sign every payment. One lost phone locks the vault.',
+            'One phone lost without a backup locks the vault.',
             style: AppTypography.bodySmall.copyWith(color: colors.text.warning),
           ),
         ],

@@ -71,8 +71,8 @@ void main() {
         enabled: true,
         connection: TorConnection.connecting,
       );
-      expect(on.statusLabel, 'Connecting…');
-      expect(on.homeLabel, 'Connecting to Tor…');
+      expect(on.statusLabel, 'Connecting...');
+      expect(on.homeLabel, 'Connecting to Tor...');
       expect(on.connecting, isTrue);
       final ok = on.copyWith(connection: TorConnection.connected);
       expect(ok.statusLabel, 'Connected');
@@ -87,7 +87,7 @@ void main() {
           enabled: true,
           connection: TorConnection.off,
         ).statusLabel,
-        'Connecting…',
+        'Connecting...',
       );
     });
   });

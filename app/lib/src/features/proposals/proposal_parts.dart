@@ -441,7 +441,7 @@ class _ReviewRows extends ConsumerWidget {
   const _ReviewRows({required this.id, this.withCheck = true});
   final String id;
 
-  /// The "Checked on this device" row too (a request shows the check above instead).
+  /// The "Checked on this phone" row too (a request shows the check above instead).
   final bool withCheck;
 
   @override
@@ -451,7 +451,7 @@ class _ReviewRows extends ConsumerWidget {
     final hide = ref.watch(privacyModeProvider);
     return review.when(
       loading: () => DetailRow(
-        label: 'Checking on this device',
+        label: 'Checking on this phone...',
         value: '',
         trailing: AppLoadingIcon(size: 16, color: colors.icon.muted),
       ),
@@ -487,7 +487,7 @@ class _ReviewRows extends ConsumerWidget {
                 if (withCheck) ...[
                   const DetailDivider(),
                   DetailRow(
-                    label: 'Checked on this device',
+                    label: 'Checked on this phone',
                     onHelp: () => showDeviceCheckSheet(context),
                     value: 'Matches',
                     trailing: AppIcon(
@@ -504,7 +504,7 @@ class _ReviewRows extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 DetailRow(
-                  label: 'Checked on this device',
+                  label: 'Checked on this phone',
                   onHelp: () => showDeviceCheckSheet(context),
                   value: 'Does not match',
                   trailing: AppIcon(
@@ -698,7 +698,7 @@ class SweepCard extends StatelessWidget {
   }
 }
 
-/// Explains "Checked on this device": what the phone verified in the transaction itself.
+/// Explains "Checked on this phone": what the phone verified in the transaction itself.
 Future<void> showDeviceCheckSheet(
   BuildContext context,
 ) => showAppMobileSheet<void>(
@@ -740,7 +740,7 @@ Future<void> showDeviceCheckSheet(
       ),
     );
     return MobileModalScaffold(
-      title: 'Checked on this device',
+      title: 'Checked on this phone',
       onClose: () => Navigator.of(sheet).pop(),
       child: Column(
         mainAxisSize: MainAxisSize.min,
