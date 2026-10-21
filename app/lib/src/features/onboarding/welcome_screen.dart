@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/theme/app_theme.dart';
 import '../home/home_screen.dart' show AppNoticeCards;
 import '../../core/widgets/app_button.dart';
@@ -87,14 +88,8 @@ class WelcomeScreen extends ConsumerWidget {
           AppButton(
             expand: true,
             variant: AppButtonVariant.ghost,
-            onPressed: () => context.push('/restore'),
-            child: const Text('Restore from backup'),
-          ),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => context.push('/recover'),
-            child: const Text('Recover without a backup'),
+            onPressed: () => _alreadyInAVault(context),
+            child: const Text("I'm already in a vault"),
           ),
         ],
       ),
@@ -145,6 +140,62 @@ class WelcomeScreen extends ConsumerWidget {
       child: scaffold,
     );
   }
+}
+
+/// A member back on a new phone: restore from a backup if they have one, otherwise
+/// co-signers move the seat (two paths whose names mean little to a newcomer, so the
+/// question picks for them).
+Future<void> _alreadyInAVault(BuildContext context) async {
+  final route = await showAppMobileSheet<String>(
+    context: context,
+    builder: (sheetContext) {
+      final colors = sheetContext.colors;
+      void go(String route) => Navigator.of(sheetContext).pop(route);
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Do you have your backup?',
+              textAlign: TextAlign.center,
+              style: AppTypography.headlineSmall.copyWith(
+                color: colors.text.accent,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Without one, your co-signers can move your seat to this phone.',
+              textAlign: TextAlign.center,
+              style: AppTypography.bodyMedium.copyWith(
+                color: colors.text.secondary,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppButton(
+              expand: true,
+              onPressed: () => go('/restore'),
+              child: const Text('Yes, restore it'),
+            ),
+            const SizedBox(height: AppSpacing.s),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.secondary,
+              onPressed: () => go('/recover'),
+              child: const Text('No, ask my co-signers'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  if (route != null && context.mounted) context.push(route);
 }
 
 /// A round button in a top corner, over the hero art.

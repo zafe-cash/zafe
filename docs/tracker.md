@@ -768,8 +768,10 @@ check. Fixed in the same change unless open:
 - [x] P1: recall check (2026-10-16): the backup passphrase is always 12 generated words, and the member
       types three of them back before export. Readiness card and the Receive interstitial: dropped (more
       cards and nags than they're worth; the backup card and signer dots cover it).
-- [ ] P2: guided test payment, one-time tips + Help hub, Welcome simplification,
-      practice vault (test with users first).
+- [x] P2: Welcome simplification (2026-10-21): "Restore from backup" and "Recover without a backup"
+      are one "I'm already in a vault" button; its sheet asks "Do you have your backup?" (Yes → `/restore`,
+      No → `/recover`). Test: `test/welcome_server_settings_test.dart`.
+- [ ] P2: guided test payment, one-time tips + Help hub, practice vault (test with users first).
 
 ## One-tap follow-ups
 

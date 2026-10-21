@@ -1142,8 +1142,8 @@ Learned while studying it:
   CLI `zafe recover --wait`) finds the vault via `/v1/mailboxes`, reads the log with a
   helper's log key, requires every helper's sigma with identical vault data, and checks
   the verifying share, group key and UFVK. `load_state` boxes `load_log` (an unboxed future
-  overflowed rustc's query depth in `send_with_progress`). App: Welcome → "Lost your
-  phone? Recover without a backup" (`/recover`, pending identity in secure storage
+  overflowed rustc's query depth in `send_with_progress`). App: Welcome → "I'm already
+  in a vault" → "No, ask my co-signers" (`/recover`; "Yes, restore it" opens `/restore`, pending identity in secure storage
   `zafe_recovery_identity`; once done the member must confirm the vault address's last 8
   characters with a co-signer (`VaultCheckBody`), because the new phone can't know which
   vault to expect and a dishonest relay could present one of its own; then
