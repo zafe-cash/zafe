@@ -16,6 +16,7 @@ import android.os.PersistableBundle
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
+import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager.Authenticators
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -37,6 +38,10 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingUnlock: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Edge to edge on every Android version, not only 15+ (where targetSdk 35+ forces
+        // it): one layout everywhere, Flutter's padding handles the bars (Play's
+        // recommendation, 2026-10-22).
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // Taps that arrive while another app draws over this one (an overlay trying to
         // trick the owner into approving) are dropped.
