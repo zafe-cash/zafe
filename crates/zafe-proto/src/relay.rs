@@ -431,10 +431,16 @@ pub fn decode_body<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ProtoError> {
 }
 
 /// Push notification platform for a member device.
+///
+/// `FcmFid` (appended 2026-10-22, so older values keep their postcard index): the target
+/// is a Firebase Installation ID, sent in FCM v1's `fid` field, from apps that register
+/// with `FirebaseMessaging.register()` (firebase_messaging 17; `token` is deprecated by
+/// FCM). A relay without the variant rejects it: update relays before such apps ship.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushPlatform {
     Apns,
     Fcm,
+    FcmFid,
 }
 
 impl PushPlatform {
@@ -442,6 +448,7 @@ impl PushPlatform {
         match self {
             PushPlatform::Apns => "apns",
             PushPlatform::Fcm => "fcm",
+            PushPlatform::FcmFid => "fcm-fid",
         }
     }
 }

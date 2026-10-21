@@ -636,6 +636,7 @@ pub fn register_push(
         .ok_or_else(|| ZafeError::invalid("bad vault id"))?;
     let platform = match platform.as_str() {
         "fcm" => zafe_proto::relay::PushPlatform::Fcm,
+        "fcm-fid" => zafe_proto::relay::PushPlatform::FcmFid,
         "apns" => zafe_proto::relay::PushPlatform::Apns,
         other => return Err(ZafeError::invalid(format!("unknown push platform {other}"))),
     };
