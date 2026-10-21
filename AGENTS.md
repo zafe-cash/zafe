@@ -1113,6 +1113,11 @@ Learned while studying it:
   and restarts one that ended by itself after 10 s; `ZafeApp` keeps the provider alive.
   Foreground = `resumed`/`inactive`/unknown. Background checks don't watch (they sync).
   `ReceivedNotifier.refresh` now queues one more read if called while loading.
+  **The balance counts it too** (2026-10-22): `get_wallet_summary` counts mined notes only, so
+  `VaultWallet::balance` adds unexpired unmined receipts (`unmined_incoming` over
+  `received_payments`) to `ironwood_pending` and the totals, and a `Stored` event marks the
+  wallet dirty and syncs (no block arrived, so the poll would skip). Before, "+x Pending" showed
+  in activity while the card waited for the next block.
 - `VaultWallet::create` does all network calls **before** creating the DB file; the bridge
   also deletes a DB with no account (`VaultWallet::exists`). Previously the first sync with
   lightwalletd down left an empty DB that failed forever ("expected one account, found 0").
