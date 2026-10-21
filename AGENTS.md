@@ -1479,6 +1479,11 @@ Learned while studying it:
   that finds one running leaves `check.again` and the running one repeats (at most 4 runs).
   Before 2026-10-22 it was dropped: a proposal pushed seconds after another vault's activity
   got no notification or switcher dot until the 15-minute task (seen in the 0.1.18 dry run).
+  Same rule in the app: never drop a request because work is running. Wallet sync goes through
+  `core/async/coalesced_run.dart` (`CoalescedRun`: calls meanwhile = one more run, forced if any
+  asked); proposals use `refreshSoon` (queues) or `refreshFresh` (waits, then runs) after a change
+  of this device (Tor, server, backup, a finished send), never the plain `refresh()`, which returns
+  while one is running.
 - **Notification icon**: `res/drawable/ic_notification.xml`, a vector of the icon's Seam mark
   written by `scripts/brand/brand.py` (`write_notification_icon`); Android uses only
   its alpha, so a full-colour launcher icon shows as a filled square. Used by

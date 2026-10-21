@@ -619,7 +619,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
           onError: (Object e) => _fail(id, e),
           onDone: () {
             _subscriptions.remove(id);
-            unawaited(refresh());
+            refreshSoon();
             unawaited(ref.read(vaultProvider.notifier).sync());
           },
         );

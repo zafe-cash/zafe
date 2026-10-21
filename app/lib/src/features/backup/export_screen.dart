@@ -108,7 +108,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       backedUp: true,
     );
     ref.invalidate(backupStatusProvider);
-    unawaited(ref.read(proposalsProvider.notifier).refresh());
+    unawaited(ref.read(proposalsProvider.notifier).refreshFresh());
   }
 
   Future<void> _shareFile() async {

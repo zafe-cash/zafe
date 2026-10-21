@@ -42,14 +42,19 @@ void main() {
     expect(runs, ['a', null]);
   });
 
-  test('without news the check runs once, and a stale lock is ignored', () async {
-    File('${dir.path}/check.lock')
-      ..writeAsStringSync('old')
-      ..setLastModifiedSync(DateTime.now().subtract(const Duration(minutes: 6)));
-    var runs = 0;
-    await CheckLock(dir).run(null, (_) async => runs++);
-    expect(runs, 1);
-  });
+  test(
+    'without news the check runs once, and a stale lock is ignored',
+    () async {
+      File('${dir.path}/check.lock')
+        ..writeAsStringSync('old')
+        ..setLastModifiedSync(
+          DateTime.now().subtract(const Duration(minutes: 6)),
+        );
+      var runs = 0;
+      await CheckLock(dir).run(null, (_) async => runs++);
+      expect(runs, 1);
+    },
+  );
 
   test('a failing check still releases the lock', () async {
     await CheckLock(dir).run(null, (_) async => throw StateError('x'));

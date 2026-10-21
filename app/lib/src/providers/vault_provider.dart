@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/async/coalesced_run.dart';
 import '../core/config/endpoints.dart';
 import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
@@ -462,10 +463,17 @@ class VaultNotifier extends Notifier<VaultState> {
   /// need a full sync even if no block arrived.
   void markDirty() => _dirty = true;
 
+  /// A sync asked for while one runs (another vault before a switch, the old server or
+  /// route, a send that just finished) runs again after it, never dropped.
+  final _syncRun = CoalescedRun();
+
   /// Syncs the active vault's wallet. With `force: false` (the Home poll), it first asks
   /// lightwalletd for the tip (one cheap call) and skips the full sync when nothing moved
   /// since the last successful one.
-  Future<void> sync({bool force = true}) async {
+  Future<void> sync({bool force = true}) =>
+      _syncRun.run(force, (f) => _syncOnce(force: f));
+
+  Future<void> _syncOnce({required bool force}) async {
     final material = state.material;
     final seeds = state.identity;
     final vaultId = state.activeId;
@@ -565,14 +573,14 @@ class VaultNotifier extends Notifier<VaultState> {
           .afterSyncFailure(e);
       state = state.copyWith(syncing: false, firstSync: false, syncError: e);
       if (switched) {
-        await sync();
+        _syncRun.again();
       } else if (_retryOverTor(e)) {
         // Through Tor the first stream to a server often fails while circuits are still
         // being built (seen on a phone right after "Use Tor": "Can't reach Zcash server"
         // for over a minute, until the next poll). One quick retry.
         _torRetryAt = DateTime.now();
         await Future<void>.delayed(const Duration(seconds: 4));
-        await sync();
+        _syncRun.again();
       }
     }
   }

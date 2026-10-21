@@ -41,7 +41,7 @@ Future<void> showEndpointSheet(
   if (changed == true) {
     if (kind == EndpointKind.relay) unawaited(reregisterPush());
     // Pick up the new server right away.
-    await ref.read(proposalsProvider.notifier).refresh();
+    await ref.read(proposalsProvider.notifier).refreshFresh();
     await ref.read(vaultProvider.notifier).sync();
   }
 }
