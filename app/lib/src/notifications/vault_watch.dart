@@ -161,8 +161,14 @@ Future<void> _registerPush({bool askPermission = true}) async {
     });
   }
   if (askPermission) await messaging.requestPermission();
+  // Deprecated in firebase_messaging 17 for register()/onRegistered, which give a
+  // Firebase Installation ID for "direct-send" messaging, not the FCM registration token
+  // the relay sends to (FCM HTTP v1 `token`). Moving needs the relay to send to FIDs
+  // first (docs/tracker.md); until then these stay.
+  // ignore: deprecated_member_use
   final token = await messaging.getToken();
   if (token != null) await _registerToken(token);
+  // ignore: deprecated_member_use
   messaging.onTokenRefresh.listen(_registerToken);
 }
 
@@ -191,6 +197,7 @@ Future<void> _registerToken(String token) async {
 Future<void> reregisterPush() async {
   try {
     if (Firebase.apps.isEmpty) return;
+    // ignore: deprecated_member_use, the relay's token, see _registerPush
     final token = await FirebaseMessaging.instance.getToken();
     if (token != null) await _registerToken(token);
   } catch (e) {
