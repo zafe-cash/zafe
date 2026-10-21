@@ -544,16 +544,6 @@ pub struct ReceivedPayment {
     pub coinbase: bool,
 }
 
-/// Money paid to the vault by transactions not mined yet ([`VaultWallet::received_payments`]
-/// already leaves out expired ones and the vault's own change).
-fn unmined_incoming(payments: &[ReceivedPayment]) -> u64 {
-    payments
-        .iter()
-        .filter(|p| p.mined_height.is_none())
-        .map(|p| p.amount_zat)
-        .sum()
-}
-
 /// A transaction this wallet saw spending vault notes (mined, or in the mempool).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VaultSpend {
@@ -572,8 +562,7 @@ pub struct VaultBalance {
     pub ironwood_locked: u64,
     /// The vault's own change waiting for confirmations.
     pub ironwood_change_pending: u64,
-    /// Other received notes waiting for confirmations (or for scanning), plus payments to
-    /// the vault still in the mempool (counted in the totals too).
+    /// Other received notes waiting for confirmations (or for scanning).
     pub ironwood_pending: u64,
     pub ironwood_total: u64,
     pub total: u64,
@@ -818,10 +807,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             .account_balances()
             .get(&self.account)
             .ok_or_else(|| WalletError::Db("account missing from summary".into()))?;
-        // The summary counts mined notes only, but the app already lists a payment the
-        // mempool watch stored as "Pending": count it too, as the sender's balance drops as
-        // soon as it sends. Once mined it moves into the summary and out of this sum.
-        let unmined = unmined_incoming(&self.received_payments()?);
         Ok(VaultBalance {
             ironwood_spendable: balance.ironwood_balance().spendable_value().into_u64(),
             ironwood_locked: balance.ironwood_balance().locked_value().into_u64(),
@@ -832,10 +817,9 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             ironwood_pending: balance
                 .ironwood_balance()
                 .value_pending_spendability()
-                .into_u64()
-                + unmined,
-            ironwood_total: balance.ironwood_balance().total().into_u64() + unmined,
-            total: balance.total().into_u64() + unmined,
+                .into_u64(),
+            ironwood_total: balance.ironwood_balance().total().into_u64(),
+            total: balance.total().into_u64(),
         })
     }
 
@@ -1766,9 +1750,6 @@ mod tests {
                 },
             ]
         );
-        // The balance adds only the unmined, unexpired payment (not the expired one, not
-        // the change of the vault's own spends): it's not in the mined-notes summary yet.
-        assert_eq!(unmined_incoming(&got), 7_000);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
