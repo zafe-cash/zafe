@@ -325,6 +325,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     const AppNoticeCards(gap: AppSpacing.md),
                     // Once the vault holds money, a missing backup outranks every
                     // other notice (a lost phone could cost the group its funds).
+                    // An empty vault leaves it to the Signers tab's backup card.
                     if (needsBackup && funded) ...[
                       NoticeCard(
                         title: 'Back up this vault',
@@ -381,14 +382,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         body:
                             'You won\'t hear when a payment needs your approval',
                         onTap: () => enableNotifications(ref),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                    ],
-                    if (needsBackup && !funded) ...[
-                      NoticeCard(
-                        title: 'Back up this vault',
-                        body: 'Your key share lives only on this phone',
-                        onTap: () => context.push('/export'),
                       ),
                       const SizedBox(height: AppSpacing.md),
                     ],

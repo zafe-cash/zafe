@@ -17,6 +17,7 @@ import '../../providers/proposals_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../home/rename_sheet.dart';
 import '../../core/widgets/line_icon.dart';
+import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
 
 /// The vault's signers and its approval rule (a tab). Signer management, such as
 /// rotating a key, will live here.
@@ -36,6 +37,8 @@ class SignersScreen extends ConsumerWidget {
     final proposals = ref.watch(proposalsProvider);
     // Unknown until the vault log has been read.
     final backedUp = proposals.loaded ? proposals.backedUp : null;
+    // This phone hasn't saved a backup (the same check as Home's reminder).
+    final iNeedBackup = ref.watch(backupStatusProvider).value == false;
 
     return SafeArea(
       bottom: false,
@@ -102,6 +105,9 @@ class SignersScreen extends ConsumerWidget {
                       signers: members.length,
                       threshold: threshold,
                       backedUp: members.where(backedUp.contains).length,
+                      onBackUp: iNeedBackup
+                          ? () => context.push('/export')
+                          : null,
                     ),
                   ],
                   const SizedBox(height: AppSpacing.md),
@@ -222,7 +228,11 @@ class BackupHealthCard extends StatelessWidget {
     required this.signers,
     required this.threshold,
     required this.backedUp,
+    this.onBackUp,
   });
+
+  /// Set when this phone has no backup yet: the card offers "Back up now".
+  final VoidCallback? onBackUp;
 
   final int signers;
   final int threshold;
@@ -269,6 +279,14 @@ class BackupHealthCard extends StatelessWidget {
                     color: colors.text.secondary,
                   ),
                 ),
+                if (onBackUp != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  AppButton(
+                    size: AppButtonSize.medium,
+                    onPressed: onBackUp,
+                    child: const Text('Back up now'),
+                  ),
+                ],
               ],
             ),
           ),

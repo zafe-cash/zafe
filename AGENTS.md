@@ -1460,7 +1460,8 @@ Learned while studying it:
   `copySecret`) and the member types 3 random words back before export (the old "Suggest" filled both fields,
   so nothing checked the words were saved). Restore takes the words or an old typed passphrase (`zxcvbn` 4 still
   enforced in Rust for those), trying the input exactly, then trimmed/lowercased/single-spaced. The app prompts right after key generation
-  (`/backup-prompt`) and shows a home reminder until `summary.json` has `backedUp`
+  (`/backup-prompt`) and shows a Home reminder **once the vault holds money** until `summary.json` has `backedUp` (an empty
+  vault leaves it to the Signers tab's backup card, which has "Back up now" while this phone has none; 2026-10-22)
   (set by export, and by restoring). CLI: `zafe backup --passphrase …` prints the text form.
   Testing tip: this emulator has no shell clipboard; paste into a field (e.g. Settings
   search) and read it with `agent-device get text @ref` (snapshots truncate long values).
