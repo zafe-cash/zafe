@@ -140,7 +140,7 @@ class _AnimatedEntryState extends State<_AnimatedEntry>
   @override
   Widget build(BuildContext context) => SizeTransition(
     sizeFactor: _curve,
-    axisAlignment: -1,
+    alignment: const Alignment(-1.0, -1.0),
     child: FadeTransition(
       opacity: _curve,
       child: Padding(
