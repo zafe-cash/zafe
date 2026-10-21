@@ -75,6 +75,13 @@ pub fn spends_to_sign(
                         reason: format!("{e:?}"),
                     })
                 })?;
+                // orchard 0.16 uses pasta_curves 0.6, reddsa (FROST) 0.5: same field,
+                // moved through its canonical bytes.
+                let alpha = <pallas::Scalar as ff::PrimeField>::from_repr(
+                    ff14::PrimeField::to_repr(&alpha),
+                )
+                .into_option()
+                .ok_or(OrchardError::Custom(TxError::MissingAlpha(index)))?;
                 found.push(SpendToSign {
                     action_index: index,
                     alpha,

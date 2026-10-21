@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -13,11 +14,11 @@ import '../../core/formatting/zec_amount.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/decimal_amount_input_formatter.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_address_verify_sheet.dart';
 import '../../core/widgets/mobile/mobile_review_row.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -38,13 +39,8 @@ enum _Step { recipient, amount, review }
 /// Payments to propose again (an expired proposal), or from a `zcash:` payment link:
 /// opens the review step prefilled, or the amount step when the link left it out.
 class SendPrefill {
-  const SendPrefill({
-    required this.payments,
-    required this.autoSend,
-    this.fromLink = false,
-  });
+  const SendPrefill({required this.payments, this.fromLink = false});
   final List<rust.PaymentInput> payments;
-  final bool autoSend;
 
   /// From a payment link (the review card says "payment request").
   final bool fromLink;
@@ -82,7 +78,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   final _amount = TextEditingController();
   final _amountFocus = FocusNode();
   String _memo = '';
-  bool _autoSend = true;
   rust.AddressCheck? _check;
   bool _busy = false;
 
@@ -96,7 +91,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     if (prefill != null && prefill.payments.isNotEmpty) {
       _added.addAll(prefill.payments.take(prefill.payments.length - 1));
       _edit(prefill.payments.last);
-      _autoSend = prefill.autoSend;
       final allValid = prefill.payments.every(
         (p) => rust
             .checkAddress(networkName: kZafeNetwork, address: p.address)
@@ -239,19 +233,16 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   /// step the payment being edited stays; on the recipient step the file replaces it.
   /// Nothing is added unless every row is valid.
   Future<void> _importCsv() async {
-    FilePickerResult? picked;
+    List<int>? bytes;
     try {
-      picked = await FilePicker.pickFiles(withData: true);
+      bytes = await (await FilePicker.pickFile())?.readAsBytes();
     } catch (_) {
-      picked = null;
+      bytes = null;
     }
-    final bytes = picked?.files.singleOrNull?.bytes;
     if (bytes == null || !mounted) return;
-    void fail(String message) => showAppToast(
-      context,
-      message,
-      iconName: AppIcons.warningCircle,
-      tone: AppToastTone.destructive,
+    Future<void> fail(String message) => showAppMobileSheet<void>(
+      context: context,
+      builder: (_) => _CsvErrorsSheet(errors: [message]),
     );
     if (bytes.length > 1024 * 1024) {
       return fail('That file is too big for a list of recipients');
@@ -287,12 +278,17 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       _edit(all.last);
       _step = _Step.review;
     });
-    final n = result.payments.length;
-    showAppToast(context, 'Added $n ${n == 1 ? 'recipient' : 'recipients'}');
+    // The review step now lists them: that is the confirmation.
   }
 
   BigInt get _spendable =>
       ref.read(vaultProvider).balance?.spendableZat ?? BigInt.zero;
+
+  /// Received money and the vault's own change that are not spendable yet.
+  BigInt get _confirming {
+    final b = ref.read(vaultProvider).balance;
+    return b == null ? BigInt.zero : b.incomingPendingZat + b.changePendingZat;
+  }
 
   String get _title => switch (_step) {
     _Step.recipient => 'Select recipient',
@@ -323,44 +319,39 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     return own != null && own == address.trim();
   }
 
+  /// "Propose payment": one unlock, then the proposal and this member's approval of it
+  /// (as in Safe, whoever creates a payment signs it); its page opens on success.
+  /// Failures show under the button.
   Future<void> _propose() async {
     if (_payments.any((p) => _isOwn(p.address))) {
-      showAppToast(
-        context,
+      throw const UserFacingError(
         'This payment goes to the vault\'s own address. Pick another recipient.',
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
       );
-      return;
     }
     if (!await confirmUnlock(
       context,
       ref,
-      reason: 'Unlock to propose this payment',
+      reason: 'Propose and approve this payment',
     )) {
-      return;
+      throw const ActionCancelled();
     }
     setState(() => _busy = true);
     try {
+      // Under the same unlock, in one call. If the approval fails (offline a moment
+      // later), the payment stays open and waits for this member's approval like any
+      // other. The returned list already shows this member's approval, so the payment's
+      // page opens right away without the Approve/Decline request flashing first.
       final id = await ref
           .read(proposalsProvider.notifier)
-          .propose(payments: _payments, autoSend: _autoSend);
+          .proposeAndApprove(
+            payments: _payments,
+            // Always: the last approval sends it (no one has to come back to tap "Send").
+            autoSend: true,
+          );
       if (!mounted) return;
-      context.go('/home');
-      context.push('/proposal/$id');
-    } catch (e) {
-      debugPrint('propose failed: ${describeError(e)}');
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(
-            e,
-            fallback: 'Couldn\'t create the proposal. Try again.',
-          ),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
+      // The payment's page takes this screen's place (Back goes to Home): going Home
+      // first and pushing it showed Home for a moment in between.
+      context.pushReplacement('/proposal/$id');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -369,6 +360,17 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    // Rebuild when the wallet's spendable balance changes (a sync lands while this screen
+    // is open): `_spendable` reads it with `ref.read`.
+    ref.watch(
+      vaultProvider.select(
+        (v) => (
+          v.balance?.spendableZat,
+          v.balance?.incomingPendingZat,
+          v.balance?.changePendingZat,
+        ),
+      ),
+    );
     return PopScope(
       canPop: _step == _Step.recipient && _added.isEmpty && !_busy,
       onPopInvokedWithResult: (didPop, _) {
@@ -377,20 +379,18 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       child: Scaffold(
         backgroundColor: colors.background.window,
         resizeToAvoidBottomInset: true,
-        body: AppToastHost(
-          child: SafeArea(
-            child: Column(
-              children: [
-                MobileTopNav.back(title: _title, onBack: _busy ? null : _back),
-                Expanded(
-                  child: switch (_step) {
-                    _Step.recipient => _recipientStep(),
-                    _Step.amount => _amountStep(),
-                    _Step.review => _reviewStep(),
-                  },
-                ),
-              ],
-            ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              MobileTopNav.back(title: _title, onBack: _busy ? null : _back),
+              Expanded(
+                child: switch (_step) {
+                  _Step.recipient => _recipientStep(),
+                  _Step.amount => _amountStep(),
+                  _Step.review => _reviewStep(),
+                },
+              ),
+            ],
           ),
         ),
       ),
@@ -447,25 +447,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                     ),
                   ),
                 ),
-              const SizedBox(height: AppSpacing.base),
-              Row(
-                children: [
-                  AppIcon(
-                    AppIcons.shieldKeyhole,
-                    size: 16,
-                    color: colors.icon.muted,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Expanded(
-                    child: Text(
-                      'Vault payments are always shielded. Paste a unified address.',
-                      style: AppTypography.bodySmall.copyWith(
-                        color: colors.text.secondary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -536,6 +517,15 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                   ],
                 ),
               ),
+              if (_confirming > BigInt.zero) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  '${amountWithTicker(ZecAmount.fromZatoshi(_confirming).balance.amountText, hide: ref.watch(privacyModeProvider))} more is still confirming.',
+                  style: AppTypography.bodySmall.copyWith(
+                    color: colors.text.secondary,
+                  ),
+                ),
+              ],
               const SizedBox(height: AppSpacing.md),
               SizedBox(
                 height: 64,
@@ -590,15 +580,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                       ),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Center(
-                child: Text(
-                  'Network fee is added when the transaction is built',
-                  style: AppTypography.bodySmall.copyWith(
-                    color: colors.text.muted,
-                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -670,10 +651,26 @@ class _SendScreenState extends ConsumerState<SendScreen> {
 
   // --- Step 3 --------------------------------------------------------------------------
 
+  /// The exact fee for the payments on review, recomputed when they change.
+  Future<BigInt>? _fee;
+  String? _feeFor;
+
+  Future<BigInt> _feeOf(List<rust.PaymentInput> payments) {
+    final key = payments
+        .map((p) => '${p.address}|${p.amountZat}|${p.memo}')
+        .join(';');
+    if (key != _feeFor || _fee == null) {
+      _feeFor = key;
+      _fee = ref.read(proposalsProvider.notifier).estimateFee(payments);
+    }
+    return _fee!;
+  }
+
   Widget _reviewStep() {
     final colors = context.colors;
     final summary = ref.watch(vaultProvider).summary!;
     final payments = _payments;
+    final fee = _feeOf(payments);
     final total = payments.fold(BigInt.zero, (sum, p) => sum + p.amountZat);
     final amount = ZecAmount.fromZatoshi(total).receipt;
     final address = payments.first.address;
@@ -730,15 +727,12 @@ class _SendScreenState extends ConsumerState<SendScreen> {
           cornerRadius: AppRadii.large,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm,
-            vertical: AppSpacing.lg,
+            vertical: AppSpacing.md,
           ),
           child: Column(
             children: [
-              if (!batch) ...[
-                DetailRow(
-                  label: 'Message',
-                  value: _memo.isEmpty ? 'None' : _memo,
-                ),
+              if (!batch && _memo.isNotEmpty) ...[
+                DetailRow(label: 'Message', value: _memo),
                 const DetailDivider(),
               ],
               DetailRow(
@@ -747,78 +741,57 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                     '${summary.threshold} of ${summary.members.length} signers',
               ),
               const DetailDivider(),
-              DetailRow(
-                label: 'Tx fee',
-                value: 'Set by ZIP 317',
-                trailing: AppTappable(
-                  onTap: () => showMobileTxFeeInfoSheet(context),
-                  semanticsLabel: 'About the network fee',
-                  child: AppIcon(
-                    AppIcons.help,
-                    size: 20,
-                    color: colors.icon.muted,
+              FutureBuilder<BigInt>(
+                future: fee,
+                builder: (context, snap) => DetailRow(
+                  label: 'Network fee',
+                  value: snap.hasData
+                      ? amountWithTicker(
+                          ZecAmount.fromZatoshi(snap.data!).fee.amountText,
+                          hide: false,
+                        )
+                      : snap.hasError
+                      ? 'Unavailable'
+                      : '…',
+                  trailing: AppTappable(
+                    onTap: () => showMobileTxFeeInfoSheet(context),
+                    semanticsLabel: 'About the network fee',
+                    child: AppIcon(
+                      AppIcons.help,
+                      size: 20,
+                      color: colors.icon.muted,
+                    ),
                   ),
-                ),
-              ),
-              const DetailDivider(),
-              MergeSemantics(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Send when approved',
-                            style: AppTypography.labelLarge.copyWith(
-                              color: colors.text.accent,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(
-                            _autoSend
-                                ? 'The last signer to approve sends it right away.'
-                                : 'A signer sends it when you choose.',
-                            style: AppTypography.bodySmall.copyWith(
-                              color: colors.text.secondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Switch(
-                      value: _autoSend,
-                      onChanged: _busy
-                          ? null
-                          : (v) => setState(() => _autoSend = v),
-                      // Brand fill when on, muted when off: the default Material colours
-                      // made the two states hard to tell apart.
-                      activeThumbColor: colors.button.primary.label,
-                      activeTrackColor: colors.button.primary.bg,
-                      inactiveThumbColor: colors.icon.muted,
-                      inactiveTrackColor: colors.background.raised,
-                      trackOutlineColor: WidgetStatePropertyAll(
-                        colors.border.regular,
-                      ),
-                    ),
-                  ],
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'Nothing is sent yet. Each signer checks this payment on their own device and '
-          'approves with one tap; ${summary.threshold} approvals complete it.',
-          style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
+        // Proposing would fail the same way (e.g. not enough funds): say so now.
+        FutureBuilder<BigInt>(
+          future: fee,
+          builder: (context, snap) => snap.hasError
+              ? Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.sm),
+                  child: Text(
+                    zafeErrorMessage(
+                      snap.error!,
+                      fallback: 'Couldn\'t work out the fee.',
+                    ),
+                    style: AppTypography.bodySmall.copyWith(
+                      color: colors.text.warning,
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
         ),
         const SizedBox(height: AppSpacing.lg),
-        AppButton(
-          expand: true,
-          leading: _busy ? null : const AppIcon(AppIcons.plane, size: 20),
-          onPressed: _busy ? null : _propose,
-          child: Text(_busy ? 'Building transaction...' : 'Propose payment'),
+        ActionButton(
+          label: 'Propose payment',
+          busyLabel: 'Building transaction...',
+          icon: AppIcons.plane,
+          errorFallback: 'Couldn\'t create the proposal. Try again.',
+          onPressed: _propose,
         ),
         const SizedBox(height: AppSpacing.s),
         AppButton(
@@ -943,8 +916,7 @@ class _CsvErrorsSheet extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Nothing was added. Fix these rows and import again. Each row is '
-            'address,amount,memo with the amount in ZEC (like 1.5); the memo is optional.',
+            'Nothing was added. Fix these rows and try again. Format: address,amount,memo (amount in ZEC, memo optional).',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),

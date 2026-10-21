@@ -3,6 +3,7 @@
 //! See `spec.md` at the repository root.
 
 pub mod backup;
+pub mod durable;
 pub mod history;
 pub mod keygen;
 pub mod keys;
@@ -14,6 +15,7 @@ pub mod nonce_store;
 pub mod price;
 pub mod relay_client;
 pub mod repair;
+pub mod sas;
 pub mod session;
 pub mod signing;
 pub mod spend_watch;
@@ -23,3 +25,4 @@ pub mod tx;
 pub mod vault;
 pub mod verify;
 pub mod wallet;
+pub mod zrng;

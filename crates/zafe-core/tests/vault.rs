@@ -82,8 +82,18 @@ impl Log {
 
     /// Appends an event authored by member `author` (the relay only accepts members, but
     /// replay must not rely on that, so the chain here is checked against all 4 ids).
+    ///
+    /// Written as version 8: these fixtures use fake PCZTs, which version 9 proposals may
+    /// not carry. Version 9 rules have their own tests (`push_v`).
     fn push(&mut self, author: usize, event: &VaultEvent) {
-        self.push_raw(author, &event.to_bytes().unwrap());
+        self.push_v(author, event, 8);
+    }
+
+    /// Appends `event` tagged with event `version`.
+    fn push_v(&mut self, author: usize, event: &VaultEvent, version: u16) {
+        let mut bytes = event.to_bytes().unwrap();
+        bytes[..2].copy_from_slice(&version.to_le_bytes());
+        self.push_raw(author, &bytes);
     }
 
     /// Appends an entry whose plaintext is `bytes` as is.
@@ -428,6 +438,23 @@ fn a_seat_moves_at_the_threshold() {
         Some(&(11, VaultError::NotAMember(11)))
     );
     assert_eq!(state.names[&pk[3]], "Alice 2");
+
+    // Devices verify the chain against the membership as of each entry. The old key's
+    // entry after the move (a stolen phone racing the relay's member update) must not
+    // stop the chain for everyone: it chains as a former member's and replay ignores it.
+    let entries = log.chain.entries();
+    let mut state = VaultState::replay(&entries[..1], &log.key).unwrap();
+    let mut chain = Chain::new(MAILBOX);
+    chain
+        .append(entries[0].clone(), &state.member_identities())
+        .unwrap();
+    for e in &entries[1..] {
+        chain.append(e.clone(), &state.log_authors()).unwrap();
+        state.apply_entry(e, &log.key);
+    }
+    assert_eq!(chain.len(), 13);
+    assert_eq!(state.former_members, vec![*log.ids[0].public()]);
+    assert!(state.ignored.contains(&(11, VaultError::NotAMember(11))));
 
     // An approval that arrives after the move is moot.
     forged = VaultEvent::Name { name: "x".into() };
@@ -1208,4 +1235,134 @@ fn broadcast_txid_must_match_the_pczt() {
     let s = old.replay().unwrap();
     assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Broadcast);
     assert!(s.ignored.is_empty());
+}
+
+// --- Pool reset (VAULT_EVENT 8): a restored device retires its dead commitments ----------
+
+/// The commitments of a `commitments(..)` event.
+fn batch_of(event: &VaultEvent) -> Vec<Vec<u8>> {
+    match event {
+        VaultEvent::Commitments { batch } => batch.clone(),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn a_pool_reset_retires_only_the_unassigned_commitments() {
+    let mut log = pooled_log(4);
+    log.push(0, &proposal(1));
+    let before = log.replay().unwrap();
+    let m1 = log.ids[1].public().sig_pk;
+    assert_eq!(before.pools[&m1].commitments.len(), 4);
+    let assigned = before.pools[&m1].next;
+    assert!(assigned > 0, "the proposal took some of m1's commitments");
+
+    // m1's device is restored from a backup: it has no nonces, so it retires the rest.
+    log.push(1, &VaultEvent::PoolReset);
+    let after = log.replay().unwrap();
+    assert!(after.ignored.is_empty());
+    assert_eq!(after.pools[&m1].commitments.len(), assigned);
+    assert_eq!(after.pools[&m1].available(), 0);
+    // Proposals already assigned keep their commitments; other members' pools are untouched.
+    assert_eq!(
+        after.proposals[&[1; 16]].preprocessed,
+        before.proposals[&[1; 16]].preprocessed
+    );
+    for m in [0, 2] {
+        let pk = log.ids[m].public().sig_pk;
+        assert_eq!(after.pools[&pk], before.pools[&pk]);
+    }
+
+    // With no pool, m1 is in no assigned group (it signs interactively) ...
+    log.push(0, &proposal(2));
+    let s = log.replay().unwrap();
+    let pre = s.proposals[&[2; 16]].preprocessed.as_ref().unwrap();
+    assert!(
+        pre.groups_of(&m1).is_empty(),
+        "no dead commitment is assigned"
+    );
+    assert_eq!(pre.subsets.len(), 1, "only the group without m1 is one-tap");
+
+    // ... and the fresh pool it publishes next is what gets assigned, not the old one.
+    let mut rng = StdRng::seed_from_u64(1234);
+    let fresh = commitments(&mut rng, 4);
+    log.push(1, &fresh);
+    log.push(0, &proposal(3));
+    let s = log.replay().unwrap();
+    let pre = s.proposals[&[3; 16]].preprocessed.as_ref().unwrap();
+    let groups = pre.groups_of(&m1);
+    assert!(!groups.is_empty(), "m1 is back in one-tap groups");
+    let published = batch_of(&fresh);
+    for g in groups {
+        let c = pre.commitment(g, 0, &m1).unwrap();
+        assert!(published.iter().any(|f| f.as_slice() == c));
+    }
+}
+
+#[test]
+fn a_pool_reset_is_only_valid_in_a_version_8_event() {
+    let mut log = pooled_log(4);
+    let m1 = log.ids[1].public().sig_pk;
+    let mut bytes = VaultEvent::PoolReset.to_bytes().unwrap();
+    assert_eq!(&bytes[..2], &version::VAULT_EVENT.to_le_bytes());
+    // The same event under an older tag (a forged or corrupted entry) is ignored.
+    bytes[..2].copy_from_slice(&7u16.to_le_bytes());
+    log.push_raw(1, &bytes);
+    let s = log.replay().unwrap();
+    assert!(s.ignored.iter().any(|(_, e)| *e == VaultError::Encoding));
+    assert_eq!(s.pools[&m1].available(), 4, "nothing was retired");
+}
+
+#[test]
+fn a_pool_reset_without_a_pool_is_harmless() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push(2, &VaultEvent::PoolReset);
+    let s = log.replay().unwrap();
+    assert!(s.ignored.is_empty());
+    assert!(s
+        .pools
+        .get(&log.ids[2].public().sig_pk)
+        .is_none_or(|p| p.available() == 0));
+}
+
+/// Version 9: once a version 9 event is in the log, an author can't dodge a newer rule by
+/// tagging an event with an older version; before one, old logs keep their meaning.
+#[test]
+fn versions_only_go_up_after_version_9() {
+    // An old log: a version 5 proposal with a fake PCZT replays as it always did.
+    let mut old = Log::new();
+    old.push(0, &old.created(&[0, 1, 2]));
+    old.push_raw(0, &proposal_v(1, 5));
+    let state = old.replay().unwrap();
+    assert!(state.proposals.contains_key(&[1; 16]));
+    assert_eq!(state.max_event_version, 5);
+
+    // After a version 9 event, the same entry is replayed under version 9 rules (here:
+    // a proposal must carry a usable PCZT), whatever version it claims.
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push_v(1, &name("Bob"), 9);
+    log.push_raw(0, &proposal_v(1, 5));
+    let state = log.replay().unwrap();
+    assert!(state.proposals.is_empty());
+    assert_eq!(state.ignored, vec![(2, VaultError::BadProposal(2))]);
+    assert_eq!(state.max_event_version, 9);
+}
+
+/// Version 9: a proposal whose PCZT doesn't parse is ignored instead of taking one-tap
+/// commitments from every member's pool.
+#[test]
+fn version_9_proposals_need_a_usable_pczt() {
+    let mut log = pooled_log(4);
+    let available = |s: &VaultState| s.pools.values().map(|p| p.available()).collect::<Vec<_>>();
+    let before = available(&log.replay().unwrap());
+    log.push_v(0, &proposal(1), 9);
+    let state = log.replay().unwrap();
+    assert!(state.proposals.is_empty());
+    assert!(matches!(
+        state.ignored.last(),
+        Some((_, VaultError::BadProposal(_)))
+    ));
+    assert_eq!(available(&state), before, "no commitments taken");
 }

@@ -69,6 +69,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  ApproveResult dco_decode_box_autoadd_approve_result(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -76,6 +79,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ZafeError dco_decode_box_autoadd_zafe_error(dynamic raw);
+
+  @protected
+  CosignerWords dco_decode_cosigner_words(dynamic raw);
 
   @protected
   ExportedBackup dco_decode_exported_backup(dynamic raw);
@@ -100,6 +106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<CosignerWords> dco_decode_list_cosigner_words(dynamic raw);
 
   @protected
   List<PaymentInfo> dco_decode_list_payment_info(dynamic raw);
@@ -135,9 +144,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<UnapprovedSpendInfo> dco_decode_list_unapproved_spend_info(dynamic raw);
 
   @protected
-  MembershipInfo dco_decode_membership_info(dynamic raw);
-
-  @protected
   MempoolEvent dco_decode_mempool_event(dynamic raw);
 
   @protected
@@ -148,6 +154,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  ApproveResult? dco_decode_opt_box_autoadd_approve_result(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
@@ -178,6 +187,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProposalStage dco_decode_proposal_stage(dynamic raw);
+
+  @protected
+  ProposeOutcome dco_decode_propose_outcome(dynamic raw);
 
   @protected
   ReceivedInfo dco_decode_received_info(dynamic raw);
@@ -214,6 +226,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SendStage dco_decode_send_stage(dynamic raw);
+
+  @protected
+  SetupProgress dco_decode_setup_progress(dynamic raw);
 
   @protected
   SignerName dco_decode_signer_name(dynamic raw);
@@ -291,6 +306,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  ApproveResult sse_decode_box_autoadd_approve_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -298,6 +318,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ZafeError sse_decode_box_autoadd_zafe_error(SseDeserializer deserializer);
+
+  @protected
+  CosignerWords sse_decode_cosigner_words(SseDeserializer deserializer);
 
   @protected
   ExportedBackup sse_decode_exported_backup(SseDeserializer deserializer);
@@ -322,6 +345,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<CosignerWords> sse_decode_list_cosigner_words(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<PaymentInfo> sse_decode_list_payment_info(SseDeserializer deserializer);
@@ -367,9 +395,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  MembershipInfo sse_decode_membership_info(SseDeserializer deserializer);
-
-  @protected
   MempoolEvent sse_decode_mempool_event(SseDeserializer deserializer);
 
   @protected
@@ -380,6 +405,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  ApproveResult? sse_decode_opt_box_autoadd_approve_result(
+    SseDeserializer deserializer,
+  );
 
   @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
@@ -412,6 +442,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProposalStage sse_decode_proposal_stage(SseDeserializer deserializer);
+
+  @protected
+  ProposeOutcome sse_decode_propose_outcome(SseDeserializer deserializer);
 
   @protected
   ReceivedInfo sse_decode_received_info(SseDeserializer deserializer);
@@ -448,6 +481,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SendStage sse_decode_send_stage(SseDeserializer deserializer);
+
+  @protected
+  SetupProgress sse_decode_setup_progress(SseDeserializer deserializer);
 
   @protected
   SignerName sse_decode_signer_name(SseDeserializer deserializer);
@@ -535,6 +571,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_approve_result(
+    ApproveResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -545,6 +587,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ZafeError self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_cosigner_words(CosignerWords self, SseSerializer serializer);
 
   @protected
   void sse_encode_exported_backup(
@@ -572,6 +617,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_cosigner_words(
+    List<CosignerWords> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_payment_info(
@@ -634,12 +685,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_membership_info(
-    MembershipInfo self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_mempool_event(MempoolEvent self, SseSerializer serializer);
 
   @protected
@@ -650,6 +695,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_approve_result(
+    ApproveResult? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
@@ -689,6 +740,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_proposal_stage(ProposalStage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_propose_outcome(
+    ProposeOutcome self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_received_info(ReceivedInfo self, SseSerializer serializer);
@@ -737,6 +794,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_send_stage(SendStage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_setup_progress(SetupProgress self, SseSerializer serializer);
 
   @protected
   void sse_encode_signer_name(SignerName self, SseSerializer serializer);

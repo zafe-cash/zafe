@@ -4,7 +4,11 @@
 //!
 //! Needs Docker and `ths` (see `infra/regtest/up.sh`). `cargo test -p rust_lib_zafe --test bridge_e2e -- --ignored --nocapture`
 
+mod common;
+
 use std::{path::PathBuf, process::Command, thread, time::Duration};
+
+use common::Setup;
 
 use rust_lib_zafe::api::{
     backup,
@@ -83,7 +87,7 @@ fn outside_address() -> String {
         .unwrap();
     let keys = VaultKeys::derive(&VaultSecret::from_bytes([1; 32]), &ak).unwrap();
     let address = keys.fvk().address_at(0u32, Scope::External);
-    zcash_keys::address::UnifiedAddress::from_receivers(Some(address), None, None)
+    zcash_keys::address::UnifiedAddress::from_receivers(Some(address), None, None, None, None)
         .unwrap()
         .encode(&zafe_core::wallet::regtest_network())
 }
@@ -133,57 +137,29 @@ fn payment_flow_through_bridge() {
     for s in &seeds[1..] {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
-    vault::seal_vault(relay.clone(), seeds[0].clone(), invite.clone()).unwrap();
-    let safety: Vec<String> = seeds
-        .iter()
-        .map(|s| {
-            vault::vault_membership(relay.clone(), s.clone(), invite.clone())
-                .unwrap()
-                .safety_number
-        })
-        .collect();
-    assert!(safety.iter().all(|n| n == &safety[0]));
-
-    // Keygen: all three at once (A picks birthday 2: regtest isn't up yet).
-    // Each member's signing state dir, where keygen leaves its one-tap pool nonces. B
-    // and C publish none (as if they closed the app right after keygen). One-tap signing
-    // assigns every group whose members all have a pool (VAULT_EVENT 6), and with only A
+    // Key generation, the app's way: one step per member per round (A's first step locks
+    // membership; A picks birthday 2: regtest isn't up yet). A goes through the bridge,
+    // which publishes its one-tap pool at the end; B and C step `zafe_core` directly and
+    // publish none (as if they closed the app right after keygen). One-tap signing assigns
+    // every group whose members all have a pool (VAULT_EVENT 6), and with only A
     // publishing none is covered, so the first payment falls back to interactive signing
     // and this test covers that path. After the first payment everyone's pool is topped
     // up and the second one is one-tap.
-    let handles: Vec<_> = seeds
+    let setups: Vec<Setup> = seeds
         .iter()
         .enumerate()
-        .map(|(i, s)| {
-            let (relay, lwd, s, invite, sn) = (
-                relay.clone(),
-                lwd.clone(),
-                s.clone(),
-                invite.clone(),
-                safety[0].clone(),
-            );
-            let state = (i == 0).then(|| {
-                let dir = tmp.join(format!("m{i}")).join("signing");
-                dir.to_string_lossy().into_owned()
-            });
-            thread::spawn(move || {
-                vault::run_keygen(
-                    relay,
-                    lwd,
-                    "regtest".into(),
-                    s,
-                    invite,
-                    sn,
-                    120,
-                    Some(2),
-                    None,
-                    state,
-                )
-                .unwrap()
-            })
+        .map(|(i, s)| Setup {
+            seeds: s.clone(),
+            state_dir: tmp
+                .join(format!("m{i}"))
+                .join("signing")
+                .to_string_lossy()
+                .into(),
+            bridge: i == 0,
         })
         .collect();
-    let materials: Vec<Vec<u8>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let safety = common::safety_words(&relay, &lwd, &setups, &invite);
+    let materials = common::keygen(&relay, &lwd, &setups, &invite, &safety, Some(2));
     let summary = vault::vault_summary(materials[0].clone()).unwrap();
     for m in &materials[1..] {
         assert_eq!(
@@ -286,9 +262,22 @@ fn payment_flow_through_bridge() {
     );
     assert_eq!(own.err().map(|e| e.kind), Some(ZafeErrorKind::InvalidInput));
 
-    // A proposes 1 ZEC.
+    // A proposes 1 ZEC; the review screen's fee estimate is the fee the proposal pays.
     let b_before = sync(&members[1]);
     let a = &members[0];
+    let estimated = proposals::estimate_fee(
+        lwd.clone(),
+        a.db_dir.clone(),
+        a.db_key.clone(),
+        a.material.clone(),
+        vec![PaymentInput {
+            address: payee.clone(),
+            amount_zat: 100_000_000,
+            memo: "grant #1".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(estimated, 10_000);
     let id = proposals::propose_payment(
         relay.clone(),
         lwd.clone(),
@@ -772,42 +761,18 @@ fn payment_flow_through_bridge() {
     let invite2 =
         vault::create_vault(relay.clone(), seeds2[0].clone(), "Payroll".into(), 2, 2).unwrap();
     vault::join_vault(relay.clone(), seeds2[1].clone(), invite2.clone()).unwrap();
-    vault::seal_vault(relay.clone(), seeds2[0].clone(), invite2.clone()).unwrap();
-    let safety2 = vault::vault_membership(relay.clone(), seeds2[0].clone(), invite2.clone())
-        .unwrap()
-        .safety_number;
-    // The creator picks lightwalletd's tip + 1 as the birthday (as the app does).
-    let handles: Vec<_> = seeds2
+    let setups2: Vec<Setup> = seeds2
         .iter()
         .zip(["v2-a", "v2-e"])
-        .map(|(s, who)| {
-            let (relay, lwd, s, invite, sn) = (
-                relay.clone(),
-                lwd.clone(),
-                s.clone(),
-                invite2.clone(),
-                safety2.clone(),
-            );
-            let state = tmp.join(who).join("signing");
-            thread::spawn(move || {
-                let state = Some(state.to_string_lossy().into());
-                vault::run_keygen(
-                    relay,
-                    lwd,
-                    "regtest".into(),
-                    s,
-                    invite,
-                    sn,
-                    120,
-                    None,
-                    None,
-                    state,
-                )
-                .unwrap()
-            })
+        .map(|(s, who)| Setup {
+            seeds: s.clone(),
+            state_dir: tmp.join(who).join("signing").to_string_lossy().into(),
+            bridge: true,
         })
         .collect();
-    let materials2: Vec<Vec<u8>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let safety2 = common::safety_words(&relay, &lwd, &setups2, &invite2);
+    // The creator picks lightwalletd's tip + 1 as the birthday (as the app does).
+    let materials2 = common::keygen(&relay, &lwd, &setups2, &invite2, &safety2, None);
     let summary2 = vault::vault_summary(materials2[1].clone()).unwrap();
     let e = {
         let dir = tmp.join("v2-e");

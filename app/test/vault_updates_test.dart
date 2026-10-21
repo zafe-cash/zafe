@@ -42,6 +42,7 @@ ProposalInfo proposal(
   expiryHeight: expiryHeight,
   needsReapproval: needsReapproval,
   stillSendable: false,
+  needsNewProposal: false,
 );
 
 ReceivedInfo receipt(String txid, {bool coinbase = false}) => ReceivedInfo(
@@ -81,11 +82,11 @@ void main() {
     );
     expect(
       named({}, proposal('p1')).single.body,
-      'Alice proposed 1.5 TAZ to uregtes .... 3456789.',
+      'Alice (aa) proposed 1.5 TAZ to uregtes .... 3456789.',
     );
     expect(
       named({}, proposal('p1'), hide: true).single.body,
-      'Alice proposed a payment.',
+      'Alice (aa) proposed a payment.',
     );
     // Unnamed proposer: no mention.
     expect(
@@ -101,13 +102,13 @@ void main() {
           rejections: ['bb', 'cc', 'aa'],
         ),
       ).single.body,
-      '1.5 TAZ to uregtes .... 3456789. Rejected by Bob, Alice.',
+      '1.5 TAZ to uregtes .... 3456789. Rejected by Bob (bb), Alice (aa).',
     );
     expect(
       named({
         'p1': 'open/none/false',
       }, proposal('p1', stage: ProposalStage.cancelled)).single.body,
-      '1.5 TAZ to uregtes .... 3456789. Cancelled by Alice.',
+      '1.5 TAZ to uregtes .... 3456789. Cancelled by Alice (aa).',
     );
   });
 
@@ -234,7 +235,6 @@ void main() {
     SeatMove move({List<String> approvals = const ['bb']}) => SeatMove(
       oldKeyHex: 'aa',
       newKeyHex: 'ff',
-      safetyCode: '1234 5678',
       approvals: approvals,
       needed: 2,
       code: 'zafe-recover-v1:00',
@@ -257,7 +257,7 @@ void main() {
       final before = snapshotOf(const [], seatMoves: const []);
       final u = moves(before, [move()]);
       expect(u.single.title, 'Grants: a signer lost their phone');
-      expect(u.single.body, startsWith('Alice is moving to a new phone.'));
+      expect(u.single.body, startsWith('Alice (aa) is moving to a new phone.'));
       expect(u.single.proposalId, startsWith(kSeatMovePrefix));
       final after = snapshotOf(const [], seatMoves: [move()], previous: before);
       expect(moves(after, [move()]), isEmpty);

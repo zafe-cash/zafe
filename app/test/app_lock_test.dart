@@ -71,5 +71,14 @@ void main() {
       ),
       isFalse,
     );
+    // Left with a prompt showing and back much later: that is being away.
+    expect(
+      resume(
+        AppLockDelay.oneMinute,
+        const Duration(hours: 3),
+        duringPrompt: true,
+      ),
+      isTrue,
+    );
   });
 }

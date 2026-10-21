@@ -124,6 +124,28 @@ impl Round1 {
         self.identifier
     }
 
+    /// This member's round-1 secret, to keep while a ceremony is paused (it is this
+    /// member's whole contribution to the group key: store it encrypted, never send it).
+    pub fn secret_bytes(&self) -> Result<Vec<u8>, KeygenError> {
+        Ok(self.secret.serialize()?)
+    }
+
+    /// A round 1 saved with [`Round1::secret_bytes`] and its package. Part 2 is
+    /// deterministic, so a resumed round 1 sends the same round-2 packages again.
+    pub fn restore(
+        params: KeygenParams,
+        identifier: Identifier,
+        secret: &[u8],
+        package: &[u8],
+    ) -> Result<Self, KeygenError> {
+        Ok(Self {
+            params,
+            identifier,
+            secret: dkg::round1::SecretPackage::deserialize(secret)?,
+            package: dkg::round1::Package::deserialize(package)?,
+        })
+    }
+
     pub fn package(&self) -> &dkg::round1::Package {
         &self.package
     }

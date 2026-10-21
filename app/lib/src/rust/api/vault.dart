@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `identity`, `material`, `network`, `open_wallet`, `remove_wallet_files`, `runtime`, `sent_txs`, `wallet_key`, `wallet_lock`, `wallet_path`
+// These functions are ignored because they are not marked as `pub`: `identity`, `material`, `network`, `note_count`, `open_wallet`, `record_synced_tip`, `remove_wallet_files`, `runtime`, `sent_txs`, `synced_tip`, `wallet_key`, `wallet_lock`, `wallet_path`
 
 IdentityInfo generateIdentity() =>
     RustLib.instance.api.crateApiVaultGenerateIdentity();
@@ -44,56 +44,63 @@ Future<void> joinVault({
   invite: invite,
 );
 
-Future<MembershipInfo> vaultMembership({
-  required String relayUrl,
-  required List<int> seeds,
-  required String invite,
-}) => RustLib.instance.api.crateApiVaultVaultMembership(
-  relayUrl: relayUrl,
-  seeds: seeds,
-  invite: invite,
-);
-
-/// Creator only: freezes membership once everyone has joined.
-Future<void> sealVault({
-  required String relayUrl,
-  required List<int> seeds,
-  required String invite,
-}) => RustLib.instance.api.crateApiVaultSealVault(
-  relayUrl: relayUrl,
-  seeds: seeds,
-  invite: invite,
-);
-
-/// Runs key generation. Blocks until every member finishes (or `timeout_secs`). Returns the
-/// vault material (secret: store it in secure storage). The creator picks the birthday:
-/// `birthday_height`, or lightwalletd's tip + 1 when `None` (the app passes `None`).
-/// Then publishes this member's one-tap commitment pool (nonces in `state_dir`, the
-/// vault's signing state dir): every member is present at keygen, so every pool is in the
-/// log before anyone can propose, and the first payment is one tap. `None` skips it (the
-/// pool then waits for the first `list_proposals`); the app always passes the dir.
-Future<Uint8List> runKeygen({
+/// One step of a vault setup for this member; the setup screen and background checks
+/// call it repeatedly, so nobody has to be online at the same time. Locks membership when
+/// this member is the creator and every seat is taken. With `confirmed_safety_number`
+/// (the words the user compared), starts this member's part of key generation; later
+/// steps continue it from `state_dir` without it. The creator's birthday
+/// (`birthday_height`, else lightwalletd's tip + 1; the app passes `None`) and a joiner's
+/// birthday ceiling are fixed once, when key generation starts.
+Future<SetupProgress> setupStep({
   required String relayUrl,
   required String lightwalletdUrl,
   required String networkName,
   required List<int> seeds,
   required String invite,
-  required String confirmedSafetyNumber,
-  required int timeoutSecs,
+  required String stateDir,
+  String? confirmedSafetyNumber,
   int? birthdayHeight,
   int? expiryDays,
-  String? stateDir,
-}) => RustLib.instance.api.crateApiVaultRunKeygen(
+}) => RustLib.instance.api.crateApiVaultSetupStep(
   relayUrl: relayUrl,
   lightwalletdUrl: lightwalletdUrl,
   networkName: networkName,
   seeds: seeds,
   invite: invite,
+  stateDir: stateDir,
   confirmedSafetyNumber: confirmedSafetyNumber,
-  timeoutSecs: timeoutSecs,
   birthdayHeight: birthdayHeight,
   expiryDays: expiryDays,
-  stateDir: stateDir,
+);
+
+/// Deletes this member's key-generation state, once the vault's material is saved (or
+/// the setup was abandoned).
+Future<void> forgetKeygen({required String stateDir}) =>
+    RustLib.instance.api.crateApiVaultForgetKeygen(stateDir: stateDir);
+
+/// Creator only, before membership is locked: deletes the setup on the relay so the
+/// invite stops working. `false` when the relay had nothing to delete (an older relay, or
+/// the setup is already gone); the app forgets the vault locally in every case.
+/// Creator only: the invite works for 72 more hours (until the setup locks). Called when
+/// the creator shares it again. `false`: the relay doesn't expire invites.
+Future<bool> renewInvite({
+  required String relayUrl,
+  required List<int> seeds,
+  required String invite,
+}) => RustLib.instance.api.crateApiVaultRenewInvite(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  invite: invite,
+);
+
+Future<bool> cancelSetup({
+  required String relayUrl,
+  required List<int> seeds,
+  required String invite,
+}) => RustLib.instance.api.crateApiVaultCancelSetup(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  invite: invite,
 );
 
 VaultSummary vaultSummary({required List<int> material}) =>
@@ -104,6 +111,15 @@ VaultSummary vaultSummary({required List<int> material}) =>
 /// against the descriptor every member signed.
 String vaultViewingKey({required List<int> material}) =>
     RustLib.instance.api.crateApiVaultVaultViewingKey(material: material);
+
+/// The vault's wallet database key (32 random bytes the app keeps in secure storage).
+/// The key that encrypts a vault's wallet database, derived from this device's identity
+/// seeds and the vault id. Nothing is stored (see `WalletKey::derive`).
+Uint8List walletDbKey({required List<int> seeds, required String vaultId}) =>
+    RustLib.instance.api.crateApiVaultWalletDbKey(
+      seeds: seeds,
+      vaultId: vaultId,
+    );
 
 /// The chain tip lightwalletd reports: one cheap call. The app runs `sync_vault` only
 /// when it moved since the last successful sync (or when something else changed).
@@ -131,16 +147,18 @@ Future<Balance> syncVault({
 
 /// Registers this device's push token (FCM on Android, APNs on iOS) for the vault, so the
 /// relay can wake it on vault activity. Pushes carry no content.
+/// Works during setup too (the vault id is the invite's mailbox), so setup steps can be
+/// woken by pushes.
 Future<void> registerPush({
   required String relayUrl,
   required List<int> seeds,
-  required List<int> material,
+  required String vaultId,
   required String platform,
   required String token,
 }) => RustLib.instance.api.crateApiVaultRegisterPush(
   relayUrl: relayUrl,
   seeds: seeds,
-  material: material,
+  vaultId: vaultId,
   platform: platform,
   token: token,
 );
@@ -246,35 +264,70 @@ class InviteInfo {
           creatorHex == other.creatorHex;
 }
 
-class MembershipInfo {
+/// Where a setup stands for this member, after one step of it ([`setup_step`]).
+class SetupProgress {
   final List<String> members;
   final bool sealed;
-  final String safetyNumber;
   final bool isCreator;
 
-  const MembershipInfo({
+  /// The safety words to compare (4 words), once membership is locked and every
+  /// member's part of the check arrived. `None` until then.
+  final String? safetyNumber;
+
+  /// Members (key hex) whose part of the safety check hasn't arrived yet.
+  final List<String> waitingFor;
+
+  /// This member confirmed the words: its keys are being made (steps go on in the
+  /// background).
+  final bool started;
+
+  /// What key generation waits for (e.g. "round-1 packages"), and from whom (key hex):
+  /// before every member confirmed, the members who haven't.
+  final String? keygenStage;
+  final List<String> keygenWaitingFor;
+
+  /// Set once the vault exists: save it in secure storage, then call [`forget_keygen`].
+  /// Until then every step returns it again.
+  final Uint8List? material;
+
+  const SetupProgress({
     required this.members,
     required this.sealed,
-    required this.safetyNumber,
     required this.isCreator,
+    this.safetyNumber,
+    required this.waitingFor,
+    required this.started,
+    this.keygenStage,
+    required this.keygenWaitingFor,
+    this.material,
   });
 
   @override
   int get hashCode =>
       members.hashCode ^
       sealed.hashCode ^
+      isCreator.hashCode ^
       safetyNumber.hashCode ^
-      isCreator.hashCode;
+      waitingFor.hashCode ^
+      started.hashCode ^
+      keygenStage.hashCode ^
+      keygenWaitingFor.hashCode ^
+      material.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is MembershipInfo &&
+      other is SetupProgress &&
           runtimeType == other.runtimeType &&
           members == other.members &&
           sealed == other.sealed &&
+          isCreator == other.isCreator &&
           safetyNumber == other.safetyNumber &&
-          isCreator == other.isCreator;
+          waitingFor == other.waitingFor &&
+          started == other.started &&
+          keygenStage == other.keygenStage &&
+          keygenWaitingFor == other.keygenWaitingFor &&
+          material == other.material;
 }
 
 class VaultSummary {

@@ -28,7 +28,7 @@ import 'package:zafe/src/rust/api/received.dart' as rust;
 const _me = 'a3f09c41d2e87b5566c0de19f4a2b7c8e1d0937a6b5c4d3e2f1a0b9c8d7e6f50';
 const _bob = '5e17b2c9a4d86f3310ab77e2c4d9f1086b3a2c5d7e9f0a1b2c3d4e5f6a7b8c9d';
 const _addr =
-    'utest1k3v8m2q9x7h5f4d6s8a0p2o4i6u8y0t2r4e6w8q0z9x7c5v3b1n2m4l6k8j0h2g4f6d8s0a';
+    'u1k3v8m2q9x7h5f4d6s8a0p2o4i6u8y0t2r4e6w8q0z9x7c5v3b1n2m4l6k8j0h2g4f6d8s0a';
 
 rust.ProposalInfo _proposal(
   String id,
@@ -60,6 +60,7 @@ rust.ProposalInfo _proposal(
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  needsNewProposal: false,
 );
 
 Future<void> _loadFonts() async {
@@ -93,7 +94,7 @@ Widget _home() => Builder(
               children: [
                 BalanceCard(
                   totalZat: BigInt.from(4237485000),
-                  fiatText: r'$5,668.30',
+                  fiatText: _showFiat ? r'$5,668.30' : null,
                   hidden: false,
                   onToggle: () {},
                   threshold: 2,
@@ -201,6 +202,8 @@ Widget _home() => Builder(
 );
 
 final _showNotice = Platform.environment['HOME_NOTICE'] != '0';
+// HOME_FIAT=0 leaves out the dollar line (the website shows no made-up prices).
+final _showFiat = Platform.environment['HOME_FIAT'] != '0';
 
 void main() {
   testWidgets('render home parts', (tester) async {

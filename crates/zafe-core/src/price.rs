@@ -55,14 +55,16 @@ pub async fn zec_usd() -> Result<f64, PriceError> {
         Route::Tor(client) => {
             use zcash_client_backend::tor::http::cryptex::Exchanges;
             let exchanges = Exchanges::unauthenticated_known_with_gemini_trusted();
-            let rate =
-                tokio::time::timeout(TOR_TIMEOUT, client.get_latest_zec_to_usd_rate(&exchanges))
-                    .await
-                    .map_err(|_| PriceError::Network {
-                        failure: crate::net::NetFailure::Timeout,
-                        message: "no price in time (through Tor)".into(),
-                    })?
-                    .map_err(network)?;
+            let rate = tokio::time::timeout(
+                TOR_TIMEOUT,
+                client.get_latest_zec_to_usd_rate(&mut crate::zrng::zrng(), &exchanges),
+            )
+            .await
+            .map_err(|_| PriceError::Network {
+                failure: crate::net::NetFailure::Timeout,
+                message: "no price in time (through Tor)".into(),
+            })?
+            .map_err(network)?;
             parse_rate(&rate.to_string())
         }
     }

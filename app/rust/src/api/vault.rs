@@ -13,7 +13,9 @@ use zafe_core::{
     nonce_store::FilePoolStore,
     relay_client::RelayClient,
     state_dir,
-    wallet::{check_server, connect, latest_height, VaultWallet, WalletKey, ZafeNetwork},
+    wallet::{
+        check_server, connect_pooled as connect, latest_height, VaultWallet, WalletKey, ZafeNetwork,
+    },
 };
 use zafe_proto::{Identity, IdentitySeeds, ProtoError};
 
@@ -117,110 +119,240 @@ pub fn create_vault(
     members: u16,
 ) -> Result<String, ZafeError> {
     let me = identity(&seeds)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
+    let mut watch = crate::diag::Stopwatch::new("create");
     let invite = runtime().block_on(node::create_vault(
         &relay, &me, &name, threshold, members, &mut OsRng,
-    ))?;
-    Ok(invite.encode())
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(invite?.encode())
 }
 
 pub fn join_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
-    runtime().block_on(node::join_vault(&RelayClient::new(relay_url), &me, &invite))?;
+    let mut watch = crate::diag::Stopwatch::new("join");
+    let joined = runtime().block_on(node::join_vault(
+        &RelayClient::pooled(relay_url),
+        &me,
+        &invite,
+    ));
+    watch.lap("relay");
+    watch.finish();
+    joined?;
     Ok(())
 }
 
-pub struct MembershipInfo {
+/// Where a setup stands for this member, after one step of it ([`setup_step`]).
+pub struct SetupProgress {
     pub members: Vec<String>,
     pub sealed: bool,
-    pub safety_number: String,
     pub is_creator: bool,
+    /// The safety words to compare (4 words), once membership is locked and every
+    /// member's part of the check arrived. `None` until then.
+    pub safety_number: Option<String>,
+    /// Members (key hex) whose part of the safety check hasn't arrived yet.
+    pub waiting_for: Vec<String>,
+    /// This member confirmed the words: its keys are being made (steps go on in the
+    /// background).
+    pub started: bool,
+    /// What key generation waits for (e.g. "round-1 packages"), and from whom (key hex):
+    /// before every member confirmed, the members who haven't.
+    pub keygen_stage: Option<String>,
+    pub keygen_waiting_for: Vec<String>,
+    /// Set once the vault exists: save it in secure storage, then call [`forget_keygen`].
+    /// Until then every step returns it again.
+    pub material: Option<Vec<u8>>,
 }
 
-pub fn vault_membership(
-    relay_url: String,
-    seeds: Vec<u8>,
-    invite: String,
-) -> Result<MembershipInfo, ZafeError> {
-    let me = identity(&seeds)?;
-    let invite = Invite::decode(&invite)?;
-    let (members, sealed, safety_number) =
-        runtime().block_on(node::membership(&RelayClient::new(relay_url), &me, &invite))?;
-    Ok(MembershipInfo {
-        members: members.iter().map(|m| hex::encode(m.sig_pk)).collect(),
-        sealed,
-        safety_number,
-        is_creator: me.public().sig_pk == invite.creator,
-    })
-}
+/// Sealed setups' membership by (relay, mailbox, member): see `setup_step`.
+type SealedKey = (String, zafe_proto::MailboxId, [u8; 32]);
+static SEALED: std::sync::Mutex<std::collections::BTreeMap<SealedKey, node::Membership>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
 
-/// Creator only: freezes membership once everyone has joined.
-pub fn seal_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(), ZafeError> {
-    let me = identity(&seeds)?;
-    let invite = Invite::decode(&invite)?;
-    runtime().block_on(node::seal(&RelayClient::new(relay_url), &me, &invite))?;
-    Ok(())
-}
-
-/// Runs key generation. Blocks until every member finishes (or `timeout_secs`). Returns the
-/// vault material (secret: store it in secure storage). The creator picks the birthday:
-/// `birthday_height`, or lightwalletd's tip + 1 when `None` (the app passes `None`).
-/// Then publishes this member's one-tap commitment pool (nonces in `state_dir`, the
-/// vault's signing state dir): every member is present at keygen, so every pool is in the
-/// log before anyone can propose, and the first payment is one tap. `None` skips it (the
-/// pool then waits for the first `list_proposals`); the app always passes the dir.
+/// One step of a vault setup for this member; the setup screen and background checks
+/// call it repeatedly, so nobody has to be online at the same time. Locks membership when
+/// this member is the creator and every seat is taken. With `confirmed_safety_number`
+/// (the words the user compared), starts this member's part of key generation; later
+/// steps continue it from `state_dir` without it. The creator's birthday
+/// (`birthday_height`, else lightwalletd's tip + 1; the app passes `None`) and a joiner's
+/// birthday ceiling are fixed once, when key generation starts.
 #[allow(clippy::too_many_arguments)]
-pub fn run_keygen(
+pub fn setup_step(
     relay_url: String,
     lightwalletd_url: String,
     network_name: String,
     seeds: Vec<u8>,
     invite: String,
-    confirmed_safety_number: String,
-    timeout_secs: u32,
+    state_dir: String,
+    confirmed_safety_number: Option<String>,
     birthday_height: Option<u32>,
     expiry_days: Option<u32>,
-    state_dir: Option<String>,
-) -> Result<Vec<u8>, ZafeError> {
+) -> Result<SetupProgress, ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     let net = network(&network_name)?;
-    let relay = RelayClient::new(relay_url);
-    let material = runtime().block_on(async {
-        let birthday = if me.public().sig_pk != invite.creator {
-            None
-        } else if let Some(h) = birthday_height {
-            Some(h.max(2))
-        } else {
-            let tip = latest_height(&mut connect(&lightwalletd_url).await?).await?;
-            Some((tip + 1).max(2))
+    let relay = RelayClient::pooled(relay_url);
+    let dir = PathBuf::from(state_dir);
+    let key = zafe_core::nonce_store::NonceKey::derive(&seeds, &invite.mailbox);
+    let is_creator = me.public().sig_pk == invite.creator;
+    let mut watch = crate::diag::Stopwatch::new("setup");
+    // "They match": key generation starts and needs the chain tip (the creator's birthday,
+    // a joiner's ceiling). Read it while the relay steps run (each ~1 s over Tor).
+    let starting = confirmed_safety_number.is_some()
+        && !node::keygen_started(&dir)
+        && !(is_creator && birthday_height.is_some());
+    let result = runtime().block_on(async {
+        let tip = async {
+            if !starting {
+                return None;
+            }
+            Some(
+                async {
+                    let mut client = connect(&lightwalletd_url).await?;
+                    Ok::<_, ZafeError>(latest_height(&mut client).await?)
+                }
+                .await,
+            )
         };
-        let material = node::run_keygen(
+        let members = async {
+            // Sealed with the words known: members and words can't change any more, so
+            // "They match" and key generation steps reuse them (the membership step is
+            // ~4 s over Tor). Steps before the tap still ask the relay (a cancelled setup).
+            let key = (
+                relay.base_url().to_owned(),
+                invite.mailbox,
+                me.public().sig_pk,
+            );
+            if confirmed_safety_number.is_some() || node::keygen_started(&dir) {
+                if let Some(m) = SEALED.lock().ok().and_then(|c| c.get(&key).cloned()) {
+                    return Ok(m);
+                }
+            }
+            let m = node::membership(&relay, &me, &invite).await?;
+            let m = node::seal_when_full(&relay, &me, &invite, m).await?;
+            if m.sealed && m.safety_words.is_some() {
+                if let Ok(mut cache) = SEALED.lock() {
+                    cache.insert(key, m.clone());
+                }
+            }
+            Ok::<_, node::NodeError>(m)
+        };
+        let (m, mut tip) = tokio::join!(members, tip);
+        let m = m?;
+        watch.lap("members");
+        let mut out = SetupProgress {
+            members: m.members.iter().map(|m| hex::encode(m.sig_pk)).collect(),
+            sealed: m.sealed,
+            is_creator,
+            safety_number: m.safety_words.clone(),
+            waiting_for: m.waiting_for.iter().map(hex::encode).collect(),
+            started: node::keygen_started(&dir),
+            keygen_stage: None,
+            keygen_waiting_for: Vec::new(),
+            material: None,
+        };
+        if m.safety_words.is_none() || !(out.started || confirmed_safety_number.is_some()) {
+            return Ok::<_, ZafeError>(out);
+        }
+        let mut options = node::KeygenOptions::default();
+        if !out.started {
+            if is_creator {
+                let birthday = match (birthday_height, tip.take()) {
+                    (Some(h), _) => h,
+                    (None, Some(tip)) => tip? + 1,
+                    (None, None) => {
+                        latest_height(&mut connect(&lightwalletd_url).await?).await? + 1
+                    }
+                };
+                options.creator_birthday_height = Some(birthday.max(2));
+                // 1152 blocks = 1 day.
+                options.creator_expiry_blocks = expiry_days.map(|d| d * 1152);
+            } else {
+                // Joiners refuse a birthday ahead of the chain; best effort, as a server
+                // that can't be reached here shouldn't block the setup.
+                let tip = match tip.take() {
+                    Some(tip) => tip.ok(),
+                    None => match connect(&lightwalletd_url).await {
+                        Ok(mut client) => latest_height(&mut client).await.ok(),
+                        Err(_) => None,
+                    },
+                };
+                options.max_birthday = tip.map(|tip| tip + 1 + node::BIRTHDAY_LEEWAY_BLOCKS);
+            }
+        }
+        let progress = node::keygen_step(
             &relay,
             &me,
             &invite,
-            &confirmed_safety_number,
+            &m,
+            &dir,
+            &key,
+            confirmed_safety_number.as_deref(),
             &net,
             net.name(),
-            birthday,
-            // Creator only (others take it from the creator); 1152 blocks = 1 day.
-            expiry_days.map(|d| d * 1152),
+            options,
             &mut OsRng,
-            Duration::from_secs(u64::from(timeout_secs)),
         )
-        .await
-        .map_err(anyhow::Error::from)?;
-        // Best effort: list_proposals tops up again on every refresh.
-        if let Some(dir) = state_dir {
-            let mut pool = FilePoolStore::new(PathBuf::from(dir).join(state_dir::POOL));
-            if let Err(e) = node::top_up_pool(&relay, &me, &material, &mut pool, &mut OsRng).await {
-                eprintln!("commitment pool after keygen: {e}");
+        .await?;
+        watch.lap("keygen");
+        out.started = node::keygen_started(&dir);
+        match progress {
+            node::KeygenProgress::Waiting { stage, missing } => {
+                out.keygen_stage = Some(stage.to_owned());
+                out.keygen_waiting_for = missing.iter().map(hex::encode).collect();
+            }
+            node::KeygenProgress::Done(material) => {
+                // Best effort: list_proposals tops up again on every refresh. Published
+                // now so the first payment can be one tap.
+                let mut pool = FilePoolStore::new(dir.join(state_dir::POOL), key.clone());
+                if let Err(e) =
+                    node::top_up_pool(&relay, &me, &material, &mut pool, false, None, &mut OsRng)
+                        .await
+                {
+                    eprintln!("commitment pool after keygen: {e}");
+                }
+                watch.lap("pool");
+                out.material = Some(material.to_bytes()?);
             }
         }
-        Ok::<_, anyhow::Error>(material)
-    })?;
-    Ok(material.to_bytes()?)
+        Ok(out)
+    });
+    watch.finish();
+    result
+}
+
+/// Deletes this member's key-generation state, once the vault's material is saved (or
+/// the setup was abandoned).
+pub fn forget_keygen(state_dir: String) -> Result<(), ZafeError> {
+    node::forget_keygen(std::path::Path::new(&state_dir))
+        .map_err(|e| ZafeError::invalid(format!("setup state: {e}")))
+}
+
+/// Creator only, before membership is locked: deletes the setup on the relay so the
+/// invite stops working. `false` when the relay had nothing to delete (an older relay, or
+/// the setup is already gone); the app forgets the vault locally in every case.
+/// Creator only: the invite works for 72 more hours (until the setup locks). Called when
+/// the creator shares it again. `false`: the relay doesn't expire invites.
+pub fn renew_invite(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<bool, ZafeError> {
+    let me = identity(&seeds)?;
+    let invite = Invite::decode(&invite)?;
+    Ok(runtime().block_on(node::renew_invite(
+        &RelayClient::pooled(relay_url),
+        &me,
+        &invite,
+    ))?)
+}
+
+pub fn cancel_setup(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<bool, ZafeError> {
+    let me = identity(&seeds)?;
+    let invite = Invite::decode(&invite)?;
+    Ok(runtime().block_on(node::cancel_setup(
+        &RelayClient::pooled(relay_url),
+        &me,
+        &invite,
+    ))?)
 }
 
 pub struct VaultSummary {
@@ -263,7 +395,8 @@ pub fn vault_viewing_key(material: Vec<u8>) -> Result<String, ZafeError> {
         .vault_keys()?
         .ufvk()
         .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?
-        .encode(&net);
+        .encode(&net)
+        .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?;
     if ufvk != m.descriptor.ufvk {
         return Err(ZafeError::new(
             ZafeErrorKind::Verification,
@@ -286,12 +419,47 @@ pub struct Balance {
 }
 
 /// Serializes use of the wallet database (sync, propose and reads race otherwise).
+/// Each vault's unspent note count as of this process's last sync (`sync_vault`), so the
+/// next pool top-up (`list_proposals`) can size the pool for proposals that spend many
+/// notes (`node::pool_target_for_notes`). Unknown until a sync ran in this process.
+static NOTE_COUNTS: std::sync::Mutex<std::collections::BTreeMap<[u8; 16], usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+pub(crate) fn note_count(vault_id: &[u8; 16]) -> Option<usize> {
+    NOTE_COUNTS.lock().ok()?.get(vault_id).copied()
+}
+
+/// Each vault's wallet chain height as of this process's last sync, so approving can
+/// check a payment's expiry without opening the wallet: that took the wallet lock and
+/// waited for any sync in progress (2.3 s on a phone, right after proposing). A height a
+/// few seconds old only narrows what is accepted (the upper expiry bound) or signs a
+/// payment a block past expiry, which can't be mined.
+static SYNCED_TIPS: std::sync::Mutex<std::collections::BTreeMap<[u8; 16], u32>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+pub(crate) fn synced_tip(vault_id: &[u8; 16]) -> Option<u32> {
+    SYNCED_TIPS.lock().ok()?.get(vault_id).copied()
+}
+
+pub(crate) fn record_synced_tip(vault_id: [u8; 16], tip: u32) {
+    if let Ok(mut tips) = SYNCED_TIPS.lock() {
+        tips.insert(vault_id, tip);
+    }
+}
+
 pub(crate) fn wallet_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// The vault's wallet database key (32 random bytes the app keeps in secure storage).
+/// The key that encrypts a vault's wallet database, derived from this device's identity
+/// seeds and the vault id. Nothing is stored (see `WalletKey::derive`).
+#[flutter_rust_bridge::frb(sync)]
+pub fn wallet_db_key(seeds: Vec<u8>, vault_id: String) -> Vec<u8> {
+    WalletKey::derive(&seeds, &vault_id).as_bytes().to_vec()
+}
+
 pub(crate) fn wallet_key(db_key: &[u8]) -> Result<WalletKey, ZafeError> {
     WalletKey::from_slice(db_key).map_err(|_| ZafeError::invalid("wallet key must be 32 bytes"))
 }
@@ -374,32 +542,64 @@ pub fn sync_vault(
 ) -> Result<Balance, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
+    crate::diag::remember_support_dir(&db_dir);
+    let mut watch = crate::diag::Stopwatch::new("sync");
+    let relay = RelayClient::pooled(relay_url);
+    // The network-only steps first, together and without the wallet lock (each is ~1-2 s
+    // over Tor; a payment being proposed waits for this lock): the server's tip and
+    // network, and the vault log for the note holds.
+    let early = runtime().block_on(async {
+        let server = async {
+            let mut client = connect(&lightwalletd_url).await?;
+            // A server on another network says so here (it would fail the sync with an
+            // obscure error, or none); one behind this wallet is checked under the lock.
+            let tip = check_server(&mut client, &m.descriptor.network, None).await?;
+            Ok::<_, ZafeError>((client, tip))
+        };
+        tokio::join!(server, node::load_state(&relay, &me, &m))
+    });
+    watch.lap("network");
     let _guard = wallet_lock();
-    runtime().block_on(async {
+    watch.lap("lock");
+    let result = runtime().block_on(async {
+        let (server, loaded) = early;
+        let (mut client, server_tip) = server?;
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
-        let mut client = connect(&lightwalletd_url).await?;
-        // A server on another network or behind this wallet would fail the sync with an
-        // obscure error (or none): say so instead.
-        check_server(&mut client, &m.descriptor.network, wallet.chain_height()?).await?;
-        // One pass is capped so a stalled stream can't hold the wallet lock forever; sync is
-        // incremental, so the next pass continues where this one stopped.
-        tokio::time::timeout(SYNC_PASS_TIMEOUT, wallet.sync(&mut client))
-            .await
-            .map_err(|_| {
-                ZafeError::new(
-                    ZafeErrorKind::NetworkTimeout,
-                    "sync took too long; it will continue on the next try",
-                )
-                .at(ZafeEndpoint::Lightwalletd)
-            })??;
+        watch.lap("open");
+        zafe_core::wallet::check_server_tip(server_tip, wallet.chain_height()?)?;
+        // Nothing new on the server and nothing left to scan: skip the scan's round trips.
+        if wallet.needs_scan(server_tip)? {
+            // One pass is capped so a stalled stream can't hold the wallet lock forever;
+            // sync is incremental, so the next pass continues where this one stopped.
+            tokio::time::timeout(SYNC_PASS_TIMEOUT, wallet.sync(&mut client))
+                .await
+                .map_err(|_| {
+                    ZafeError::new(
+                        ZafeErrorKind::NetworkTimeout,
+                        "sync took too long; it will continue on the next try",
+                    )
+                    .at(ZafeEndpoint::Lightwalletd)
+                })??;
+            watch.lap("scan");
+        } else {
+            watch.lap("noscan");
+        }
         if wallet.chain_height()?.is_some() {
             // Locks persist in the wallet database, so a failure keeps the last holds.
-            if let Ok((_, state)) = node::load_state(&RelayClient::new(relay_url), &me, &m).await {
+            if let Ok((_, state)) = loaded {
                 let sent = sent_txs(&db_dir, &m);
                 let _ = node::reserve_notes(&state, &mut wallet, &mut client, &sent).await;
+                watch.lap("holds");
             }
         }
         let b = wallet.balance()?;
+        if let (Ok(n), Ok(mut counts)) = (wallet.unspent_note_count(), NOTE_COUNTS.lock()) {
+            counts.insert(m.descriptor.vault_id, n);
+        }
+        if let Ok(Some(h)) = wallet.chain_height() {
+            record_synced_tip(m.descriptor.vault_id, h);
+        }
+        watch.lap("balance");
         // Before the vault's birthday block exists the wallet has no chain height yet.
         let height = match wallet.chain_height()? {
             Some(h) => h,
@@ -413,30 +613,33 @@ pub fn sync_vault(
             incoming_pending_zat: b.ironwood_pending,
             total_zat: b.total,
         })
-    })
+    });
+    watch.finish();
+    result
 }
 
 /// Registers this device's push token (FCM on Android, APNs on iOS) for the vault, so the
 /// relay can wake it on vault activity. Pushes carry no content.
+/// Works during setup too (the vault id is the invite's mailbox), so setup steps can be
+/// woken by pushes.
 pub fn register_push(
     relay_url: String,
     seeds: Vec<u8>,
-    material: Vec<u8>,
+    vault_id: String,
     platform: String,
     token: String,
 ) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
-    let m = self::material(&material)?;
+    let vault_id: [u8; 16] = hex::decode(&vault_id)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ZafeError::invalid("bad vault id"))?;
     let platform = match platform.as_str() {
         "fcm" => zafe_proto::relay::PushPlatform::Fcm,
         "apns" => zafe_proto::relay::PushPlatform::Apns,
         other => return Err(ZafeError::invalid(format!("unknown push platform {other}"))),
     };
-    runtime().block_on(RelayClient::new(relay_url).register_push(
-        &me,
-        m.descriptor.vault_id,
-        platform,
-        token,
-    ))?;
+    runtime()
+        .block_on(RelayClient::pooled(relay_url).register_push(&me, vault_id, platform, token))?;
     Ok(())
 }

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 
 /// Result of asking the phone's owner to unlock before a sensitive action.
@@ -5,7 +8,7 @@ enum UnlockOutcome {
   /// The owner unlocked (biometrics or PIN/pattern/password).
   unlocked,
 
-  /// The "Require unlock to approve" setting is off.
+  /// No unlock was asked for (the caller didn't require one, e.g. the app lock is off).
   notRequired,
 
   /// The phone has no screen lock at all, so there is nothing to prompt with.
@@ -56,6 +59,36 @@ class LocalDeviceAuthenticator implements DeviceAuthenticator {
     persistAcrossBackgrounding: true,
   );
 }
+
+/// [DeviceAuthenticator] for Android (`xyz.zafe/device_auth` in `MainActivity`): a
+/// strong biometric (class 3) or the PIN, pattern or password. local_auth also offers
+/// weak biometrics (camera face unlock, which a photo can fool) and can't be told not to.
+class StrongDeviceAuthenticator implements DeviceAuthenticator {
+  static const _channel = MethodChannel('xyz.zafe/device_auth');
+
+  @override
+  Future<bool> hasScreenLock() async =>
+      await _channel.invokeMethod<bool>('hasScreenLock') ?? false;
+
+  @override
+  Future<bool> authenticate(String reason) async {
+    final error = await _channel.invokeMethod<String>('authenticate', {
+      'reason': reason,
+    });
+    if (error == null) return true;
+    throw LocalAuthException(code: errorCode(error));
+  }
+
+  /// The native side's error names are local_auth's, so [DeviceAuth] maps both alike.
+  static LocalAuthExceptionCode errorCode(String name) =>
+      LocalAuthExceptionCode.values.asNameMap()[name] ??
+      LocalAuthExceptionCode.unknownError;
+}
+
+/// The authenticator for this platform.
+DeviceAuthenticator platformAuthenticator() => Platform.isAndroid
+    ? StrongDeviceAuthenticator()
+    : LocalDeviceAuthenticator();
 
 /// Decides whether to prompt, skip or block, and maps the platform's answer to an
 /// [UnlockOutcome]. Pure apart from the authenticator.

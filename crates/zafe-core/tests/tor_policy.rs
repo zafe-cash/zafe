@@ -177,6 +177,32 @@ async fn turning_tor_on_cuts_direct_connections() {
 }
 
 #[tokio::test]
+async fn a_pooled_lightwalletd_channel_is_never_reused_once_tor_is_on() {
+    let _serial = serial();
+    let (url, connections) = counting_server().await;
+    // Direct: the second call reuses the first one's connection.
+    wallet::connect_pooled(&url).await.unwrap();
+    wallet::connect_pooled(&url).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await; // let the server count it
+    assert_eq!(connections.load(Ordering::SeqCst), 1);
+
+    // Tor on (and failing here): the pooled channel is not handed out, nothing connects.
+    tor::request();
+    let (_dir, bad) = unusable_dir();
+    assert!(tor::enable(&bad, Duration::from_secs(5)).await.is_err());
+    let e = wallet::connect_pooled(&url).await.unwrap_err();
+    assert_eq!(wallet_failure(&e), Some(NetFailure::TorFailed));
+    tokio::time::sleep(Duration::from_millis(300)).await; // let the server count it
+    assert_eq!(connections.load(Ordering::SeqCst), 1);
+
+    // Off again: a fresh direct channel, not the revoked one.
+    tor::disable();
+    wallet::connect_pooled(&url).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(connections.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn a_lightwalletd_stream_is_cut_when_tor_is_turned_on() {
     let _serial = serial();
     // A server that accepts and never answers: the call would wait for the request

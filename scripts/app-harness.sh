@@ -6,7 +6,7 @@
 #   scripts/app-harness.sh start          relay + B creates a vault (ZAFE_THRESHOLD of
 #                                         ZAFE_MEMBERS, default 2 of 3); prints the invite
 #   scripts/app-harness.sh join-all       the other CLI members (C, D, ...) join; alias join-c
-#   scripts/app-harness.sh seal           B seals (after the app joined); prints safety number
+#   scripts/app-harness.sh seal           B seals (after the app joined); shows the members
 #   scripts/app-harness.sh keygen         CLI members run keygen in the background (app joins in)
 #   scripts/app-harness.sh each ARGS      run the zafe CLI as every CLI member in turn
 #   scripts/app-harness.sh fund           regtest up (ths), faucet notes to the vault
@@ -57,8 +57,14 @@ case "${1:-}" in
   join-c|join-all) for who in $(others); do member "$who" vault join "$(cat "$WORK/invite")"; done ;;
   seal) member B vault seal; member B vault members ;;
   keygen)
-    SN=$(member B vault members | sed -n 's/^safety number: //p')
-    echo "safety number: $SN"
+    # The safety check needs every member at once (the app: keep its setup screen open).
+    pids=()
+    for who in B $(others); do
+      member "$who" vault members --wait > "$WORK/m$who" 2>&1 & pids+=($!)
+    done
+    for pid in "${pids[@]}"; do wait "$pid" || { cat "$WORK/m"*; exit 1; }; done
+    SN=$(sed -n 's/^safety words: //p' "$WORK/mB")
+    echo "safety words: $SN"
     nohup "$ZAFE" --home "$WORK/B" vault keygen --safety-number "$SN" --birthday 2 > "$WORK/kB" 2>&1 &
     for who in $(others); do
       nohup "$ZAFE" --home "$WORK/$who" vault keygen --safety-number "$SN" > "$WORK/k$who" 2>&1 &

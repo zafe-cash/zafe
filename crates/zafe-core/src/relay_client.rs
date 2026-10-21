@@ -5,12 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{de::DeserializeOwned, Serialize};
 use zafe_proto::{
     relay::{
-        decode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo, MailboxesRead,
-        MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove,
+        decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
+        InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
+        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, RenewInvite,
         ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed,
-        WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, QUOTA_CAPACITY, QUOTA_HEADER,
-        UNSUPPORTED_VERSION_HEADER,
+        WaitRequest, WaitResponse, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
     Envelope, Identity, LogEntry, MailboxId, ProtoError,
@@ -34,10 +34,6 @@ pub enum RelayClientError {
     /// `detail` is the relay's explanation.
     #[error("the relay's storage for this vault is full: {detail}")]
     StorageFull { detail: String },
-    /// The relay takes no more vaults for now (a capped beta, HTTP 507 with
-    /// `zafe-quota: capacity`). Existing vaults are not affected.
-    #[error("the relay is full: it takes no new vaults for now")]
-    AtCapacity,
     #[error("encoding")]
     Encoding,
     /// The relay refused this client's version of `format` (HTTP 426). `ours` newer than
@@ -51,7 +47,15 @@ pub enum RelayClientError {
     /// The relay sent data in a version this build can't read.
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
+    /// The response was over [`MAX_RESPONSE_BYTES`] (a misbehaving relay; audit L6).
+    #[error("the relay's response is over {MAX_RESPONSE_BYTES} bytes")]
+    ResponseTooLarge,
 }
+
+/// Largest response body read from a relay. A page is at most 500 envelopes or log
+/// entries, almost all a few KB, so this is far above anything real while bounding the
+/// memory a hostile relay can make the app allocate.
+pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 impl RelayClientError {
     /// This app is older than what it talked to: updating the app fixes it.
@@ -115,12 +119,14 @@ pub const WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 /// opens a new Tor stream and TLS session (several round trips through the circuit).
 pub const TOR_EXTRA_TIME: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Marks an oversized body inside the Tor client's error type.
+const TOO_LARGE: &str = "relay response too large";
+
 /// What the client needs from a relay response, whichever way it travelled.
 struct RawResponse {
     status: u16,
     retry_after: Option<String>,
     supported_version: Option<String>,
-    quota: Option<String>,
     body: Vec<u8>,
 }
 
@@ -136,14 +142,18 @@ async fn over_tor(
     use zcash_client_backend::tor::{self, http::HttpError};
 
     let uri: tonic::transport::Uri = url.parse().map_err(transport)?;
-    let read_body = |incoming: hyper::body::Incoming| async move {
-        Ok::<_, tor::Error>(
-            incoming
-                .collect()
-                .await
-                .map_err(HttpError::from)?
-                .to_bytes(),
-        )
+    // Read frame by frame so an oversized body is cut off, not collected.
+    let read_body = |mut incoming: hyper::body::Incoming| async move {
+        let mut out = Vec::new();
+        while let Some(frame) = incoming.frame().await {
+            if let Ok(data) = frame.map_err(HttpError::from)?.into_data() {
+                if out.len() + data.len() > MAX_RESPONSE_BYTES {
+                    return Err(tor::Error::Io(std::io::Error::other(TOO_LARGE)));
+                }
+                out.extend_from_slice(&data);
+            }
+        }
+        Ok::<_, tor::Error>(bytes::Bytes::from(out))
     };
     let response = match body {
         None => client.http_get(uri, |b| b, read_body, 0, |_| None).await,
@@ -160,7 +170,10 @@ async fn over_tor(
                 .await
         }
     }
-    .map_err(transport)?;
+    .map_err(|e| match &e {
+        tor::Error::Io(io) if io.to_string() == TOO_LARGE => RelayClientError::ResponseTooLarge,
+        _ => transport(e),
+    })?;
     let header = |name: &str| {
         response
             .headers()
@@ -172,7 +185,6 @@ async fn over_tor(
         status: response.status().as_u16(),
         retry_after: header("retry-after"),
         supported_version: header(UNSUPPORTED_VERSION_HEADER),
-        quota: header(QUOTA_HEADER),
         body: response.body().to_vec(),
     })
 }
@@ -199,6 +211,24 @@ impl RelayClient {
             base: base.into().trim_end_matches('/').to_owned(),
             // Only fails if the TLS backend can't initialise; fall back to the defaults.
             http: http_builder().build().unwrap_or_default(),
+            log_cache: crate::log_cache::configured(),
+        }
+    }
+
+    /// Like [`RelayClient::new`], but every client made this way shares one connection
+    /// pool, so a call reuses the TLS connection the previous one opened instead of a new
+    /// handshake (~0.7 s to the hosted relay from a phone: most of an approval's time).
+    /// Only for a process whose relay calls all run on **one long-lived runtime** (the
+    /// app's bridge): pooled connections belong to the runtime that opened them, so tests
+    /// and tools that start a runtime per call use [`RelayClient::new`]. Tor is unaffected:
+    /// with Tor on no request takes the direct path, so pooled connections sit unused.
+    pub fn pooled(base: impl Into<String>) -> Self {
+        static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        Self {
+            base: base.into().trim_end_matches('/').to_owned(),
+            http: HTTP
+                .get_or_init(|| http_builder().build().unwrap_or_default())
+                .clone(),
             log_cache: crate::log_cache::configured(),
         }
     }
@@ -310,7 +340,7 @@ impl RelayClient {
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
-        let response = request.send().await.map_err(transport)?;
+        let mut response = request.send().await.map_err(transport)?;
         let status = response.status().as_u16();
         let header = |name: &str| {
             response
@@ -319,17 +349,25 @@ impl RelayClient {
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned)
         };
-        let (retry_after, supported_version, quota) = (
-            header("retry-after"),
-            header(UNSUPPORTED_VERSION_HEADER),
-            header(QUOTA_HEADER),
-        );
-        let body = response.bytes().await.map_err(transport)?.to_vec();
+        let (retry_after, supported_version) =
+            (header("retry-after"), header(UNSUPPORTED_VERSION_HEADER));
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(RelayClientError::ResponseTooLarge);
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(transport)? {
+            if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+                return Err(RelayClientError::ResponseTooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
         Ok(RawResponse {
             status,
             retry_after,
             supported_version,
-            quota,
             body,
         })
     }
@@ -366,9 +404,6 @@ impl RelayClient {
             return Err(RelayClientError::RateLimited { retry_after_secs });
         }
         let bytes = response.body;
-        if status == 507 && response.quota.as_deref() == Some(QUOTA_CAPACITY) {
-            return Err(RelayClientError::AtCapacity);
-        }
         if status == 507 {
             return Err(RelayClientError::StorageFull {
                 detail: String::from_utf8_lossy(&bytes).into_owned(),
@@ -464,6 +499,42 @@ impl RelayClient {
         }
     }
 
+    /// Creator only, before sealing: deletes the mailbox, so the invite stops working and
+    /// members waiting in it learn the setup is gone. `Ok(false)` when there was nothing to
+    /// delete there: a relay without the route, or a mailbox that is already gone (both
+    /// answer HTTP 404).
+    pub async fn cancel_setup(
+        &self,
+        creator: &Identity,
+        mailbox: MailboxId,
+    ) -> Result<bool, RelayClientError> {
+        match self
+            .signed::<_, ()>("/v1/mailbox/cancel", creator, CancelSetup { mailbox })
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(RelayClientError::Status { status: 404, .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Restarts the invite's clock (creator only, before the setup locks). `Ok(false)`:
+    /// a relay without the route (its invites never expire).
+    pub async fn renew_invite(
+        &self,
+        creator: &Identity,
+        mailbox: MailboxId,
+    ) -> Result<bool, RelayClientError> {
+        match self
+            .signed::<_, ()>("/v1/mailbox/renew", creator, RenewInvite { mailbox })
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(RelayClientError::Status { status: 404, .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Moves a lost member's seat to a new key on the relay, with the approvals of at least
     /// the vault's threshold of other members. Succeeds if it already moved.
     pub async fn replace_member(
@@ -481,6 +552,44 @@ impl RelayClient {
             },
         )
         .await
+    }
+
+    /// Leaves one value of the safety check of `subject`'s seat recovery (see
+    /// [`RecoveryPut`]). A relay without the route answers 404.
+    pub async fn recovery_put(
+        &self,
+        who: &Identity,
+        subject: [u8; 32],
+        kind: RecoveryValueKind,
+        value: [u8; 32],
+    ) -> Result<(), RelayClientError> {
+        let payload = RecoveryPut {
+            subject,
+            kind,
+            value,
+            timestamp: now(),
+        };
+        self.signed::<_, ()>("/v1/recovery/put", who, payload).await
+    }
+
+    /// The values left for `subject`'s recovery whose signature verifies and that are
+    /// about `subject` (the relay is not trusted with them).
+    pub async fn recovery_read(
+        &self,
+        who: &Identity,
+        subject: [u8; 32],
+    ) -> Result<Vec<Signed<RecoveryPut>>, RelayClientError> {
+        let read = RecoveryRead {
+            subject,
+            timestamp: now(),
+        };
+        let response: RecoveryValues = self.signed("/v1/recovery/read", who, read).await?;
+        Ok(response
+            .values
+            .iter()
+            .filter_map(|b| Signed::<RecoveryPut>::from_bytes(b).ok())
+            .filter(|s| s.verify().is_ok_and(|p| p.subject == subject))
+            .collect())
     }
 
     /// The mailboxes `who` is a member of. Empty from a relay without the route (404).

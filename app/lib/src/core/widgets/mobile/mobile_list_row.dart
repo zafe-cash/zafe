@@ -67,6 +67,10 @@ class MobileListRow extends StatelessWidget {
   /// whose mobile flow hasn't shipped yet.
   final bool enabled;
 
+  /// Label and value on two lines: system text at 1.5x or more.
+  static bool _stacked(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(10) >= 15;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -93,7 +97,37 @@ class MobileListRow extends StatelessWidget {
           // at the row end, pulling short values off the right edge).
           // Rows with a value keep static labels; the label only gets
           // the truncating Expanded when it is the sole text.
-          if (value != null) ...[
+          // Zafe: at large system text sizes there's no room for both on one
+          // line (the label would push the row off screen): the value goes under
+          // the label instead.
+          if (value != null && _stacked(context))
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          label,
+                          style: labelTextStyle.copyWith(color: labelColor),
+                        ),
+                      ),
+                      if (labelBadge != null) ...[
+                        const SizedBox(width: AppSpacing.xxs),
+                        labelBadge!,
+                      ],
+                    ],
+                  ),
+                  Text(
+                    value!,
+                    overflow: TextOverflow.ellipsis,
+                    style: valueTextStyle.copyWith(color: valueColor),
+                  ),
+                ],
+              ),
+            )
+          else if (value != null) ...[
             Text(label, style: labelTextStyle.copyWith(color: labelColor)),
             if (labelBadge != null) ...[
               const SizedBox(width: AppSpacing.xxs),

@@ -8,7 +8,7 @@
 #      9067 + offset, ths's dashboard on 32805 + offset. Everything binds to 127.0.0.1.
 #      THS (default `ths` on PATH) must be version THS_VERSION below.
 set -euo pipefail
-THS_VERSION=0.3.0
+THS_VERSION=0.4.0
 THS=${THS:-ths}
 NAME=${ZAFE_REGTEST_NAME:-zafe-regtest}
 OFFSET=${ZAFE_REGTEST_PORT_OFFSET:-0}

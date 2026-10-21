@@ -7,13 +7,13 @@ use pasta_curves::pallas;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     node::{
-        create_vault, join_vault, load_state, membership, run_keygen, seal, set_name, NodeError,
+        create_vault, join_vault, load_state, run_keygen, seal, set_name, KeygenOptions, NodeError,
         VaultMaterial,
     },
     relay_client::RelayClient,
     repair::{
-        approve_replacement, current_material, help_repairs, retry_repair, try_recover,
-        RecoveryRequest, RecoveryStatus,
+        approve_replacement, current_material, help_repairs, new_phone_words, recovery_checks,
+        retry_repair, try_recover, RecoveryRequest, RecoveryStatus,
     },
     signing,
     wallet::regtest_network,
@@ -48,7 +48,17 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
         join_vault(relay, id, &invite).await.unwrap();
     }
     seal(relay, &ids[0], &invite).await.unwrap();
-    let (_, _, number) = membership(relay, &ids[0], &invite).await.unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let mut rngs: Vec<StdRng> = (0..n)
@@ -62,7 +72,21 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
         .map(|(i, (id, rng))| {
             let birthday = (i == 0).then_some(2);
             run_keygen(
-                relay, id, &invite, &number, &net, "regtest", birthday, None, rng, timeout,
+                relay,
+                id,
+                &invite,
+                &number,
+                &net,
+                "regtest",
+                KeygenOptions {
+                    creator_birthday_height: birthday,
+                    creator_expiry_blocks: None,
+                    max_birthday: None,
+                },
+                keygen_dir(),
+                keygen_key(),
+                rng,
+                timeout,
             )
         });
     let materials = futures::future::join_all(runs)
@@ -98,6 +122,68 @@ fn sign_together(a: &VaultMaterial, b: &VaultMaterial, rng: &mut StdRng) {
         .expect("a valid signature from the two shares");
 }
 
+/// The safety check between a co-signer and the new phone, step by step as the two apps
+/// poll it: both end with the same words, which the co-signer then approves with.
+async fn compare_words(relay: &RelayClient, cosigner: &Identity, new: &Identity) -> String {
+    let mut words = None;
+    for _ in 0..4 {
+        let shown_new = recovery_checks(relay, new).await.unwrap();
+        if let Some(w) = new_phone_words(relay, cosigner, new.public())
+            .await
+            .unwrap()
+        {
+            words = Some((w, shown_new));
+            break;
+        }
+    }
+    let (w, _) = words.expect("the check finishes in a few polls");
+    let shown = recovery_checks(relay, new).await.unwrap();
+    let on_new = shown
+        .iter()
+        .find(|c| c.cosigner == cosigner.public().sig_pk)
+        .expect("the new phone shows this co-signer's words");
+    assert_eq!(on_new.words, w, "both phones show the same words");
+    assert_eq!(w.split(' ').count(), 4);
+    w
+}
+
+/// Someone who swaps the recovery code on the way (their own phone's code instead) can't
+/// make the co-signer's words appear on the real new phone.
+#[tokio::test]
+async fn a_swapped_recovery_code_shows_words_the_new_phone_does_not() {
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, materials) = vault(&relay, 3).await;
+    let mut rng = StdRng::seed_from_u64(73);
+    let real = Identity::generate(&mut rng);
+    let attacker = Identity::generate(&mut rng);
+    // The real phone has its screen open; the co-signer received the attacker's code.
+    recovery_checks(&relay, &real).await.unwrap();
+    let words = compare_words(&relay, &ids[1], &attacker).await;
+    let on_real = recovery_checks(&relay, &real).await.unwrap();
+    assert!(on_real.is_empty(), "the real phone was never challenged");
+    // Approving the attacker's phone needs the words the co-signer's phone shows for it;
+    // with any others it refuses.
+    let old = ids[0].public().sig_pk;
+    let request = RecoveryRequest {
+        identity: *attacker.public(),
+    };
+    let wrong = "abandon ability able about";
+    assert_ne!(words, wrong);
+    assert!(matches!(
+        approve_replacement(
+            &relay,
+            &ids[1],
+            &materials[1],
+            old,
+            &request,
+            wrong,
+            &mut rng
+        )
+        .await,
+        Err(NodeError::Verification(_))
+    ));
+}
+
 /// The creator loses their phone. The other two approve moving the seat to a new device,
 /// repair the share, and the new device ends up with the same key share, signs with
 /// another member, and reads the vault log.
@@ -121,8 +207,9 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let code = request.encode();
     assert!(code.starts_with("zafe-recover-v1:"));
     let request = RecoveryRequest::decode(&code).unwrap();
-    let safety = request.safety_code();
-    assert_eq!(safety.len(), 9);
+    let words_b = compare_words(&relay, &ids[1], &fresh).await;
+    let words_c = compare_words(&relay, &ids[2], &fresh).await;
+    assert_ne!(words_b, words_c, "each co-signer has its own words");
     assert!(matches!(
         try_recover(&relay, &fresh).await.unwrap(),
         RecoveryStatus::Waiting
@@ -130,18 +217,26 @@ async fn a_lost_seat_moves_to_a_new_device() {
 
     // The lost member can't approve its own move, and one approval isn't enough.
     let old = ids[0].public().sig_pk;
+    assert!(
+        matches!(
+            approve_replacement(&relay, &ids[0], a, old, &request, &words_b, &mut rng).await,
+            Err(NodeError::NotReady(_))
+        ),
+        "approving before the words were compared is refused"
+    );
+    let words_a = compare_words(&relay, &ids[0], &fresh).await;
     assert!(matches!(
-        approve_replacement(&relay, &ids[0], a, old, &request, &mut rng).await,
+        approve_replacement(&relay, &ids[0], a, old, &request, &words_a, &mut rng).await,
         Err(NodeError::Invalid(_))
     ));
     assert!(
-        !approve_replacement(&relay, &ids[1], b, old, &request, &mut rng)
+        !approve_replacement(&relay, &ids[1], b, old, &request, &words_b, &mut rng)
             .await
             .unwrap()
     );
     // Approving twice changes nothing.
     assert!(matches!(
-        approve_replacement(&relay, &ids[1], b, old, &request, &mut rng).await,
+        approve_replacement(&relay, &ids[1], b, old, &request, &words_b, &mut rng).await,
         Err(NodeError::Invalid(_))
     ));
     assert!(matches!(
@@ -151,7 +246,7 @@ async fn a_lost_seat_moves_to_a_new_device() {
 
     // The second approval moves the seat, on the log and on the relay.
     assert!(
-        approve_replacement(&relay, &ids[2], c, old, &request, &mut rng)
+        approve_replacement(&relay, &ids[2], c, old, &request, &words_c, &mut rng)
             .await
             .unwrap()
     );
@@ -256,7 +351,8 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     };
     let old = ids[0].public().sig_pk;
     for i in [1, 2] {
-        approve_replacement(&relay, &ids[i], &m[i], old, &request, &mut rng)
+        let words = compare_words(&relay, &ids[i], &fresh).await;
+        approve_replacement(&relay, &ids[i], &m[i], old, &request, &words, &mut rng)
             .await
             .unwrap();
     }
@@ -320,4 +416,14 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     );
     sign_together(&material, &m[3], &mut rng);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

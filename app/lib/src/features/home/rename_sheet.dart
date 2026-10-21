@@ -2,16 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../core/storage/vault_name.dart';
-import '../../core/errors/zafe_error_copy.dart';
-import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/vault_names_provider.dart';
@@ -24,22 +21,19 @@ Future<void> showRenameSignerSheet(
   String keyHex,
 ) async {
   final current = ref.read(memberNamesProvider)[keyHex] ?? '';
-  final name = await showAppMobileSheet<String>(
+  await showAppMobileSheet<void>(
     context: context,
     builder: (sheet) => _RenameSheet(
       title: 'Name this signer',
-      body:
-          'Key ${shortKey(keyHex)}. The name stays on this phone; other '
-          'members don\'t see it.',
+      body: 'Only you see this label.',
       hint: 'e.g. Alice (treasurer)',
       maxLength: MemberNames.maxLength,
       current: current,
       removeLabel: 'Remove name',
+      onSave: (name) =>
+          ref.read(memberNamesProvider.notifier).rename(keyHex, name),
     ),
   );
-  if (name != null) {
-    await ref.read(memberNamesProvider.notifier).rename(keyHex, name);
-  }
 }
 
 /// This member's name for the other signers, shared through the vault log.
@@ -47,34 +41,23 @@ Future<void> showMyNameSheet(BuildContext context, WidgetRef ref) async {
   final me = ref.read(vaultProvider).myKeyHex;
   if (me == null) return;
   final current = ref.read(proposalsProvider).sharedNames[me] ?? '';
-  final name = await showAppMobileSheet<String>(
+  await showAppMobileSheet<void>(
     context: context,
     builder: (sheet) => _RenameSheet(
       title: 'Your name',
-      body:
-          'The other signers of this vault see it next to your approvals. '
-          'Their own name for you comes first on their phones.',
       hint: 'e.g. Alice',
       maxLength: MemberNames.maxLength,
       current: current,
       removeLabel: 'Remove name',
+      errorFallback: 'Couldn\'t save your name. Try again.',
+      onSave: (name) async {
+        if (MemberNames.clean(name) == current) return;
+        await ref
+            .read(proposalsProvider.notifier)
+            .setMyName(MemberNames.clean(name));
+      },
     ),
   );
-  if (name == null || MemberNames.clean(name) == current) return;
-  try {
-    await ref
-        .read(proposalsProvider.notifier)
-        .setMyName(MemberNames.clean(name));
-  } catch (e) {
-    if (context.mounted) {
-      showAppToast(
-        context,
-        zafeErrorMessage(e, fallback: 'Couldn\'t save your name. Try again.'),
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
-      );
-    }
-  }
 }
 
 /// Renames the active vault on this device (other members keep their names for it).
@@ -83,43 +66,46 @@ Future<void> showRenameVaultSheet(BuildContext context, WidgetRef ref) async {
   final creator = ref.read(vaultProvider).summary?.name;
   if (id == null || creator == null) return;
   final current = ref.read(vaultNamesProvider)[id] ?? '';
-  final name = await showAppMobileSheet<String>(
+  await showAppMobileSheet<void>(
     context: context,
     builder: (sheet) => _RenameSheet(
       title: 'Rename vault',
-      body:
-          'The name stays on this phone; other members keep seeing '
-          'their own. It was created as "$creator".',
+      body: 'Only on this phone. Created as "$creator".',
       hint: creator,
       maxLength: VaultName.maxLength,
       current: current.isEmpty ? creator : current,
       removeLabel: current.isEmpty ? null : 'Use "$creator"',
+      onSave: (name) => ref
+          .read(vaultNamesProvider.notifier)
+          .rename(id, name.trim() == creator ? '' : name),
     ),
   );
-  if (name != null) {
-    await ref
-        .read(vaultNamesProvider.notifier)
-        .rename(id, name.trim() == creator ? '' : name);
-  }
 }
 
 class _RenameSheet extends StatefulWidget {
   const _RenameSheet({
     required this.title,
-    required this.body,
+    this.body,
     required this.hint,
     required this.maxLength,
     required this.current,
+    required this.onSave,
     this.removeLabel,
+    this.errorFallback,
   });
   final String title;
-  final String body;
+  final String? body;
   final String hint;
   final int maxLength;
   final String current;
 
   /// Label of the button that clears the name; hidden when null.
   final String? removeLabel;
+
+  /// Saves the name (empty clears it); the sheet closes once it's done, and a failure
+  /// shows under the button.
+  final Future<void> Function(String name) onSave;
+  final String? errorFallback;
 
   @override
   State<_RenameSheet> createState() => _RenameSheetState();
@@ -152,13 +138,15 @@ class _RenameSheetState extends State<_RenameSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            widget.body,
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
+          if (widget.body != null) ...[
+            Text(
+              widget.body!,
+              style: AppTypography.bodyMedium.copyWith(
+                color: colors.text.secondary,
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           MobileTextField(
             controller: _name,
             focusNode: _focus,
@@ -167,21 +155,22 @@ class _RenameSheetState extends State<_RenameSheet> {
             inputFormatters: [
               LengthLimitingTextInputFormatter(widget.maxLength),
             ],
-            onSubmitted: (v) => Navigator.of(context).pop(v),
           ),
           const SizedBox(height: AppSpacing.md),
-          AppButton(
-            expand: true,
-            onPressed: () => Navigator.of(context).pop(_name.text),
-            child: const Text('Save'),
+          ActionButton(
+            label: 'Save',
+            errorFallback: widget.errorFallback,
+            onPressed: () => widget.onSave(_name.text),
+            onDone: () => Navigator.of(context).pop(),
           ),
           if (widget.removeLabel != null && widget.current.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
-            AppButton(
-              expand: true,
+            ActionButton(
+              label: widget.removeLabel!,
               variant: AppButtonVariant.ghost,
-              onPressed: () => Navigator.of(context).pop(''),
-              child: Text(widget.removeLabel!),
+              errorFallback: widget.errorFallback,
+              onPressed: () => widget.onSave(''),
+              onDone: () => Navigator.of(context).pop(),
             ),
           ],
         ],

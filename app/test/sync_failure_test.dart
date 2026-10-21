@@ -5,7 +5,12 @@ import 'package:zafe/src/rust/api/error.dart';
 ZafeError err(
   ZafeErrorKind kind, [
   ZafeEndpoint endpoint = ZafeEndpoint.none,
-]) => ZafeError(kind: kind, message: 'detail', endpoint: endpoint);
+]) => ZafeError(
+  kind: kind,
+  message: 'detail',
+  endpoint: endpoint,
+  members: const [],
+);
 
 void main() {
   group('classifySyncFailure', () {
@@ -46,6 +51,7 @@ void main() {
         ZafeErrorKind.relayRolledBack: SyncFailureKind.relayRolledBack,
         ZafeErrorKind.relayLostVault: SyncFailureKind.relayLostVault,
         ZafeErrorKind.relayForked: SyncFailureKind.relayForked,
+        ZafeErrorKind.logCopyInvalid: SyncFailureKind.logCopyInvalid,
         ZafeErrorKind.relayMembership: SyncFailureKind.relayMembership,
       };
       cases.forEach((kind, expected) {
@@ -155,11 +161,11 @@ void main() {
     },
   );
 
-  test('only a forked relay offers to follow it, with a plain warning', () {
+  test('only a fork or a damaged copy offers to follow the relay', () {
     for (final k in SyncFailureKind.values) {
       expect(
         SyncFailure(kind: k).canFollowRelay,
-        k == SyncFailureKind.relayForked,
+        k == SyncFailureKind.relayForked || k == SyncFailureKind.logCopyInvalid,
         reason: '$k',
       );
     }
@@ -180,6 +186,7 @@ void main() {
         kind: ZafeErrorKind.relayMembership,
         message: 'x',
         endpoint: ZafeEndpoint.relay,
+        members: const [],
       ),
     );
     expect(c.kind, SyncFailureKind.relayMembership);

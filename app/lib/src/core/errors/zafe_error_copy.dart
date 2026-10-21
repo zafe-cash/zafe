@@ -3,10 +3,20 @@ import '../config/network_config.dart';
 
 /// Friendly copy for errors from Rust. Switches on the typed `ZafeErrorKind` (no
 /// substring matching); `fallback` covers `other`.
+/// A failure the app explains itself (not from Rust): its text is shown as is.
+class UserFacingError implements Exception {
+  const UserFacingError(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 String zafeErrorMessage(
   Object error, {
   String fallback = 'Something went wrong. Try again.',
 }) {
+  if (error is UserFacingError) return error.message;
   if (error is! ZafeError) return fallback;
   return switch (error.kind) {
     ZafeErrorKind.network =>
@@ -15,6 +25,11 @@ String zafeErrorMessage(
           : 'Can\'t reach the ${_server(error.endpoint)}. Check your connection '
                 'and try again.',
     ZafeErrorKind.notReady => _sentence(error.message),
+    ZafeErrorKind.keygenIncomplete =>
+      'Key generation stopped: some members never took part. Ask them to open Zafe, '
+          'then try again together.',
+    ZafeErrorKind.inviteExpired =>
+      'This invite expired. Ask the vault\'s creator to share it again.',
     ZafeErrorKind.timeout =>
       'Other signers haven\'t answered yet. Ask them to open Zafe, then try again.',
     ZafeErrorKind.verification =>
@@ -22,8 +37,7 @@ String zafeErrorMessage(
     ZafeErrorKind.insufficientFunds =>
       'Not enough $kZcashDefaultCurrencyTicker in the vault to cover the amount and the fee.',
     ZafeErrorKind.fundsReserved =>
-      'Part of the vault\'s balance is held by payments that are still open. '
-          'Wait until one is sent or cancelled, or propose a smaller amount.',
+      'Some funds are held by open payments. Wait for one to finish, or send less.',
     ZafeErrorKind.invalidInput => _sentence(error.message),
     ZafeErrorKind.updateRequired =>
       'This needs a newer version of Zafe. Update the app, then try again.',
@@ -31,26 +45,18 @@ String zafeErrorMessage(
       'The relay server runs an older version of Zafe than this app. '
           'Ask whoever runs it to update it.',
     ZafeErrorKind.relayStorageFull =>
-      'The relay\'s storage for this vault is full, so it can\'t take new messages '
-          'right now. Old messages expire after 30 days; if this keeps happening, ask '
-          'whoever runs the relay to raise the vault\'s limit.',
-    ZafeErrorKind.relayAtCapacity =>
-      'The Zafe beta is full for now, so this relay takes no new vaults. Vaults '
-          'that already exist keep working. Try again later.',
+      'The relay\'s storage for this vault is full. Old messages expire after 30 days; if it keeps happening, ask the relay\'s operator for more space.',
     ZafeErrorKind.relayRolledBack =>
-      'The relay lost part of this vault\'s history, so Zafe isn\'t using it. A '
-          'member whose phone has the full history can restore it from the sync '
-          'status on Home.',
+      'The relay lost part of this vault\'s history, so Zafe ignores it. A member with the full history can restore it from Home.',
     ZafeErrorKind.relayLostVault =>
       'The relay no longer has this vault. A member can restore it from the sync '
           'status on Home.',
     ZafeErrorKind.relayForked =>
-      'The relay shows a different history than this phone saw, so Zafe isn\'t '
-          'using it. Check with the other members before doing anything.',
+      'The relay shows a different history than this phone saw, so Zafe ignores it. Check with the other members first.',
+    ZafeErrorKind.logCopyInvalid =>
+      'This phone\'s saved history is damaged. Check with the other members, then follow the relay.',
     ZafeErrorKind.relayMembership =>
-      'The relay\'s list of members or its approval rule doesn\'t match this '
-          'vault, so Zafe isn\'t using it. Your funds are safe. Ask the other '
-          'members, and agree on a fresh relay in Settings.',
+      'The relay\'s members or approval rule don\'t match this vault, so Zafe ignores it. Your funds are safe. Agree on a new relay with the others.',
     ZafeErrorKind.tls =>
       'Couldn\'t connect securely to the ${_server(error.endpoint)}. '
           'Check its address in Settings.',
@@ -69,8 +75,7 @@ String zafeErrorMessage(
       'Tor couldn\'t connect, so nothing was sent. Try again, or turn off Tor in '
           'Settings.',
     ZafeErrorKind.vaultNotOnRelay =>
-      'This vault isn\'t on this relay. Check the relay address in Settings, and that '
-          'every member uses the same relay.',
+      'This vault isn\'t on this relay. Check the relay address in Settings; all members must use the same one.',
     ZafeErrorKind.other => fallback,
   };
 }

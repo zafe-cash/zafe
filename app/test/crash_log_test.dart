@@ -121,5 +121,20 @@ void main() {
         );
       },
     );
+
+    test('the report lists slow steps from the Rust timing file', () async {
+      final log = CrashLog.forDir(dir.path, isBackground: false);
+      File('${dir.path}/timings.log').writeAsStringSync(
+        '2026-10-12T13:00:00Z sync total=7120ms lock=2ms open=1200ms scan=900ms\n'
+        '2026-10-12T13:00:20Z proposals total=40ms pool=10ms log=30ms\n',
+      );
+      final report = await log.report(network: 'test');
+      expect(report, contains('Slow steps'));
+      expect(report, contains('sync total=7120ms lock=2ms open=1200ms'));
+      expect(await log.readTimings(last: 1), hasLength(1));
+      await log.clear();
+      expect(File('${dir.path}/timings.log').existsSync(), isFalse);
+      expect(await log.report(network: 'test'), isNot(contains('Slow steps')));
+    });
   });
 }

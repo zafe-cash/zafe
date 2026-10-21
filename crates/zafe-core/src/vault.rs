@@ -67,6 +67,11 @@ pub enum VaultError {
     BadReplacement(u64),
     #[error("entry {0}: not a valid change to a seat's key repair")]
     BadRepair(u64),
+    /// A version 9 `Proposal` whose PCZT doesn't parse, or that declares more spends to
+    /// sign than the PCZT has: members would reject it anyway, and it would only drain
+    /// every member's one-tap pool.
+    #[error("entry {0}: proposal with a transaction members can't use")]
+    BadProposal(u64),
 }
 
 /// Most commitments one `Commitments` event may carry.
@@ -90,6 +95,11 @@ pub struct Pool {
 impl Pool {
     pub fn available(&self) -> usize {
         self.commitments.len() - self.next
+    }
+
+    /// Drops every unassigned commitment ([`VaultEvent::PoolReset`]).
+    pub fn reset(&mut self) {
+        self.commitments.truncate(self.next);
     }
 }
 
@@ -328,6 +338,13 @@ pub enum VaultEvent {
     RepairDone {
         replacement: u64,
     },
+    /// The author retires every one-tap commitment of theirs that no proposal has been
+    /// assigned yet, so the next ones they publish are the next ones assigned. Logged by a
+    /// device restored from a backup: the backup has no nonces, so the commitments the
+    /// previous device published can never be signed with, yet proposals would be assigned
+    /// them one by one. Proposals already assigned keep theirs (re-propose those). Event
+    /// version 8.
+    PoolReset,
 }
 
 /// Approvals collected so far for moving `old`'s seat to `new`.
@@ -501,6 +518,14 @@ pub struct VaultState {
     /// Seat moves that happened, in log order. `descriptor.members` already holds the new
     /// keys: the state's descriptor is the current membership, not the signed original.
     pub replacements: Vec<Replacement>,
+    /// Identities whose seat moved away. Their log entries still chain (see
+    /// [`VaultState::log_authors`]) and replay ignores them as `NotAMember`.
+    pub former_members: Vec<IdentityPublic>,
+    /// Highest event version seen in the log so far. From version 9 on it is a floor:
+    /// an entry tagged with an older version is replayed under the newer rules, so a
+    /// member can't skip a rule (e.g. the version 7 broadcast txid check) by tagging an
+    /// event with an old version. Logs without a version 9 entry replay as before.
+    pub max_event_version: u16,
 }
 
 impl VaultState {
@@ -538,6 +563,8 @@ impl VaultState {
             backups: BTreeMap::new(),
             pending_replacements: BTreeMap::new(),
             replacements: Vec::new(),
+            former_members: Vec::new(),
+            max_event_version: 0,
         };
         for entry in rest {
             state.apply_entry(entry, key);
@@ -553,12 +580,23 @@ impl VaultState {
             .map_err(|_| VaultError::Undecryptable(index))
             .and_then(|bytes| VaultEvent::from_bytes_versioned(&bytes))
             .and_then(|(event, found)| {
-                self.apply_versioned(index, entry.header.author, event, found)
+                let effective = self.effective_version(found);
+                self.max_event_version = self.max_event_version.max(found);
+                self.apply_versioned(index, entry.header.author, event, effective)
             });
         if let Err(e) = result {
             self.ignored.push((index, e));
         }
         self.applied = index + 1;
+    }
+
+    /// The version whose rules apply to an event tagged `found` (see `max_event_version`).
+    fn effective_version(&self, found: u16) -> u16 {
+        if self.max_event_version >= VERSION_FLOOR_FROM {
+            found.max(self.max_event_version)
+        } else {
+            found
+        }
     }
 
     /// Entries skipped because they come from a newer version of Zafe: other members can
@@ -627,6 +665,13 @@ impl VaultState {
                         Some((nfs, *p.global().expiry_height()))
                     })
                     .unwrap_or_default();
+                if event_version >= VERSION_FLOOR_FROM
+                    && (expected_txid.is_none()
+                        || signing_spends == 0
+                        || usize::from(signing_spends) > nullifiers.len())
+                {
+                    return Err(VaultError::BadProposal(index));
+                }
                 // First come, first served: notes an earlier proposal that can still be
                 // signed spends are taken, until that proposal's transaction expires (as
                 // of the chain tip this proposal was built on, so every member agrees).
@@ -873,6 +918,16 @@ impl VaultState {
                     .ok_or(VaultError::BadRepair(index))?;
                 r.done = true;
             }
+            VaultEvent::PoolReset => {
+                // Only a version 8 app can write it (older apps don't know the variant), so
+                // an older tag here is a forged or corrupted entry.
+                if event_version < POOL_RESET_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                if let Some(pool) = self.pools.get_mut(&author) {
+                    pool.reset();
+                }
+            }
         }
         Ok(())
     }
@@ -882,6 +937,17 @@ impl VaultState {
     /// The current members' identities (after any seat moves).
     pub fn member_identities(&self) -> Vec<IdentityPublic> {
         self.descriptor.members.iter().map(|m| m.identity).collect()
+    }
+
+    /// Keys whose signed entries may extend the log: current members and every key whose
+    /// seat moved away. A lost (possibly stolen) device keeps its old key, and the relay
+    /// may still accept its appends until it learns of the move; if such an entry stopped
+    /// the chain, nobody could read the log any more. It chains like any other entry and
+    /// replay ignores it (`NotAMember`), the same way on every member's device.
+    pub fn log_authors(&self) -> Vec<IdentityPublic> {
+        let mut authors = self.member_identities();
+        authors.extend(self.former_members.iter().copied());
+        authors
     }
 
     /// The seat move that gave `new` its seat, if any (the latest one).
@@ -911,6 +977,7 @@ impl VaultState {
         let mut frost_id = Vec::new();
         for m in &mut self.descriptor.members {
             if m.identity.sig_pk == old {
+                self.former_members.push(m.identity);
                 m.identity = new;
                 frost_id = m.frost_id.clone();
             }
@@ -1051,6 +1118,13 @@ const PARTIAL_GROUPS_FROM: u16 = 6;
 
 /// First `VAULT_EVENT` version whose `Broadcast` txid is checked against the PCZT.
 const BROADCAST_CHECKED_FROM: u16 = 7;
+
+/// First `VAULT_EVENT` version that has [`VaultEvent::PoolReset`].
+const POOL_RESET_FROM: u16 = 8;
+
+/// First `VAULT_EVENT` version after which versions only go up (see
+/// `VaultState::max_event_version`), and proposals must carry a usable PCZT.
+const VERSION_FLOOR_FROM: u16 = 9;
 
 fn check_descriptor_signatures(
     descriptor: &VaultDescriptor,

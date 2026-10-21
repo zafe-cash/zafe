@@ -10,6 +10,7 @@ import '../../core/config/network_config.dart';
 import '../../core/errors/sync_failure.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
+import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
@@ -205,12 +206,12 @@ class LightwalletdServerList extends StatelessWidget {
             value: busyUrl == preset.url
                 ? 'Connecting...'
                 : (probes[preset.url] ?? ServerProbe.checking).label,
-            valueColor: switch ((probes[preset.url] ?? ServerProbe.checking)
-                .check) {
-              ServerCheck.unavailable ||
-              ServerCheck.wrongNetwork => colors.text.destructive,
-              _ => colors.text.secondary,
-            },
+            valueColor:
+                switch ((probes[preset.url] ?? ServerProbe.checking).check) {
+                  ServerCheck.unavailable ||
+                  ServerCheck.wrongNetwork => colors.text.destructive,
+                  _ => colors.text.secondary,
+                },
             minRowHeight: 48,
             onTap: onSelect == null ? null : () => onSelect!(preset),
           ),
@@ -298,15 +299,6 @@ class _LightwalletdSheetState extends ConsumerState<_LightwalletdSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'The lightwalletd server this phone reads the $kZafeNetwork chain '
-            'from. It sees which blocks this phone downloads, not the vault\'s '
-            'keys.${kLightwalletdPresets.length > 1 ? ' If a listed server stops answering, Zafe moves to the next one.' : ''}',
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
           LightwalletdServerList(
             presets: kLightwalletdPresets,
             selectedUrl: ref.watch(endpointsProvider).lightwalletdUrl,
@@ -324,14 +316,6 @@ class _LightwalletdSheetState extends ConsumerState<_LightwalletdSheet> {
               ),
             ),
           ],
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Checking the list contacts each server once (through Tor when '
-            'it\'s on).',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
         ],
       ),
     );
@@ -370,6 +354,17 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
       return;
     }
     final url = check.url!;
+    // A server of someone else's choosing sees this phone's activity (and a relay is
+    // where the vault's messages go): with a vault on the phone, ask the owner.
+    if (ref.read(vaultProvider).vaults.isNotEmpty &&
+        !await confirmUnlock(
+          context,
+          ref,
+          reason: 'Confirm it\'s you to change the server',
+        )) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -404,18 +399,15 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _relay
-                ? 'Carries proposals, votes and signatures between members, '
-                      'encrypted. Every member of a vault must use the same relay.'
-                : 'The lightwalletd server this phone reads the $kZafeNetwork '
-                      'chain from. It sees which blocks this phone downloads, not '
-                      'the vault\'s keys.',
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
+          if (_relay) ...[
+            Text(
+              'All members of a vault must use the same relay.',
+              style: AppTypography.bodyMedium.copyWith(
+                color: colors.text.secondary,
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           MobileTextField(
             controller: _url,
             focusNode: _focus,

@@ -14,7 +14,7 @@ fn main() {
         .unwrap();
     let keys = VaultKeys::derive(&VaultSecret::from_bytes([1; 32]), &ak).unwrap();
     let address = keys.fvk().address_at(0u32, Scope::External);
-    let ua = UnifiedAddress::from_receivers(Some(address), None, None).unwrap();
+    let ua = UnifiedAddress::from_receivers(Some(address), None, None, None, None).unwrap();
     let one = Some(BlockHeight::from_u32(1));
     let regtest = LocalNetwork {
         overwinter: one,
@@ -27,7 +27,8 @@ fn main() {
         nu6_1: one,
         nu6_2: one,
         nu6_3: one,
+        nu7: None,
     };
     println!("ua={}", ua.encode(&regtest));
-    println!("ufvk={}", keys.ufvk().unwrap().encode(&regtest));
+    println!("ufvk={}", keys.ufvk().unwrap().encode(&regtest).unwrap());
 }

@@ -2,22 +2,11 @@ import 'package:flutter/widgets.dart';
 
 import '../theme/app_theme.dart';
 import 'app_button.dart';
-import 'app_copy_feedback.dart';
-import 'app_icon.dart';
+import 'copy_button.dart';
 
 /// Exact string placed on the clipboard: trimmed, with no display spaces
 /// or line breaks introduced for wrapping.
 String fullAddressCopyText(String address) => address.trim();
-
-/// Copies [address] without formatting spaces or line breaks and toasts
-/// `Address copied`.
-void copyFullAddress(BuildContext context, String address) {
-  copyTextWithToast(
-    context,
-    text: fullAddressCopyText(address),
-    toastMessage: 'Address copied',
-  );
-}
 
 /// Continuous, wrapping JetBrains Mono address. Soft-wrap only — the string
 /// itself stays unspaced so `O` / `0` sit in a fixed-width grid the eye
@@ -57,19 +46,14 @@ class FullAddressCopyButton extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) {
-    return AppButton(
-      key: const ValueKey('full_address_copy_button'),
-      onPressed: () => copyFullAddress(context, address),
-      variant: AppButtonVariant.primary,
-      size: size,
-      expand: expand,
-      constrainContent: expand,
-      minWidth: kFullAddressCopyActionMinWidth,
-      leading: const AppIcon(AppIcons.copy),
-      child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1)),
-    );
-  }
+  Widget build(BuildContext context) => CopyButton(
+    key: const ValueKey('full_address_copy_button'),
+    label: label,
+    text: fullAddressCopyText(address),
+    variant: AppButtonVariant.primary,
+    size: size,
+    expand: expand,
+  );
 }
 
 /// Minimum width for the labeled Copy address action, matching the

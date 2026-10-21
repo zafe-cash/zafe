@@ -21,14 +21,6 @@ const SIGNATURE_DOMAIN: &[u8] = b"Zafe relay request v1";
 /// the relay supports.
 pub const UNSUPPORTED_VERSION_HEADER: &str = "zafe-supported-version";
 
-/// Response header of a 507 (storage quota): which cap was hit, as a machine-readable
-/// token (see [`QUOTA_CAPACITY`]); the body says it in words.
-pub const QUOTA_HEADER: &str = "zafe-quota";
-
-/// [`QUOTA_HEADER`] value: the relay has reached the number of vaults it takes in total
-/// (a capped beta), so a new vault can't be created on it right now.
-pub const QUOTA_CAPACITY: &str = "capacity";
-
 /// Read requests must be at most this old (and not from the future) when they arrive.
 pub const MAX_REQUEST_SKEW_SECS: u64 = 300;
 
@@ -93,6 +85,28 @@ pub struct Remove {
     pub member: [u8; 32],
 }
 
+/// Cancels a vault setup: deletes the mailbox, its members and anything stored for it, so
+/// the invite stops working. Signed by the creator, only before sealing (`POST
+/// /v1/mailbox/cancel`, a newer route: a relay without it answers 404 and the app just
+/// forgets the vault locally).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelSetup {
+    pub mailbox: MailboxId,
+}
+
+/// How long an invite lets a new member join, in seconds, from when it was issued or
+/// last renewed. An invite is a bearer credential until the setup locks: this bounds a
+/// leaked one. Members already in the setup can always rejoin.
+pub const INVITE_TTL_SECS: u64 = 72 * 3600;
+
+/// Restarts an unlocked setup's invite clock ([`INVITE_TTL_SECS`]). Signed by the creator
+/// (`POST /v1/mailbox/renew`, a newer route: a relay without it answers 404, and its
+/// invites never expire).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewInvite {
+    pub mailbox: MailboxId,
+}
+
 /// Joins a mailbox using the invite's token. Signed by the joining member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Join {
@@ -136,6 +150,10 @@ pub struct InboxAck {
 pub struct InboxAckResponse {
     pub deleted: u64,
 }
+
+/// Most items one read returns (log entries, inbox envelopes). A log read that returns
+/// fewer has reached the end of the log, so a client needs no second read to learn that.
+pub const READ_PAGE: u64 = 500;
 
 /// Reads log entries from index `from`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,6 +206,43 @@ impl ReplaceApproval {
     pub fn verify(&self, by: &IdentityPublic, signature: &[u8]) -> Result<(), ProtoError> {
         by.verify(&self.signing_bytes()?, signature)
     }
+}
+
+/// Which value of a seat recovery's safety check (commit, then reveal) a record holds.
+/// Appended only: the postcard index is the wire format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum RecoveryValueKind {
+    /// The new phone's commitment to its secret value (signed by the new phone).
+    Commit,
+    /// A co-signer's random value (signed by that co-signer).
+    Challenge,
+    /// The new phone's secret value, sent once a challenge exists (signed by the new phone).
+    Reveal,
+}
+
+/// Leaves one value of the safety check for the seat recovery of the new phone whose
+/// signing key is `subject` (`POST /v1/recovery/put`, a newer route: an older relay
+/// answers 404). The new phone isn't a vault member yet, so this can't go through a
+/// mailbox. The relay keeps the signed bytes and serves them back; clients verify them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryPut {
+    pub subject: [u8; 32],
+    pub kind: RecoveryValueKind,
+    pub value: [u8; 32],
+    pub timestamp: u64,
+}
+
+/// Reads every value left for `subject` (`POST /v1/recovery/read`), signed by anyone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryRead {
+    pub subject: [u8; 32],
+    pub timestamp: u64,
+}
+
+/// The values left for a subject: each a `Signed<RecoveryPut>` as it was posted.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryValues {
+    pub values: Vec<Vec<u8>>,
 }
 
 /// Moves a seat on the relay: `approval.old` leaves the member list and `approval.new`

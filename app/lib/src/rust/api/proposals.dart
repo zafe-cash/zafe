@@ -8,7 +8,8 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_store`, `parse_id`, `pool_store`, `repairs`, `request_file`, `seat_moves`, `shared_names`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `visible_text`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Proposed`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 
@@ -39,6 +40,19 @@ BigInt? parseZec({required String text}) =>
 /// Bytes a memo takes (the limit is 512).
 int memoLength({required String memo}) =>
     RustLib.instance.api.crateApiProposalsMemoLength(memo: memo);
+
+/// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
+/// Zcash libraries this build uses know it. Blocks come every 75 s before it and every 25 s
+/// from it on, which the app needs to turn a block count into a time.
+int? nu7ActivationHeight({required String network}) =>
+    RustLib.instance.api.crateApiProposalsNu7ActivationHeight(network: network);
+
+/// A device restored from a backup has no signing nonces, so its next refresh retires the
+/// commitments the previous device published and publishes a fresh pool (see
+/// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the
+/// vault's signing state directory, which backups never contain.
+Future<void> markPoolReset({required String stateDir}) =>
+    RustLib.instance.api.crateApiProposalsMarkPoolReset(stateDir: stateDir);
 
 /// Every proposal in the vault log, newest first. Also keeps this device ready for
 /// one-tap signing: tops up its pre-published commitments when they run low, and deletes
@@ -74,6 +88,23 @@ Future<void> retryRepair({
   stalledKeyHex: stalledKeyHex,
 );
 
+/// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
+/// last synced: the same note selection as `propose_payment`, nothing built or logged.
+/// Fails like a proposal would (e.g. not enough funds), so the review can say so first.
+Future<BigInt> estimateFee({
+  required String lightwalletdUrl,
+  required String dbDir,
+  required List<int> dbKey,
+  required List<int> material,
+  required List<PaymentInput> payments,
+}) => RustLib.instance.api.crateApiProposalsEstimateFee(
+  lightwalletdUrl: lightwalletdUrl,
+  dbDir: dbDir,
+  dbKey: dbKey,
+  material: material,
+  payments: payments,
+);
+
 /// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns
 /// the proposal id.
 Future<String> proposePayment({
@@ -94,6 +125,51 @@ Future<String> proposePayment({
   material: material,
   payments: payments,
   autoSend: autoSend,
+);
+
+/// Proposes `payments` and approves them as this member, in one call: the approval uses
+/// the log state the proposal left (one read of the log fewer, ~1.5 s over Tor). A
+/// failed approval is reported in the outcome, not as an error: the payment exists.
+Future<ProposeOutcome> proposeAndApprove({
+  required String relayUrl,
+  required String lightwalletdUrl,
+  required String dbDir,
+  required List<int> dbKey,
+  required String stateDir,
+  required List<int> seeds,
+  required List<int> material,
+  required List<PaymentInput> payments,
+  required bool autoSend,
+}) => RustLib.instance.api.crateApiProposalsProposeAndApprove(
+  relayUrl: relayUrl,
+  lightwalletdUrl: lightwalletdUrl,
+  dbDir: dbDir,
+  dbKey: dbKey,
+  stateDir: stateDir,
+  seeds: seeds,
+  material: material,
+  payments: payments,
+  autoSend: autoSend,
+);
+
+/// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
+/// commitments (see `ProposalInfo.needs_new_proposal`). Returns the new proposal's id.
+Future<String> proposeAgain({
+  required String relayUrl,
+  required String lightwalletdUrl,
+  required String dbDir,
+  required List<int> dbKey,
+  required List<int> seeds,
+  required List<int> material,
+  required String proposalId,
+}) => RustLib.instance.api.crateApiProposalsProposeAgain(
+  relayUrl: relayUrl,
+  lightwalletdUrl: lightwalletdUrl,
+  dbDir: dbDir,
+  dbKey: dbKey,
+  seeds: seeds,
+  material: material,
+  proposalId: proposalId,
 );
 
 /// Proposes spending a cancelled proposal's notes back to the vault, so the cancelled
@@ -414,6 +490,11 @@ class ProposalInfo {
   /// A live proposal (id) that spends this cancelled one's notes back to the vault.
   final String? invalidatedBy;
 
+  /// One-tap, open, and no signer group can be completed any more (a member's phone
+  /// was restored or replaced while it was open): the proposer should propose it again
+  /// (`propose_again`), and everyone approves once more.
+  final bool needsNewProposal;
+
   const ProposalInfo({
     required this.id,
     required this.author,
@@ -437,6 +518,7 @@ class ProposalInfo {
     required this.needsReapproval,
     required this.stillSendable,
     this.invalidatedBy,
+    required this.needsNewProposal,
   });
 
   @override
@@ -462,7 +544,8 @@ class ProposalInfo {
       expiryHeight.hashCode ^
       needsReapproval.hashCode ^
       stillSendable.hashCode ^
-      invalidatedBy.hashCode;
+      invalidatedBy.hashCode ^
+      needsNewProposal.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -490,7 +573,8 @@ class ProposalInfo {
           expiryHeight == other.expiryHeight &&
           needsReapproval == other.needsReapproval &&
           stillSendable == other.stillSendable &&
-          invalidatedBy == other.invalidatedBy;
+          invalidatedBy == other.invalidatedBy &&
+          needsNewProposal == other.needsNewProposal;
 }
 
 class ProposalList {
@@ -562,6 +646,41 @@ enum ProposalStage {
   rejected,
   cancelled,
   sent,
+}
+
+/// What [`propose_and_approve`] gets back.
+class ProposeOutcome {
+  final String id;
+
+  /// This member's approval, given under the same unlock (`None` if it failed).
+  final ApproveResult? approved;
+
+  /// Why the approval failed: the payment then stays open for this member's approval.
+  final ZafeError? approveError;
+
+  /// The vault's proposals right after, so the app shows the new payment at once.
+  final List<ProposalInfo> items;
+
+  const ProposeOutcome({
+    required this.id,
+    this.approved,
+    this.approveError,
+    required this.items,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ approved.hashCode ^ approveError.hashCode ^ items.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProposeOutcome &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          approved == other.approved &&
+          approveError == other.approveError &&
+          items == other.items;
 }
 
 /// A moved seat whose key the helpers are still rebuilding on the new phone.
@@ -727,9 +846,6 @@ class SeatMove {
   /// The new phone's key (hex).
   final String newKeyHex;
 
-  /// What the new phone shows ("1234 5678"): compare before approving.
-  final String safetyCode;
-
   /// Members who approved so far (hex keys).
   final List<String> approvals;
   final int needed;
@@ -740,7 +856,6 @@ class SeatMove {
   const SeatMove({
     required this.oldKeyHex,
     required this.newKeyHex,
-    required this.safetyCode,
     required this.approvals,
     required this.needed,
     required this.code,
@@ -750,7 +865,6 @@ class SeatMove {
   int get hashCode =>
       oldKeyHex.hashCode ^
       newKeyHex.hashCode ^
-      safetyCode.hashCode ^
       approvals.hashCode ^
       needed.hashCode ^
       code.hashCode;
@@ -762,7 +876,6 @@ class SeatMove {
           runtimeType == other.runtimeType &&
           oldKeyHex == other.oldKeyHex &&
           newKeyHex == other.newKeyHex &&
-          safetyCode == other.safetyCode &&
           approvals == other.approvals &&
           needed == other.needed &&
           code == other.code;

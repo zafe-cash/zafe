@@ -1,18 +1,14 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/config/endpoints.dart';
 import '../../core/platform/system_settings.dart';
-import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_list_row.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/security/app_lock.dart';
@@ -22,16 +18,20 @@ import '../../providers/endpoints_provider.dart';
 import '../../providers/payment_sounds_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/theme_mode_provider.dart';
-import '../../providers/tor_provider.dart';
-import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
-import '../home/rename_sheet.dart';
 import 'endpoint_sheet.dart';
 import 'diagnostics_sheet.dart';
-import 'tor_sheet.dart';
+import 'tor_setting_row.dart';
+import '../../core/widgets/app_segmented.dart';
+import '../../core/widgets/app_switch.dart';
 
 const _rowHeight = 44.0;
-const _appVersion = '0.1.0';
+
+/// The release's version, passed by the release workflows (`--dart-define=ZAFE_VERSION`).
+const _appVersion = String.fromEnvironment(
+  'ZAFE_VERSION',
+  defaultValue: '0.1.0',
+);
 
 /// Settings: grouped surface cards of 44px rows.
 class SettingsScreen extends ConsumerWidget {
@@ -45,12 +45,9 @@ class SettingsScreen extends ConsumerWidget {
     final hideAmounts = ref.watch(privacyModeProvider);
     final paymentSounds = ref.watch(paymentSoundsProvider);
     final themeMode = ref.watch(themeModeProvider);
-    final requireUnlock = ref.watch(requireUnlockProvider);
     final appLock = ref.watch(appLockDelayProvider);
     final hasScreenLock = ref.watch(hasScreenLockProvider).value;
-    final me = vault.myKeyHex;
     final endpoints = ref.watch(endpointsProvider);
-    final tor = ref.watch(torProvider);
     if (summary == null) return const SizedBox.shrink();
 
     final rowStyle = AppTypography.labelLarge.copyWith(
@@ -63,10 +60,12 @@ class SettingsScreen extends ConsumerWidget {
       String? value,
       VoidCallback? onTap,
       bool chevron = false,
+      Widget? trailing,
     }) => MobileListRow(
       leading: AppIcon(icon, size: 20, color: colors.icon.muted),
       label: label,
       value: value,
+      trailing: trailing,
       minRowHeight: _rowHeight,
       textStyle: rowStyle,
       valueTextStyle: rowStyle,
@@ -78,324 +77,153 @@ class SettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              const MobileTopNav.back(title: 'Settings'),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.sm,
-                    AppSpacing.s,
-                    AppSpacing.sm,
-                    // Clears the floating tab bar.
-                    112,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            const MobileTopNav.back(title: 'Settings'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.sm,
+                  AppSpacing.s,
+                  AppSpacing.sm,
+                  // Clears the floating tab bar.
+                  112,
+                ),
+                children: [
+                  _Group(
+                    title: 'Security',
+                    rows: [
+                      row(
+                        icon: appLock == AppLockDelay.off
+                            ? AppIcons.unlock
+                            : AppIcons.lock,
+                        label: 'Lock app',
+                        value: appLock.label,
+                        chevron: true,
+                        onTap: () => _pickAppLock(context, ref, appLock),
+                      ),
+                      if (hasScreenLock == false) const _NoScreenLockNote(),
+                    ],
                   ),
-                  children: [
-                    _Group(
-                      title: 'Vault',
-                      rows: [
-                        row(
-                          icon: AppIcons.wallet,
-                          label: 'Name',
-                          value: ref.watch(activeVaultNameProvider),
-                          chevron: true,
-                          onTap: () => showRenameVaultSheet(context, ref),
-                        ),
-                        row(
-                          icon: AppIcons.users,
-                          label: 'Approval rule',
-                          value:
-                              '${summary.threshold} of ${summary.members.length} signers',
-                        ),
-                        row(
-                          icon: AppIcons.qr,
-                          label: 'Vault address',
-                          value: compactAddress(summary.address),
-                          chevron: true,
-                          onTap: () => context.push('/receive'),
-                        ),
-                        row(
-                          icon: AppIcons.globe,
-                          label: 'Network',
-                          value: _networkLabel(summary.network),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _Group(
-                      title: 'Security',
-                      rows: [
-                        row(
-                          icon: AppIcons.shieldKeyhole,
-                          label: 'How it\'s protected',
-                          chevron: true,
-                          onTap: () => context.push('/vault-protection'),
-                        ),
-                        row(
-                          icon: AppIcons.lock,
-                          label: 'Back up vault',
-                          chevron: true,
-                          onTap: () => context.push('/export'),
-                        ),
-                        row(
-                          icon: AppIcons.eye,
-                          label: 'Viewing key',
-                          chevron: true,
-                          onTap: () => _openViewingKey(context, ref),
-                        ),
-                        row(
-                          icon: AppIcons.key,
-                          label: 'Your signer key',
-                          value: me == null ? '' : memberLabel(me),
-                          onTap: me == null
-                              ? null
-                              : () => copyTextWithToast(
-                                  context,
-                                  text: me,
-                                  toastMessage: 'Signer key copied',
-                                ),
-                        ),
-                        row(
-                          icon: hideAmounts ? AppIcons.eyeClosed : AppIcons.eye,
-                          label: 'Hide amounts',
-                          value: hideAmounts ? 'On' : 'Off',
-                          onTap: () =>
+                  const SizedBox(height: AppSpacing.md),
+                  _Group(
+                    title: 'Privacy',
+                    rows: [
+                      row(
+                        icon: hideAmounts ? AppIcons.eyeClosed : AppIcons.eye,
+                        label: 'Hide amounts',
+                        onTap: () =>
+                            ref.read(privacyModeProvider.notifier).toggle(),
+                        trailing: AppSwitch(
+                          value: hideAmounts,
+                          semanticsLabel: 'Hide amounts',
+                          onChanged: (_) =>
                               ref.read(privacyModeProvider.notifier).toggle(),
                         ),
-                        row(
-                          icon: paymentSounds
-                              ? AppIcons.sound
-                              : AppIcons.soundOff,
-                          label: 'Payment sounds',
-                          value: paymentSounds ? 'On' : 'Off',
-                          onTap: () =>
+                      ),
+                      TorSettingRow(rowStyle: rowStyle),
+                      row(
+                        icon: AppIcons.help,
+                        label: 'Diagnostic report',
+                        value: 'Stays on this phone',
+                        chevron: true,
+                        onTap: () => showDiagnosticsSheet(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _Group(
+                    title: 'System',
+                    rows: [
+                      MobileListRow(
+                        leading: AppIcon(
+                          AppIcons.theme,
+                          size: 20,
+                          color: colors.icon.muted,
+                        ),
+                        label: 'Theme',
+                        minRowHeight: _rowHeight,
+                        textStyle: rowStyle,
+                        trailing: AppSegmented<ThemeMode>(
+                          value: themeMode,
+                          options: const [
+                            (ThemeMode.system, AppIcons.monitor, 'System'),
+                            (ThemeMode.light, AppIcons.day, 'Light'),
+                            (ThemeMode.dark, AppIcons.night, 'Dark'),
+                          ],
+                          onChanged: (m) =>
+                              ref.read(themeModeProvider.notifier).set(m),
+                        ),
+                      ),
+                      row(
+                        icon: paymentSounds
+                            ? AppIcons.sound
+                            : AppIcons.soundOff,
+                        label: 'Payment sounds',
+                        onTap: () =>
+                            ref.read(paymentSoundsProvider.notifier).toggle(),
+                        trailing: AppSwitch(
+                          value: paymentSounds,
+                          semanticsLabel: 'Payment sounds',
+                          onChanged: (_) =>
                               ref.read(paymentSoundsProvider.notifier).toggle(),
                         ),
-                        row(
-                          icon: appLock == AppLockDelay.off
-                              ? AppIcons.unlock
-                              : AppIcons.lock,
-                          label: 'Lock app',
-                          value: appLock.label,
-                          chevron: true,
-                          onTap: () => _pickAppLock(context, ref, appLock),
-                        ),
-                        row(
-                          icon: requireUnlock ? AppIcons.lock : AppIcons.unlock,
-                          label: 'Require unlock to approve',
-                          value: requireUnlock ? 'On' : 'Off',
-                          onTap: () =>
-                              _toggleRequireUnlock(context, ref, requireUnlock),
-                        ),
-                        if (hasScreenLock == false) const _NoScreenLockNote(),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _Group(
-                      title: 'Privacy',
-                      rows: [
-                        row(
-                          icon: AppIcons.tor,
-                          label: 'Use Tor',
-                          value: tor.statusLabel,
-                          chevron: true,
-                          onTap: () => showTorSheet(context),
-                        ),
-                        row(
-                          icon: AppIcons.help,
-                          label: 'Diagnostic report',
-                          value: 'Stays on this phone',
-                          chevron: true,
-                          onTap: () => showDiagnosticsSheet(context),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _Group(
-                      title: 'System',
-                      rows: [
-                        row(
-                          icon: AppIcons.theme,
-                          label: 'Theme',
-                          value: _themeLabel(themeMode),
-                          chevron: true,
-                          onTap: () => _pickTheme(context, ref, themeMode),
-                        ),
-                        row(
-                          icon: AppIcons.endpoint,
-                          label: 'Relay',
-                          value: endpoints.relayIsPlaceholder
-                              ? 'Not configured'
-                              : endpointHost(endpoints.relayUrl),
-                          chevron: true,
-                          onTap: () => showEndpointSheet(
-                            context,
-                            ref,
-                            EndpointKind.relay,
-                          ),
-                        ),
-                        row(
-                          icon: AppIcons.endpoint,
-                          label: 'Zcash server',
-                          value: endpointHost(endpoints.lightwalletdUrl),
-                          chevron: true,
-                          onTap: () => showEndpointSheet(
-                            context,
-                            ref,
-                            EndpointKind.lightwalletd,
-                          ),
-                        ),
-                        row(
-                          icon: AppIcons.book,
-                          label: 'Open-source licenses',
-                          chevron: true,
-                          onTap: () => showLicensePage(
-                            context: context,
-                            applicationName: 'Zafe',
-                            applicationVersion: _appVersion,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppButton(
-                      expand: true,
-                      variant: AppButtonVariant.destructive,
-                      leading: const AppIcon(AppIcons.trash, size: 20),
-                      onPressed: () => _confirmRemove(
-                        context,
-                        ref,
-                        ref.read(activeVaultNameProvider) ?? summary.name,
-                        summary.threshold,
                       ),
-                      child: const Text('Remove vault from this device'),
-                    ),
-                    const SizedBox(height: AppSpacing.base),
-                    Center(
-                      child: Text(
-                        'Zafe v$_appVersion',
-                        style: AppTypography.codeSmall.copyWith(
-                          color: colors.text.secondary,
+                      row(
+                        icon: AppIcons.endpoint,
+                        label: 'Relay',
+                        value: endpoints.relayIsPlaceholder
+                            ? 'Not configured'
+                            : endpointHost(endpoints.relayUrl),
+                        chevron: true,
+                        onTap: () =>
+                            showEndpointSheet(context, ref, EndpointKind.relay),
+                      ),
+                      row(
+                        icon: AppIcons.endpoint,
+                        label: 'Zcash server',
+                        value: endpointHost(endpoints.lightwalletdUrl),
+                        chevron: true,
+                        onTap: () => showEndpointSheet(
+                          context,
+                          ref,
+                          EndpointKind.lightwalletd,
                         ),
                       ),
+                      row(
+                        icon: AppIcons.book,
+                        label: 'Open-source licenses',
+                        chevron: true,
+                        onTap: () => showLicensePage(
+                          context: context,
+                          applicationName: 'Zafe',
+                          applicationVersion: _appVersion,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.base),
+                  Center(
+                    child: Text(
+                      'Zafe v$_appVersion',
+                      style: AppTypography.codeSmall.copyWith(
+                        color: colors.text.secondary,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Future<void> _confirmRemove(
-    BuildContext context,
-    WidgetRef ref,
-    String name,
-    int threshold,
-  ) async {
-    final remove = await showAppMobileSheet<bool>(
-      context: context,
-      builder: (sheet) {
-        final colors = sheet.colors;
-        return MobileModalScaffold(
-          title: 'Remove "$name"?',
-          onClose: () => Navigator.of(sheet).pop(false),
-          leading: AppIcon(
-            AppIcons.warning,
-            size: 20,
-            color: colors.icon.destructive,
-            patina: colors.icon.destructive,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'This deletes your key share, signing state and history for this vault from '
-                'this phone. You stay a member, but this phone can no longer approve or sign. '
-                'If fewer than $threshold members keep their shares, the vault\'s funds can never '
-                'be moved again.',
-                style: AppTypography.bodyMedium.copyWith(
-                  color: colors.text.accent,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              AppButton(
-                expand: true,
-                variant: AppButtonVariant.destructive,
-                onPressed: () => Navigator.of(sheet).pop(true),
-                child: const Text('Remove from this device'),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              AppButton(
-                expand: true,
-                variant: AppButtonVariant.ghost,
-                onPressed: () => Navigator.of(sheet).pop(false),
-                child: const Text('Keep it'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    if (remove != true || !context.mounted) return;
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Unlock to remove this vault',
-    )) {
-      return;
-    }
-    if (!context.mounted) return;
-    final vaultId = ref.read(vaultProvider).activeId!;
-    await ref.read(vaultProvider.notifier).removeVault(vaultId);
-    if (!context.mounted) return;
-    final next = ref.read(vaultProvider);
-    context.go(
-      next.hasVault
-          ? '/home'
-          : next.isSettingUp
-          ? '/setup'
-          : '/welcome',
-    );
-  }
-
   /// The viewing key reveals the vault's whole history, so it asks for an unlock first.
-  Future<void> _openViewingKey(BuildContext context, WidgetRef ref) async {
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Unlock to show the viewing key',
-    )) {
-      return;
-    }
-    if (context.mounted) context.push('/viewing-key');
-  }
-
-  /// Turning the gate off needs an unlock (whatever the setting); turning it on
-  /// doesn't.
-  Future<void> _toggleRequireUnlock(
-    BuildContext context,
-    WidgetRef ref,
-    bool current,
-  ) async {
-    if (current &&
-        !await confirmUnlock(
-          context,
-          ref,
-          reason: 'Unlock to stop asking before approvals',
-          always: true,
-        )) {
-      return;
-    }
-    await ref.read(requireUnlockProvider.notifier).set(!current);
-  }
-
   /// Turning the app lock off or making it wait longer needs an unlock; making it
   /// stricter doesn't.
   Future<void> _pickAppLock(
@@ -424,47 +252,12 @@ class SettingsScreen extends ConsumerWidget {
           context,
           ref,
           reason: 'Unlock to change the app lock',
-          always: true,
         )) {
       return;
     }
     await ref.read(appLockDelayProvider.notifier).set(selected);
   }
-
-  Future<void> _pickTheme(
-    BuildContext context,
-    WidgetRef ref,
-    ThemeMode current,
-  ) async {
-    final selected = await showAppMobileSheet<ThemeMode>(
-      context: context,
-      builder: (_) => _OptionsSheet<ThemeMode>(
-        title: 'Theme',
-        current: current,
-        options: const [
-          (ThemeMode.system, AppIcons.monitor, 'System (Auto)'),
-          (ThemeMode.light, AppIcons.day, 'Light'),
-          (ThemeMode.dark, AppIcons.night, 'Dark'),
-        ],
-      ),
-    );
-    if (selected != null && selected != current) {
-      await ref.read(themeModeProvider.notifier).set(selected);
-    }
-  }
 }
-
-String _networkLabel(String network) => switch (network) {
-  'main' => 'Mainnet',
-  'test' => 'Testnet',
-  _ => 'Regtest',
-};
-
-String _themeLabel(ThemeMode mode) => switch (mode) {
-  ThemeMode.system => 'System',
-  ThemeMode.light => 'Light',
-  ThemeMode.dark => 'Dark',
-};
 
 /// Shown under the Security rows when the phone has no screen lock, so approvals
 /// go through without a prompt. "Open settings" goes to the phone's security settings;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
@@ -210,27 +211,35 @@ class MobileTopNav extends StatelessWidget {
       ),
     );
 
-    return Row(
-      children: [
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Align(alignment: Alignment.centerLeft, child: account),
-        ),
-        if (syncLabel != null)
-          _tappableSync(
-            _SyncStatus(
-              label: syncLabel!,
-              baseColor: syncLabelColor ?? colors.sync.text,
-              highlightColor:
-                  syncHighlightColor ?? syncLabelColor ?? colors.sync.text,
-              indicatorColor: syncIndicatorColor ?? colors.sync.glow,
-              indicatorSize: _syncIndicatorSize,
-              animated: syncAnimated,
-            ),
-          )
-        else
+    // Zafe: the status keeps its natural width at the right edge, but never more than
+    // 60% of the bar (its label ellipsizes), so the vault name and avatar keep room on
+    // narrow phones with large system text.
+    return LayoutBuilder(
+      builder: (context, constraints) => Row(
+        children: [
           const SizedBox(width: AppSpacing.sm),
-      ],
+          Expanded(
+            child: Align(alignment: Alignment.centerLeft, child: account),
+          ),
+          if (syncLabel != null)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth * 0.6),
+              child: _tappableSync(
+                _SyncStatus(
+                  label: syncLabel!,
+                  baseColor: syncLabelColor ?? colors.sync.text,
+                  highlightColor:
+                      syncHighlightColor ?? syncLabelColor ?? colors.sync.text,
+                  indicatorColor: syncIndicatorColor ?? colors.sync.glow,
+                  indicatorSize: _syncIndicatorSize,
+                  animated: syncAnimated,
+                ),
+              ),
+            )
+          else
+            const SizedBox(width: AppSpacing.sm),
+        ],
+      ),
     );
   }
 
@@ -402,6 +411,13 @@ class _AvatarPlaceholder extends StatelessWidget {
 abstract final class _SyncStatusMotion {
   static const period = Duration(milliseconds: 1400);
 
+  /// How often the sweep and the glow move. Not every vsync: any change redraws the whole
+  /// screen (about 5 ms of raster time per frame on a phone, measured with the profiler:
+  /// the cost is the redraw itself, whatever the widget), and a display runs at 60-120 Hz,
+  /// so a per-vsync animation held a core at ~70% for as long as a sync lasted. A 1.4 s
+  /// sweep stays smooth at ~16 updates a second and costs about a seventh of that.
+  static const frameInterval = Duration(milliseconds: 60);
+
   /// Half-width of the shimmer highlight band as a gradient-stop fraction.
   /// Kept narrow for a gentle, low-contrast sparkle.
   static const _bandHalf = 0.18;
@@ -429,8 +445,8 @@ abstract final class _SyncStatusMotion {
 
 /// The right-aligned sync status: the label plus the edge glow bar.
 ///
-/// While [animated] (the live syncing state, reduced-motion off) a single
-/// [AnimationController] drives a bright shimmer band sweeping across
+/// While [animated] (the live syncing state, reduced-motion off) a timer steps a bright
+/// shimmer band sweeping across
 /// the label and a slow breathing pulse on the edge bar, so the two
 /// read as one "actively working" affordance. Otherwise — synced, failed,
 /// or reduced-motion — it renders the same static label + bar as before.
@@ -455,16 +471,11 @@ class _SyncStatus extends StatefulWidget {
   State<_SyncStatus> createState() => _SyncStatusState();
 }
 
-class _SyncStatusState extends State<_SyncStatus>
-    with SingleTickerProviderStateMixin {
-  AnimationController? _controller;
-
-  AnimationController get _activeController {
-    return _controller ??= AnimationController(
-      vsync: this,
-      duration: _SyncStatusMotion.period,
-    );
-  }
+class _SyncStatusState extends State<_SyncStatus> {
+  /// 0..1 through one [_SyncStatusMotion.period], stepped by [_ticker].
+  final _progress = ValueNotifier<double>(0);
+  final _clock = Stopwatch();
+  Timer? _ticker;
 
   bool get _shouldAnimate {
     if (!widget.animated) {
@@ -490,34 +501,52 @@ class _SyncStatusState extends State<_SyncStatus>
 
   void _syncAnimation() {
     if (_shouldAnimate) {
-      if (!_activeController.isAnimating) {
-        _activeController.repeat();
+      if (_ticker == null) {
+        _clock
+          ..reset()
+          ..start();
+        _ticker = Timer.periodic(_SyncStatusMotion.frameInterval, (_) {
+          _progress.value =
+              (_clock.elapsedMilliseconds %
+                  _SyncStatusMotion.period.inMilliseconds) /
+              _SyncStatusMotion.period.inMilliseconds;
+        });
       }
     } else {
-      final controller = _controller;
-      if (controller != null) {
-        controller
-          ..stop()
-          ..value = 0;
-      }
+      _ticker?.cancel();
+      _ticker = null;
+      _clock.stop();
+      _progress.value = 0;
     }
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _ticker?.cancel();
+    _progress.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Its own layer: the motion repaints only this corner, never the screen under it.
+    return RepaintBoundary(child: _content(context));
+  }
+
+  Widget _content(BuildContext context) {
     if (!_shouldAnimate) {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            widget.label,
-            style: AppTypography.labelMedium.copyWith(color: widget.baseColor),
+          Flexible(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.labelMedium.copyWith(
+                color: widget.baseColor,
+              ),
+            ),
           ),
           const SizedBox(width: AppSpacing.s),
           _SyncEdgeIndicator(
@@ -529,18 +558,20 @@ class _SyncStatusState extends State<_SyncStatus>
     }
 
     return AnimatedBuilder(
-      animation: _activeController,
+      animation: _progress,
       builder: (context, _) {
-        final t = _activeController.value;
+        final t = _progress.value;
         final glow = _SyncStatusMotion.glowFor(t);
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _ShimmerLabel(
-              label: widget.label,
-              baseColor: widget.baseColor,
-              highlightColor: widget.highlightColor,
-              progress: t,
+            Flexible(
+              child: _ShimmerLabel(
+                label: widget.label,
+                baseColor: widget.baseColor,
+                highlightColor: widget.highlightColor,
+                progress: t,
+              ),
             ),
             const SizedBox(width: AppSpacing.s),
             _SyncEdgeIndicator(
@@ -602,6 +633,8 @@ class _ShimmerLabel extends StatelessWidget {
       // Solid color so `srcIn` keeps the gradient over the full glyph.
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: AppTypography.labelMedium.copyWith(
           color: const Color(0xFFFFFFFF),
         ),

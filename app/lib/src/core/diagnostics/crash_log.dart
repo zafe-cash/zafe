@@ -16,6 +16,7 @@ class CrashLog {
     this.file, {
     this.peers = const [],
     this.panicFile,
+    this.timingFile,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
@@ -33,6 +34,7 @@ class CrashLog {
       mine,
       peers: [other],
       panicFile: File('$dir/rust-panics.log'),
+      timingFile: File('$dir/timings.log'),
     );
   }
 
@@ -48,6 +50,9 @@ class CrashLog {
 
   /// One line per Rust panic (file:line only), written by the bridge's panic hook.
   final File? panicFile;
+
+  /// One line per slow Rust call (names and durations only), `timings.log`.
+  final File? timingFile;
   final DateTime Function() _now;
 
   static const maxEntries = 20;
@@ -135,9 +140,24 @@ class CrashLog {
     }
   }
 
+  /// The last slow-call notes (`<time> sync total=…ms lock=…ms open=…ms ...`).
+  Future<List<String>> readTimings({int last = 40}) async {
+    final f = timingFile;
+    if (f == null) return <String>[];
+    try {
+      final lines = [
+        for (final l in (await f.readAsString()).split('\n'))
+          if (l.trim().isNotEmpty) scrubDiagnostics(l.trim()),
+      ];
+      return lines.length > last ? lines.sublist(lines.length - last) : lines;
+    } on FileSystemException {
+      return <String>[];
+    }
+  }
+
   Future<void> clear() async {
     await _tail;
-    for (final f in [file, ...peers, ?panicFile]) {
+    for (final f in [file, ...peers, ?panicFile, ?timingFile]) {
       try {
         await f.delete();
       } on FileSystemException {
@@ -150,6 +170,7 @@ class CrashLog {
   Future<String> report({required String network}) async {
     final entries = await read();
     final panics = await readPanics();
+    final timings = await readTimings();
     final b = StringBuffer()
       ..writeln('Zafe diagnostic report')
       ..writeln('Network: $network')
@@ -166,6 +187,14 @@ class CrashLog {
         ..writeln()
         ..writeln('Rust panics (location only): ${panics.length}')
         ..writeln(panics.join('\n'));
+    }
+    if (timings.isNotEmpty) {
+      b
+        ..writeln()
+        ..writeln(
+          'Slow steps (the first call of each kind, and anything over 1.5 s):',
+        )
+        ..writeln(timings.join('\n'));
     }
     return scrubDiagnostics(b.toString());
   }

@@ -11,9 +11,9 @@ import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/vault_summaries.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
@@ -50,13 +50,21 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       (_text.text.trim().isEmpty ? null : utf8.encode(_text.text.trim()));
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.pickFiles(withData: true);
-    final picked = result?.files.singleOrNull;
-    if (picked?.bytes == null) return;
+    final picked = await FilePicker.pickFile();
+    if (picked == null) return;
+    final List<int> bytes;
+    try {
+      bytes = await picked.readAsBytes();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
-      _file = picked!.bytes;
+      _file = bytes;
       _fileName = picked.name;
       _text.clear();
+      // Next: the words.
+      _passFocus.requestFocus();
     });
   }
 
@@ -73,21 +81,10 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
   Future<void> _restore() async {
     setState(() => _busy = true);
     try {
-      final v = await rust.importVaultBackup(
-        data: _data!,
-        passphrase: _pass.text,
-      );
+      final v = await _open(_data!, _pass.text);
       final notifier = ref.read(vaultProvider.notifier);
       if (ref.read(vaultProvider).vaults.any((x) => x.id == v.vaultId)) {
-        if (mounted) {
-          showAppToast(
-            context,
-            '"${v.name}" is already on this phone',
-            iconName: AppIcons.warningCircle,
-            tone: AppToastTone.destructive,
-          );
-        }
-        return;
+        throw UserFacingError('"${v.name}" is already on this phone.');
       }
       // The signer names saved with the backup (before the vault becomes active, so the
       // names provider picks them up).
@@ -101,20 +98,28 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       );
       // A backup of this vault exists (it was just restored from one).
       await VaultSummaries.write(v.vaultId, backedUp: true);
-      if (!mounted) return;
-      showAppToast(context, '"${v.name}" restored');
-      context.go('/home');
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
+      // Home showing the vault is the confirmation.
+      if (mounted) context.go('/home');
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Opens the backup with what was typed, exactly (a passphrase from before the
+  /// words were generated may care about case and spaces); if that fails and tidying
+  /// it changes something (spaces, line breaks, capitals around the 12 words), once
+  /// more tidied. The first error is the one shown.
+  static Future<rust.ImportedVault> _open(List<int> data, String typed) async {
+    try {
+      return await rust.importVaultBackup(data: data, passphrase: typed);
+    } catch (e, st) {
+      final tidy = typed.trim().toLowerCase().split(RegExp(r'\s+')).join(' ');
+      if (tidy == typed) rethrow;
+      try {
+        return await rust.importVaultBackup(data: data, passphrase: tidy);
+      } catch (_) {
+        Error.throwWithStackTrace(e, st);
+      }
     }
   }
 
@@ -123,23 +128,14 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
     final colors = context.colors;
     return ZafeScreen(
       title: 'Restore vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: _data != null && _pass.text.isNotEmpty && !_busy
-            ? _restore
-            : null,
-        child: Text(_busy ? 'Decrypting...' : 'Restore vault'),
+      bottom: ActionButton(
+        label: 'Restore vault',
+        busyLabel: 'Decrypting...',
+        enabled: _data != null && _pass.text.isNotEmpty,
+        onPressed: _restore,
       ),
       children: [
         const OnboardingBanner('restore_key'),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          'Restore your seat in a vault from a backup made in Zafe. You need the backup and '
-          'its passphrase.',
-          style: AppTypography.bodyMedium.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
         const SizedBox(height: AppSpacing.md),
         AppButton(
           expand: true,
@@ -148,53 +144,63 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
           onPressed: _busy ? null : _pickFile,
           child: Text(_fileName ?? 'Choose backup file'),
         ),
-        const SizedBox(height: AppSpacing.s),
-        Center(
-          child: Text(
-            'or paste the backup text',
-            style: AppTypography.labelMedium.copyWith(color: colors.text.muted),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.s),
-        MobileTextField(
-          controller: _text,
-          focusNode: _textFocus,
-          hintText: 'zafe-backup-v1:...',
-          onChanged: (_) => setState(() {
-            _file = null;
-            _fileName = null;
-          }),
-          trailing: GestureDetector(
-            onTap: _pasteText,
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: colors.background.neutralSubtleOpacity,
-                borderRadius: BorderRadius.circular(10),
+        // A chosen file is the backup: no second way to give it (tap the file to
+        // choose another).
+        if (_fileName == null) ...[
+          const SizedBox(height: AppSpacing.s),
+          Center(
+            child: Text(
+              'or paste the backup text',
+              style: AppTypography.labelMedium.copyWith(
+                color: colors.text.muted,
               ),
-              child: Text(
-                'Paste',
-                style: AppTypography.labelLarge.copyWith(
-                  color: colors.text.accent,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.s),
+          MobileTextField(
+            secret: true,
+            controller: _text,
+            focusNode: _textFocus,
+            hintText: 'zafe-backup-v1:...',
+            onChanged: (_) => setState(() {
+              _file = null;
+              _fileName = null;
+            }),
+            trailing: GestureDetector(
+              onTap: _pasteText,
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: colors.background.neutralSubtleOpacity,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Paste',
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.accent,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
         const SizedBox(height: AppSpacing.md),
         Text(
-          'Passphrase',
+          'Backup words',
           style: AppTypography.labelLarge.copyWith(
             color: colors.text.secondary,
           ),
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _pass,
           focusNode: _passFocus,
-          hintText: 'The passphrase you chose when backing up',
+          // Backups made before the words were generated took a typed passphrase:
+          // it goes in the same field.
+          hintText: 'The 12 words, or your passphrase',
           onChanged: (_) => setState(() {}),
         ),
       ],

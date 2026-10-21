@@ -1,19 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/errors/zafe_error_copy.dart';
+import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
+import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
@@ -71,7 +72,8 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       _error = null;
     });
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _check());
+    // Co-signers wait on this phone's part of each safety check: answer quickly.
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _check());
     unawaited(_check());
   }
 
@@ -101,13 +103,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   }
 
   Future<void> _save(rust.RecoveryProgress p) async {
-    if (_saving) return;
     setState(() => _saving = true);
     _timer?.cancel();
     final notifier = ref.read(vaultProvider.notifier);
     try {
       if (ref.read(vaultProvider).vaults.any((v) => v.id == p.vaultId)) {
-        throw StateError('"${p.name}" is already on this phone');
+        throw UserFacingError('"${p.name}" is already on this phone.');
       }
       await notifier.addRestoredVault(
         vaultId: p.vaultId,
@@ -115,23 +116,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
         material: p.material,
         invite: p.invite,
       );
-    } catch (e) {
-      if (mounted) {
-        setState(() => _saving = false);
-        showAppToast(
-          context,
-          e is StateError
-              ? e.message
-              : zafeErrorMessage(e, fallback: 'Couldn\'t save the vault.'),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-      return;
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+      rethrow;
     }
     await _store.deleteRecoveryIdentity();
     if (!mounted) return;
-    showAppToast(context, '"${p.name}" is back on this phone');
     // The key now exists only here: offer a backup first, as after key generation.
     context.go('/backup-prompt');
   }
@@ -142,8 +132,7 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       builder: (c) => AlertDialog(
         title: const Text('Start over?'),
         content: const Text(
-          'This phone makes a new code. Approvals of the old code won\'t move your seat '
-          'here, so send the new code to your co-signers.',
+          'This phone makes a new code. Send it to your co-signers; approvals of the old one won\'t count.',
         ),
         actions: [
           TextButton(
@@ -167,14 +156,16 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   Future<void> _reject() async {
     await _store.deleteRecoveryIdentity();
     if (!mounted) return;
-    showAppToast(
-      context,
-      'Not saved. Tell your co-signers, and start over with a new code.',
-      iconName: AppIcons.warningCircle,
-      tone: AppToastTone.destructive,
-    );
     setState(() => _found = null);
     await _start(fresh: true);
+    // Shown on the new code's screen until the next check succeeds.
+    if (mounted) {
+      setState(
+        () => _error = const UserFacingError(
+          'Not saved. Tell your co-signers, and share this new code.',
+        ),
+      );
+    }
   }
 
   @override
@@ -184,10 +175,10 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       final summary = rust_vault.vaultSummary(material: found.material);
       return ZafeScreen(
         title: 'Check your vault',
-        bottom: AppButton(
-          expand: true,
-          onPressed: _saving ? null : () => _save(found),
-          child: Text(_saving ? 'Saving...' : 'It matches: save the vault'),
+        bottom: ActionButton(
+          label: 'It matches: save the vault',
+          errorFallback: 'Couldn\'t save the vault.',
+          onPressed: () => _save(found),
         ),
         children: [
           VaultCheckBody(
@@ -208,10 +199,12 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
               leading: const AppIcon(AppIcons.share, size: 20),
               onPressed: () => SharePlus.instance.share(
                 ShareParams(
+                  // The safety words are compared by voice: whoever can swap this
+                  // message can't make both phones show the same words.
                   text:
-                      'Please move my Zafe seat to my new phone: open Zafe, Signers, '
-                      '"Replace a lost phone", and paste this code. Safety code: '
-                      '${code.safetyCode}\n\n${code.code}',
+                      'Please move my Zafe seat to my new phone: in Zafe, open Signers, '
+                      '"Replace a lost phone", and paste this code. I\'ll call to '
+                      'compare safety words.\n\n${code.code}',
                 ),
               ),
               child: const Text('Send code to a co-signer'),
@@ -220,17 +213,16 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
         if (code != null)
           RecoverBody(
             code: code.code,
-            safetyCode: code.safetyCode,
+            checks: _progress?.checks ?? const [],
             stage: _progress?.stage,
             received: _progress?.received ?? 0,
             needed: _progress?.needed ?? 0,
             error: _error == null
                 ? null
-                : zafeErrorMessage(_error!, fallback: 'Can\'t reach the relay.'),
-            onCopy: () async {
-              await Clipboard.setData(ClipboardData(text: code.code));
-              if (context.mounted) showAppToast(context, 'Recovery code copied');
-            },
+                : zafeErrorMessage(
+                    _error!,
+                    fallback: 'Can\'t reach the relay.',
+                  ),
             onStartOver: _startOver,
           ),
       ],
@@ -243,22 +235,22 @@ class RecoverBody extends StatelessWidget {
   const RecoverBody({
     super.key,
     required this.code,
-    required this.safetyCode,
+    this.checks = const [],
     this.stage,
     this.received = 0,
     this.needed = 0,
     this.error,
-    this.onCopy,
     this.onStartOver,
   });
 
   final String code;
-  final String safetyCode;
+
+  /// Each co-signer's words, once that co-signer opened the code.
+  final List<rust.CosignerWords> checks;
   final rust.RecoveryStage? stage;
   final int received;
   final int needed;
   final String? error;
-  final VoidCallback? onCopy;
   final VoidCallback? onStartOver;
 
   @override
@@ -270,17 +262,13 @@ class RecoverBody extends StatelessWidget {
             ? 'Approved. Your co-signers\' phones are rebuilding your key.'
             : 'Approved. Rebuilding your key: $received of $needed co-signers done.',
       rust.RecoveryStage.done => 'Done. Saving the vault on this phone.',
-      _ =>
-        'Waiting for your co-signers to approve. Keep this screen open, or come back '
-            'to it.',
+      _ => 'Waiting for your co-signers to approve.',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Lost your phone and have no backup? Your co-signers can move your seat to '
-          'this phone: enough of them approve, and their phones rebuild your key here. '
-          'Send them this code.',
+          'Lost your phone and your backup? Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -306,35 +294,43 @@ class RecoverBody extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.s),
         Center(
-          child: AppButton(
-            variant: AppButtonVariant.ghost,
+          child: CopyButton(
+            label: 'Copy code',
+            text: code,
             size: AppButtonSize.medium,
-            leading: const AppIcon(AppIcons.copy, size: 18),
-            onPressed: onCopy,
-            child: const Text('Copy code'),
+            expand: false,
           ),
         ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          'Safety code',
-          style: AppTypography.labelLarge.copyWith(
-            color: colors.text.secondary,
+        // The safety words, once a co-signer has opened the code.
+        if (checks.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Safety words',
+            style: AppTypography.labelLarge.copyWith(
+              color: colors.text.secondary,
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.xxs),
-        Text(
-          safetyCode,
-          style: AppTypography.headlineMedium.copyWith(
-            color: colors.text.accent,
-            fontFeatures: const [FontFeature.tabularFigures()],
+          const SizedBox(height: AppSpacing.xxs),
+          for (final c in checks) ...[
+            Text(
+              'With co-signer ${shortKey(c.cosignerKeyHex)}',
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.secondary,
+              ),
+            ),
+            Text(
+              c.words,
+              style: AppTypography.headlineMedium.copyWith(
+                color: colors.text.accent,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+          ],
+          Text(
+            'Compare them with each co-signer on a call or in person. If the words differ, or someone you didn\'t ask appears, stop.',
+            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
           ),
-        ),
-        const SizedBox(height: AppSpacing.xxs),
-        Text(
-          'Read it to each co-signer who approves, on a call or in person. If their '
-          'phone shows a different code, don\'t go ahead: someone changed the code.',
-          style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
-        ),
+        ],
         const SizedBox(height: AppSpacing.md),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -394,9 +390,8 @@ class VaultCheckBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Your key is back. Before saving "$name", make sure it is your vault: ask a '
-          'co-signer to open Zafe, Settings, Vault address, and read the last 8 '
-          'characters.',
+          'Your key is back. Before saving "$name", ask a co-signer to read you the '
+          'end of the vault address (Settings, Vault address).',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -422,8 +417,7 @@ class VaultCheckBody extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
-          'If it\'s different, don\'t save it: someone may be showing you a fake vault, '
-          'and money sent to its address wouldn\'t reach your vault.',
+          'If it\'s different, don\'t save it: it may be a fake vault.',
           style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
         ),
         const SizedBox(height: AppSpacing.md),

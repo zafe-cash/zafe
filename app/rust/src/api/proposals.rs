@@ -9,15 +9,20 @@ use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
 
 use rand::rngs::OsRng;
 use zafe_core::{
+    durable,
     node::{self, VaultMaterial},
-    nonce_store::{FileNonceStore, FilePoolStore},
+    nonce_store::{FileNonceStore, FilePoolStore, NonceKey},
     relay_client::RelayClient,
     repair,
     session::{NonceStore, ProposalId},
     state_dir,
     vault::{ProposalStatus, ProposedPayment, VaultState},
-    wallet::{connect, PaymentRequest, ZafeNetwork},
+    wallet::{
+        self as zwallet, connect_pooled as connect, Client, PaymentRequest, VaultWallet,
+        ZafeNetwork,
+    },
 };
+use zafe_proto::{Chain, Identity};
 use zcash_protocol::memo::{Memo, MemoBytes};
 
 use super::{
@@ -119,8 +124,8 @@ pub fn parse_payment_request(network_name: String, text: String) -> ScannedReque
                         .memo()
                         .map(|m| memo_text(m.as_slice()))
                         .unwrap_or_default(),
-                    label: p.label().cloned().unwrap_or_default(),
-                    message: p.message().cloned().unwrap_or_default(),
+                    label: visible_text(p.label().map_or("", String::as_str)),
+                    message: visible_text(p.message().map_or("", String::as_str)),
                 })
                 .collect::<Vec<_>>(),
             Err(_) => return fail("This payment link can't be read".into()),
@@ -190,7 +195,7 @@ fn memo_text(bytes: &[u8]) -> String {
         .ok()
         .and_then(|b| Memo::try_from(b).ok())
         .and_then(|m| match m {
-            Memo::Text(t) => Some(t.to_string()),
+            Memo::Text(t) => Some(visible_text(&t)),
             _ => None,
         })
         .unwrap_or_default()
@@ -258,6 +263,10 @@ pub struct ProposalInfo {
     pub still_sendable: bool,
     /// A live proposal (id) that spends this cancelled one's notes back to the vault.
     pub invalidated_by: Option<String>,
+    /// One-tap, open, and no signer group can be completed any more (a member's phone
+    /// was restored or replaced while it was open): the proposer should propose it again
+    /// (`propose_again`), and everyone approves once more.
+    pub needs_new_proposal: bool,
 }
 
 fn parse_id(hex_id: &str) -> Result<ProposalId, ZafeError> {
@@ -275,17 +284,35 @@ fn request_file(state_dir: &str, id: &ProposalId) -> PathBuf {
     leader_dir(state_dir).join(format!("{}.{}", hex::encode(id), state_dir::REQUEST_EXT))
 }
 
-fn pool_store(state_dir: &str) -> FilePoolStore {
-    FilePoolStore::new(PathBuf::from(state_dir).join(state_dir::POOL))
+/// This member's key for its nonce files in this vault (derived, never stored).
+fn nonce_key(seeds: &[u8], m: &VaultMaterial) -> NonceKey {
+    NonceKey::derive(seeds, &m.descriptor.vault_id)
 }
 
-fn nonce_store(state_dir: &str) -> FileNonceStore {
-    FileNonceStore::new(PathBuf::from(state_dir).join(state_dir::NONCES))
+fn pool_store(state_dir: &str, seeds: &[u8], m: &VaultMaterial) -> FilePoolStore {
+    FilePoolStore::new(
+        PathBuf::from(state_dir).join(state_dir::POOL),
+        nonce_key(seeds, m),
+    )
 }
 
-fn info(state: &VaultState, me: [u8; 32], state_dir: &str) -> Vec<ProposalInfo> {
+fn nonce_store(state_dir: &str, seeds: &[u8], m: &VaultMaterial) -> FileNonceStore {
+    FileNonceStore::new(
+        PathBuf::from(state_dir).join(state_dir::NONCES),
+        nonce_key(seeds, m),
+    )
+}
+
+fn info(
+    state: &VaultState,
+    me: [u8; 32],
+    state_dir: &str,
+    seeds: &[u8],
+    m: &VaultMaterial,
+) -> Vec<ProposalInfo> {
     let d = &state.descriptor;
-    let nonces = nonce_store(state_dir);
+    let nonces = nonce_store(state_dir, seeds, m);
+    let pool = pool_store(state_dir, seeds, m);
     let mut out: Vec<_> = state
         .proposals
         .values()
@@ -351,6 +378,7 @@ fn info(state: &VaultState, me: [u8; 32], state_dir: &str) -> Vec<ProposalInfo> 
             needs_reapproval: matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
                 && p.approvals.get(&me).is_some_and(|c| !c.is_empty())
                 && !nonces.contains(&p.id, &p.pczt_hash),
+            needs_new_proposal: node::one_tap_stuck(state, &p.id, &me, &pool),
         })
         .collect();
     out.sort_by_key(|p| {
@@ -398,13 +426,32 @@ pub struct SeatMove {
     pub old_key_hex: String,
     /// The new phone's key (hex).
     pub new_key_hex: String,
-    /// What the new phone shows ("1234 5678"): compare before approving.
-    pub safety_code: String,
     /// Members who approved so far (hex keys).
     pub approvals: Vec<String>,
     pub needed: u32,
     /// The recovery code, rebuilt from the log, for approving from this list.
     pub code: String,
+}
+
+/// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
+/// Zcash libraries this build uses know it. Blocks come every 75 s before it and every 25 s
+/// from it on, which the app needs to turn a block count into a time.
+#[flutter_rust_bridge::frb(sync)]
+pub fn nu7_activation_height(network: String) -> Option<u32> {
+    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+    let net = super::vault::network(&network).ok()?;
+    net.activation_height(NetworkUpgrade::Nu7).map(u32::from)
+}
+
+/// A device restored from a backup has no signing nonces, so its next refresh retires the
+/// commitments the previous device published and publishes a fresh pool (see
+/// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the
+/// vault's signing state directory, which backups never contain.
+pub fn mark_pool_reset(state_dir: String) -> Result<(), ZafeError> {
+    fs::create_dir_all(&state_dir).map_err(anyhow::Error::from)?;
+    fs::write(PathBuf::from(&state_dir).join(state_dir::POOL_RESET), b"1")
+        .map_err(anyhow::Error::from)?;
+    Ok(())
 }
 
 /// Every proposal in the vault log, newest first. Also keeps this device ready for
@@ -420,11 +467,27 @@ pub fn list_proposals(
 ) -> Result<ProposalList, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::new(relay_url);
-    let mut pool = pool_store(&state_dir);
+    let relay = RelayClient::pooled(relay_url);
+    let mut pool = pool_store(&state_dir, &seeds, &m);
+    // A device just restored from a backup retires the commitments its previous device
+    // published (see `node::top_up_pool`); the marker is removed once that is logged.
+    let reset_marker = PathBuf::from(&state_dir).join(state_dir::POOL_RESET);
+    let reset = reset_marker.exists();
+    let mut watch = crate::diag::Stopwatch::new("proposals");
     let state = runtime().block_on(async {
-        node::top_up_pool(&relay, &me, &m, &mut pool, &mut OsRng).await?;
-        let (_, state) = node::load_state(&relay, &me, &m).await?;
+        let notes = super::vault::note_count(&m.descriptor.vault_id);
+        // One load of the log for both: the pool top-up keeps `state` current with
+        // whatever it appends (it used to load the log a second time).
+        let (mut chain, mut state) = node::load_state(&relay, &me, &m).await?;
+        watch.lap("log");
+        node::top_up_pool_loaded(
+            &relay, &me, &m, &mut pool, reset, notes, &mut chain, &mut state, &mut OsRng,
+        )
+        .await?;
+        if reset {
+            let _ = std::fs::remove_file(&reset_marker);
+        }
+        watch.lap("pool");
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
@@ -444,11 +507,13 @@ pub fn list_proposals(
             return Ok::<_, ZafeError>(fresh);
         }
         Ok::<_, ZafeError>(state)
-    })?;
+    });
+    watch.finish();
+    let state = state?;
     node::forget_closed(&state, &me.public().sig_pk, tip_height, &mut pool);
-    node::forget_closed_nonces(&state, tip_height, &mut nonce_store(&state_dir));
+    node::forget_closed_nonces(&state, tip_height, &mut nonce_store(&state_dir, &seeds, &m));
     Ok(ProposalList {
-        items: info(&state, me.public().sig_pk, &state_dir),
+        items: info(&state, me.public().sig_pk, &state_dir, &seeds, &m),
         newer_version_entries: state.newer_version_entries() as u32,
         shared_names: shared_names(&state),
         backed_up: backed_up(&state),
@@ -491,7 +556,7 @@ pub fn retry_repair(
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| ZafeError::invalid("not a signer key"))?;
     runtime().block_on(repair::retry_repair(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         replacement,
@@ -510,7 +575,6 @@ fn seat_moves(state: &VaultState) -> Vec<SeatMove> {
             SeatMove {
                 old_key_hex: hex::encode(p.old),
                 new_key_hex: hex::encode(p.new.sig_pk),
-                safety_code: request.safety_code(),
                 approvals: p.approvals.iter().map(|(pk, _)| hex::encode(pk)).collect(),
                 needed: u32::from(state.descriptor.threshold),
                 code: request.encode(),
@@ -528,15 +592,67 @@ fn backed_up(state: &VaultState) -> Vec<String> {
         .collect()
 }
 
+/// Names members gave themselves, minus any that could pass for someone else: a member
+/// writes its own name, so it could call itself "You" (every other phone shows that for
+/// its owner), take another member's name, or hide text behind bidi or zero-width
+/// characters. Those are left out and that member shows as its short key. Display only:
+/// replay keeps every `Name` event as it is.
 fn shared_names(state: &VaultState) -> Vec<SignerName> {
+    let folded = |name: &str| name.trim().to_lowercase();
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    for name in state.names.values() {
+        *seen.entry(folded(name)).or_default() += 1;
+    }
     state
         .names
         .iter()
+        .filter(|(_, name)| plain_name(name) && seen[&folded(name)] == 1)
         .map(|(pk, name)| SignerName {
             key_hex: hex::encode(pk),
             name: name.clone(),
         })
         .collect()
+}
+
+/// Invisible or direction-changing characters: they can hide text or make it read in
+/// another order than it is (an amount or address inside a memo, a name).
+fn hidden_char(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FE00}'..='\u{FE0F}'
+        | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}')
+}
+
+/// Text from outside (memos, a payment link's label and message) as shown: each hidden
+/// character becomes U+FFFD, so it is visible and can't reorder what's around it.
+pub(crate) fn visible_text(text: &str) -> String {
+    text.chars()
+        .map(|c| if hidden_char(c) { '\u{FFFD}' } else { c })
+        .collect()
+}
+
+/// No invisible or direction-changing characters, and not "You" (with anything after).
+fn plain_name(name: &str) -> bool {
+    let lower = name.trim().to_lowercase();
+    let you = lower == "you" || lower.starts_with("you ") || lower.starts_with("you(");
+    !you && !name.chars().any(hidden_char)
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::{plain_name, visible_text};
+
+    #[test]
+    fn names_that_could_pass_for_someone_else_are_not_plain() {
+        assert!(plain_name("Alice"));
+        assert!(plain_name("Younes"));
+        assert!(!plain_name("You"));
+        assert!(!plain_name(" you (CFO)"));
+        assert!(!plain_name("Al\u{202E}ecila"));
+        assert_eq!(visible_text("pay \u{202E}01 ZEC"), "pay \u{FFFD}01 ZEC");
+        assert_eq!(visible_text("plain memo"), "plain memo");
+        assert!(!plain_name("Ali\u{200B}ce"));
+    }
 }
 
 // --- Proposing and reviewing ------------------------------------------------------------
@@ -545,6 +661,56 @@ pub struct PaymentInput {
     pub address: String,
     pub amount_zat: u64,
     pub memo: String,
+}
+
+/// Checks `payments` and turns them into wallet requests.
+fn payment_requests(
+    m: &VaultMaterial,
+    payments: &[PaymentInput],
+) -> Result<Vec<PaymentRequest>, ZafeError> {
+    let net = network(&m.descriptor.network)?;
+    if payments.is_empty() {
+        return Err(ZafeError::invalid("Add at least one payment"));
+    }
+    payments
+        .iter()
+        .map(|p| {
+            node::orchard_receiver(&net, p.address.trim())?;
+            if p.amount_zat == 0 {
+                return Err(ZafeError::invalid("Amount must be more than zero"));
+            }
+            Ok(PaymentRequest {
+                address: p.address.trim().to_string(),
+                amount_zat: p.amount_zat,
+                memo: memo_bytes(&p.memo)?,
+            })
+        })
+        .collect()
+}
+
+/// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
+/// last synced: the same note selection as `propose_payment`, nothing built or logged.
+/// Fails like a proposal would (e.g. not enough funds), so the review can say so first.
+pub fn estimate_fee(
+    lightwalletd_url: String,
+    db_dir: String,
+    db_key: Vec<u8>,
+    material: Vec<u8>,
+    payments: Vec<PaymentInput>,
+) -> Result<u64, ZafeError> {
+    let m = self::material(&material)?;
+    let requests = payment_requests(&m, &payments)?;
+    let mut watch = crate::diag::Stopwatch::new("fee");
+    let _guard = wallet_lock();
+    watch.lap("lock");
+    let fee = runtime().block_on(async {
+        let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
+        Ok(wallet.fee_for(&requests)?)
+    });
+    watch.lap("build");
+    watch.finish();
+    fee
 }
 
 /// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns
@@ -562,46 +728,277 @@ pub fn propose_payment(
 ) -> Result<String, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
+    let requests = payment_requests(&m, &payments)?;
+    let mut watch = crate::diag::Stopwatch::new("propose");
+    let relay = RelayClient::pooled(relay_url);
+    let proposed = propose_inner(
+        &mut watch,
+        &relay,
+        &me,
+        &m,
+        &lightwalletd_url,
+        &db_dir,
+        &db_key,
+        &requests,
+        auto_send,
+    );
+    watch.finish();
+    Ok(hex::encode(proposed?.id))
+}
+
+/// What [`propose_and_approve`] gets back.
+pub struct ProposeOutcome {
+    pub id: String,
+    /// This member's approval, given under the same unlock (`None` if it failed).
+    pub approved: Option<ApproveResult>,
+    /// Why the approval failed: the payment then stays open for this member's approval.
+    pub approve_error: Option<ZafeError>,
+    /// The vault's proposals right after, so the app shows the new payment at once.
+    pub items: Vec<ProposalInfo>,
+}
+
+/// Proposes `payments` and approves them as this member, in one call: the approval uses
+/// the log state the proposal left (one read of the log fewer, ~1.5 s over Tor). A
+/// failed approval is reported in the outcome, not as an error: the payment exists.
+#[allow(clippy::too_many_arguments)]
+pub fn propose_and_approve(
+    relay_url: String,
+    lightwalletd_url: String,
+    db_dir: String,
+    db_key: Vec<u8>,
+    state_dir: String,
+    seeds: Vec<u8>,
+    material: Vec<u8>,
+    payments: Vec<PaymentInput>,
+    auto_send: bool,
+) -> Result<ProposeOutcome, ZafeError> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
-    if payments.is_empty() {
-        return Err(ZafeError::invalid("Add at least one payment"));
-    }
-    let requests = payments
-        .iter()
-        .map(|p| {
-            node::orchard_receiver(&net, p.address.trim())?;
-            if p.amount_zat == 0 {
-                return Err(ZafeError::invalid("Amount must be more than zero"));
-            }
-            Ok(PaymentRequest {
-                address: p.address.trim().to_string(),
-                amount_zat: p.amount_zat,
-                memo: memo_bytes(&p.memo)?,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let requests = payment_requests(&m, &payments)?;
+    let mut watch = crate::diag::Stopwatch::new("propose-approve");
+    let relay = RelayClient::pooled(relay_url);
+    let proposed = propose_inner(
+        &mut watch,
+        &relay,
+        &me,
+        &m,
+        &lightwalletd_url,
+        &db_dir,
+        &db_key,
+        &requests,
+        auto_send,
+    );
+    let mut p = match proposed {
+        Ok(p) => p,
+        Err(e) => {
+            watch.finish();
+            return Err(e);
+        }
+    };
+    let mut store = nonce_store(&state_dir, &seeds, &m);
+    let mut pool = pool_store(&state_dir, &seeds, &m);
+    let approved = runtime().block_on(node::approve_after_propose(
+        &relay,
+        &me,
+        &m,
+        &net,
+        p.tip,
+        p.id,
+        &mut store,
+        &mut pool,
+        &mut OsRng,
+        &mut p.chain,
+        &mut p.state,
+    ));
+    watch.lap("approve");
+    watch.finish();
+    let (approved, approve_error) = match approved {
+        Ok(a) => (
+            Some(ApproveResult {
+                signed: a.signed,
+                completed: a.completed,
+                auto_send: a.auto_send,
+            }),
+            None,
+        ),
+        Err(e) => (None, Some(e.into())),
+    };
+    Ok(ProposeOutcome {
+        id: hex::encode(p.id),
+        approved,
+        approve_error,
+        items: info(&p.state, me.public().sig_pk, &state_dir, &seeds, &m),
+    })
+}
+
+/// A logged proposal, the log state that includes it, and the wallet's synced tip.
+struct Proposed {
+    id: ProposalId,
+    chain: Chain,
+    state: VaultState,
+    tip: u32,
+}
+
+/// Proposing, timed into `watch`. The network-only steps run first, together and without
+/// the wallet lock: lightwalletd's tip and branch (one request) and the vault log. Then,
+/// under the lock, the wallet catches up to that tip (a scan only if needed) and builds.
+#[allow(clippy::too_many_arguments)]
+fn propose_inner(
+    watch: &mut crate::diag::Stopwatch,
+    relay: &RelayClient,
+    me: &Identity,
+    m: &VaultMaterial,
+    lightwalletd_url: &str,
+    db_dir: &str,
+    db_key: &[u8],
+    requests: &[PaymentRequest],
+    auto_send: bool,
+) -> Result<Proposed, ZafeError> {
+    let params = network(&m.descriptor.network)?;
+    node::check_payees(m, &params, requests)?;
+    let (server, loaded) = runtime().block_on(async {
+        let server = async {
+            let mut client = connect(lightwalletd_url).await?;
+            let tip = zwallet::tip_on_current_branch(&mut client, &params).await?;
+            Ok::<_, ZafeError>((client, tip))
+        };
+        tokio::join!(server, node::load_state(relay, me, m))
+    });
+    watch.lap("network");
+    let (mut client, server_tip) = server?;
+    let (mut chain, mut state) = loaded?;
     let _guard = wallet_lock();
+    watch.lap("lock");
+    runtime().block_on(async {
+        let mut wallet = open_wallet(db_dir, db_key, lightwalletd_url, m).await?;
+        watch.lap("open");
+        let scanned = catch_up_to(&mut wallet, &mut client, server_tip, true).await?;
+        watch.lap(if scanned { "scan" } else { "noscan" });
+        let sent = sent_txs(db_dir, m);
+        let first = node::propose_loaded(
+            relay,
+            me,
+            m,
+            &mut wallet,
+            &mut client,
+            &sent,
+            requests,
+            auto_send,
+            &mut chain,
+            &mut state,
+            &mut OsRng,
+        )
+        .await;
+        // Built without scanning and the wallet refused (e.g. funds it hasn't seen yet):
+        // scan and try once more, so skipping the scan only ever costs time.
+        let id = match first {
+            Err(node::NodeError::Wallet(_)) if !scanned => {
+                wallet.sync(&mut client).await?;
+                watch.lap("rescan");
+                node::propose_loaded(
+                    relay,
+                    me,
+                    m,
+                    &mut wallet,
+                    &mut client,
+                    &sent,
+                    requests,
+                    auto_send,
+                    &mut chain,
+                    &mut state,
+                    &mut OsRng,
+                )
+                .await?
+            }
+            other => other?,
+        };
+        watch.lap("build");
+        let tip = wallet.chain_height()?.unwrap_or(server_tip);
+        Ok(Proposed {
+            id,
+            chain,
+            state,
+            tip,
+        })
+    })
+}
+
+/// Brings the wallet up to the server's tip before building a transaction: one cheap
+/// height request, and a scan only when needed. The scan's round trips cost about 2 s on
+/// a phone even for a single new block. `lenient`: a wallet that has scanned everything
+/// it knows of and is at most a few blocks behind builds as it is
+/// ([`VaultWallet::can_build_without_scan`]); the caller retries after a full sync if the
+/// build fails. Strict: scan whenever the server has anything new (as `sync_vault` does).
+/// Returns whether it scanned.
+async fn catch_up(
+    wallet: &mut VaultWallet<ZafeNetwork>,
+    client: &mut Client,
+    lenient: bool,
+) -> Result<bool, ZafeError> {
+    let tip = zwallet::latest_height(client).await?;
+    catch_up_to(wallet, client, tip, lenient).await
+}
+
+/// [`catch_up`] with the server's tip already read.
+async fn catch_up_to(
+    wallet: &mut VaultWallet<ZafeNetwork>,
+    client: &mut Client,
+    tip: u32,
+    lenient: bool,
+) -> Result<bool, ZafeError> {
+    let skip = if lenient {
+        wallet.can_build_without_scan(tip)?
+    } else {
+        !wallet.needs_scan(tip)?
+    };
+    if skip {
+        return Ok(false);
+    }
+    wallet.sync(client).await?;
+    Ok(true)
+}
+
+/// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
+/// commitments (see `ProposalInfo.needs_new_proposal`). Returns the new proposal's id.
+pub fn propose_again(
+    relay_url: String,
+    lightwalletd_url: String,
+    db_dir: String,
+    db_key: Vec<u8>,
+    seeds: Vec<u8>,
+    material: Vec<u8>,
+    proposal_id: String,
+) -> Result<String, ZafeError> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
+    let target = parse_id(&proposal_id)?;
+    let mut watch = crate::diag::Stopwatch::new("propose-again");
+    let _guard = wallet_lock();
+    watch.lap("lock");
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
-        wallet.sync(&mut client).await?;
-        let relay = RelayClient::new(relay_url);
+        let scanned = catch_up(&mut wallet, &mut client, false).await?;
+        watch.lap(if scanned { "scan" } else { "noscan" });
         Ok::<_, ZafeError>(
-            node::propose(
-                &relay,
+            node::propose_again(
+                &RelayClient::pooled(relay_url),
                 &me,
                 &m,
                 &mut wallet,
                 &mut client,
                 &sent_txs(&db_dir, &m),
-                &requests,
-                auto_send,
+                target,
                 &mut OsRng,
             )
             .await?,
         )
-    })?;
-    Ok(hex::encode(id))
+    });
+    watch.lap("build");
+    watch.finish();
+    Ok(hex::encode(id?))
 }
 
 /// Proposes spending a cancelled proposal's notes back to the vault, so the cancelled
@@ -618,14 +1015,18 @@ pub fn invalidate_proposal(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let target = parse_id(&proposal_id)?;
+    let mut watch = crate::diag::Stopwatch::new("sweep");
     let _guard = wallet_lock();
+    watch.lap("lock");
     let id = runtime().block_on(async {
         let mut wallet = open_wallet(&db_dir, &db_key, &lightwalletd_url, &m).await?;
+        watch.lap("open");
         let mut client = connect(&lightwalletd_url).await?;
-        wallet.sync(&mut client).await?;
+        let scanned = catch_up(&mut wallet, &mut client, false).await?;
+        watch.lap(if scanned { "scan" } else { "noscan" });
         Ok::<_, ZafeError>(
             node::invalidate(
-                &RelayClient::new(relay_url),
+                &RelayClient::pooled(relay_url),
                 &me,
                 &m,
                 &mut wallet,
@@ -636,8 +1037,10 @@ pub fn invalidate_proposal(
             )
             .await?,
         )
-    })?;
-    Ok(hex::encode(id))
+    });
+    watch.lap("build");
+    watch.finish();
+    Ok(hex::encode(id?))
 }
 
 /// This device's independent check of a proposal (spec §9.3).
@@ -660,6 +1063,11 @@ fn local_tip(
     lightwalletd_url: &str,
     m: &VaultMaterial,
 ) -> Result<u32, ZafeError> {
+    // The last sync's height when this process has one (see `vault::synced_tip`):
+    // opening the wallet waits for any sync holding it.
+    if let Some(tip) = super::vault::synced_tip(&m.descriptor.vault_id) {
+        return Ok(tip);
+    }
     let _guard = wallet_lock();
     let wallet = runtime().block_on(open_wallet(db_dir, db_key, lightwalletd_url, m))?;
     wallet
@@ -680,9 +1088,16 @@ pub fn review_proposal(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
+    let mut watch = crate::diag::Stopwatch::new("review");
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
-    let (_, state) = runtime().block_on(node::load_state(&RelayClient::new(relay_url), &me, &m))?;
-    match node::review(&state, &m, &net, tip, id) {
+    watch.lap("tip");
+    let (_, state) =
+        runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
+    watch.lap("log");
+    let reviewed = node::review(&state, &m, &net, tip, id);
+    watch.lap("check");
+    watch.finish();
+    match reviewed {
         Ok(v) => Ok(ReviewInfo {
             verified: true,
             problem: String::new(),
@@ -735,11 +1150,29 @@ pub fn approve_proposal(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
-    let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
-    let mut store = nonce_store(&state_dir);
-    let mut pool = pool_store(&state_dir);
+    // Timed per step (diagnostic report, "Slow steps"): `lock` is the wait for a sync
+    // holding the wallet, `tip` the chain height read, then the core's steps.
+    let mut watch = crate::diag::Stopwatch::new("approve");
+    // The height the last sync stored, when there is one (see `vault::synced_tip`);
+    // otherwise read it from the wallet, waiting for a sync that holds it.
+    let cached = super::vault::synced_tip(&m.descriptor.vault_id);
+    let tip = if let Some(tip) = cached {
+        watch.lap("tip");
+        tip
+    } else {
+        let _guard = wallet_lock();
+        watch.lap("lock");
+        let wallet = runtime().block_on(open_wallet(&db_dir, &db_key, &lightwalletd_url, &m))?;
+        let tip = wallet.chain_height()?.ok_or_else(|| {
+            ZafeError::new(ZafeErrorKind::NotReady, "The vault has not synced yet")
+        })?;
+        watch.lap("tip");
+        tip
+    };
+    let mut store = nonce_store(&state_dir, &seeds, &m);
+    let mut pool = pool_store(&state_dir, &seeds, &m);
     let approved = runtime().block_on(node::approve(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         &net,
@@ -749,6 +1182,8 @@ pub fn approve_proposal(
         &mut pool,
         &mut OsRng,
     ))?;
+    watch.steps(&approved.timings);
+    watch.finish();
     Ok(ApproveResult {
         signed: approved.signed,
         completed: approved.completed,
@@ -765,13 +1200,17 @@ pub fn reject_proposal(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let id = parse_id(&proposal_id)?;
-    runtime().block_on(node::reject(
-        &RelayClient::new(relay_url),
+    let mut watch = crate::diag::Stopwatch::new("reject");
+    let result = runtime().block_on(node::reject(
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         id,
         &mut OsRng,
-    ))?;
+    ));
+    watch.lap("relay");
+    watch.finish();
+    result?;
     Ok(())
 }
 
@@ -786,7 +1225,7 @@ pub fn set_my_name(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     runtime().block_on(node::set_name(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         &name,
@@ -808,7 +1247,7 @@ pub fn attest_backup(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     runtime().block_on(node::attest_backup(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         at,
@@ -827,13 +1266,17 @@ pub fn cancel_proposal(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let id = parse_id(&proposal_id)?;
-    runtime().block_on(node::cancel(
-        &RelayClient::new(relay_url),
+    let mut watch = crate::diag::Stopwatch::new("cancel");
+    let result = runtime().block_on(node::cancel(
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         id,
         &mut OsRng,
-    ))?;
+    ));
+    watch.lap("relay");
+    watch.finish();
+    result?;
     Ok(())
 }
 
@@ -854,6 +1297,28 @@ pub fn restart_signing(state_dir: String, proposal_id: String) -> Result<(), Zaf
         }
     }
     Ok(())
+}
+
+/// A payment this phone just sent: store it in the wallet as unmined, so the balance
+/// stops counting the notes it spent and shows its change as pending. Block sync only sees
+/// it once mined, a minute or more later, and Home read "Sent" over the old balance until
+/// then. The same store the mempool watch uses; best effort (the next sync catches up).
+fn store_own_send(db_dir: &str, db_key: &[u8], m: &VaultMaterial, tip: u32, raw: &[u8]) {
+    let (Ok(net), Ok(key)) = (
+        network(&m.descriptor.network),
+        super::vault::wallet_key(db_key),
+    ) else {
+        return;
+    };
+    let Some(tx) = zafe_core::mempool::parse_mempool_tx(&net, tip, raw) else {
+        return;
+    };
+    let _guard = wallet_lock();
+    if let Ok(mut wallet) = VaultWallet::open(&super::vault::wallet_path(db_dir, m), &key, net) {
+        if let Err(e) = wallet.store_mempool_tx(&tx) {
+            eprintln!("storing the sent payment: {e}");
+        }
+    }
 }
 
 /// Builds the proving and verifying keys now (seconds on a phone, then kept for the
@@ -881,23 +1346,27 @@ pub fn answer_signing_requests(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
-    let mut store = nonce_store(&state_dir);
+    let mut store = nonce_store(&state_dir, &seeds, &m);
     // Runs even without stored nonces (one-tap members rarely hold any): the inbox still
     // has keygen messages, finished requests and old shares for the relay to delete.
+    let mut watch = crate::diag::Stopwatch::new("respond");
     let tip = match tip_height {
         Some(tip) => tip,
         None => local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?,
     };
+    watch.lap("tip");
     let report = runtime().block_on(node::respond(
-        &RelayClient::new(relay_url),
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         &net,
         tip,
         &mut store,
         &mut OsRng,
-    ))?;
-    Ok(report.answered.len() as u32)
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(report?.answered.len() as u32)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -980,13 +1449,32 @@ pub fn send_with_progress(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
-    let relay = RelayClient::new(relay_url);
+    let relay = RelayClient::pooled(relay_url);
+    let mut watch = crate::diag::Stopwatch::new("send");
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
+    watch.lap("tip");
     let req_path = request_file(&state_dir, &id);
+    let silent = node::SilentSigners::at(leader_dir(&state_dir).join(state_dir::SILENT_SIGNERS));
     let io = |e: std::io::Error| ZafeError::new(ZafeErrorKind::Other, e.to_string());
 
     // One tap: the approvals already carry every signature; aggregate and send alone.
     let (_, state) = runtime().block_on(node::load_state(&relay, &me, &m))?;
+    watch.lap("log");
+    // Already sent by another member, or by this app's other process (a background check
+    // finishing an auto-send while the app sent it too): nothing left to do.
+    if let Some(p) = state.proposals.get(&id) {
+        if let (ProposalStatus::Broadcast, Some(mut display)) = (p.status, p.txid) {
+            display.reverse();
+            on_progress(SendProgress {
+                stage: SendStage::Sent,
+                received: u32::from(m.descriptor.threshold),
+                needed: u32::from(m.descriptor.threshold),
+                txid: Some(hex::encode(display)),
+                error: None,
+            });
+            return Ok(());
+        }
+    }
     if node::is_ready(&state, &id) {
         on_progress(SendProgress {
             stage: SendStage::Collecting,
@@ -1002,9 +1490,14 @@ pub fn send_with_progress(
                     node::send_ready(&relay, &me, &m, &net, tip, id, &mut client, &mut OsRng)
                         .await?;
                 sent_txs(&db_dir, &m).put(&sent);
-                sent.txid
+                sent
             })
         })?;
+        watch.lap("prove+broadcast");
+        store_own_send(&db_dir, &db_key, &m, tip, &txid.raw);
+        watch.lap("store");
+        watch.finish();
+        let txid = txid.txid;
         let mut display = txid;
         display.reverse();
         on_progress(SendProgress {
@@ -1027,12 +1520,22 @@ pub fn send_with_progress(
                 Err(_) => BTreeSet::new(),
             };
             let sent = runtime().block_on(node::request_signatures(
-                &relay, &me, &m, &net, tip, id, &used, &mut OsRng,
+                &relay,
+                &me,
+                &m,
+                &net,
+                tip,
+                id,
+                &used,
+                &silent.load(),
+                &mut OsRng,
             ))?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(leader_dir(&state_dir)).map_err(io)?;
-            fs::write(&used_path, node::encode_used_commitments(&used)?).map_err(io)?;
-            fs::write(&req_path, node::encode_request(&sent.request)?).map_err(io)?;
+            // Atomic: a torn file would block sending (or, for the used set, fail closed
+            // forever).
+            durable::write(&used_path, &node::encode_used_commitments(&used)?).map_err(io)?;
+            durable::write(&req_path, &node::encode_request(&sent.request)?).map_err(io)?;
             sent.request
         }
     };
@@ -1055,17 +1558,17 @@ pub fn send_with_progress(
         let own: Option<Vec<Vec<u8>>> = match fs::read(&own_path) {
             Ok(bytes) => Some(node::decode_own_shares(&bytes)?),
             Err(_) => {
-                let mut store = nonce_store(&state_dir);
+                let mut store = nonce_store(&state_dir, &seeds, &m);
                 let own =
                     node::sign_own_shares(&relay, &me, &m, &net, tip, &request, &mut store).await?;
                 if let Some(own) = &own {
-                    fs::write(&own_path, node::encode_own_shares(own)?).map_err(io)?;
+                    durable::write(&own_path, &node::encode_own_shares(own)?).map_err(io)?;
                 }
                 own
             }
         };
         let mut client = connect(&lightwalletd_url).await?;
-        let sent = node::finalize(
+        let finalized = node::finalize(
             &relay,
             &me,
             &m,
@@ -1084,8 +1587,30 @@ pub fn send_with_progress(
             },
             &mut OsRng,
         )
-        .await?;
+        .await;
+        let signers: Vec<_> = request.signers.iter().copied().collect();
+        let sent = match finalized {
+            Ok(sent) => {
+                silent.update(&[], &signers);
+                sent
+            }
+            Err(e @ node::NodeError::Timeout(_)) => {
+                // Remember who never answered, so the next round (after "Start over")
+                // asks someone else first.
+                if let Ok(quiet) = node::unanswered_signers(&relay, &me, &m, &request).await {
+                    let answered: Vec<_> = signers
+                        .iter()
+                        .filter(|s| !quiet.contains(s))
+                        .copied()
+                        .collect();
+                    silent.update(&quiet, &answered);
+                }
+                return Err(e.into());
+            }
+            Err(e) => return Err(e.into()),
+        };
         sent_txs(&db_dir, &m).put(&sent);
+        store_own_send(&db_dir, &db_key, &m, tip, &sent.raw);
         let txid = sent.txid;
         let _ = fs::remove_file(&req_path);
         let _ = fs::remove_file(&own_path);

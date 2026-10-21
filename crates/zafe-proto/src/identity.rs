@@ -132,25 +132,3 @@ impl core::fmt::Debug for Identity {
             .finish_non_exhaustive()
     }
 }
-
-/// The safety number members compare before key generation (spec §5.3): 12 digits over
-/// the vault id and the sorted set of all members' identities.
-pub fn safety_number(vault_id: &[u8; 16], members: &[IdentityPublic]) -> String {
-    let mut sorted: Vec<&IdentityPublic> = members.iter().collect();
-    sorted.sort();
-    sorted.dedup();
-    let mut state = blake2b_simd::Params::new()
-        .hash_length(32)
-        .personal(b"Zafe_SafetyNumbr")
-        .to_state();
-    state.update(vault_id);
-    state.update(&(sorted.len() as u32).to_le_bytes());
-    for member in sorted {
-        state.update(&member.fingerprint());
-    }
-    let hash = state.finalize();
-    let n =
-        u64::from_le_bytes(hash.as_bytes()[..8].try_into().expect("8 bytes")) % 1_000_000_000_000;
-    let digits = format!("{n:012}");
-    format!("{} {} {}", &digits[..4], &digits[4..8], &digits[8..])
-}

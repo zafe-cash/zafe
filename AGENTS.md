@@ -18,6 +18,9 @@ the same change.
 
 ```bash
 cargo fmt --all && cargo clippy --workspace --all-targets     # must be clean
+# CI uses the latest stable (dtolnay/rust-toolchain@stable) with -D warnings; the local
+# default is pinned older (1.97), so check new deprecations before pushing:
+CARGO_TARGET_DIR=target/stable-check cargo +stable clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                                        # ~68 tests, 3 ignored
 
 # ZIP 2005 vectors: regenerate, then check independently in Python
@@ -75,13 +78,52 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `qsk = trunc32(PRF^expand_sk[0x0C])`, `qk = BLAKE3.derive_key("Zcash ZIP 2005 qk-derivation v1", qsk)`,
   `rivk_ext = ToScalar(PRF^expand_qk[0x0D] || ak || nk)`. FVK via `FullViewingKey::from_bytes`.
   Never use frost-tools' `from_sk_ak_incompatible_with_quantum_recoverability...` (not recoverable).
-- **DKG**: safety number confirmed out of band before starting; round-1 echo hashes must all
+- **DKG**: safety words confirmed out of band before starting; round-1 echo hashes must all
   match; round-2 packages and `sk` contributions are HPKE-sealed; every member signs the
   descriptor. Each `sk` contribution is committed in round 1 (`SkContribution::commitment`,
   in `Round1Msg.sk_commitment`), the commitments are part of the echo every member
   compares (`echo_with_commitments`), and a revealed `r_j` that doesn't match aborts
   keygen: no member can choose its contribution after seeing the others'. `reddsa`
   0.5.2's `post_dkg` normalizes `ak` to even Y (orchard rejects odd).
+- **Setup safety words** (2026-10-15, `zafe_core::sas`, audit finding: the old 12-digit
+  hash of member keys was ~40 bits and a relay could grind a matching key set): after
+  sealing, each member sends a `Kind::SafetyCommit` envelope (commitment to a secret), then,
+  only once it holds every other member's commitment, `Kind::SafetyReveal` (the secret);
+  the 4 BIP-39 words hash every member's key and value, so a relay gets one guess (2^-44).
+  The secret is derived from an Ed25519 signature (deterministic: a restarted app reveals
+  what it committed to, nothing stored). `node::membership` does one step per call and
+  returns `safety_words` (`None` + `waiting_for` until all values are in); the setup
+  screen and background checks both step it (see "Async setup"). CLI/tests:
+  `node::wait_for_safety_words` (1 s poll: two requests per poll, under the hosted per-key
+  rate); `SAFETY_SENT` dedupes sends per (relay URL, mailbox, sender, kind) in-process.
+  Keygen still takes the confirmed string (`--safety-number` in the CLI, `confirmedSafetyNumber`
+  in the bridge) and re-derives it.
+- **Async setup** (2026-10-16): keygen is a step function, `node::keygen_step` (plus
+  `seal_when_full`: the creator's step locks a full setup; once sealed with the words known the bridge keeps
+  the membership in memory (`SEALED`) and the "They match" step and later keygen steps skip the ~4 s membership
+  step; the setup screen polls every 10 s while the words wait for "They match", the tap doesn't wait for a
+  running poll (polls skip while the tap's step runs), and the key screen shows on the tap (`_confirming`; a
+  failure brings the words back with `_tapError`): the tap's step is 10-15 s over Tor (keygen round trips); bridge `setup_step` does
+  membership, seal, safety check and keygen in one call; `node::run_keygen` loops it for the
+  CLI/tests, 1 step/s to stay under the hosted rate). State between steps:
+  `state_dir::KEYGEN` (`keygen.state`, `KEYGEN_STATE` 1, sealed with the vault's
+  `NonceKey`): words, round-1 secret + package, `sk` contribution, creator's log key, sent
+  flags. **Written before anything it covers is sent** (round 1 is never generated twice;
+  part 2, the echo, signatures are recomputed deterministically each step; receivers keep
+  the first copy of a resent message). Unreadable state is an error, never a fresh start.
+  Created only once: `durable::create_new` under a process-wide lock (the app and its
+  background engines share one process on Android; **Android forbids hard links in app
+  storage**, "Permission denied", so the temp-file-plus-link trick failed live). A new
+  round 1 is refused once the vault log has an entry, and the app stops stepping once the
+  material is in secure storage (a background check may have saved it and deleted the
+  state: a fresh step would offer the words again). `KeygenProgress::Done` repeats until
+  the caller saved the material and called `forget_keygen`. App: `providers/setup_step.dart`
+  `stepSetup` (screen + `vault_watch._checkSetup`); push tokens registered per vault id at
+  join (`register_push` takes the vault id); notifications `vaultId:setup` ("compare safety
+  words", once, pref `zafe_setup_words_shown_<id>`) and `vaultId:ready` (opens
+  `/backup-prompt` with `go`). Message formats and order unchanged: no version bump.
+  Tests: `tests/keygen_async.rs` (members at different times, two processes, wrong key),
+  bridge tests step members round-robin (`app/rust/tests/common`).
 - **Randomizer**: the FROST randomizer for each spend is the PCZT's own `alpha` (fixed before
   round 1 because `rk` feeds the sighash). Secure per the Re-Randomized FROST paper; matches
   frost-tools' `zcash-sign`. **Deviates from ZIP 312**, which says the Coordinator MUST
@@ -104,6 +146,16 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (recipient, amount, memo); change must belong to the vault **and trial-decrypt** with its IVK;
   fee must **equal** ZIP 317 (5000 × max(2, actions)); sighash computed locally.
 - **Proposals are built with `OvkPolicy::Sender`** and Ironwood change, or verification fails.
+- **Change is split** (2026-10-16, `wallet::change_split_policy`): while the vault has fewer than
+  `CHANGE_NOTES_TARGET` (4) spendable notes, change comes back as up to 4 notes of at least
+  `CHANGE_NOTE_MIN_ZAT` (0.01). Each open proposal reserves whole notes, so a one-note vault could
+  only have one payment in flight. Members' checks already accept any number of change outputs and
+  compute the fee from the action count (a splitting payment pays 5,000 zats per extra action;
+  seen live on testnet: 1 payment + 4 change = fee 25,000). A vault can never pay its own addresses
+  (`node::propose` refuses: members would count the output as change), so splitting is the only way
+  a single deposit becomes several notes. Vault addresses hold only an Orchard-format receiver
+  (Ironwood shares it): the testnet faucet rejects them as "not a valid address" (it pays Sapling/
+  transparent only); fund vaults from an Orchard-capable wallet.
 - **Note reservation** (spec §9.1): two layers.
   *Log rule* (`VaultState::apply`, deterministic): a `Proposal` whose PCZT spends a note
   of an earlier **open/approved** proposal with `expiry_height > new.tip_height` is
@@ -129,12 +181,21 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   gotcha: Zakura (like Zebra) keeps the last ~100 blocks in memory, so restarting the
   node rewinds the chain as well as the mempool; don't use it to simulate a drop.
 - **Nonce storage**: `nonce_store::FileNonceStore` (atomic write+rename; `put` returns an
-  error so a failed write never publishes an approval). The directory must be excluded from
+  error so a failed write never publishes an approval). Since `NONCES`/`POOL_NONCE` 2
+  (2026-10-15) nonce and pool-nonce files are XChaCha20-Poly1305 encrypted (file name as
+  AAD) with `NonceKey::derive(identity seeds, vault id)`: the stores take the key (bridge
+  `nonce_key(seeds, m)`, CLI `Home::nonce_key`). Version 1 plaintext files are still read
+  (published pool commitments stay usable after the update); another key reads nothing. The directory must be excluded from
   backups/device transfer: the Android app disables both (`allowBackup=false`,
   `res/xml/data_extraction_rules.xml`); iOS: `ZafeBackup.excludeStateFromBackups()` (AppDelegate.swift) sets `isExcludedFromBackup` on Application Support and Documents at every launch (a directory's flag covers its contents, the Tor dir included). Not device-tested.
 - **Nonces**: one pair per spend, keyed by (proposal, pczt hash); check the request's
   packages against stored commitments **before** consuming; delete before sending a share;
-  never reuse. Re-approval produces fresh commitments; leaders track used commitment sets.
+  never reuse. Nonce, pool-nonce, kept-vote and leader files go through
+  `zafe_core::durable` (write temp + fsync + rename + fsync dir; deletes fsync the dir), so
+  a power cut can't bring a used nonce back (audit L1/L2). An interactive reply is kept
+  (`NonceStore::keep_reply`, `<nonces>/<request hash>.reply`) from signing until the relay
+  accepted it, and `respond` resends it instead of dropping the request (L3); `respond`
+  skips requests for closed or expired proposals (L4). Re-approval produces fresh commitments; leaders track used commitment sets.
 - **Proving runs in parallel with share collection** (`node::finalize`, Vizor's Keystone
   pattern): the Halo 2 proof doesn't depend on spend-auth signatures, so the unsigned PCZT
   is proved on a blocking thread, then signatures are applied to the proved PCZT (verified
@@ -147,6 +208,13 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `bridge_e2e` now makes the leader an approver.
 - **Signing requests are deterministic** (same approvals → same bytes → same request
   hash), so re-running `request_signatures` after a partial failure is safe.
+- **Who the leader asks** (`node::order_signers`, audit M5-B, 2026-10-15): itself first
+  (it always answers), then members not in `SilentSigners`, then those who are, each by
+  identifier. `SilentSigners` (`<leader dir>/silent.bin`, `SILENT_SIGNERS` format,
+  unreadable = empty: it's only a preference) gains a round's unanswered signers when
+  `finalize` times out (`node::unanswered_signers`) and loses each signer who answers a
+  round. Before this the first t approvers by identifier were always chosen, so one
+  member could stall every interactive round.
 - **Leader resumability**: the app persists each signing request (`<state>/leader/<id>.req`)
   and the used-commitments set; `send_proposal` after a timeout resumes the same round.
   **Start over** (`restart_signing`) deletes `<id>.req` and `<id>.own` only; the old
@@ -169,7 +237,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   signing when pools are short or C(n, t) > 64. Pool size (`node::pool_target`):
   `POOL_PROPOSALS` = 16 single-spend proposals' worth, C(n-1, t-1) each, at least
   `MIN_POOL_TARGET` = 32 and at most one batch (256; replay caps a member at 4096
-  outstanding); published first at the end of keygen (bridge `run_keygen` takes the vault's
+  outstanding); deepened to cover one proposal spending every unspent vault note
+  (`pool_target_for_notes`: notes × C(n-1, t-1), at most `MAX_DEEP_POOL` = 1024, published
+  in batches of 256; the bridge's `sync_vault` records the note count per vault in memory,
+  `VaultWallet::unspent_note_count`, and `list_proposals` passes it; CLI and keygen pass
+  `None`); published first at the end of keygen (bridge `run_keygen` takes the vault's
   `state_dir`; CLI `vault keygen`), while every member is present, so the first payment
   is one tap (it used to wait for each member's first refresh; the harness's CLI members
   never published, and the app fell back to interactive); `assign_commitments` assigns a
@@ -182,6 +254,21 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   background check). Pools drain when a proposal **enters the log**, for every member,
   approving or not. Security reading of ePrint 2024/436 is in
   spec §9.5.1; confirmed by Daira-Emma Hopwood and conradoplg 2026-10-01 (U5).
+- **Restore vs one-tap (found 2026-10-12 in the mainnet dry run; fixed by `VAULT_EVENT` 8 `PoolReset`)**: a backup
+  never carries nonces, but the member's published pool stays in the log and `assign_commitments` takes each
+  member's next commitment in log order, so after a restore proposals were assigned that member's **dead**
+  commitments. The other signer's one-tap approval is final, the restored member could only approve interactively,
+  and a 2-of-2 could never complete (~15 proposals, until the dead pool ran out). Fix: `VaultEvent::PoolReset`
+  retires the author's *unassigned* commitments (assigned ones stay, so already-assigned open proposals still need
+  re-proposing: `node::one_tap_stuck` → bridge `ProposalInfo.needs_new_proposal`, and the proposer's "Propose
+  again" button runs `node::propose_again`, which cancels and re-proposes the same payments with fresh one-tap
+  commitments; the user chose this over mixing one-tap and interactive approvals on one payment, 2026-10-15).
+  `node::top_up_pool(.., reset, ..)` logs it before publishing a full fresh pool, only when asked:
+  the restore (`addRestoredVault`) calls bridge `mark_pool_reset(state_dir)`, which writes the
+  `state_dir::POOL_RESET` marker; `list_proposals` reads it, resets, removes it. CLI: `zafe pool --reset`. Only the
+  restore asks, because two devices of one member (a deliberate second phone) would otherwise retire each
+  other's pools; a restore while the old device is still in use costs that device its pool until it tops up.
+  Test: `node_keygen::a_restored_device_replaces_its_dead_pool` + `vault.rs` pool-reset replay tests.
 - **Sweeps**: a `Proposal` with **no payments** spends a cancelled proposal's notes back
   to the vault (`node::invalidate`, `VaultWallet::propose_sweep`) so a fully signed
   cancelled transaction can never be mined. UI code must handle `payments.isEmpty`
@@ -219,13 +306,14 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
     versioning (tables but version 0), is refused at startup: delete it. Bumps:
     **2** (2026-09-30) added the quota counters `mailboxes.delivery_bytes/log_bytes`;
     a schema-1 DB is migrated at startup (`migrate_from_v1`: ALTER + backfill).
-  - **Device state**: invites (`zafe-invite-v1:`, `INVITE`; another version →
+  - **Device state**: invites (`zafe-invite-v2:`, `INVITE`; another version →
     `UnsupportedVersion`, not "bad invite"), identity seeds (`IdentitySeeds::to_bytes`,
     66 bytes: secure storage, CLI `identity.bin`, backups), vault material
     (`VaultMaterial::to_bytes`: secure storage, CLI `vault.bin`, backups), nonce and pool
     nonce files (an unreadable version counts as missing: never used), leader `.own`
     (`OWN_SHARES`) and `used_commitments.bin` (`USED_COMMITMENTS`; unreadable is an
-    **error**, never "empty", or a commitment set could be reused), backups (`ZAFEBAK`
+    **error**, never "empty", or a commitment set could be reused), `silent.bin`
+    (`SILENT_SIGNERS`; unreadable = empty, a preference only), backups (`ZAFEBAK`
     byte = `BACKUP`, text `zafe-backup-v1:`; the text prefix is not the format version),
     the log copy (`log_cache`, `<vault id hex>.log`, `LOG_CACHE`: an unparsable file is
     "no anchor", a newer version is an error).
@@ -271,12 +359,19 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   assignment, and old logs replay as before. Cost: every event a version-6 app writes
   (votes, names too) is invisible to older apps, so members must update together.
   `LOG_CACHE` 1 (new, device file). `RELAY_API` unchanged: `POST /v1/mailbox/reseed`
-  is a new route (404 on an older relay) and 507 now carries `zafe-quota: <token>`.
+  is a new route (404 on an older relay).
   `VAULT_EVENT` 6 → 7 (2026-10-07, no new variant): a `Broadcast` written with version 7
   must carry the txid the proposal's PCZT fixes (`ProposalState.expected_txid` = its
   shielded sighash; v6 txids exclude signatures and proof), else `TxidMismatch` and it is
   ignored. **Gate:** an older app skips every version 7 event, so all members must update
   together before anyone sends. Versions 1-6 broadcasts replay unchecked, forever.
+  `VAULT_EVENT` 7 → 8 (2026-10-12, `VaultEvent::PoolReset`, appended): valid only in a version 8 event. **Gate:**
+  an older app skips every version 8 event, so all members must update together before anyone restores a backup.
+  `VAULT_EVENT` 8 → 9 (2026-10-15, no new variant, audit M3/L5): once a version 9 event is in the log, later
+  events replay under the highest version seen (no dodging a rule with an old tag), and a version 9 `Proposal`
+  must carry a parseable PCZT that declares no more spends than it has. **Gate:** older apps skip v9 events;
+  logs without one replay as before. `INVITE` 1 → 2 (2026-10-15): same body, but setups use the safety words,
+  so an older app refuses a v2 invite ("update Zafe") instead of showing a number nobody else has.
   **Pre-release: nothing reads the unversioned bytes from before 2026-09-30**; reset
   test devices (`adb shell pm clear xyz.zafe.zafe`), the harness
   (`scripts/app-harness.sh stop`) and relay DBs after pulling this change.
@@ -295,10 +390,18 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `WalletDb::for_path` can't take a key, so `open_wallet_db` opens the connection itself,
   loads `rusqlite::vtab::array` (what `for_path` does) and uses `WalletDb::from_connection`.
   The received-payments read-only connection takes the same key. The key (`WalletKey`) is
-  32 random bytes per vault in `ZafeSecureStore` (`zafe_vault_<id>_walletKey`, made on
-  first use by `walletKey(id)`), passed to every wallet bridge call as `dbKey`. **Not in
+  **derived, not stored** (2026-10-12): `WalletKey::derive(identity_seeds, vault_id)` (BLAKE3
+  `derive_key` "Zafe wallet database key v1", length-prefixed), bridge `wallet_db_key`, Dart
+  `walletKeyFor(seeds, vaultId)`, passed to every wallet bridge call as `dbKey`. It used to be 32
+  random bytes per vault in `ZafeSecureStore` (`zafe_vault_<id>_walletKey`, made on first use),
+  but that put a secure-storage call on the sync path, and on Android such a call can go
+  unanswered for a minute right after key generation (a background engine using the same
+  storage): the first sync of a new vault stalled on it (report entry "sync failed at wallet key
+  after 45s", fresh vault on a Nothing phone, 2026-10-12). Derived from the seeds the app already
+  holds, every isolate gets the same key and nothing waits on storage. A database made with an
+  old stored key can't be opened and is handled like any unreadable one. **Not in
   backups**: the wallet is a chain-data cache; a DB the key can't open (plain DB from before
-  encryption, lost key, another isolate's racing key) is deleted by the bridge's
+  encryption, an older stored key) is deleted by the bridge's
   `open_wallet` and resynced from the birthday; `list_received` reads it as empty until
   then. No `sqlcipher_export` migration on purpose. The CLI keeps a dev key in
   `<home>/wallet.key` (plain file, like the rest of its state). SQLCipher logs key
@@ -316,9 +419,37 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   deletes all. Rust panics: `app/rust/src/diag.rs` (not in `api/`, so no FRB surface) installs a hook from
   `init_app` writing `<ts> panic at file:line:col` (never the message) to `diagnostics/rust-panics.log`;
   the directory is learned from the first `wallet_path(db_dir)` call (db dir = support dir), so a panic
-  before the first wallet call leaves no note. The report adds a "Rust panics" section. The site says "no
+  before the first wallet call leaves no note. The report adds a "Rust panics" section and a "Slow steps" one (`timings.log`, written by `diag::Stopwatch` around the bridge calls a user waits on (2026-10-16: `sync`, `proposals`, `propose`, `review`, `approve`, `send`, `fee`, `reject`, `cancel`, `propose-again`, `sweep`, `respond`, `setup`, `create`, `join`, `seat-words`, `seat-approve`, `recover`; add one to any new such call: a clock read per step, a write only when slow or first): step names and durations only, for calls over 1.5 s and the first of each kind per process; first-sync investigation 2026-10-12). `first_sync_timing` (zafe-core example) times a new wallet's create + first sync on a live server: ~3 s on desktop against testnet. The site says "no
   telemetry" (home FAQ + Security row, README): keep those claims true. New log lines must never include
   secrets, even though they're scrubbed.
+- **Abandoning a locked setup** (2026-10-15, onboarding P0; relay rule relaxed 2026-10-16):
+  the relay accepts the creator's `cancel_setup` until the vault's first log entry, sealed
+  or not, so the creator's "Abandon setup" / "They don't match" cancels it for everyone;
+  a joiner's only forgets it on this phone. Keygen's waits fail with `NodeError::KeygenStalled { stage, missing }` →
+  `ZafeErrorKind::KeygenIncomplete`, and `ZafeError.members` (hex keys, empty for other
+  kinds) lists who never took part; the setup screen names them (`stalledText`) and the
+  key button becomes "Try again".
+- **Cancelling a setup** (2026-10-12): before membership is locked the creator can back out
+  (`node::cancel_setup`, bridge `cancel_setup`, `POST /v1/mailbox/cancel`, body
+  `CancelSetup`; creator-signed, refused once the mailbox has log entries (sealed is fine since 2026-10-16);
+  deletes the mailbox, members, deliveries, sender seqs and push tokens; wakes waiters).
+  New route, no `RELAY_API` bump: a relay without it answers 404 and the client reports
+  `Ok(false)` (same for an already-deleted mailbox), and the app forgets the vault
+  locally anyway. Members still waiting see 404 on `/v1/mailbox/members`
+  (`ZafeErrorKind::VaultNotOnRelay`) and the setup screen says the creator cancelled.
+  App: `VaultNotifier.cancelSetup` (creator keeps the typed details in
+  `createPrefillProvider`, the create screen reads them once), "Cancel setup" / "Leave
+  setup" on the setup screen, Android back asks the same. Tests: `relay.rs`
+  (`the_creator_can_cancel_...`), `zafe-core/tests/cancel_setup.rs`,
+  `test/create_prefill_test.dart`.
+- **Invite expiry** (2026-10-16, onboarding P1): an invite lets a **new** member join for
+  `relay::INVITE_TTL_SECS` (72 h) after it was issued or renewed (`mailboxes.created_at`, otherwise unused; no
+  `RELAY_DB` bump); members already in can rejoin; then `RelayError::InviteExpired` = HTTP 410 →
+  `ZafeErrorKind::InviteExpired` ("ask the creator to share it again"). The creator renews with
+  `POST /v1/mailbox/renew` (`RenewInvite`, creator-signed, refused once sealed; new route, no `RELAY_API` bump,
+  404 = older relay whose invites never expire): the app calls it when the creator opens the setup screen and on
+  "Share link" (`VaultNotifier.renewInvite`). Enforced by the relay because the threat is whoever holds a leaked
+  link. Test: `relay.rs` `an_invite_expires_after_72_hours_unless_the_creator_renews_it`.
 - **Relay membership check**: `reseed` lets the restorer choose members and threshold and
   the blind relay can't verify them, so `node::check_relay_membership` (route
   `POST /v1/mailbox/info`, body `MembersRead`, response `MailboxInfo`; no `RELAY_API` bump,
@@ -328,10 +459,75 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   RelayMembership` -> sync failure `relayMembership`. Recovery is a fresh relay.
 - **Leaving a fork**: `node::follow_relay` (bridge `follow_relay`, sync sheet "Follow the
   relay instead") is the only caller of `LogCache::remove` besides vault removal: needs a
-  real fork, verifies the relay's log from entry 0 without the anchor, then replaces the
+  real fork (or a copy that doesn't verify, `LogCopyInvalid`), verifies the relay's log from entry 0 without the anchor, then replaces the
   copy and reports the local-only entries dropped. Always behind a dialog + unlock.
 - **Unapproved-spend grace** (`spend_watch`) only covers Approved/Broadcast proposals and
   the txid their PCZT fixes; cancelled, rejected and open ones get none.
+- **One-tap retries and races (2026-10-15, docs/tracker.md "Security audit")**: signing a
+  one-tap vote consumes the pool nonces, so `node::approve` keeps the encoded vote
+  (`PoolStore::keep_vote`, `<state>/pool/<id>-<pczt hash>.vote`, not counted as a nonce)
+  **before** appending and posts the same bytes on the next approve; my shares already in
+  the log = done. Never fall back to interactive for a member whose shares are lost: a
+  one-tap vote is final for the others (`VoteFinal`) and the leader skips approvals
+  without commitments, so it deadlocks a 2-of-2; `approve` refuses an interactive vote
+  when fewer than t members are without logged shares. `send_ready` tries every complete
+  group (one bad share set can't stall it). A broadcast the node rejects counts as sent
+  when our txid is in lightwalletd's mempool (whole-mempool read): the app and a
+  background check, or two members, may send the same proposal at once. `respond`
+  re-seals with a fresh seq on a relay 409 (the relay wants strictly increasing seqs per
+  sender; two isolates of one member race on it). Log chains accept entries signed by
+  former members (`VaultState::log_authors`): after a seat move the old key can still
+  append until the relay updates, and replay ignores it (`NotAMember`).
+- **Relay hardening (audit L6-L9, 2026-10-15)**: the client reads at most
+  `relay_client::MAX_RESPONSE_BYTES` (64 MiB) per response, streamed on both the direct
+  and Tor paths (`RelayClientError::ResponseTooLarge`). `log_append` verifies the entry's
+  signature and charges the key **before** answering `Conflict { len }`. Joiners refuse a
+  creator birthday above their server's tip + `BIRTHDAY_LEEWAY_BLOCKS` (bridge
+  `run_keygen` → `node::run_keygen_with_ceiling`; best effort: skipped if the tip can't be
+  read). A device's log copy that doesn't verify is `NodeError::LogCopyInvalid` (→
+  `ZafeErrorKind::LogCopyInvalid` → `SyncFailureKind.logCopyInvalid`, "History damaged"),
+  never a silent first load; `follow_relay` accepts it as well as a fork. `VaultKeys`'s
+  `Debug` shows only `ak` (L10).
+- **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
+  task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
+  leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,
+  secrets) record black. The recording shows whatever is on screen, other apps included: look only at Zafe.
+- **Envelope seqs** (`node::SeqCounter`): microsecond clock, but never below the last seq
+  this process issued (`LAST_SEQ`, shared by every counter). The WSL clock steps back by
+  ~1 s every so often (measured 2026-10-15) and phones correct theirs, and since the safety
+  words a member sends envelopes milliseconds before key generation: a fresh clock-only
+  counter then got 409 "replayed or reordered envelope". Two steps of one member can
+  still collide (the app and a background check, or the setup screen's 2 s poll and the
+  "They match" tap; over Tor each request takes its own circuit, so the later seq often
+  arrives first): every keygen, safety-word and signing-reply send goes through
+  `node::send_fresh`, which re-seals with a fresh seq on 409 (seen on a phone 2026-10-16
+  as "Couldn't start. Try again."; test `keygen_async::a_send_overtaken_...`). The setup
+  screen also runs one step at a time (`_step`).
+- **Relay connections are pooled in the app** (2026-10-16): the bridge makes every client with
+  `RelayClient::pooled` (one process-wide `reqwest::Client`), so a call reuses the previous call's TLS
+  connection; `RelayClient::new` (CLI, tests) builds its own, because pooled connections belong to the runtime
+  that opened them and tests start one per test. A new TLS connection to the hosted relay costs ~0.7 s; before
+  this every bridge call paid it (approve's `history` step was 1.26 s of 1.6 s on a phone). `load_log` skips the
+  extra catch-up read when a page is shorter than `relay::READ_PAGE` (500; the relay's page size, shared).
+  Same for lightwalletd: the bridge uses `wallet::connect_pooled` (one channel per endpoint, reused while its
+  Tor lease isn't revoked; `tor::request()` revokes them all, tested in `tor_policy.rs`); endpoint checks keep
+  `connect`. `sync_vault` skips the scan (`noscan` in timings) when `VaultWallet::needs_scan` says the server's
+  tip equals the wallet's and no scan range is left: the scan's round trips cost 1.2-2 s even with nothing new.
+  Proposing (and propose-again, the cancel sweep) does the same through `catch_up` in
+  `api/proposals.rs` (2026-10-16: each used to run a full `wallet.sync` first, ~1.9 s on a
+  phone, so "Building transaction..." felt slow); `propose` is timed in the report too.
+- **Independent requests run together** (2026-10-16, measured with Tor on: propose was 6.9 s): over Tor every
+  relay request is a new circuit stream + TLS (~1 s), so serial round trips add up. `load_state` reads the
+  relay's member list (when its 60 s check is due) alongside the log, `propose` checks the branch alongside
+  `load_state`, `approve_replacement` re-checks the words alongside it, `setup_step` reads the chain tip
+  alongside the membership step on "They match", the bridge's `check_recovery` runs `try_recover` and
+  `recovery_checks` together, and `sync_vault` reads the server and the log **before taking the wallet lock**
+  (a sync held it 6-7 s over Tor while a payment being proposed waited: 17 s on dev7). Refreshes answer
+  signing requests only on inbox news (`VaultActivity.inbox`), when the live watch isn't connected, or once
+  a minute (`providers/respond_policy.dart`); `respond` is ~2 s over Tor and used to run on every refresh,
+  and each log append triggers one. The timings log keeps its newest half when it passes 16 KiB (it used
+  to restart, and with Tor the `respond` lines pushed everything else out). A `tokio::join!` inside these deep async fns needs `Box::pin` or rustc hits
+  its query depth limit (as `load_log` did).
 - **Relay is blind**: it only sees public keys, ciphertext, metadata. Clients drop envelopes
   for another mailbox, from non-members, badly signed, or with non-increasing seq.
 - **Relay rollback and loss** (spec §6.3; `log_cache`, `node::{load_log, reseed_relay}`):
@@ -538,6 +734,14 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   named volume (Docker copies the image's `/data` ownership into a new named volume, so
   the entrypoint's chown isn't needed and `cap_drop: ALL` works); Docker-published ports
   bypass ufw, so publish nothing but Caddy's.
+- **Deploy access (active since 2026-10-11)**: testnet and mainnet have separate unix users
+  (`zafe-testnet`/`zafe-mainnet`) and keys (`RELAY_TESTNET_SSH_KEY` in `relay-testnet`,
+  `RELAY_MAINNET_SSH_KEY` only in `relay-mainnet`), each pinned to a forced command
+  `sudo -n /usr/local/sbin/zafe-deploy <network>` (`vps/zafe-deploy`, installed only by
+  `bootstrap.sh`; commands `sync|secrets|check|deploy`; files come from a `main` commit
+  downloaded by the server, never from CI). No docker group for CI. Migrated
+  2026-10-11 (old `deploy` user and `RELAY_SSH_KEY` gone, fallback removed). Change the wrapper by re-running bootstrap, not by deploying.
+  Residual: one host/Docker daemon, root code from `main`; see `docs/audit-scope.md` §10.
 - **Hosted relay (mainnet, prepared 2026-10-07, not deployed)**: `relay.zafe.cash`, same
   VPS, compose profile `mainnet` (`relay-mainnet`, `backup-mainnet`, `litestream-mainnet`
   to S3-compatible storage, `restore-mainnet` for an empty volume), site block
@@ -547,14 +751,18 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (manual, environment `relay-mainnet` with required reviewers): it promotes the digest
   testnet runs (record + `min_soak_hours`, build provenance verified); never build or
   deploy mainnet from a push. A compose variable without a default breaks the file even
-  when its profile is off: mainnet variables have defaults. Capped beta: relay
-  `ZAFE_RELAY_MAX_VAULTS` (507 + `zafe-quota: capacity` → `RelayClientError::AtCapacity`
-  → `ZafeErrorKind::RelayAtCapacity`) and the app's `core/config/beta.dart` (beta label
-  and per-vault cap on mainnet builds, `ZAFE_BETA`, `ZAFE_BETA_CAP_ZAT`).
+  when its profile is off: mainnet variables have defaults. Beta = label only, **no cap**
+  (decided 2026-10-07: no relay vault-count limit, no per-vault fund limit; the per-IP
+  and per-key creation limits stay as anti-abuse): the app's `core/config/beta.dart`
+  (`ZAFE_BETA`, default on for mainnet builds).
   `kMainnetRelayUrl` = `https://relay.zafe.cash`. Steps only the user can do:
   `infra/relay/README.md` "Mainnet"; audit scope: `docs/audit-scope.md`.
 - **Public testnet lightwalletd**: `https://testnet.zec.rocks:443` (Ironwood-aware;
   Ironwood live on testnet since block 4,134,000). Mainnet: `https://zec.rocks:443`.
+- **Killing `cargo` leaves its `rustc` children running** (they kept the machine at load 20 for 45 min,
+  2026-10-16): stop a build with Ctrl-C/`TaskStop`, or kill the `rustc` pids too. Run one cargo command at a
+  time; `nice -n 15 cargo ... -j 4` keeps the machine usable. Never `pkill -f` a pattern that appears in
+  your own command line: it kills the shell running it.
 - **A `CARGO_TARGET_DIR` shared between worktrees races** when their workspace crates
   differ: path crates hash relative to the workspace root, so every worktree writes the
   same `libzafe_proto-<hash>.rlib` and a concurrent build can hand yours another
@@ -587,8 +795,37 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   must equal `background.window` (#080B0B / #F1F5F5), and `app/tool/illustrations/
   preview_test.dart` hardcodes the window colours too: update all three together (plus
   `app/tool/brand/render_test.dart`, `emblem_render_test.dart` and the launch colours).
+- **Animated art** (2026-10-16): a scene the app animates lists its layers in `scenes.py`
+  `LAYERS`; `scenes.py <scene>` also writes `assets/illustrations/layers/<scene>_<layer>_<theme>.svg`
+  on the scene's canvas (each moving part drawn in its rest place). The widget stacks them, each in
+  a `RepaintBoundary`, and only transforms them (no re-rasterizing). First: `KeyShardsArt`
+  (`key_shards`, the key screen): the shards drift, then close into the key's outline when keygen
+  finishes and the backup prompt follows. They **stop short of touching** (`_gap`): the whole key
+  never exists, so the art must not show it whole. Offsets are shared with `SHARD_OFFSETS`. Second:
+  `SentArt` (`sent_slot`, layers bg/glow/fore/coin) + `CoinFountain` (2026-10-16, after researching Google
+  Wallet's M3 payment animation, CRED's "Paid" check, Apple's motion guidance): **the climax is at the status
+  badge**, the one focal point (`MobileTransactionProgressBadge`: the sending circle squeezes, the gold circle grows
+  from the centre with a spring, the check draws in, a thin gold wave; a wide filled ripple flooded the screen and a
+  teal-to-gold colour fade went through olive). `successEffect` (the fountain) sits behind the badge: coins tumble
+  face-on (|cos| squash, small tilt: tilted perspective coins read as leaves), launched low and wide so they fall away
+  past the words, not back up into the vault. Coins on trails move with `u` **linear in time**: a quadratic curve
+  walked steadily is a true gravity arc, easing made them less physical (and bunched them in the slot). While sending,
+  the slot breathes; once sent no coin leaves, those in the air fade within 0.6 s (a phone recording showed them
+  drifting on through "Sent!", pulling the eye from the badge) and the light dims. Words change after the
+  pop (`AnimatedSwitcher`, halves never overlap), in a block that never shrinks (`_KeepTallest`) so the badge never
+  moves. Review whole-screen frames: `flutter test tool/screens/sent_moment_render_test.dart`. Third: `WelcomeArt`
+  (`welcome_vault`, 2026-10-16, after several rounds): the still already tells the 3-of-5 story, so **only the hand
+  wheel moves**, worked by hand: uneven pushes (20-50 deg over 0.6-1.1 s, a 7% give-back), uneven pauses
+  (sometimes two pushes close together), nothing drawn between them. The gold blooms in place now and then (2.3 s:
+  0.9 up, 0.8 held, 0.6 down; ~15% brighter, measured; every ~7.5 s), after Vizor's welcome video (chest glow ~2.3 s
+  of light every 3.8 s at +21%, measured from `assets/animations/mobile_welcome.mp4`). Tapping the door
+  (`WelcomeDoorTap`, a translucent target above the screen's scroll view, which otherwise takes every touch) gives a
+  full turn with a haptic tick. Rejected along the way: a 30 deg nudge every 7 s (unnoticed), a looping 3.2 s unlock
+  with keys, arc, wheel, bolts, shake and ripple (too much), a band sweeping across the door (loud and fast even at
+  4.5 s / 8%). The hero's gradient overlay is `IgnorePointer`. Clamp curve inputs (`(u - a) / b` can exceed 1 by
+  rounding; `Curve.transform` asserts).
 - Art is also used outside onboarding: backup/export/restore banners, the sending screen's
-  full-page background (`IllustrationBackground`), the Activity empty state.
+  full-page background (`SentArt`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":
   deep verdigris #004A46 tile, a block split by a Z-shaped channel into a pale #D9F5F2
   upper piece and a #51DDD2 lower piece, geometry = `marks.js` `seam()`; flat colours
@@ -612,6 +849,17 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   launch's splash. Android < 12 still follows the OS theme; on iOS the same channel sets `overrideUserInterfaceStyle` on the windows (the launch screen still follows the OS).
   Check resources without a Gradle build: `aapt2 compile --dir res` + `aapt2 link` against
   `platforms/android-36/android.jar`.
+- **Small phones and large text** (checked 2026-10-16): `flutter test
+  tool/screens/size_sweep_test.dart` renders the newer screens and sheets at 320x568 to
+  412x915 and text scales 1.0/1.3/2.0 and fails on any overflow; on the emulator use
+  `adb shell wm size 720x1280 && adb shell wm density 320` (360x640 dp) and `adb shell
+  settings put system font_scale 2.0` (reset with `wm size reset`, `wm density reset`,
+  font_scale 1.0). A debug build records every overflow in `files/diagnostics/crashes.log`
+  (`adb shell run-as xyz.zafe.zafe cat ...`), which also covers capture-protected screens.
+  Rules learned: `AppButton` labels shrink to fit a bounded width; `MobileListRow` puts the
+  value under the label at text scale >= 1.5; sheets with prose use `constrainBody: true`
+  and a scrolling body; full-screen layouts with spacers use LayoutBuilder +
+  SingleChildScrollView + ConstrainedBox(minHeight) + IntrinsicHeight (Welcome).
 - **Screen previews without a device**: `flutter test tool/screens/home_render_test.dart`
   (vault card, Home buttons, notice card, activity rows, tab bar → `home_{dark,light}.png`)
   and `flutter test tool/screens/proposal_render_test.dart`
@@ -628,10 +876,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
 
 ## Regtest (infra/regtest)
 
-- **Regtest is `ths`** (thus-spoke-zakura, pinned `THS_VERSION` in `up.sh`, currently 0.3.0:
-  Zakura 1.6.0 + its lightwalletd, NU5..NU6.3 at height 1), so our tests also exercise ths
+- **Regtest is `ths`** (thus-spoke-zakura, pinned `THS_VERSION` in `up.sh`, currently 0.4.0
+  (2026-10-19): Zakura 1.6.0 + its lightwalletd, NU5..NU7 at height 1, so `regtest_network()` sets
+  `nu7` to 1 too; the test fixtures' `common::nu6_3_network()` stays NU6.3 for fixed PCZTs), so our tests also exercise ths
   and catch its bugs. Keep the pin on the latest ths release. Install:
-  `curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zcashlabs/thus-spoke-zakura/main/install.sh | THS_VERSION=0.3.0 sh`
+  `curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zcashlabs/thus-spoke-zakura/main/install.sh | THS_VERSION=0.4.0 sh`
   (to `~/.local/bin`; `THS=/path/to/ths` overrides). `up.sh` refuses another version.
 - `up.sh` runs `ths --name $ZAFE_REGTEST_NAME start --no-open --port-offset
   $ZAFE_REGTEST_PORT_OFFSET` under `setsid nohup` (it stays in the foreground and deletes
@@ -639,8 +888,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   "is ready" (~10 s). Ports: RPC 18232, lightwalletd 9067, dashboard 32805, each + offset
   (multiple of 10, at most 32730). Offsets in use: harness 0, `regtest_e2e` 30000,
   `bridge_e2e` 30100, `m0-e2e.sh` 30200. `down.sh` sends SIGINT, then `ths stop`.
-  Gotcha (0.3.0): `ths stop` deletes the environment but leaves the foreground launcher
-  running; only SIGINT ends it (fix: thus-spoke-zakura PR #146, issue #145).
+  Since 0.4.0 `ths stop` also ends the foreground launcher (our PR #146). `ths start --detach`
+  (our PR #308, open) would replace the `setsid nohup` once released. Seen once on 0.4.0: `ths start`
+  failed with "docker start -a ...: timed out" in its init step; a re-run passed.
 - **Funding**: ths mines to its own wallet, so vaults are funded from the faucet:
   `fund.sh <ua> [notes]` = `notes` x 5 ZEC (the faucet's maximum) to the Ironwood receiver,
   then 12 blocks so they pass the default confirmation policy. One note per proposal that
@@ -869,8 +1119,9 @@ Learned while studying it:
   creator can be replaced). Anything membership-related must use the replayed state
   (`members_by_pk(state)`, `frost_id_of(&state.descriptor, ..)`), never
   `material.descriptor` (which the app refreshes from `ProposalList.updated_material`, and
-  `load_state` only compares on group key + UFVK). Flow: new phone shows a recovery code +
-  8-digit safety code (`RecoveryRequest`), co-signers log `ReplaceApproval` (signature over
+  `load_state` only compares on group key + UFVK). Flow: new phone shows a recovery code
+  (`RecoveryRequest`); each approving co-signer runs the **safety words** check with it
+  (below), then logs `ReplaceApproval` (signature over
   `relay::ReplaceApproval`, reused for the relay), at t the seat moves (votes/shares/groups/
   name re-keyed; interactive approvals voided; pool + backup attestation dropped); the
   relay swaps keys on `/v1/mailbox/replace` with t signatures (t recorded by the creator via
@@ -901,9 +1152,28 @@ Learned while studying it:
   `seen.json`; not to the old key or members who approved; tap opens Signers), and
   background checks save `updatedMaterial`. Live-tested on the emulator
   2026-10-01 both ways (app as helper, app as the new phone) with CLI members
-  (`zafe recover`, `zafe seat approve|repair`). Tips: `/recover` is a SecureScreen
+  (`zafe recover`, `zafe seat words|approve|repair`). Tips: `/recover` is a SecureScreen
   (screenshots are black: read it with `agent-device snapshot`); the code is not shown as
   text, so "Copy code", then paste it into Join's field to read it.
+- **Seat recovery safety words** (2026-10-15, audit M2; replaced an 8-digit code of the new
+  keys, which a swapped recovery code could match in seconds): commit, challenge, reveal
+  through the relay (`POST /v1/recovery/put|read`, `RecoveryPut` signed; new routes, no
+  `RELAY_API` bump, table `recovery_values` added by `CREATE TABLE IF NOT EXISTS`, so no
+  `RELAY_DB` bump; first value per (subject, signer, kind) stays, at most
+  `MAX_RECOVERY_CHALLENGES` = 16 challenges per new phone, pruned after 7 days; the relay
+  stores the canonical signed bytes, clients verify). The new phone
+  (`repair::recovery_checks`, run by the bridge's `check_recovery` poll) publishes a
+  commitment to its secret, reveals it once a challenge exists, and lists the words per
+  co-signer key (`RecoveryProgress.checks`). A co-signer (`repair::new_phone_words`, bridge
+  `new_phone_words`, polled by the Replace screen) challenges with a value derived from a
+  signature over (subject, commitment), refuses a commitment that changed after it
+  challenged, checks the reveal and returns 4 words (`sas::recovery_words`).
+  `approve_replacement` takes the confirmed words and recomputes them (reading them and the
+  log at once). The new phone's `/recover` screen checks every 2 s: co-signers wait on it. Both secrets are
+  signature-derived (nothing stored). Every approver does its own check, also when
+  approving from the log's pending move. CLI: `zafe seat words <code>` then `zafe seat
+  approve <old> <code> --words "..."`; `zafe recover` prints the words as they arrive. An
+  older relay answers 404 → "the relay doesn't support safe seat recovery yet".
 - **Backup health** (spec §12.2): `VaultEvent::BackupVerified { epoch, at }` (only for the
   current descriptor epoch; latest per member in `VaultState.backups`), written by
   `node::attest_backup` (once per epoch; bridge `attest_backup`, CLI `zafe backup`).
@@ -925,6 +1195,10 @@ Learned while studying it:
   label wins, then the shared name, then the short key. Tiles stay key-derived, so a
   member calling themselves "Bob" still shows their own tile and key. "Your name" is the
   sheet behind your own row on the Signers tab; the CLI has `zafe name`.
+- **Name in setup** (2026-10-16): Create and Join take "Your name" (`core/storage/my_name.dart`, last one
+  in prefs `zafe_last_my_name` prefills); it can't be published before the vault exists (a `Name` is a log
+  entry), so it waits in `<vaultDir>/my_name_pending.txt` and `ProposalsNotifier._publishPendingName` sends it
+  on the first refresh with material, unless a shared name for this member exists already.
 - **CSV recipients import** (`features/send/recipients_csv.dart`): pure parser with the
   bridge validators injected (`checkAddress` for `kZafeNetwork`, `parseZec`,
   `memoLength`), so it's unit-tested without Rust. All-or-nothing.
@@ -932,6 +1206,49 @@ Learned while studying it:
   `vault_viewing_key(material)` derives the UFVK and refuses if it differs from the
   descriptor's `ufvk` (`Verification`).
 - Pushed-page titles are 24 px and left-aligned (room for ~20 characters); keep them short.
+- **Copy and layout rules (user, 2026-10-16)**: minimal text: delete lines that restate the screen,
+  show exact values (bridge `estimate_fee`, never "at least"), explanations only in help sheets.
+  Check UI on a 360x640 phone at 1.0 and 2.0x text (`adb shell wm size 720x1280; wm density 320;
+  settings put system font_scale 2.0`, reset after) and run `flutter test
+  tool/screens/size_sweep_test.dart` (fails on any overflow); test proposer **and** approver flows.
+  No dead ends: "Sent!" returns Home by itself (`kSentHoldTime`), reject/cancel/non-final approve
+  go back; Tx IDs open ZecBlock (`core/config/block_explorer.dart`).
+- **Actions and feedback (2026-10-16, polish pass)**: a tap that takes a moment or can fail
+  uses `core/widgets/action_button.dart` `ActionButton` (spinner inside, optional
+  `busyLabel`, `doneLabel` check, shake + inline error via `zafeErrorMessage`; throw
+  `ActionCancelled` to back out silently, `UserFacingError` for app-made messages). **There
+  are no toasts** (the widget was deleted 2026-10-16): the screen change or the button is the
+  feedback; `CopyButton`/`TxIdRow` turn their icon into a check. Events not caused by a tap (a
+  payment link expired, sync moved server, a history export failed) go to `appNoticesProvider`,
+  shown as dismissible cards by `AppNoticeCards` on Home, Welcome and Activity. Unlock failures
+  are shown by the system prompt itself. Switches use
+  `AppSwitch` (with `busy`), small exclusive choices `AppSegmented` (icons). Buttons press
+  to 96% (`AppButton`). Payments that need your vote open as a request
+  (`PaymentRequestView`, Approve/Decline pinned; the request stays on screen through
+  "Approved" while it leaves: `_holdRequest`). Auto-send is always on (the toggle is gone;
+  `SendPrefill` has no `autoSend`). Confirmation sheets only for what can't be undone
+  (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline, backup
+  "Later" just leaves.
+- **The proposer approves when proposing** (2026-10-16, user's call after the testnet dry run, as Safe does):
+  `send_screen._propose` runs bridge `propose_and_approve` under one unlock ("Propose and approve this payment"):
+  `node::propose_loaded` then `node::approve_after_propose` with the log state the proposal left (2026-10-17, one
+  log read fewer), returning the proposal list so the page opens at once; a failed approval comes back as
+  `approve_error` and leaves the payment open for this member's approval (the request page then says "You proposed
+  sending"). Proposing reads lightwalletd's tip and branch in one `GetLightdInfo` (`tip_on_current_branch`)
+  alongside the log, before the wallet lock (`propose_inner`). Before, the proposer's own payment came back as a request with Approve/Decline. The CLI still
+  proposes and approves separately.
+- **Needs you** (Home, 2026-10-16, `features/home/needs_you.dart`): payments where `needsMyAction`
+  (`proposal_status.dart`; the same rule counts notifications) and seat moves this member can approve, as
+  `RequestCard`s (amount first with a gold ticker, then who and the message; a tonal full-width button
+  naming the decision: "Approve or decline" opens the request, never approves from Home since the card
+  lacks the address; "Send now" sends after the unlock; "Compare safety words" for seat moves) in an
+  `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms); from 3 requests they stack (`_FanStack`:
+  the first card in full, two edges under it, "N waiting"); tapping the top card or the edges fans them out
+  (300 ms), leaving for a payment folds it back. Decline is optimistic (`declinesProvider`: the card leaves on
+  the tap, a failure brings it back with the reason). Test: `test/needs_you_stack_test.dart`. Tip: phone
+  screenshots are scaled to 900 px wide; multiply by the stated factor before `adb shell input tap`, above every notice except "Money left
+  without approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
+  wants attention asked for only when the member must act.
 - **Privacy mode is app-wide** (`privacyModeProvider`, persisted in prefs, read in the
   bootstrap): every amount goes through `amountWithTicker(text, hide:)`. Vizor's
   `hideAmountIfPrivacyMode` only appends the unit to the *mask*, so passing a bare amount
@@ -961,7 +1278,9 @@ Learned while studying it:
   (`zafe_zec_usd_v1`). Live tests: `price::tests::live_direct_price` and the Tor live test.
 - **In-app updates** (`services/app_update.dart`, `in_app_update` **4.2.5**: 5.x needs
   Flutter 3.44): Android Play installs only; checks at launch/unlock/resume (6 h apart).
-  Priority ≥ 4 (set per release in the Play Console/API) = immediate full-screen update,
+  Priority comes from the release's class (`docs/releases/<version>.md`: essential = 5,
+  optional = 2; set by `release-mainnet.yml` and `play-promote.yml`, never by hand: the Console
+  can't set it). Priority ≥ 4 = immediate full-screen update,
   except while a payment is sending; otherwise a background download, then a Home
   "Update ready" card whose Restart is refused mid-send. Debug/sideloaded installs get a
   Play error and nothing shows. Can only be tested end to end with a Play install
@@ -970,10 +1289,13 @@ Learned while studying it:
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:
   iOS handles the same channels in `ios/Runner/AppDelegate.swift` (`ZafeNative`): it can't block screenshots, so `ZafePrivacy` covers the app while the screen is recorded or mirrored on a secret screen (`UIScreen.isCaptured`) and always in the app switcher. Dart swallows `MissingPluginException` where there is no handler (tests). Check with `adb shell dumpsys window windows | grep SECURE`.
-- Settings (`/settings` tab; the vault switcher's "Vault settings" goes there too): vault info
-  (name renames locally), signer key,
-  hide amounts, theme (`themeModeProvider`, persisted), endpoints (editable, see above),
-  open-source licenses (fonts + NOTICE registered in `main.dart`).
+- Settings (`/settings` tab) is app-only since 2026-10-16: Security (lock app), Privacy (hide
+  amounts, Tor, diagnostics), System (theme, payment sounds, relay, Zcash server, licenses; fonts +
+  NOTICE registered in `main.dart`). Vault things live in **Manage vaults** (`/vaults`,
+  `features/vaults/manage_vaults_screen.dart`, opened from the vault sheet `showVaultSwitcher`: the
+  open vault large, other vaults with a dot when something waits, [Manage vaults] [+]); each vault's ⋯
+  (`vault_actions.dart` `showVaultActions`) has Rename, Back up, Viewing key, How it's protected, Remove
+  (switching to that vault first where needed).
   "How it's protected" (`/vault-protection`, `VaultProtectionBody` takes plain data;
   preview `flutter test tool/screens/protection_render_test.dart`): the approval rule, full
   view access, what losing too many keys means, and the post-quantum caveat (spec §2.3).
@@ -995,13 +1317,60 @@ Learned while studying it:
   `ZafeErrorKind::{Network, Tls, NetworkTimeout, ServerBehind, WrongNetwork,
   WalletDatabase}` plus `ZafeError.endpoint` (`Relay`/`Lightwalletd`/`None`). The relay
   client now has a 10 s connect / 60 s request timeout (it had none).
+- **Sync status animation** (2026-10-12): the shimmer + breathing glow in `MobileTopNav` is Vizor's
+  widget, but it ran an `AnimationController` (a frame per vsync, ~120/s on a 120 Hz phone) for the
+  whole sync. Profiled with `flutter run --profile`/`flutter attach` + the VM-service timeline on a
+  Nothing phone: every frame costs ~5 ms of raster time (Impeller re-encodes the whole screen), so a
+  continuous animation held the raster thread at 70-78% of a core. Bisecting the Home scene (vault
+  card, tab-bar backdrop blur, scroll fade) showed **no single widget is the cost**: with all three
+  hidden a frame still cost 3.3 ms, and the shimmer/glow added only ~1 ms. So the fix is the frame
+  rate, not the widget: a `Timer` steps the sweep and glow every 60 ms (~16/s,
+  `_SyncStatusMotion.frameInterval`), no ticker, so the engine draws ~16 frames/s: raster ~15% of a
+  core (measured), no cap needed. Any new indeterminate animation should do the same (or be short):
+  Impeller has no partial repaint, so anything that animates redraws the whole screen. Tests:
+  `test/mobile_top_nav_motion_test.dart` (no frame scheduled between ticks). **First-sync stall**
+  (separate cause): see the wallet-key note under "Wallet DB is encrypted"; the steps before the Rust
+  call time out in 45 s and a slow/stuck sync is recorded in the report as `slow-sync` / `sync` entries.
+- **Sync status**: "First sync..." while the first sync of a vault on this device runs (`VaultState.firstSync`:
+  no saved sync time); the
+  sync sheet says "First sync" / "Syncing" while a sync runs (it used to say "Vault in sync"
+  whenever there was no error). While "Use Tor" is on the status line and its glow are Tor's
+  purple (`AppSyncColors.torText/torGlow`), unless Tor failed (error colour). Settings'
+  version comes from `--dart-define=ZAFE_VERSION` (both release workflows pass it).
+- **Secure storage plugin** (2026-10-12): `flutter_secure_storage` 11.2.0 (was 10.3.4; we have used the 10.x
+  default ciphers since the first commit, so no data used the algorithms v11 dropped). Why: 10.x probed
+  for old `EncryptedSharedPreferences` data on its first call in every engine (the "migrated" flag is only
+  set after a real migration), which threw "decryption failed" at each start (logged by the plugin, then it
+  fell back to the normal path), once per engine (app + background), on the one handler thread every storage
+  call queues behind; v11 removed that backend. Upgrade needed `file_picker` 13.1.0 and `share_plus` 13.3.1
+  (the plugin's Windows part needs `win32` ^6; a `win32` override breaks `flutter test`, which compiles
+  `file_picker`'s Windows code on the host). `file_picker` 13: `FilePicker.pickFile()` +
+  `PlatformFile.readAsBytes()` replace `pickFiles(withData: true)`. **Verified on a phone**: an app on
+  10.3.4 holding a vault was updated in place (same signing key) to 11.2.0: same vault, address and signer
+  key, zero `FlutterSecureStorage` errors, then a new vault (write path, keygen, first sync) worked. Repeat
+  that in-place test whenever the plugin changes: it guards the key shares.
+- **Strong unlock on Android** (2026-10-15, user's decision): `local_auth` always offers
+  weak (class 2) biometrics such as camera face unlock, so Android uses
+  `StrongDeviceAuthenticator` (`xyz.zafe/device_auth` in `MainActivity`): `BiometricPrompt`
+  with `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` on Android 11+, the `KeyguardManager` PIN
+  screen alone below (the two can't be combined there). Error names are local_auth's, so
+  `DeviceAuth.outcomeForError` maps both; iOS keeps `LocalDeviceAuthenticator`
+  (`platformAuthenticator()`). Same activity: `filterTouchesWhenObscured` on the decor
+  view (overlay tapjacking), and `xyz.zafe/clipboard`: `copySecret` (invite link, viewing
+  key, backup text) flags the clip sensitive and clears it after 60 s if unchanged.
+  `clearShareCache` deletes `<cache>/share_plus` at launch (share_plus keeps the last
+  shared file, e.g. a backup, until the next share). Memos and payment-link labels go
+  through the bridge's `visible_text` (hidden/bidi characters shown as U+FFFD); "Proposed
+  by" and notifications add the short key after a member's name. Release workflows now
+  fail without `ZAFE_LINK_HOST` (`zafe://` can be claimed by any app).
 - **Unlock gate** (spec §14; `core/security/device_auth.dart` pure logic behind a
   `DeviceAuthenticator`, `core/security/unlock_gate.dart` `confirmUnlock(context, ref,
   reason:)`, `providers/device_lock_provider.dart`): approving, Send now / Collect
   signatures & send / Try again, proposing, exporting a backup and removing a vault call
-  `if (!await confirmUnlock(...)) return;` before acting. Rejecting doesn't. The setting
-  "Require unlock to approve" (`zafe_require_unlock`, default on, read in the bootstrap)
-  needs an unlock to turn **off**. Biometrics **or** device credential. No screen lock
+  `if (!await confirmUnlock(...)) return;` before acting (or throw `ActionCancelled` from an
+  `ActionButton` action). Rejecting doesn't. **Always required** (2026-10-16: the "Require
+  unlock to approve" setting was removed; the prompt's reason text is the confirmation,
+  e.g. "Approve this payment. It can't be undone."). Biometrics **or** device credential. No screen lock
   (e.g. the emulator) → the action goes ahead, a one-time toast (`zafe_no_screen_lock_warned`)
   and a permanent note in Settings; unknown errors fail closed. Background checks (push,
   WorkManager) answer signing requests and finish auto-sends **without** a prompt: they only
@@ -1068,8 +1437,11 @@ Learned while studying it:
   restores. Restore writes the names to `names.json` (cleaned with `MemberNames.clean`,
   non-hex keys dropped) before the vault becomes active. Import checks
   the identity is a vault member and refuses KDF params below 64 MiB / 3 passes (or absurdly
-  high). Text form `zafe-backup-v1:` + base64url. Passphrase: 12+ words or zxcvbn 4
-  ("Suggest" = 12 BIP-39 words). The app prompts right after key generation
+  high). Text form `zafe-backup-v1:` + base64url. Passphrase: since 2026-10-16 the app
+  always generates it (12 BIP-39 words, 128 bits; `ExportScreen`, words shown once, "Copy words" through
+  `copySecret`) and the member types 3 random words back before export (the old "Suggest" filled both fields,
+  so nothing checked the words were saved). Restore takes the words or an old typed passphrase (`zxcvbn` 4 still
+  enforced in Rust for those), trying the input exactly, then trimmed/lowercased/single-spaced. The app prompts right after key generation
   (`/backup-prompt`) and shows a home reminder until `summary.json` has `backedUp`
   (set by export, and by restoring). CLI: `zafe backup --passphrase …` prints the text form.
   Testing tip: this emulator has no shell clipboard; paste into a field (e.g. Settings
@@ -1118,7 +1490,7 @@ Learned while studying it:
   don't conclude "not delivered" too early: check `adb logcat | grep FLTFireMsg`. The
   relay logs `push: sent` at debug level (`RUST_LOG=zafe_relay=debug`).
 - **Invites** (`features/onboarding/invite_link.dart`, pure and unit-tested): raw form
-  `zafe-invite-v1:<hex postcard>` (~250 chars; URL-safe, asserted in `node::tests`), link
+  `zafe-invite-v2:<hex postcard>` (~250 chars; URL-safe, asserted in `node::tests`), link
   form `zafe://join?invite=<raw>`, or `https://<ZAFE_LINK_HOST>/join#<raw>` when the build
   has the dart-define (invite in the **fragment**, so the landing site's server never sees
   it; only that exact host, port 443, no query). Both forms are always accepted; the https
@@ -1144,7 +1516,7 @@ Learned while studying it:
   `inviteLinks` and `paymentLinks` (its stream also delivers the launch link); `app.dart` opens
   `/welcome` + push `/join?invite=` (calling `beginAddVault` when a vault is active) and
   defers while keys are being made or on `/backup-prompt`. Test on a device with
-  `adb shell "am start -a android.intent.action.VIEW -d 'zafe://join?invite=zafe-invite-v1:...'"`
+  `adb shell "am start -a android.intent.action.VIEW -d 'zafe://join?invite=zafe-invite-v2:...'"`
   (quoted twice: the device shell splits it again; cold start: `adb shell am force-stop
   xyz.zafe.zafe` first).
 - **Website** (`infra/site/`, Astro 7, static): a calm home page `/` (no JS; structured
@@ -1174,7 +1546,7 @@ Learned while studying it:
   Cache headers live in `public/_headers` (`/assets/...` blocks; `vercel-output.sh`
   turns each into a Vercel route). The **static fallback** (no GPU, reduced motion, no
   JS) shows stills of the world rendered by `infra/site/stills.sh` (capture mode
-  `/showcase?still`; also writes the social image `og.png`); re-run it after changing the world
+  `/showcase?still`; also writes the social image `og-mainnet.png`); re-run it after changing the world
   or the story. `public/assets/boot.js` adds `html.js` before the first paint so the
   world's visitors never fetch the stills; anything only for the fallback goes under
   `:is(html:not(.js), html.stills)`.
@@ -1189,7 +1561,7 @@ Learned while studying it:
   IndexNow (`indexnow.sh`, key file `public/<key>.txt`, public by design; failures only
   warn).
   Head tags live in `Base.astro` (props `title`, `description`, `socialTitle`, `jsonLd`,
-  `noindex`); social image `/assets/og.png` (1200×630) in `config.ts`. `/join` stays
+  `noindex`); social image `/assets/og-mainnet.png` (1200×630) in `config.ts`. Chat apps and X cache a link's card image by its URL, so when the picture changes, give the file a new name (it was `og.png`, which kept showing the testnet card). `/join` stays
   `noindex`, out of the sitemap and **not** disallowed in robots.txt (Google must fetch
   it to see the noindex). JSON-LD on `/` (Organization, WebSite, MobileApplication,
   FAQPage from the same `faq` array as the page) is the one inline `<script>`
@@ -1265,6 +1637,46 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
 
 ## Upstream status (check before relying on it)
 
+- **NU7 (found 2026-10-12, top mainnet risk)**: NU7 activated on **testnet at block 4,465,026 (2026-10-04)** with
+  consensus branch id **`0x77190AD9`** (ZIP 259); **mainnet is targeted for 2026-11-05** (decision due 2026-10-20). Our
+  pinned stack (`zcash_protocol` 0.10.6, `zcash_primitives` 0.30.1, `zcash_client_backend` 0.24.0, `pczt` 0.9.3, `orchard`
+  0.15.5) only has NU7 behind `--cfg zcash_unstable="nu7"`, with **no activation heights** and a **placeholder
+  branch id (`0xffff_ffff`)**: every send is built with NU6.3's `0x37a5165b`, so a NU7 node rejects it ("transaction uses
+  an incorrect consensus branch id"; seen on testnet: proposal verified, approved by both signers, then
+  `broadcast rejected`; nothing is sent, funds don't move). **Mainnet works until activation** (checked
+  `cargo run -p zafe-core --example branch_check`: mainnet server branch = ours `37a5165b`; testnet server `77190ad9`).
+  Needed before 2026-11-05: move to the librustzcash pre-release train that carries the final NU7 branch id and
+  heights (`zcash_protocol` 0.11.0-pre, `zcash_primitives` 0.31.0-pre, `zcash_client_backend` 0.25.0-pre, `pczt`
+  0.10.0-pre, `orchard` 0.16), check what NU7 changes for us (v4 txs disabled, 25 s blocks, NSM fee recycling /
+  ZIP 233 vs our "fee must equal ZIP 317" check in `verify`, expiry-in-blocks windows, wallet DB migrations),
+  re-run regtest/bridge e2e (`ths` must run NU7) and the testnet end-to-end send, then ship a mainnet release
+  that users install before activation. Until then testnet sends can't be tested; use regtest.
+
+- **NU7 port (branch `nu7-migration`, 2026-10-12; merged into `main` as 91d600f)**: orchard 0.16, pczt 0.10.0-pre.1,
+  zcash_primitives 0.31.0-pre.1, zcash_protocol 0.11.0-pre.0, zcash_keys 0.17.0-pre.1, zcash_client_backend
+  0.25.0-pre.1, zcash_client_sqlite 0.23.0-pre.1, zip321 0.10.0-pre.1, zcash_address 0.14.0-pre.1,
+  incrementalmerkletree 0.9, shardtree 0.8. These carry the real NU7 branch id `0x77190AD9` and testnet height
+  4,465,026; **mainnet's NU7 height is still `None`** in them (a later pre-release will set it; if none carries
+  it by the release date, set it ourselves). Changes it forced: the Zcash APIs take `rand_core` 0.10 (a second
+  `rand10` for those calls only, `zafe_core::zrng`: stateless OS generator, `Clone` because the wallet migrator
+  needs it; our own crypto stays on 0.6); `UnifiedFullViewingKey::encode` is fallible; `from_receivers` and
+  `create_pczt_from_proposal` take extra args; `alpha` moves between pasta_curves 0.5 (reddsa/FROST) and 0.6
+  (orchard) through its canonical bytes; `LocalNetwork` has `nu7` (regtest: NU7 at height 1 since ths 0.4.0).
+  The ZIP 2005 vectors still pass, so key and address encoding did not change. v6 transactions stay valid under
+  NU7 (v4 is disabled); the ZIP 233 fee change is behind an unstable flag, so the ZIP 317 fee check is unchanged.
+  **`VaultWallet::open` now runs `init_wallet_db`**: it used to migrate only in `create`, which was harmless until a
+  library bump changed the schema ("no such table: transparent_spend_locator_map" on an old wallet DB). A failed
+  migration makes `exists` false and the bridge recreates the wallet. Checked on the old testnet CLI wallet.
+- **NU7 guards (2026-10-13)**: (1) `wallet::ensure_current_branch` (pure part `check_branch`) compares
+  lightwalletd's `consensus_branch_id` with `BranchId::for_height(params, tip)` and fails with
+  `WalletError::AppOutdated` -> `ZafeErrorKind::UpdateRequired` ("needs a newer version of Zafe"); called by
+  `node::propose` only, **not** by `check_server`, so an outdated app can still sync and show balances. (2) A
+  broadcast rejected with "consensus branch id" in the node's message maps to the same error. (3)
+  `wallet::proposal_expiry` cuts a proposal's expiry to the block before the NU7 activation height when that height
+  is known and falls inside the window (a transaction signed for the old rules can't be mined after the upgrade); with
+  no known height (mainnet, until a crate release or our own override has it) nothing changes. (4) The app turns
+  blocks into time with 75 s blocks before NU7 and 25 s after (`blocksToSeconds`, bridge `nu7_activation_height`).
+  A proposal that fails the device check (e.g. built for the old branch) can be cancelled by its author.
 - **Upstream gates cleared (2026-10-01, frost#1094, conradoplg)**: U1 (vaults derived per
   ZIP 2005 § 4.2.3 from our own `sk` agreement: change "very unlikely", "if you have your
   own system that will also work"), U5 (builder-chosen `alpha` fine; keep it secret) and U3

@@ -41,6 +41,9 @@ enum SyncFailureKind {
   /// The relay's log differs from the history this phone saw.
   relayForked,
 
+  /// This phone's own saved copy of the vault history doesn't verify.
+  logCopyInvalid,
+
   /// The relay's member list or threshold differs from the vault's.
   relayMembership,
 
@@ -81,6 +84,7 @@ class SyncFailure {
     SyncFailureKind.relayRolledBack => 'Relay lost data',
     SyncFailureKind.relayLostVault => 'Relay lost the vault',
     SyncFailureKind.relayForked => 'Relay not trusted',
+    SyncFailureKind.logCopyInvalid => 'History damaged',
     SyncFailureKind.relayMembership => 'Relay not trusted',
     SyncFailureKind.torConnecting => 'Connecting to Tor…',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
@@ -105,6 +109,7 @@ class SyncFailure {
     SyncFailureKind.relayRolledBack => 'The relay lost part of the vault',
     SyncFailureKind.relayLostVault => 'The relay lost the vault',
     SyncFailureKind.relayForked => 'The relay shows another history',
+    SyncFailureKind.logCopyInvalid => 'This phone\'s saved history is damaged',
     SyncFailureKind.relayMembership => 'The relay lists other members',
     SyncFailureKind.torConnecting => 'Connecting to Tor',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
@@ -117,65 +122,39 @@ class SyncFailure {
       'Neither the Zcash server nor the relay answers. Check this phone\'s '
           'internet connection. Zafe keeps trying.',
     SyncFailureKind.lightwalletdUnreachable =>
-      'Balances and payments can\'t update until the Zcash server (lightwalletd) '
-          'answers. It may be down, or its address in Settings may be wrong. Zafe '
-          'keeps trying.',
+      'Can\'t reach the Zcash server. Zafe keeps trying; if it lasts, check its address in Settings.',
     SyncFailureKind.relayUnreachable =>
-      'Proposals, votes and signatures travel through the relay, so they can\'t '
-          'update until it answers. It may be down, or its address in Settings may be '
-          'wrong. Zafe keeps trying.',
+      'Can\'t reach the relay, so payments and votes can\'t update. Zafe keeps trying; if it lasts, check its address in Settings.',
     SyncFailureKind.tls =>
-      'The server\'s certificate isn\'t trusted, has expired or names another '
-          'server, or the address uses https for a server without it. Zafe won\'t '
-          'connect until this is fixed. Check the address in Settings.',
+      'The server\'s security certificate isn\'t valid. Check its address in Settings.',
     SyncFailureKind.timeout =>
-      'The server accepted the connection but didn\'t answer in time. It may be '
-          'overloaded, or the connection is slow. Zafe keeps trying.',
+      'The server is too slow to answer. Zafe keeps trying.',
     SyncFailureKind.serverBehind =>
-      'The Zcash server is at an older block than this wallet already saw. It may '
-          'still be catching up, or follow another chain. Wait, or pick another '
-          'server in Settings.',
+      'The Zcash server is behind this wallet. Wait, or pick another server in Settings.',
     SyncFailureKind.wrongNetwork =>
       'The Zcash server serves a different network than this vault. Pick a server '
           'for the right network in Settings.',
     SyncFailureKind.walletDatabase =>
-      'This phone couldn\'t read or write the vault\'s wallet data. Your keys and '
-          'funds are safe: the wallet data can be rebuilt from the chain.',
+      'This phone couldn\'t read the vault\'s wallet data. Your keys and funds are safe; the data can be rebuilt.',
     SyncFailureKind.updateRequired =>
       'The relay or another member uses a newer version of Zafe. Update the app.',
     SyncFailureKind.relayOutdated =>
       'The relay runs an older version of Zafe than this app. Ask whoever runs it '
           'to update it.',
     SyncFailureKind.relayRolledBack =>
-      'The relay has fewer entries of the vault\'s history than this phone has '
-          'already seen, for example after it was restored from an older backup. '
-          'Zafe ignores what it says until the history is put back. Any member whose '
-          'phone has the full history can restore it.',
+      'The relay lost part of the vault\'s history, so Zafe ignores it. A member with the full history can restore it.',
     SyncFailureKind.relayLostVault =>
-      'The relay no longer knows this vault, for example after its database was '
-          'wiped. Your funds are safe. Any member can restore the vault on the relay '
-          'from the history kept on their phone. Payments that were waiting for '
-          'signatures are asked for again.',
+      'The relay lost this vault. Your funds are safe: any member can restore it from their phone.',
     SyncFailureKind.relayForked =>
-      'The relay shows a different history of this vault than this phone saw. '
-          'Zafe won\'t use it. Check with the other members whether the relay was '
-          'changed or restored, and don\'t approve anything from it until you know why. '
-          'If the other members agree the relay\'s history is the right one, you can '
-          'follow it: this phone drops its own copy.',
+      'The relay shows a different history than this phone saw, so Zafe won\'t use it. Check with the other members. If they agree the relay is right, you can follow it.',
+    SyncFailureKind.logCopyInvalid =>
+      'This phone\'s saved history is damaged. Your funds are safe. If another member\'s app works normally, follow the relay to replace it.',
     SyncFailureKind.relayMembership =>
-      'The relay\'s list of members, or the number of approvals it asks for, '
-          'doesn\'t match this vault. This can happen when someone restored a wiped '
-          'relay with the wrong details. Your funds are safe: the vault\'s members '
-          'come from its signed history, not from the relay. But the relay may lock '
-          'members out, so Zafe won\'t use it. Ask the other members, and agree on a '
-          'fresh relay in Settings.',
+      'The relay\'s members or approval rule don\'t match this vault, so Zafe won\'t use it. Your funds are safe. Agree on a new relay with the other members.',
     SyncFailureKind.torConnecting =>
-      '"Use Tor" is on and Tor is still connecting. Zafe sends nothing until it '
-          'is, and never connects directly instead.',
+      'Connecting to Tor. Nothing is sent until it connects.',
     SyncFailureKind.torFailed =>
-      '"Use Tor" is on but Tor couldn\'t connect, so Zafe sends nothing: no sync, '
-          'no approvals, no payments. Tor may be blocked on this network. Try again, '
-          'or turn off Tor in Settings.',
+      'Tor couldn\'t connect, so nothing is sent. Try again, or turn off Tor in Settings.',
     SyncFailureKind.other =>
       'Something went wrong while updating the vault. Zafe keeps trying.',
   };
@@ -187,7 +166,9 @@ class SyncFailure {
 
   /// This phone can drop its own copy of the history and follow the relay's (after the
   /// relay showed another history; the other members must agree the relay is right).
-  bool get canFollowRelay => kind == SyncFailureKind.relayForked;
+  bool get canFollowRelay =>
+      kind == SyncFailureKind.relayForked ||
+      kind == SyncFailureKind.logCopyInvalid;
 
   /// Whether changing a server address in Settings could fix it.
   bool get suggestsSettings => switch (kind) {
@@ -235,6 +216,7 @@ SyncFailure classifySyncFailure(Object error, {SyncEndpoint? fallback}) {
     ZafeErrorKind.relayRolledBack => SyncFailureKind.relayRolledBack,
     ZafeErrorKind.relayLostVault => SyncFailureKind.relayLostVault,
     ZafeErrorKind.relayForked => SyncFailureKind.relayForked,
+    ZafeErrorKind.logCopyInvalid => SyncFailureKind.logCopyInvalid,
     ZafeErrorKind.relayMembership => SyncFailureKind.relayMembership,
     ZafeErrorKind.torConnecting => SyncFailureKind.torConnecting,
     ZafeErrorKind.torFailed => SyncFailureKind.torFailed,
@@ -316,11 +298,7 @@ const followRelayTitle = 'Follow the relay\'s history?';
 
 /// What following the relay does, said before the user confirms.
 const followRelayWarning =
-    'This phone throws away its own saved copy of the vault\'s history and uses the '
-    'relay\'s instead. Anything only this phone saw is lost: votes, payments or '
-    'names the relay never had. Your keys and funds are not touched. Do this only '
-    'after the other members confirm the relay shows the right history. If you '
-    'are unsure, cancel.';
+    'This phone replaces its saved history with the relay\'s. Anything only this phone saw is lost. Your keys and funds are not touched. Do it only once the other members confirm the relay is right.';
 
 /// The toast after following: how many entries only this phone had.
 String followRelayDone(int dropped) => dropped == 0

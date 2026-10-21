@@ -11,11 +11,11 @@ import '../../core/errors/zafe_error_copy.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/zafe_paths.dart';
-import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
+import '../../providers/app_notices_provider.dart';
+import '../home/home_screen.dart' show AppNoticeCards;
 import '../../providers/endpoints_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/proposals_provider.dart';
@@ -24,6 +24,7 @@ import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
 import '../../rust/api/history.dart' as rust_history;
 import 'activity_feed.dart';
+import '../../core/storage/wallet_key.dart';
 
 /// Exports the vault history as CSV (spec §11.3) through the share sheet. It lists every
 /// payment and memo, so it asks for an unlock first.
@@ -41,7 +42,7 @@ Future<void> exportHistory(BuildContext context, WidgetRef ref) async {
     final csv = await rust_history.exportHistoryCsv(
       relayUrl: ref.read(endpointsProvider).relayUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       names: MemberNames.toSigners(
@@ -69,17 +70,15 @@ Future<void> exportHistory(BuildContext context, WidgetRef ref) async {
     } catch (_) {}
   } catch (e) {
     debugPrint('history export failed: ${describeError(e)}');
-    if (context.mounted) {
-      showAppToast(
-        context,
-        zafeErrorMessage(
-          e,
-          fallback: 'Couldn\'t export the history. Try again.',
-        ),
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
-      );
-    }
+    ref
+        .read(appNoticesProvider.notifier)
+        .show(
+          AppNotice(
+            id: 'history-export',
+            title: 'History not exported',
+            body: zafeErrorMessage(e, fallback: 'Try again.'),
+          ),
+        );
   }
 }
 
@@ -100,55 +99,54 @@ class ActivityScreen extends ConsumerWidget {
     );
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              MobileTopNav.back(
-                title: 'Activity',
-                trailing: AppButton(
-                  variant: AppButtonVariant.secondary,
-                  size: AppButtonSize.small,
-                  leading: const AppIcon(AppIcons.share, size: 16),
-                  onPressed: () => exportHistory(context, ref),
-                  child: const Text('Export'),
-                ),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            MobileTopNav.back(
+              title: 'Activity',
+              trailing: AppButton(
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.small,
+                leading: const AppIcon(AppIcons.share, size: 16),
+                onPressed: () => exportHistory(context, ref),
+                child: const Text('Export'),
               ),
-              Expanded(
-                child: MobileTopScrollFade(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(4, 12, 4, 112),
-                    children: [
-                      if (sections.isEmpty && proposals.loaded)
-                        const _EmptyCard()
-                      else if (sections.isEmpty)
-                        _MessageCard(
-                          text: proposals.error != null
-                              ? 'Couldn\'t load activity. Try again in a moment.'
-                              : 'Loading activity...',
-                          error: proposals.error != null,
-                        ),
-                      for (final (title, rows) in sections) ...[
-                        _SectionCard(
-                          title: title,
-                          children: [
-                            for (final item in rows)
-                              ActivityRow(
-                                item: item,
-                                hideAmount: hide,
-                                height: height,
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
+            ),
+            Expanded(
+              child: MobileTopScrollFade(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(4, 12, 4, 112),
+                  children: [
+                    const AppNoticeCards(gap: AppSpacing.s),
+                    if (sections.isEmpty && proposals.loaded)
+                      const _EmptyCard()
+                    else if (sections.isEmpty)
+                      _MessageCard(
+                        text: proposals.error != null
+                            ? 'Couldn\'t load activity. Try again in a moment.'
+                            : 'Loading activity...',
+                        error: proposals.error != null,
+                      ),
+                    for (final (title, rows) in sections) ...[
+                      _SectionCard(
+                        title: title,
+                        children: [
+                          for (final item in rows)
+                            ActivityRow(
+                              item: item,
+                              hideAmount: hide,
+                              height: height,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.md),
                     ],
-                  ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

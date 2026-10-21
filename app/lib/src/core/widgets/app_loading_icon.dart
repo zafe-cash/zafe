@@ -7,9 +7,7 @@ import '../theme/app_theme.dart';
 
 /// Animated loading icon used by `AppIcon(AppIcons.loader)`.
 ///
-/// The static frame is drawn as eight rounded spokes in the same 24x24
-/// coordinate space as the exported SVG. Animation keeps every spoke fixed in
-/// place and moves an opacity pulse from one spoke to the next.
+/// A comet arc around a faint ring (see [_LoaderIconPainter]).
 class AppLoadingIcon extends StatefulWidget {
   const AppLoadingIcon({
     this.size = AppIconSize.medium,
@@ -99,16 +97,11 @@ class _AppLoadingIconState extends State<AppLoadingIcon>
 }
 
 abstract final class AppLoadingIconTiming {
-  static const period = Duration(milliseconds: 900);
+  /// One turn of the arc.
+  static const period = Duration(milliseconds: 1000);
 
-  @visibleForTesting
-  static const spokeCount = 8;
-
-  @visibleForTesting
-  static const trailLength = 3.2;
-
-  @visibleForTesting
-  static const minOpacity = 0.28;
+  /// How much of the circle the arc covers (its tail fades out).
+  static const sweep = 0.72;
 
   @visibleForTesting
   static double progressForFrameTime(Duration frameTime) {
@@ -116,69 +109,68 @@ abstract final class AppLoadingIconTiming {
     final periodMicros = period.inMicroseconds;
     return (frameMicros % periodMicros) / periodMicros;
   }
-
-  @visibleForTesting
-  static double opacityForSpokeAtProgress(int index, double progress) {
-    final active = progress * spokeCount;
-    final trailDistance = (active - index + spokeCount) % spokeCount;
-    if (trailDistance > trailLength) {
-      return minOpacity;
-    }
-    final falloff = Curves.easeOutCubic.transform(
-      1 - trailDistance / trailLength,
-    );
-    return minOpacity + falloff * (1 - minOpacity);
-  }
 }
 
+/// A faint ring with an arc running around it: transparent at the tail, solid at its
+/// rounded head. Every loader turns in step (the frame clock, not its own start time).
+/// Still: the arc stops where it is.
 class _LoaderIconPainter extends CustomPainter {
   _LoaderIconPainter({required this.color, required super.repaint})
     : _animated = repaint != null,
       super();
-
-  static const _viewBoxSize = 24.0;
-  static const _center = Offset(12, 12);
-  static const _spokeRect = Rect.fromLTWH(10.5724, 1, 2.8552, 6.0464);
-  static const _spokeRadius = Radius.circular(1.4276);
 
   final Color color;
   final bool _animated;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final scale = math.min(size.width, size.height) / _viewBoxSize;
-    final dx = (size.width - _viewBoxSize * scale) / 2;
-    final dy = (size.height - _viewBoxSize * scale) / 2;
-    final paint = Paint()..style = PaintingStyle.fill;
-    final spoke = RRect.fromRectAndRadius(_spokeRect, _spokeRadius);
+    final side = math.min(size.width, size.height);
+    final stroke = math.max(1.6, side * 0.11);
+    final radius = side / 2 - stroke / 2;
+    final center = Offset(size.width / 2, size.height / 2);
+    final rect = Rect.fromCircle(center: center, radius: radius);
 
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = color.withValues(alpha: 0.14),
+    );
+
+    final turn = _animated
+        ? AppLoadingIconTiming.progressForFrameTime(
+            SchedulerBinding.instance.currentFrameTimeStamp,
+          )
+        : 0.0;
+    const sweep = AppLoadingIconTiming.sweep * 2 * math.pi;
     canvas
       ..save()
-      ..translate(dx, dy)
-      ..scale(scale);
-
-    for (var i = 0; i < AppLoadingIconTiming.spokeCount; i++) {
-      paint.color = color.withValues(alpha: _opacityForSpoke(i));
-      canvas
-        ..save()
-        ..translate(_center.dx, _center.dy)
-        ..rotate(i * math.pi / 4)
-        ..translate(-_center.dx, -_center.dy)
-        ..drawRRect(spoke, paint)
-        ..restore();
-    }
-
-    canvas.restore();
-  }
-
-  double _opacityForSpoke(int index) {
-    if (!_animated) {
-      return 1;
-    }
-    final progress = AppLoadingIconTiming.progressForFrameTime(
-      SchedulerBinding.instance.currentFrameTimeStamp,
+      ..translate(center.dx, center.dy)
+      ..rotate(turn * 2 * math.pi - math.pi / 2)
+      ..translate(-center.dx, -center.dy);
+    // A flat tail (a round cap there would reach past the gradient's start, where it
+    // wraps to the solid colour) and a round head drawn as a dot.
+    canvas.drawArc(
+      rect,
+      0,
+      sweep,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..shader = SweepGradient(
+          endAngle: sweep,
+          colors: [color.withValues(alpha: 0), color],
+        ).createShader(rect),
     );
-    return AppLoadingIconTiming.opacityForSpokeAtProgress(index, progress);
+    canvas.drawCircle(
+      center + Offset(math.cos(sweep), math.sin(sweep)) * radius,
+      stroke / 2,
+      Paint()..color = color,
+    );
+    canvas.restore();
   }
 
   @override

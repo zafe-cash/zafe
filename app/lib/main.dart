@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'src/app.dart';
 import 'src/core/diagnostics/crash_log.dart';
 import 'src/core/network/tor_setting.dart';
+import 'src/core/platform/share_cache.dart';
 import 'src/core/storage/zafe_paths.dart';
 import 'src/notifications/vault_watch.dart';
 import 'src/providers/vault_provider.dart';
@@ -17,6 +21,11 @@ import 'src/rust/frb_generated.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Portrait only (also set in the Android manifest and iOS Info.plist): every
+  // screen is laid out for a phone held upright.
+  unawaited(
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]),
+  );
   // Local only (Settings > Diagnostic report): nothing is uploaded.
   CrashLog.instance = CrashLog.forDir(
     (await ZafePaths.get()).diagnosticsDir,
@@ -49,6 +58,7 @@ Future<void> main() async {
     torRequest();
   }
   await initVaultNotifications();
+  unawaited(getTemporaryDirectory().then(clearShareCache));
   final bootstrap = await VaultBootstrap.load();
   runApp(
     ProviderScope(

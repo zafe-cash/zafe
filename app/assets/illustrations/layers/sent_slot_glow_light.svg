@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 2340" width="1080" height="2340"><defs>
+<radialGradient id="vig" cx="50%" cy="42%" r="70%"><stop offset="55%" stop-color="#F1F5F5" stop-opacity="0"/><stop offset="100%" stop-color="#55615F" stop-opacity="0.10"/></radialGradient>
+<radialGradient id="glow"><stop offset="0%" stop-color="#F4B728" stop-opacity="0.75"/><stop offset="45%" stop-color="#F4B728" stop-opacity="0.22"/><stop offset="100%" stop-color="#F4B728" stop-opacity="0"/></radialGradient>
+<radialGradient id="glowl"><stop offset="0%" stop-color="#00736C" stop-opacity="0.55"/><stop offset="100%" stop-color="#00736C" stop-opacity="0"/></radialGradient>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F1F5F5"/></linearGradient>
+<linearGradient id="goldg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFF1C4"/><stop offset=".45" stop-color="#F4B728"/><stop offset="1" stop-color="#C98A10"/></linearGradient>
+<linearGradient id="skyt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F1F5F5"/></linearGradient><radialGradient id="vigp" cx="50%" cy="50%" r="75%"><stop offset="60%" stop-color="#F1F5F5" stop-opacity="0"/><stop offset="100%" stop-color="#55615F" stop-opacity=".08"/></radialGradient><clipPath id="cv"><rect width="1080" height="2340"/></clipPath></defs><g clip-path="url(#cv)"><ellipse cx="540" cy="360" rx="340" ry="200" fill="url(#glow)"/></g></svg>

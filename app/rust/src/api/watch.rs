@@ -49,6 +49,10 @@ pub enum VaultActivityKind {
 #[derive(Clone, Debug)]
 pub struct VaultActivity {
     pub kind: VaultActivityKind,
+    /// Something was delivered to this member (or may have been, on `Connected`): the
+    /// app answers signing requests only then, or after a minute (each answer reads the
+    /// inbox, ~2 s over Tor).
+    pub inbox: bool,
     pub error: Option<ZafeError>,
     pub retry_in_secs: u32,
 }
@@ -57,6 +61,7 @@ impl VaultActivity {
     fn of(kind: VaultActivityKind) -> Self {
         Self {
             kind,
+            inbox: kind == VaultActivityKind::Connected,
             error: None,
             retry_in_secs: 0,
         }
@@ -65,6 +70,7 @@ impl VaultActivity {
     fn failed(error: ZafeError, retry_in_secs: u64) -> Self {
         Self {
             kind: VaultActivityKind::Failed,
+            inbox: false,
             error: Some(error),
             retry_in_secs: u32::try_from(retry_in_secs).unwrap_or(u32::MAX),
         }
@@ -131,7 +137,7 @@ pub fn watch_vault_with(
     let mailbox = self::material(&material)?.descriptor.vault_id;
     watches().send_modify(|w| w.latest = w.latest.max(watch_id));
     runtime().spawn(watch_loop(
-        RelayClient::new(relay_url),
+        RelayClient::pooled(relay_url),
         me,
         mailbox,
         watch_id,
@@ -181,13 +187,17 @@ async fn watch_loop(
             Ok(Some(now)) => {
                 failures = 0;
                 let news = seen.is_some_and(|s| now.is_news(s.log_len, s.inbox_cursor));
+                let inbox = seen.is_some_and(|s| now.inbox_cursor > s.inbox_cursor);
                 seen = Some(now);
                 let was_connected = std::mem::replace(&mut connected, true);
                 if !news && started.elapsed() < MIN_ROUND && wait > Duration::ZERO {
                     pause = MIN_ROUND;
                 }
                 if news {
-                    Some(VaultActivity::of(VaultActivityKind::Activity))
+                    Some(VaultActivity {
+                        inbox,
+                        ..VaultActivity::of(VaultActivityKind::Activity)
+                    })
                 } else if !was_connected {
                     Some(VaultActivity::of(VaultActivityKind::Connected))
                 } else {

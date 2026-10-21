@@ -1,0 +1,265 @@
+name: Release (Android, mainnet)
+
+# Builds a signed MAINNET APK (package xyz.zafe.zafe, relay https://relay.zafe.cash, beta
+# label) and publishes it as a GitHub pre-release for early users, and uploads the same
+# version as an App Bundle to Google Play's internal testing track. Testnet APKs stay on
+# release.yml (tags v*).
+#
+#   git tag mainnet-v0.1.0 && git push origin mainnet-v0.1.0
+#
+# Every mainnet version needs `docs/releases/<version>.md` (see docs/releasing.md,
+# "Release class"): `class: optional|essential` sets the Play in-app update priority (2 or
+# 5) and the notes become Play's "What's new" and the top of the GitHub release.
+#
+# Needs, see docs/releasing.md:
+#   repository variables
+#     ZAFE_LINK_HOST             required: host of the invite landing site (infra/site/),
+#                                e.g. zafe.cash; without it invites are zafe:// links
+#   secrets of the environment `android-release` (only v* tags may use it, so no branch or
+#   pull-request workflow can read the signing key)
+#     ANDROID_KEYSTORE_BASE64    base64 of the upload keystore (.jks)
+#     ANDROID_KEYSTORE_PASSWORD
+#     ANDROID_KEY_ALIAS
+#     ANDROID_KEY_PASSWORD
+#     GOOGLE_SERVICES_JSON       optional: Firebase config for push notifications
+#     PLAY_SERVICE_ACCOUNT_JSON  optional: the Play publisher service account's key (Play Console:
+#                                "release to testing tracks" only); with it the same build
+#                                also goes to Google Play's internal testing track as an
+#                                App Bundle. Production stays a manual promotion in the
+#                                Play Console.
+
+on:
+  push:
+    tags: ['mainnet-v*']
+
+permissions:
+  contents: write
+  actions: write   # start the site workflow so its download links follow this release
+
+concurrency:
+  group: release-mainnet-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: Build and publish the APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: android-release
+    env:
+      ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        id: version
+        run: |
+          v="${GITHUB_REF_NAME#mainnet-v}"
+          if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$'; then
+            echo "::error::Version '$v' is not like 1.2.3"; exit 1
+          fi
+          echo "name=$v" >> "$GITHUB_OUTPUT"
+
+      # Optional updates download in the background; essential ones (a Zcash network
+      # upgrade, a vault protocol change, a security fix) take over the screen until
+      # installed (app/lib/src/services/app_update.dart: priority >= 4 is immediate).
+      - name: Release class
+        id: class
+        run: |
+          f="docs/releases/${{ steps.version.outputs.name }}.md"
+          [ -f "$f" ] || { echo "::error::Missing $f (class + notes; docs/releasing.md)"; exit 1; }
+          class=$(head -1 "$f" | sed -n 's/^class: *//p')
+          case "$class" in
+            essential) priority=5 ;;
+            optional) priority=2 ;;
+            *) echo "::error::$f: class must be optional or essential, got '$class'"; exit 1 ;;
+          esac
+          # The notes: everything after the front line, as Play's "What's new" (500 max).
+          mkdir -p "$RUNNER_TEMP/whatsnew"
+          tail -n +2 "$f" | sed '/./,$!d' > "$RUNNER_TEMP/whatsnew/whatsnew-en-US"
+          n=$(wc -c < "$RUNNER_TEMP/whatsnew/whatsnew-en-US")
+          [ "$n" -gt 0 ] && [ "$n" -le 500 ] || { echo "::error::$f: notes must be 1-500 characters, got $n"; exit 1; }
+          echo "class=$class" >> "$GITHUB_OUTPUT"
+          echo "priority=$priority" >> "$GITHUB_OUTPUT"
+
+      # Never publish a mainnet APK while the mainnet relay is down, or one signed with a debug key.
+      - name: Check configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=0
+          # Testnet is the staging step: a mainnet APK is cut from a commit that already
+          # went out as a testnet build (tag v*), i.e. the one the dry run used.
+          sha=$(git rev-parse HEAD)
+          staged=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" \
+            --jq ".[] | select(.ref | test(\"^refs/tags/v[0-9]\")) | select(.object.sha == \"$sha\") | .ref")
+          [ -n "$staged" ] || { echo "::error::No testnet tag (v*) on this commit. Tag it v<version> first, try it, then tag mainnet-v<version> on the same commit."; missing=1; }
+          [ "$(curl -fsS --max-time 15 https://relay.zafe.cash/health || true)" = ok ] \
+            || { echo "::error::https://relay.zafe.cash/health did not answer ok"; missing=1; }
+          case "$ZAFE_LINK_HOST" in
+            # Required: a release must open invites through verified https App Links; any
+            # app can claim the zafe:// scheme and receive the invite instead.
+            '') echo "::error::Set ZAFE_LINK_HOST: without it invites are zafe:// links, which another app can claim"; missing=1 ;;
+            *[!a-z0-9.-]*|.*|*.|*..*) echo "::error::ZAFE_LINK_HOST must be a bare lower-case host like zafe.example"; missing=1 ;;
+          esac
+          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!name}" ] || { echo "::error::Signing secret for $name is missing (docs/releasing.md)"; missing=1; }
+          done
+          exit $missing
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> app/build/rust_lib_zafe/build'
+          key: android-release
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.6
+          channel: stable
+          cache: true
+
+      - name: Signing key
+        working-directory: app/android
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/upload.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > key.properties
+
+      - name: Firebase config (optional, enables push)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > app/android/app/google-services.json
+          else
+            echo "::warning::No GOOGLE_SERVICES_JSON: the APK relies on background checks, no push"
+          fi
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --split-per-abi --target-platform android-arm64 \
+            --dart-define=ZAFE_NETWORK=main \
+            --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
+            --dart-define=ZAFE_VERSION='${{ steps.version.outputs.name }}' \
+            --build-name='${{ steps.version.outputs.name }}' \
+            --build-number='${{ github.run_number }}'
+
+      - name: Package
+        id: package
+        run: |
+          v='${{ steps.version.outputs.name }}'
+          apk="zafe-$v-mainnet-arm64.apk"
+          mkdir dist
+          cp app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/$apk"
+          (cd dist && sha256sum "$apk" > "$apk.sha256")
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "dist/$apk" | tee dist/certs.txt
+          cert=$(grep -m1 'SHA-256 digest' dist/certs.txt | sed 's/.*: //')
+          size=$(du -h "dist/$apk" | cut -f1)
+          {
+            if [ '${{ steps.class.outputs.class }}' = essential ]; then
+              echo "**Essential update:** every member of a vault should install it."
+              echo
+            fi
+            cat "$RUNNER_TEMP/whatsnew/whatsnew-en-US"
+            echo
+            echo "Zafe $v for **Zcash mainnet** (ZEC), **beta for early users**. The code has not had"
+            echo "its external security audit yet: only use money you can afford to lose."
+            echo
+            echo "**Update together:** every member of a vault should run the same version. A missed"
+            echo "update never puts funds at risk."
+            echo
+            echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
+            echo "installing from your browser or files app when Android asks."
+            echo
+            echo "Relay: \`https://relay.zafe.cash\` · size $size"
+            echo
+            echo "Verify: \`sha256sum -c $apk.sha256\`; signing certificate SHA-256:"
+            echo "\`$cert\` (the same for every release: an update signed otherwise is not ours)."
+          } > dist/notes.md
+          rm dist/certs.txt
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      # Google Play: the same code as an App Bundle (arm64 native libraries only, see
+      # build.gradle.kts). Its version code is 3000 + this workflow's run number: always
+      # above the first bundle, uploaded by hand as 2018, and increasing with every tag.
+      - name: Build the App Bundle (Google Play)
+        id: bundle
+        working-directory: app
+        env:
+          PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$PLAY_KEY" ]; then
+            echo "::warning::No PLAY_SERVICE_ACCOUNT_JSON: nothing goes to Google Play"
+            echo "upload=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          flutter build appbundle --release --target-platform android-arm64 \
+            --dart-define=ZAFE_NETWORK=main \
+            --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
+            --dart-define=ZAFE_VERSION='${{ steps.version.outputs.name }}' \
+            --build-name='${{ steps.version.outputs.name }}' \
+            --build-number=$((3000 + ${{ github.run_number }}))
+          echo "upload=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Google Play (internal testing)
+        if: steps.bundle.outputs.upload == 'true'
+        # Pinned to the v1.1.5 commit: it holds the Play key.
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: xyz.zafe.zafe
+          releaseFiles: app/build/app/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+          releaseName: ${{ steps.version.outputs.name }}
+          inAppUpdatePriority: ${{ steps.class.outputs.priority }}
+          whatsNewDirectory: ${{ runner.temp }}/whatsnew
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mainnet-v${{ steps.version.outputs.name }}
+          name: Zafe ${{ steps.version.outputs.name }} (mainnet beta)
+          body_path: dist/notes.md
+          prerelease: true
+          files: |
+            dist/${{ steps.package.outputs.apk }}
+            dist/${{ steps.package.outputs.apk }}.sha256
+
+      # The site's download links are the newest release of each kind; rebuild it now.
+      - name: Refresh the site links
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run site.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks" app/android/key.properties

@@ -42,7 +42,9 @@ bool lockOnLaunch({required AppLockDelay delay, required bool hasVaults}) =>
 
 /// Whether the app locks when it comes back to the foreground after [away] in the
 /// background. Time spent behind the system's own unlock prompt ([duringPrompt])
-/// doesn't count, or unlocking would lock the app again.
+/// doesn't count, or unlocking would lock the app again; but only up to
+/// [kPromptGrace]: someone who left the phone with a prompt showing and came back
+/// much later (or a thief who found it) gets the lock like any other return.
 bool lockOnResume({
   required AppLockDelay delay,
   required bool hasVaults,
@@ -50,6 +52,10 @@ bool lockOnResume({
   required bool duringPrompt,
 }) {
   final after = delay.after;
-  if (after == null || !hasVaults || duringPrompt) return false;
+  if (after == null || !hasVaults) return false;
+  if (duringPrompt && away < kPromptGrace) return false;
   return away >= after;
 }
+
+/// Longest time behind the system unlock prompt that doesn't count as being away.
+const kPromptGrace = Duration(minutes: 2);

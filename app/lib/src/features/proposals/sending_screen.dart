@@ -10,10 +10,13 @@ import '../../core/widgets/mobile/mobile_transaction_progress_screen.dart';
 import '../../providers/payment_sounds_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
-import '../onboarding/onboarding_art.dart';
+import 'sent_art.dart';
 
 /// Transaction progress screen for sending a payment (spec: send status, 4.6).
 /// The send itself belongs to the provider, so leaving this screen doesn't stop it.
+/// How long "Sent!" stays before the app goes back Home by itself.
+const kSentHoldTime = Duration(milliseconds: 1600);
+
 class SendingScreen extends ConsumerStatefulWidget {
   const SendingScreen({super.key, required this.id});
   final String id;
@@ -48,6 +51,13 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
     final sound = ref.read(paymentSoundsProvider);
     if (phase == MobileTransactionProgressPhase.succeeded) {
       unawaited(PaymentFeedback.play(PaymentMoment.sent, sound: sound));
+      // "Sent!" is the confirmation: show it for a moment (with its sound), then go
+      // Home on its own. No Done button to tap.
+      Future<void>.delayed(kSentHoldTime, () {
+        if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+          context.go('/home');
+        }
+      });
     }
     if (phase == MobileTransactionProgressPhase.failed) {
       unawaited(PaymentFeedback.play(PaymentMoment.failed, sound: sound));
@@ -86,7 +96,7 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
     final (title, body) = switch (phase) {
       MobileTransactionProgressPhase.succeeded => (
         'Sent!',
-        'It will confirm on-chain shortly. Track it in Activity.',
+        'It confirms on-chain shortly.',
       ),
       MobileTransactionProgressPhase.failed => (
         'Send failed',
@@ -95,9 +105,8 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
       _ => (
         'Sending...',
         (p?.ready ?? false) || progress == null || progress.needed == 0
-            ? 'Building the private transaction and submitting it to the network...'
-            : 'Signatures ${progress.received} of ${progress.needed}. The private proof is '
-                  'built on this phone meanwhile.',
+            ? 'Building the transaction and submitting it...'
+            : 'Signatures ${progress.received} of ${progress.needed}.',
       ),
     };
 
@@ -108,15 +117,17 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
       // The send continues in the background, so leaving is always safe.
       canPop: true,
       bodyMaxWidth: 260,
-      background: const IllustrationBackground('sent_slot'),
+      background: SentArt(
+        sent: phase == MobileTransactionProgressPhase.succeeded,
+        sending: phase == MobileTransactionProgressPhase.inProgress,
+      ),
+      successEffect: const CoinFountain(),
       primaryActionLabel: switch (phase) {
-        MobileTransactionProgressPhase.succeeded => 'Done',
         MobileTransactionProgressPhase.failed when reapprove => 'Approve again',
         MobileTransactionProgressPhase.failed => 'Try again',
         _ => null,
       },
       onPrimaryAction: switch (phase) {
-        MobileTransactionProgressPhase.succeeded => () => context.go('/home'),
         MobileTransactionProgressPhase.failed when reapprove => () {
           context.go('/home');
           context.push('/proposal/${widget.id}');
@@ -138,8 +149,7 @@ class _SendingScreenState extends ConsumerState<SendingScreen> {
         MobileTransactionProgressPhase.failed when canStartOver =>
           'Start over with other signers',
         MobileTransactionProgressPhase.failed => 'Return home',
-        MobileTransactionProgressPhase.inProgress =>
-          'Keep sending in background',
+        MobileTransactionProgressPhase.inProgress => 'Back to Home',
         _ => null,
       },
       onSecondaryAction: switch (phase) {

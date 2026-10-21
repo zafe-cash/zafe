@@ -6,7 +6,7 @@ use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     node::{
         create_vault, join_vault, load_state, membership, respond, run_keygen, seal, set_name,
-        Invite, NodeError,
+        Invite, KeygenOptions, NodeError,
     },
     relay_client::RelayClient,
     session::MemoryNonceStore,
@@ -56,16 +56,21 @@ async fn setup() -> (RelayClient, Vec<Identity>, Invite, String) {
     }
     seal(&relay, &ids[0], &invite).await.unwrap();
 
-    // Every member sees the same safety number.
-    let mut numbers = Vec::new();
-    for id in &ids {
-        let (members, sealed, number) = membership(&relay, id, &invite).await.unwrap();
-        assert!(sealed);
-        assert_eq!(members.len(), 3);
-        numbers.push(number);
-    }
-    assert!(numbers.windows(2).all(|w| w[0] == w[1]));
-    let number = numbers.remove(0);
+    // Membership is locked; every member sees the same safety words once all values are in.
+    let m = membership(&relay, &ids[0], &invite).await.unwrap();
+    assert!(m.sealed);
+    assert_eq!(m.members.len(), 3);
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(&relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     (relay, ids, invite, number)
 }
 
@@ -88,16 +93,49 @@ async fn three_members_create_a_vault_over_the_relay() {
             &number,
             &net,
             "regtest",
-            Some(2),
-            Some(3 * 1152),
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: Some(3 * 1152),
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
         run_keygen(
-            &relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
         ),
         run_keygen(
-            &relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout
+            &relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
         ),
     );
     let (a, b, c) = (a.unwrap(), b.unwrap(), c.unwrap());
@@ -170,6 +208,130 @@ async fn three_members_create_a_vault_over_the_relay() {
 }
 
 #[tokio::test]
+async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
+    let (relay, ids, invite, number) = setup().await;
+    let net = regtest_network();
+    let timeout = Duration::from_secs(10);
+    let (mut r0, mut r1, mut r2) = (
+        StdRng::seed_from_u64(1),
+        StdRng::seed_from_u64(2),
+        StdRng::seed_from_u64(3),
+    );
+    // The creator picks a birthday far past the joiners' tip (100 + leeway).
+    let (_, b, _) = tokio::join!(
+        run_keygen(
+            &relay,
+            &ids[0],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: Some(5_000_000),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r0,
+            timeout
+        ),
+        run_keygen(
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: Some(110)
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
+        ),
+        run_keygen(
+            &relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
+        ),
+    );
+    match b {
+        Err(NodeError::Protocol(m)) => assert!(m.contains("ahead of the chain"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A member who never takes part is named when key generation gives up, so the others
+/// know whom to ask (or to abandon the setup).
+#[tokio::test]
+async fn keygen_names_the_member_who_never_took_part() {
+    let (relay, ids, invite, number) = setup().await;
+    let net = regtest_network();
+    let timeout = Duration::from_secs(3);
+    let (mut r0, mut r1) = (StdRng::seed_from_u64(1), StdRng::seed_from_u64(2));
+    let (a, b) = tokio::join!(
+        run_keygen(
+            &relay,
+            &ids[0],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r0,
+            timeout
+        ),
+        run_keygen(
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
+        ),
+    );
+    for result in [a, b] {
+        match result {
+            Err(NodeError::KeygenStalled { missing, .. }) => {
+                assert_eq!(missing, vec![ids[2].public().sig_pk]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
 async fn keygen_refuses_an_unconfirmed_safety_number() {
     let (relay, ids, invite, _number) = setup().await;
     let net = regtest_network();
@@ -181,8 +343,13 @@ async fn keygen_refuses_an_unconfirmed_safety_number() {
         "0000 0000 0000",
         &net,
         "regtest",
-        None,
-        None,
+        KeygenOptions {
+            creator_birthday_height: None,
+            creator_expiry_blocks: None,
+            max_birthday: None,
+        },
+        keygen_dir(),
+        keygen_key(),
         &mut rng,
         Duration::from_secs(5),
     )
@@ -265,4 +432,162 @@ async fn a_full_relay_gets_a_typed_error() {
         matches!(&err, RelayClientError::StorageFull { detail } if detail.contains("inbox")),
         "{err:?}"
     );
+}
+
+/// A device restored from a backup has no nonces: `top_up_pool(reset)` retires the pool the
+/// old device published and publishes a fresh one, so proposals are assigned commitments
+/// this device can sign with (found by the mainnet restore test).
+#[tokio::test]
+async fn a_restored_device_replaces_its_dead_pool() {
+    use zafe_core::{
+        node::top_up_pool,
+        session::{MemoryPoolStore, PoolStore},
+    };
+
+    let (relay, ids, invite, number) = setup().await;
+    let net = regtest_network();
+    let timeout = Duration::from_secs(60);
+    let (mut r0, mut r1, mut r2) = (
+        StdRng::seed_from_u64(11),
+        StdRng::seed_from_u64(12),
+        StdRng::seed_from_u64(13),
+    );
+    let (a, b, c) = tokio::join!(
+        run_keygen(
+            &relay,
+            &ids[0],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r0,
+            timeout
+        ),
+        run_keygen(
+            &relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
+        ),
+        run_keygen(
+            &relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
+        ),
+    );
+    let (material, _, _) = (a.unwrap(), b.unwrap(), c.unwrap());
+    let me = ids[0].public().sig_pk;
+
+    // The original device publishes its pool.
+    let mut rng = StdRng::seed_from_u64(5);
+    let mut old_device = MemoryPoolStore::default();
+    let published = top_up_pool(
+        &relay,
+        &ids[0],
+        &material,
+        &mut old_device,
+        false,
+        None,
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    assert!(published > 0);
+    let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
+    let old: Vec<Vec<u8>> = state.pools[&me].commitments.clone();
+    assert_eq!(old.len(), published);
+
+    // The restored device has an empty store. Without a reset the log still counts the
+    // dead commitments as available, so nothing is published.
+    let mut restored = MemoryPoolStore::default();
+    assert_eq!(
+        top_up_pool(
+            &relay,
+            &ids[0],
+            &material,
+            &mut restored,
+            false,
+            None,
+            &mut rng
+        )
+        .await
+        .unwrap(),
+        0
+    );
+
+    // With the reset, the old ones are retired and a full fresh pool follows, all of it
+    // signable here.
+    let n = top_up_pool(
+        &relay,
+        &ids[0],
+        &material,
+        &mut restored,
+        true,
+        None,
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    assert_eq!(n, published);
+    let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
+    let pool = &state.pools[&me];
+    assert_eq!(pool.available(), published);
+    assert!(pool.commitments.iter().all(|c| !old.contains(c)));
+    assert!(pool.commitments.iter().all(|c| restored.contains(c)));
+    assert!(state.ignored.is_empty());
+
+    // Running the reset again right away only retires and republishes: still a full pool.
+    top_up_pool(
+        &relay,
+        &ids[0],
+        &material,
+        &mut restored,
+        true,
+        None,
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    let (_, state) = load_state(&relay, &ids[0], &material).await.unwrap();
+    assert_eq!(state.pools[&me].available(), published);
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

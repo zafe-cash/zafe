@@ -10,8 +10,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::rngs::OsRng;
 use zafe_core::{
+    durable,
     node::{self, Invite, VaultMaterial},
-    nonce_store::{FileNonceStore, FilePoolStore},
+    nonce_store::{FileNonceStore, FilePoolStore, NonceKey},
     relay_client::RelayClient,
     repair::{self, RecoveryRequest, RecoveryStatus},
     session::ProposalId,
@@ -79,7 +80,12 @@ enum Command {
         auto_send: bool,
     },
     /// Publish fresh commitments so proposals can be signed at approval time (one tap).
-    Pool,
+    Pool {
+        /// First retire this member's unassigned commitments (use after this member's
+        /// nonces were lost, e.g. a state directory restored without its `pool` folder).
+        #[arg(long)]
+        reset: bool,
+    },
     /// Send a proposal whose approvals already carry every signature (one tap).
     Send { proposal: String },
     /// Export this member's seat as an encrypted backup (text form, as the app's "Copy as
@@ -102,6 +108,8 @@ enum Command {
     Approve { proposal: String },
     /// Reject a proposal.
     Reject { proposal: String },
+    /// Cancel a proposal this member authored (open or approved, not yet sent).
+    Cancel { proposal: String },
     /// Leader: send signing requests for an approved proposal.
     Request { proposal: String },
     /// Answer pending signing requests.
@@ -123,8 +131,21 @@ enum Command {
 
 #[derive(Subcommand)]
 enum SeatCmd {
-    /// Approve moving a signer's seat to the device that printed `code`.
-    Approve { old: String, code: String },
+    /// Approve moving a signer's seat to the device that printed `code`, after comparing
+    /// `words` (from `zafe seat words`) with it.
+    Approve {
+        old: String,
+        code: String,
+        #[arg(long)]
+        words: String,
+    },
+    /// Run the safety check with the device that printed `code` and print the words to
+    /// compare with it (waits up to `timeout_secs` for the new device).
+    Words {
+        code: String,
+        #[arg(long, default_value_t = 60)]
+        timeout_secs: u64,
+    },
     /// Seat moves waiting for approvals.
     List,
     /// Do this member's part in repairing a moved seat's key (and save the new membership).
@@ -146,11 +167,16 @@ enum VaultCmd {
     },
     /// Join a vault from an invite string.
     Join { invite: String },
-    /// Show members, whether membership is sealed, and the safety number.
-    Members,
+    /// Show members, whether membership is sealed, and (once every member's part of the
+    /// check is in) the safety words. With `--wait`, keep going until the words are known
+    /// (each call sends this member's part; the others can take part at any time).
+    Members {
+        #[arg(long)]
+        wait: bool,
+    },
     /// Creator: freeze membership once everyone has joined.
     Seal,
-    /// Run key generation. Requires the safety number you compared with the others.
+    /// Run key generation. Requires the safety words you compared with the others.
     Keygen {
         #[arg(long)]
         safety_number: String,
@@ -177,6 +203,13 @@ impl Home {
     fn identity(&self) -> Result<Identity> {
         let bytes = fs::read(self.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?;
         Ok(Identity::from_seeds(IdentitySeeds::from_bytes(&bytes)?))
+    }
+
+    /// The key this member's nonce files in the vault are encrypted with (derived from
+    /// the identity seeds, like the app).
+    fn nonce_key(&self, material: &VaultMaterial) -> Result<NonceKey> {
+        let seeds = fs::read(self.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?;
+        Ok(NonceKey::derive(&seeds, &material.descriptor.vault_id))
     }
 
     fn invite(&self) -> Result<Invite> {
@@ -352,8 +385,10 @@ async fn main() -> Result<()> {
         Command::Approve { proposal } => {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
-            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
-            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
+            let mut store =
+                FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
+            let mut pool =
+                FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
             let approved = node::approve(
                 &relay,
                 &home.identity()?,
@@ -407,11 +442,20 @@ async fn main() -> Result<()> {
             node::set_name(&relay, &home.identity()?, &material, &name, &mut rng).await?;
             println!("name set");
         }
-        Command::Pool => {
+        Command::Pool { reset } => {
             let material = home.material()?;
-            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
-            let n = node::top_up_pool(&relay, &home.identity()?, &material, &mut pool, &mut rng)
-                .await?;
+            let mut pool =
+                FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
+            let n = node::top_up_pool(
+                &relay,
+                &home.identity()?,
+                &material,
+                &mut pool,
+                reset,
+                None,
+                &mut rng,
+            )
+            .await?;
             println!("published {n} commitment(s)");
         }
         Command::Send { proposal } => {
@@ -431,6 +475,17 @@ async fn main() -> Result<()> {
             .await?;
             node::SentTxs::in_dir(home.path(state_dir::SENT)).put(&sent);
             println!("broadcast txid {}", hex_txid(&sent.txid));
+        }
+        Command::Cancel { proposal } => {
+            node::cancel(
+                &relay,
+                &home.identity()?,
+                &home.material()?,
+                parse_proposal(&proposal)?,
+                &mut rng,
+            )
+            .await?;
+            println!("cancelled");
         }
         Command::Reject { proposal } => {
             node::reject(
@@ -461,18 +516,21 @@ async fn main() -> Result<()> {
                 tip,
                 id,
                 &used,
+                &node::SilentSigners::at(home.path(REQUESTS_DIR).join(state_dir::SILENT_SIGNERS))
+                    .load(),
                 &mut rng,
             )
             .await?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(home.path(REQUESTS_DIR))?;
-            fs::write(&used_path, node::encode_used_commitments(&used)?)?;
-            fs::write(
-                home.path(&format!("requests/{proposal}.bin")),
-                node::encode_request(&sent.request)?,
+            durable::write(&used_path, &node::encode_used_commitments(&used)?)?;
+            durable::write(
+                &home.path(&format!("requests/{proposal}.bin")),
+                &node::encode_request(&sent.request)?,
             )?;
             // If this member is also a signer, it signs its own part now (never via relay).
-            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
+            let mut store =
+                FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
             if let Some(own) = node::sign_own_shares(
                 &relay,
                 &home.identity()?,
@@ -484,9 +542,9 @@ async fn main() -> Result<()> {
             )
             .await?
             {
-                fs::write(
-                    home.path(&format!("requests/{proposal}.own")),
-                    node::encode_own_shares(&own)?,
+                durable::write(
+                    &home.path(&format!("requests/{proposal}.own")),
+                    &node::encode_own_shares(&own)?,
                 )?;
             }
             println!(
@@ -498,29 +556,41 @@ async fn main() -> Result<()> {
             let me = home.identity()?;
             let material = home.material()?;
             match cmd {
-                SeatCmd::Approve { old, code } => {
+                SeatCmd::Approve { old, code, words } => {
                     let old: [u8; 32] = hex::decode(old.trim())?
                         .try_into()
                         .map_err(|_| anyhow!("old must be a 32-byte hex key"))?;
                     let request = RecoveryRequest::decode(&code)?;
                     let moved = repair::approve_replacement(
-                        &relay, &me, &material, old, &request, &mut rng,
+                        &relay, &me, &material, old, &request, &words, &mut rng,
                     )
                     .await?;
-                    println!(
-                        "approved (safety code {}){}",
-                        request.safety_code(),
-                        if moved { "; the seat moved" } else { "" }
-                    );
+                    println!("approved{}", if moved { "; the seat moved" } else { "" });
+                }
+                SeatCmd::Words { code, timeout_secs } => {
+                    let request = RecoveryRequest::decode(&code)?;
+                    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+                    loop {
+                        if let Some(words) =
+                            repair::new_phone_words(&relay, &me, &request.identity).await?
+                        {
+                            println!("safety words: {words}");
+                            break;
+                        }
+                        if std::time::Instant::now() > deadline {
+                            bail!("the new device hasn't taken part (is its recovery running?)");
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
                 SeatCmd::List => {
                     let (_, state) = node::load_state(&relay, &me, &material).await?;
                     for p in state.pending_replacements.values() {
                         println!(
-                            "{} -> {}  safety {}  approvals {}/{}",
+                            "{} -> {}  code {}  approvals {}/{}",
                             hex::encode(p.old),
                             hex::encode(p.new.sig_pk),
-                            RecoveryRequest { identity: p.new }.safety_code(),
+                            RecoveryRequest { identity: p.new }.encode(),
                             p.approvals.len(),
                             state.descriptor.threshold
                         );
@@ -578,9 +648,17 @@ async fn main() -> Result<()> {
                 identity: *me.public(),
             };
             println!("{}", request.encode());
-            eprintln!("safety code {}", request.safety_code());
             let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+            let mut shown = std::collections::BTreeSet::new();
             loop {
+                // The safety check: each co-signer's words, once, as they arrive.
+                if let Ok(checks) = repair::recovery_checks(&relay, &me).await {
+                    for c in checks {
+                        if shown.insert(c.cosigner) {
+                            eprintln!("safety words with {}: {}", hex::encode(c.cosigner), c.words);
+                        }
+                    }
+                }
                 match repair::try_recover(&relay, &me).await? {
                     RecoveryStatus::Done { material, invite } => {
                         fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
@@ -603,7 +681,8 @@ async fn main() -> Result<()> {
         Command::Respond => {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
-            let mut store = FileNonceStore::new(home.path(state_dir::NONCES));
+            let mut store =
+                FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
             let report = node::respond(
                 &relay,
                 &home.identity()?,
@@ -631,9 +710,13 @@ async fn main() -> Result<()> {
                     .map(|b| node::decode_own_shares(&b))
                     .transpose()?;
             let mut client = connect(&cli.lightwalletd).await?;
-            let sent = node::finalize(
+            let me = home.identity()?;
+            let silent =
+                node::SilentSigners::at(home.path(REQUESTS_DIR).join(state_dir::SILENT_SIGNERS));
+            let signers: Vec<_> = request.signers.iter().copied().collect();
+            let sent = match node::finalize(
                 &relay,
-                &home.identity()?,
+                &me,
                 &material,
                 &request,
                 own.as_deref(),
@@ -642,7 +725,29 @@ async fn main() -> Result<()> {
                 |p| eprintln!("shares {}/{}", p.received, p.needed),
                 &mut rng,
             )
-            .await?;
+            .await
+            {
+                Ok(sent) => {
+                    silent.update(&[], &signers);
+                    sent
+                }
+                Err(e) => {
+                    // After a timeout, the next `zafe request` asks the silent signers last.
+                    if matches!(e, node::NodeError::Timeout(_)) {
+                        if let Ok(quiet) =
+                            node::unanswered_signers(&relay, &me, &material, &request).await
+                        {
+                            let answered: Vec<_> = signers
+                                .iter()
+                                .filter(|s| !quiet.contains(s))
+                                .copied()
+                                .collect();
+                            silent.update(&quiet, &answered);
+                        }
+                    }
+                    return Err(e.into());
+                }
+            };
             node::SentTxs::in_dir(home.path(state_dir::SENT)).put(&sent);
             println!("broadcast txid {}", hex_txid(&sent.txid));
         }
@@ -675,14 +780,29 @@ async fn vault(
             fs::write(home.path(INVITE_FILE), parsed.encode())?;
             println!("joined vault {}", parsed.name);
         }
-        VaultCmd::Members => {
-            let (members, sealed, number) =
-                node::membership(relay, &home.identity()?, &home.invite()?).await?;
-            for m in &members {
-                println!("member {}", hex::encode(m.sig_pk));
+        VaultCmd::Members { wait } => {
+            let (me, invite) = (home.identity()?, home.invite()?);
+            let m = node::membership(relay, &me, &invite).await?;
+            for member in &m.members {
+                println!("member {}", hex::encode(member.sig_pk));
             }
-            println!("sealed {sealed}");
-            println!("safety number: {number}");
+            println!("sealed {}", m.sealed);
+            let words = match (m.safety_words, wait) {
+                (Some(words), _) => Some(words),
+                (None, true) => Some(
+                    node::wait_for_safety_words(relay, &me, &invite, Duration::from_secs(300))
+                        .await?,
+                ),
+                (None, false) => {
+                    for pk in &m.waiting_for {
+                        println!("waiting for {}", hex::encode(pk));
+                    }
+                    None
+                }
+            };
+            if let Some(words) = words {
+                println!("safety words: {words}");
+            }
         }
         VaultCmd::Seal => {
             node::seal(relay, &home.identity()?, &home.invite()?).await?;
@@ -708,8 +828,17 @@ async fn vault(
                 &safety_number,
                 &network(),
                 network().name(),
-                birthday,
-                expiry_days.map(|d| d * 1152),
+                node::KeygenOptions {
+                    creator_birthday_height: birthday,
+                    creator_expiry_blocks: expiry_days.map(|d| d * 1152),
+                    max_birthday: None,
+                },
+                // The home is the state dir; the state is deleted once the vault exists.
+                home.0.clone(),
+                NonceKey::derive(
+                    &fs::read(home.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?,
+                    &invite.mailbox,
+                ),
                 rng,
                 Duration::from_secs(timeout_secs),
             )
@@ -718,8 +847,9 @@ async fn vault(
             println!("vault created: {}", material.descriptor.address);
             // Like the app: publish the one-tap commitment pool while every member is
             // present, so the first payment can be one tap.
-            let mut pool = FilePoolStore::new(home.path(state_dir::POOL));
-            let n = node::top_up_pool(relay, &me, &material, &mut pool, rng).await?;
+            let mut pool =
+                FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
+            let n = node::top_up_pool(relay, &me, &material, &mut pool, false, None, rng).await?;
             println!("published {n} commitment(s)");
         }
         VaultCmd::Show => {

@@ -6,9 +6,15 @@ use zcash_keys::address::UnifiedAddress;
 
 fn regtest_address(seed: u8) -> String {
     let fvk = FullViewingKey::from(&SpendingKey::from_bytes([seed; 32]).unwrap());
-    UnifiedAddress::from_receivers(Some(fvk.address_at(0u32, Scope::External)), None, None)
-        .unwrap()
-        .encode(&zafe_core::wallet::regtest_network())
+    UnifiedAddress::from_receivers(
+        Some(fvk.address_at(0u32, Scope::External)),
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .encode(&zafe_core::wallet::regtest_network())
 }
 
 #[test]

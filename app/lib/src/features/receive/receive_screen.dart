@@ -6,8 +6,8 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/config/beta.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/app_button.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../providers/vault_names_provider.dart';
@@ -66,20 +66,12 @@ class ReceiveScreen extends ConsumerWidget {
             ),
           ),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Center(
-          child: Text(
-            'Shielded address. Funds sent here are held by the vault and can only move with '
-            '${summary.threshold} of ${summary.members.length} signatures.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
-          ),
-        ),
+
         if (kIsBeta) ...[
           const SizedBox(height: AppSpacing.xs),
           Center(
             child: Text(
-              betaNote(),
+              betaNote,
               textAlign: TextAlign.center,
               style: AppTypography.bodySmall.copyWith(
                 color: colors.text.warning,
@@ -95,17 +87,7 @@ class ReceiveScreen extends ConsumerWidget {
           child: const Text('Share vault address'),
         ),
         const SizedBox(height: AppSpacing.s),
-        AppButton(
-          expand: true,
-          variant: AppButtonVariant.ghost,
-          onPressed: () => copyTextWithToast(
-            context,
-            text: address,
-            toastMessage: 'Address copied',
-          ),
-          leading: const AppIcon(AppIcons.copy, size: 20),
-          child: const Text('Copy vault address'),
-        ),
+        CopyButton(label: 'Copy vault address', text: address),
       ],
     );
   }

@@ -19,8 +19,6 @@ type Result<T, E = ZafeError> = std::result::Result<T, E>;
 pub struct RecoveryCode {
     /// `zafe-recover-v1:...`: sent to a co-signer (text, link or QR code).
     pub code: String,
-    /// Eight digits both phones show ("1234 5678"), read out to check the code.
-    pub safety_code: String,
 }
 
 /// The recovery code of a new phone's identity (`seeds`, a fresh identity kept until the
@@ -32,14 +30,12 @@ pub fn recovery_code(seeds: Vec<u8>) -> Result<RecoveryCode> {
     };
     Ok(RecoveryCode {
         code: request.encode(),
-        safety_code: request.safety_code(),
     })
 }
 
 pub struct RecoveryCodeInfo {
     /// The new phone's signing key (hex).
     pub key_hex: String,
-    pub safety_code: String,
 }
 
 /// Parses a recovery code a co-signer pasted or scanned (also inside a message or a
@@ -49,8 +45,24 @@ pub fn parse_recovery_code(code: String) -> Result<RecoveryCodeInfo> {
     let request = decode(&code)?;
     Ok(RecoveryCodeInfo {
         key_hex: hex::encode(request.identity.sig_pk),
-        safety_code: request.safety_code(),
     })
+}
+
+/// Co-signer: one step of the safety check with the phone that showed `code` (poll it
+/// while the screen is open). `None` until the new phone has taken part; then the four
+/// words to compare with it on a call before approving.
+pub fn new_phone_words(relay_url: String, seeds: Vec<u8>, code: String) -> Result<Option<String>> {
+    let me = identity(&seeds)?;
+    let request = decode(&code)?;
+    let mut watch = crate::diag::Stopwatch::new("seat-words");
+    let words = runtime().block_on(repair::new_phone_words(
+        &RelayClient::pooled(relay_url),
+        &me,
+        &request.identity,
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(words?)
 }
 
 fn decode(text: &str) -> Result<RecoveryRequest> {
@@ -73,6 +85,7 @@ pub fn approve_seat_move(
     material: Vec<u8>,
     old_key_hex: String,
     code: String,
+    words: String,
 ) -> Result<bool> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
@@ -85,14 +98,19 @@ pub fn approve_seat_move(
     if old == me.public().sig_pk {
         return Err(ZafeError::invalid("You can't approve moving your own seat"));
     }
-    Ok(runtime().block_on(repair::approve_replacement(
-        &RelayClient::new(relay_url),
+    let mut watch = crate::diag::Stopwatch::new("seat-approve");
+    let moved = runtime().block_on(repair::approve_replacement(
+        &RelayClient::pooled(relay_url),
         &me,
         &m,
         old,
         &request,
+        &words,
         &mut OsRng,
-    ))?)
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(moved?)
 }
 
 pub enum RecoveryStage {
@@ -114,13 +132,33 @@ pub struct RecoveryProgress {
     /// `VaultMaterial::to_bytes` (secret; `Done` only).
     pub material: Vec<u8>,
     pub invite: String,
+    /// While waiting: the words each co-signer that started the safety check shows.
+    pub checks: Vec<CosignerWords>,
+}
+
+/// The words a co-signer (`cosigner_key_hex`) sees for this new phone.
+pub struct CosignerWords {
+    pub cosigner_key_hex: String,
+    pub words: String,
 }
 
 /// The new phone: checks whether its seat moved and the repaired key has arrived. On
 /// `Done` the key has been checked against the vault (spec §10.4.2).
 pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgress> {
     let me = identity(&seeds)?;
-    let status = runtime().block_on(repair::try_recover(&RelayClient::new(relay_url), &me))?;
+    let relay = RelayClient::pooled(relay_url);
+    let mut watch = crate::diag::Stopwatch::new("recover");
+    // Both read the relay (~1 s each over Tor): at once. The safety check's next step
+    // (commit, then reveal once challenged) only matters while waiting for approvals.
+    let (status, checks) = runtime().block_on(async {
+        tokio::join!(
+            repair::try_recover(&relay, &me),
+            repair::recovery_checks(&relay, &me)
+        )
+    });
+    watch.lap("relay");
+    watch.finish();
+    let status = status?;
     let empty = |stage, received, needed| RecoveryProgress {
         stage,
         received,
@@ -129,9 +167,19 @@ pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgr
         name: String::new(),
         material: Vec::new(),
         invite: String::new(),
+        checks: Vec::new(),
     };
     Ok(match status {
-        RecoveryStatus::Waiting => empty(RecoveryStage::Waiting, 0, 0),
+        RecoveryStatus::Waiting => RecoveryProgress {
+            checks: checks?
+                .into_iter()
+                .map(|c| CosignerWords {
+                    cosigner_key_hex: hex::encode(c.cosigner),
+                    words: c.words,
+                })
+                .collect(),
+            ..empty(RecoveryStage::Waiting, 0, 0)
+        },
         RecoveryStatus::SeatMoved { received, needed } => {
             empty(RecoveryStage::Repairing, received as u32, needed as u32)
         }
@@ -145,6 +193,7 @@ pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgr
                 .to_bytes()
                 .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?,
             invite: invite.encode(),
+            checks: Vec::new(),
         },
     })
 }

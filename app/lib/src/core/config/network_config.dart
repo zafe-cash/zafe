@@ -45,7 +45,7 @@ const String kTestnetRelayUrl = kPlaceholderRelayUrl;
 const String kTestnetLightwalletdUrl = 'https://testnet.zec.rocks:443';
 
 /// Mainnet waits on the audit and a dry run (docs/tracker.md, M2). Its relay is the
-/// capped-beta relay on the same VPS as testnet (`infra/relay/README.md`, "Mainnet"):
+/// beta relay on the same VPS as testnet (`infra/relay/README.md`, "Mainnet"):
 /// deployed by `.github/workflows/relay-mainnet.yml` once the user has done the one-time
 /// setup (DNS, bucket, environment); until then this name doesn't resolve and a mainnet
 /// build shows "Can't reach relay".
@@ -103,6 +103,14 @@ const String kZafeLightwalletdUrl = String.fromEnvironment(
 
 /// True when this build still points at the placeholder relay (no relay configured).
 const bool kZafeRelayIsPlaceholder = kZafeRelayUrl == kPlaceholderRelayUrl;
+
+/// Shown on the vault card of every non-mainnet build, so the testnet app can't be taken
+/// for the mainnet one (they look alike and install side by side); empty on mainnet.
+const String kNetworkBadge = kZafeNetwork == 'main'
+    ? ''
+    : kZafeNetwork == 'test'
+    ? 'TESTNET'
+    : 'REGTEST';
 
 /// Ticker shown next to amounts: ZEC on mainnet, TAZ on test networks.
 const String kZcashDefaultCurrencyTicker = kZafeNetwork == 'main'

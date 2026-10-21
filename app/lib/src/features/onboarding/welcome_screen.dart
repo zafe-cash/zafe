@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../home/home_screen.dart' show AppNoticeCards;
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
@@ -10,6 +11,11 @@ import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../settings/endpoint_sheet.dart';
 import 'onboarding_art.dart';
+import 'welcome_art.dart';
+
+/// Taps on the Welcome door (one Welcome screen exists at a time): each replays its
+/// unlock.
+final _doorTaps = ValueNotifier<int>(0);
 
 class WelcomeScreen extends ConsumerWidget {
   const WelcomeScreen({super.key});
@@ -29,74 +35,91 @@ class WelcomeScreen extends ConsumerWidget {
       if (context.mounted) context.go('/home');
     }
 
+    // The text block over the hero art; the top gap keeps the title below the art's
+    // busy middle (the art is full width, 1240/1080 as tall) on short screens.
+    Widget content(double width) => Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(height: width * 1240 / 1080 * 0.5),
+          const Spacer(flex: 3),
+          Text(
+            'Zafe',
+            style: TextStyle(
+              fontFamily: 'Space Grotesk',
+              fontSize: 48,
+              height: 1.1,
+              letterSpacing: -1.35,
+              color: colors.text.accent,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.s),
+          Text(
+            'A shielded multisig for Zcash.',
+            style: AppTypography.bodyMedium.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+          const Spacer(),
+          const _InfoCard(),
+          const SizedBox(height: AppSpacing.md),
+          const AppNoticeCards(),
+          if (noRelay) ...[
+            _NoRelayNote(onTap: servers),
+            const SizedBox(height: AppSpacing.s),
+          ],
+          AppButton(
+            expand: true,
+            onPressed: () => context.push('/create'),
+            leading: const AppIcon(AppIcons.addNew, size: 20),
+            child: const Text('Create a vault'),
+          ),
+          const SizedBox(height: AppSpacing.s),
+          AppButton(
+            expand: true,
+            variant: AppButtonVariant.secondary,
+            onPressed: () => context.push('/join'),
+            leading: const AppIcon(AppIcons.link, size: 20),
+            child: const Text('Join with an invite'),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          AppButton(
+            expand: true,
+            variant: AppButtonVariant.ghost,
+            onPressed: () => context.push('/restore'),
+            child: const Text('Restore from backup'),
+          ),
+          AppButton(
+            expand: true,
+            variant: AppButtonVariant.ghost,
+            onPressed: () => context.push('/recover'),
+            child: const Text('Recover without a backup'),
+          ),
+        ],
+      ),
+    );
+
     final scaffold = Scaffold(
       backgroundColor: colors.background.window,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const OnboardingHero('welcome_vault'),
+          OnboardingHero('welcome_vault', art: WelcomeArt(replay: _doorTaps)),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Spacer(flex: 3),
-                  Text(
-                    'Zafe',
-                    style: TextStyle(
-                      fontFamily: 'Space Grotesk',
-                      fontSize: 48,
-                      height: 1.1,
-                      letterSpacing: -1.35,
-                      color: colors.text.accent,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.s),
-                  Text(
-                    'A shielded multisig for Zcash. Every payment needs your co-signers to agree.',
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: colors.text.secondary,
-                    ),
-                  ),
-                  const Spacer(),
-                  const _InfoCard(),
-                  const SizedBox(height: AppSpacing.md),
-                  if (noRelay) ...[
-                    _NoRelayNote(onTap: servers),
-                    const SizedBox(height: AppSpacing.s),
-                  ],
-                  AppButton(
-                    expand: true,
-                    onPressed: () => context.push('/create'),
-                    leading: const AppIcon(AppIcons.addNew, size: 20),
-                    child: const Text('Create a vault'),
-                  ),
-                  const SizedBox(height: AppSpacing.s),
-                  AppButton(
-                    expand: true,
-                    variant: AppButtonVariant.secondary,
-                    onPressed: () => context.push('/join'),
-                    leading: const AppIcon(AppIcons.link, size: 20),
-                    child: const Text('Join with an invite'),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  AppButton(
-                    expand: true,
-                    variant: AppButtonVariant.ghost,
-                    onPressed: () => context.push('/restore'),
-                    child: const Text('Restore from backup'),
-                  ),
-                  AppButton(
-                    expand: true,
-                    variant: AppButtonVariant.ghost,
-                    onPressed: () => context.push('/recover'),
-                    child: const Text('Recover without a backup'),
-                  ),
-                ],
+            // Fills the screen when it fits; scrolls on short phones or with large
+            // system text (it used to cut off the last buttons on a 360x640 phone).
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(child: content(constraints.maxWidth)),
+                ),
               ),
             ),
           ),
+
+          WelcomeDoorTap(onTap: () => _doorTaps.value++),
           if (adding)
             _CornerButton(
               alignment: Alignment.topLeft,

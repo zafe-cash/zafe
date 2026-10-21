@@ -28,7 +28,7 @@ x-relay: &relay
   tmpfs: [/tmp]
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
-  environment: &relay-env
+  environment:
     RUST_LOG: zafe_relay=info
     # Caddy sets X-Forwarded-For to the client address (it drops client-supplied values).
     ZAFE_RELAY_CLIENT_IP_HEADER: x-forwarded-for
@@ -57,7 +57,7 @@ x-litestream: &litestream
   env_file:
     - path: litestream.env
       required: false
-  networks: [relay]
+  networks: [mainnet]
   volumes:
     - relay-mainnet-data:/data
     - ./litestream.yml:/etc/litestream.yml:ro
@@ -78,7 +78,8 @@ services:
       - ./caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
-    networks: [relay]
+    # On both relays' networks, which can't reach each other.
+    networks: [relay, mainnet]
 
   relay-testnet:
     <<: *relay
@@ -116,12 +117,7 @@ services:
     <<: *relay
     profiles: [mainnet]
     image: ${RELAY_MAINNET_IMAGE:-zafe-relay-mainnet-not-deployed}
-    environment:
-      <<: *relay-env
-      # The capped beta: the relay takes this many vaults in total, then refuses new ones
-      # (existing vaults keep working). Set from the `relay-mainnet` environment variable
-      # RELAY_MAX_VAULTS; 0 = no limit.
-      ZAFE_RELAY_MAX_VAULTS: ${RELAY_MAINNET_MAX_VAULTS:-25}
+    networks: [mainnet]
     env_file:
       - path: secrets-mainnet.env
         required: false
@@ -151,7 +147,10 @@ services:
       - /var/backups/zafe-relay/mainnet:/backups
 
 networks:
+  # testnet's relay and Caddy; mainnet's services have their own, so a compromised
+  # testnet image can't reach the mainnet relay or Litestream.
   relay: {}
+  mainnet: {}
 
 volumes:
   caddy-data: {}

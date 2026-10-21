@@ -141,7 +141,7 @@ the code that enforces each and the test that should catch a regression.
 | **iOS has never been built.** Backup exclusion, Notification Service Extension and background behaviour are untested. Android only for the beta. | out of scope |
 | **Android background checks sign nothing new**: they answer interactive requests and finish auto-sends the owner already approved, without an unlock prompt, by design. | accepted |
 | **One relay per vault.** Moving to another relay is a manual restore from a member's copy. | by design |
-| **Beta cap is advisory in the app** (money can't be refused on receive); the relay caps the number of vaults. | by design |
+| **The mainnet beta has no cap**, only a "beta" label in the app (decided 2026-10-07): no limit on vaults per relay or on what a vault holds. Per-IP/per-key creation limits stay as anti-abuse. | by design |
 
 ## 5. Test inventory
 
@@ -167,14 +167,14 @@ Protocol and crypto (`crates/zafe-core/tests`)
   (ignored; the app's payment flow through the bridge API), `scripts/m0-e2e.sh` (three CLI
   processes through the relay).
 
-Relay (`crates/zafe-relay/tests`): `relay` (11), `quotas` (8 incl. capacity and stale
+Relay (`crates/zafe-relay/tests`): `relay` (11), `quotas` (7 incl. stale
 reseed), `persistence` (5), `wait` (6), `fcm` (2); unit tests in `limits`, `wait`, `main`.
 
 Protocol types (`crates/zafe-proto/tests`): `envelope` (7), `log` (4), `version` (5).
 
 Bridge and app: `app/rust/tests` (`repair_bridge`, `vault_watch`, `payment_request`),
 Dart `app/test` (sync failures, unlock gate, app lock, recipients CSV, invite and payment
-links, privacy mode, beta cap, network config, ...).
+links, privacy mode, beta label, network config, ...).
 
 Gaps we know of (please probe): no fuzzing of `Envelope`/`LogEntry`/`PCZT` decoders beyond
 the negative tests above; no property tests for `VaultState::apply` (determinism is
@@ -252,8 +252,7 @@ Fixed on branch `audit-fixes` (regression tests written, **not run**):
   from any branch (pushing `:main` and an attested image). The image job now needs
   `refs/heads/main`; the verify step adds `--source-ref refs/heads/main` and the OIDC issuer.
 - **Soak check could pass on a bad record (low).** `at=null` read as 0 in bash arithmetic;
-  now must be numeric. `RELAY_MAX_VAULTS` is validated before it reaches the remote shell
-  command; Litestream env values are single-quoted (a `$` in a secret broke Compose
+  now must be numeric. Litestream env values are single-quoted (a `$` in a secret broke Compose
   interpolation); unused `id-token: write` dropped.
 
 Confirmed, not fixed (design or needs the build agent):
@@ -278,14 +277,6 @@ Confirmed, not fixed (design or needs the build agent):
   `RelayForked` nothing clears that device's copy (`LogCache::remove` has no caller), so a
   member on the minority branch of an equivocating relay is refused on every relay until
   reinstall or restore from backup. Add an explicit, confirmed "discard my copy" action.
-- **Capped-beta slots can be filled by anyone (low).** `ZAFE_RELAY_MAX_VAULTS` counts every
-  mailbox, including unsealed ones from abandoned keygens or reseeds; a few fresh keys per
-  IP exhaust 25 slots. No pruning of never-sealed mailboxes exists.
-- **Same SSH key / VPS for testnet and mainnet defeats the reviewer gate (medium, process).**
-  The `relay-testnet` environment has no required reviewers, and the `deploy` user (docker
-  group) controls the mainnet compose, `.env` and `litestream.env`. Anyone who can push to
-  `main` can therefore act on mainnet without the `relay-mainnet` approval. Use a separate
-  key with a forced command, or a separate host.
 - **Image pinning:** `litestream/litestream:0.3.13` and `caddy:2.11-alpine` are tags, not digests.
 - **`Broadcast` is not checked against the PCZT (pre-existing, low).** Any member can log
   `Broadcast { txid }` with any txid for an Approved proposal; it sets status Broadcast
@@ -330,3 +321,25 @@ page vs fork) and atomic cache writes.
   relay which equivocates to others follows that branch; the confirmation tells the user to
   check with the other members first.
 - **Image pinning.** Litestream and Caddy are pinned by digest in `infra/relay/vps/compose.yml`.
+- **Separate deploy access for testnet and mainnet (closes the section 9 "same SSH key" finding;
+  files prepared 2026-10-07, active once the operator runs the migration in
+  `infra/relay/README.md`).** Each network has its own unix user and SSH key; the key is pinned
+  to `sudo -n /usr/local/sbin/zafe-deploy <network>` (`restrict`, forced command, no shell, no
+  `docker` group). The mainnet key exists only as a `relay-mainnet` environment secret (reviewer
+  gate), the testnet job cannot read it and the server would not let the testnet key act on
+  mainnet anyway. `zafe-deploy` (root-owned, `infra/relay/vps/zafe-deploy`) parses a fixed
+  grammar, validates the image (`ghcr.io/zafe-cash/zafe-relay@sha256:<64 hex>`), the domain
+  (pinned per network in `/etc/zafe-deploy.conf`) and secret file contents, installs files by
+  downloading the commit from GitHub and refusing any commit not on `main` (CI sends no
+  files), and only writes its network's secret files; the mainnet soak/digest check runs on
+  the server. `deploy.sh` converges only its network's services; the relays use separate
+  Docker networks. **Residual risk:** one host and one Docker daemon. `zafe-deploy` runs
+  `deploy.sh` from `main` as root, so whoever can push to `main` (or a root-level escape from
+  the testnet container) still reaches mainnet; the mainnet approval gate protects only
+  against a leaked testnet key and mistaken pushes to the testnet job, not against a compromised
+  `main`. A leaked testnet key can pick a `main` commit and any image digest of ours for
+  testnet. Image provenance is verified in CI, not on the server. Mitigations to take: branch
+  protection with required reviews on `main`, or a separate host for mainnet. `compare` against
+  `main` uses the unauthenticated GitHub API (rate limit 60/h per IP): fine at deploy cadence.
+  Not tested against a live server (no SSH from the build agent): the first migration run is
+  the test; `bash -n` and a Compose config check only.

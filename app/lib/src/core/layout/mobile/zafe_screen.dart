@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../theme/app_theme.dart';
-import '../../widgets/app_toast.dart';
 import 'mobile_top_nav.dart';
 
 /// Pushed full-screen route: back nav, scrollable body, pinned CTA area.
@@ -27,28 +26,26 @@ class ZafeScreen extends StatelessWidget {
     final colors = context.colors;
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          child: Column(
-            children: [
-              MobileTopNav.back(
-                title: title,
-                onBack: showBack ? (onBack ?? () => context.pop()) : null,
+      body: SafeArea(
+        child: Column(
+          children: [
+            MobileTopNav.back(
+              title: title,
+              onBack: showBack ? (onBack ?? () => context.pop()) : null,
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: children,
               ),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  children: children,
-                ),
+            ),
+            if (bottom != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                // Full width, so `AppButton(expand: true)` spans the screen.
+                child: SizedBox(width: double.infinity, child: bottom),
               ),
-              if (bottom != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  // Full width, so `AppButton(expand: true)` spans the screen.
-                  child: SizedBox(width: double.infinity, child: bottom),
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );

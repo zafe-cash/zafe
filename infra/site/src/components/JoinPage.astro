@@ -1,0 +1,89 @@
+---
+// The body of the invite page (https://<host>/join#<invite>), shared by the mainnet page
+// (join.astro) and the testnet page (join-testnet.astro, served at /join on the testnet
+// host): same markup and ids, because public/assets/join.js drives both. The invite is in
+// the fragment and is handled only by join.js, loaded as-is (never bundled or inlined).
+import Base from '../layouts/Base.astro';
+import { downloadUrl, sourceUrl, testnetUrl } from '../config';
+
+interface Props {
+  testnet?: boolean;
+}
+const { testnet = false } = Astro.props;
+const installUrl = (testnet ? testnetUrl : downloadUrl) || sourceUrl;
+const hasBuild = Boolean(testnet ? testnetUrl : downloadUrl);
+---
+
+<Base
+  title={testnet ? 'Join a Zafe testnet vault' : 'Join a Zafe vault'}
+  description={testnet
+    ? "You're invited to a Zafe testnet vault: a practice vault with test coins that have no value. Install the testnet app, then open the invite."
+    : "You're invited to a shared Zafe vault. Install the app, then open the invite."}
+  noindex
+>
+  <script is:inline slot="head" src="/assets/join.js" defer></script>
+  <main>
+    <header class="brand">
+      <img src="/assets/zafe.svg" alt="" width="40" height="40" />
+      <span>Zafe</span>
+      {testnet && <span class="net">Testnet</span>}
+    </header>
+
+    <h1>{testnet ? "You're invited to a Zafe testnet vault" : "You're invited to a Zafe vault"}</h1>
+    {testnet && (
+      <p class="note testnet-note">
+        <strong>This is the testnet.</strong> It uses test coins (TAZ) that have no value, to
+        try Zafe out. It's a separate app from the real Zafe, and this invite only works in it.
+      </p>
+    )}
+    <p class="lead">
+      Zafe is a shared Zcash wallet: a payment goes out only when enough members approve
+      it. Someone sent you this link to give you a seat.
+    </p>
+
+    <section id="invite" hidden>
+      <ol class="steps">
+        <li>
+          <h2>{testnet ? 'Install Zafe Testnet' : 'Install Zafe'}</h2>
+          <p>Android 7 or newer. The iPhone app isn't available yet.</p>
+          <a class="button" href={installUrl} target="_blank" rel="noopener noreferrer">{hasBuild ? (testnet ? 'Get the testnet app' : 'Download for Android') : 'Build from source'}</a>
+        </li>
+        <li>
+          <h2>Open the invite</h2>
+          <p>Zafe opens on its Join screen with the invite filled in. You still confirm before joining.</p>
+          <a class="button" id="open" href="#">Open in Zafe</a>
+          <p class="small">
+            Nothing happens? Copy the invite, then open Zafe, tap <b>Join with an invite</b>
+            and paste it.
+          </p>
+          <button class="button secondary" id="copy" type="button">Copy invite</button>
+          <p class="small" id="copied" role="status" aria-live="polite"></p>
+        </li>
+      </ol>
+      <p class="note">
+        Join only if you expected this invite. Until the vault's creator locks membership,
+        anyone with it can take a seat, so don't forward it.
+      </p>
+    </section>
+
+    <section id="missing" hidden>
+      <p class="note">
+        This link doesn't include an invite. Open it again from the message you got it in,
+        or ask the person who invited you to send it again or to show you the QR code on
+        their phone.
+      </p>
+    </section>
+
+    <noscript>
+      <p class="note">
+        This page needs JavaScript to read the invite. Without it: install Zafe, tap
+        <b>Join with an invite</b> and paste the whole link you were sent.
+      </p>
+    </noscript>
+
+    <footer>
+      This page runs only in your browser. The invite is the part of the link after
+      <code>#</code>, which browsers never send to the server.
+    </footer>
+  </main>
+</Base>

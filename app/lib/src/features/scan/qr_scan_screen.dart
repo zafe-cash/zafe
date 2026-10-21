@@ -25,8 +25,6 @@ class ScanInviteScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => QrScanScreen(
     title: 'Scan invite',
-    prompt:
-        'Point the camera at the invite QR code on the vault creator\'s phone.',
     rejected:
         'That QR code isn\'t a Zafe invite. Scan the one on the vault creator\'s '
         'setup screen.',
@@ -50,9 +48,6 @@ class ScanRecoveryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => QrScanScreen(
     title: 'Scan recovery code',
-    prompt:
-        'Point the camera at the code on the new phone of the signer who lost '
-        'theirs.',
     rejected:
         'That QR code isn\'t a Zafe recovery code. Scan the one on the "Recover your '
         'seat" screen.',
@@ -83,7 +78,6 @@ class _ScanRecipientScreenState extends State<ScanRecipientScreen> {
   @override
   Widget build(BuildContext context) => QrScanScreen(
     title: 'Scan recipient',
-    prompt: 'Point the camera at a Zcash address or payment request QR code.',
     rejected: _problem ?? 'That QR code isn\'t a Zcash address.',
     accept: (raw) {
       final request = rust_proposals.parsePaymentRequest(
@@ -107,7 +101,7 @@ class QrScanScreen extends StatefulWidget {
   const QrScanScreen({
     super.key,
     required this.title,
-    required this.prompt,
+    this.prompt = '',
     required this.rejected,
     required this.accept,
   });
@@ -171,8 +165,8 @@ class _QrScanScreenState extends State<QrScanScreen>
 
   /// Reads a QR code from a picture (a shared QR image or a screenshot of one).
   Future<void> _chooseImage() async {
-    final result = await FilePicker.pickFiles(type: FileType.image);
-    final path = result?.files.single.path;
+    final picked = await FilePicker.pickFile(type: FileType.image);
+    final path = picked?.path;
     if (path == null || !mounted) return;
     BarcodeCapture? capture;
     try {
@@ -360,8 +354,7 @@ class _ScannerError extends StatelessWidget {
             const SizedBox(height: AppSpacing.xxs),
             Text(
               denied
-                  ? 'Allow camera access for Zafe in your phone\'s settings to scan '
-                        'invites, or go back and paste the invite instead.'
+                  ? 'Allow camera access in your phone\'s settings, or go back and paste the invite.'
                   : 'Try again, or go back and paste the invite instead.',
               textAlign: TextAlign.center,
               style: AppTypography.bodySmall.copyWith(

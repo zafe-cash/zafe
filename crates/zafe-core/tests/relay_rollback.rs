@@ -11,7 +11,7 @@ use zafe_core::{
     log_cache::LogCache,
     node::{
         create_vault, follow_relay, join_vault, load_state, reseed_relay, run_keygen, seal,
-        set_name, Invite, NodeError, Reseeded, VaultMaterial,
+        set_name, Invite, KeygenOptions, NodeError, Reseeded, VaultMaterial,
     },
     relay_client::RelayClient,
     wallet::regtest_network,
@@ -52,9 +52,17 @@ async fn make_vault(relay: &RelayClient) -> Vault {
         join_vault(relay, id, &invite).await.unwrap();
     }
     seal(relay, &ids[0], &invite).await.unwrap();
-    let (_, _, number) = zafe_core::node::membership(relay, &ids[0], &invite)
-        .await
-        .unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| {
+        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
+    }))
+    .await
+    .into_iter()
+    .map(Result::unwrap)
+    .reduce(|a, b| {
+        assert_eq!(a, b, "every member sees the same safety words");
+        a
+    })
+    .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let (mut r0, mut r1, mut r2) = (
@@ -70,13 +78,50 @@ async fn make_vault(relay: &RelayClient) -> Vault {
             &number,
             &net,
             "regtest",
-            Some(2),
-            None,
+            KeygenOptions {
+                creator_birthday_height: Some(2),
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
             &mut r0,
             timeout
         ),
-        run_keygen(relay, &ids[1], &invite, &number, &net, "regtest", None, None, &mut r1, timeout),
-        run_keygen(relay, &ids[2], &invite, &number, &net, "regtest", None, None, &mut r2, timeout),
+        run_keygen(
+            relay,
+            &ids[1],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r1,
+            timeout
+        ),
+        run_keygen(
+            relay,
+            &ids[2],
+            &invite,
+            &number,
+            &net,
+            "regtest",
+            KeygenOptions {
+                creator_birthday_height: None,
+                creator_expiry_blocks: None,
+                max_birthday: None
+            },
+            keygen_dir(),
+            keygen_key(),
+            &mut r2,
+            timeout
+        ),
     );
     Vault {
         ids,
@@ -508,4 +553,42 @@ async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
         len(&w, 0, &w.url).await,
         Err(NodeError::RelayForked { .. })
     ));
+}
+
+/// A device copy that no longer verifies is reported, not silently replaced by whatever
+/// the relay serves; following the relay then replaces it (audit L9).
+#[tokio::test]
+async fn a_copy_that_does_not_verify_is_an_error_until_the_member_follows_the_relay() {
+    let w = world().await;
+    name(&w, 1, &w.url, "Bob").await;
+    let total = len(&w, 0, &w.url).await.unwrap();
+    let mailbox = w.vault.material[0].descriptor.vault_id;
+    let key = w.vault.material[0].log_key();
+
+    // Damage the last saved entry (it still parses, but its signature no longer holds).
+    let cache = LogCache::in_dir(w.dir.path().join("copy-0"));
+    let mut saved = cache.read(&mailbox).unwrap();
+    saved.last_mut().unwrap().ciphertext[30] ^= 1;
+    cache.remove(&mailbox);
+    assert!(cache.write(&mailbox, &saved).unwrap());
+
+    let err = len(&w, 0, &w.url).await.unwrap_err();
+    assert!(matches!(err, NodeError::LogCopyInvalid(_)), "{err:?}");
+
+    let out = follow_relay(&w.client(0, &w.url), &w.vault.ids[0], mailbox, &key)
+        .await
+        .unwrap();
+    assert_eq!(out.entries, total);
+    assert_eq!(out.dropped, 1, "only the damaged entry differs");
+    assert_eq!(len(&w, 0, &w.url).await.unwrap(), total);
+}
+
+/// A fresh directory for one member's key-generation state.
+fn keygen_dir() -> std::path::PathBuf {
+    tempfile::tempdir().unwrap().keep()
+}
+
+/// The key that encrypts it (any fixed key will do in tests).
+fn keygen_key() -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
 }

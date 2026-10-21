@@ -1,4 +1,4 @@
-/// Invite links, the tappable and scannable form of a raw invite (`zafe-invite-v1:<hex>`):
+/// Invite links, the tappable and scannable form of a raw invite (`zafe-invite-v2:<hex>`):
 ///
 /// - `https://<ZAFE_LINK_HOST>/join#<invite>` when the build has a link host. It opens Zafe
 ///   when installed (Android App Links, iOS Universal Links) and the landing page otherwise
@@ -9,7 +9,12 @@
 /// it's used.
 library;
 
-const kInviteLinkScheme = 'zafe';
+import '../../core/config/network_config.dart';
+
+/// The scheme this build registers: the testnet app has its own, so a link opens the app
+/// it was made for when both are installed. Both builds still read the other's links.
+const kInviteLinkScheme = kZafeNetwork == 'test' ? 'zafe-testnet' : 'zafe';
+const _kInviteLinkSchemes = {'zafe', 'zafe-testnet'};
 const kInviteLinkHost = 'join';
 
 /// The web host of `https` invite links (`--dart-define=ZAFE_LINK_HOST=zafe.example`),
@@ -44,7 +49,7 @@ String inviteLink(String invite, {String linkHost = kZafeLinkHost}) {
 /// invite: such a link is shown on the Join screen, which says it isn't an invite.
 bool isInviteLink(Uri uri, {String linkHost = kZafeLinkHost}) {
   final scheme = uri.scheme.toLowerCase();
-  if (scheme == kInviteLinkScheme) return true;
+  if (_kInviteLinkSchemes.contains(scheme)) return true;
   return scheme == 'https' &&
       linkHost.isNotEmpty &&
       uri.host.toLowerCase() == linkHost.toLowerCase();
@@ -53,7 +58,7 @@ bool isInviteLink(Uri uri, {String linkHost = kZafeLinkHost}) {
 /// The raw invite carried by [uri], or null when it isn't a Zafe invite link.
 String? inviteFromLink(Uri uri, {String linkHost = kZafeLinkHost}) {
   final scheme = uri.scheme.toLowerCase();
-  if (scheme == kInviteLinkScheme) return _fromSchemeLink(uri);
+  if (_kInviteLinkSchemes.contains(scheme)) return _fromSchemeLink(uri);
   if (scheme != 'https' || linkHost.isEmpty) return null;
   return _fromWebLink(uri, linkHost);
 }
@@ -109,7 +114,8 @@ String? extractInvite(String text, {String linkHost = kZafeLinkHost}) {
 String? _inviteIn(String token, String linkHost) {
   if (token.startsWith(_rawInvitePrefix)) return token;
   final lower = token.toLowerCase();
-  if (!lower.startsWith('$kInviteLinkScheme:') && !lower.startsWith('https:')) {
+  final isSchemeLink = _kInviteLinkSchemes.any((s) => lower.startsWith('$s:'));
+  if (!isSchemeLink && !lower.startsWith('https:')) {
     return null;
   }
   final uri = Uri.tryParse(token);

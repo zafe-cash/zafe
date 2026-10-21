@@ -37,14 +37,15 @@ pub enum ZafeErrorKind {
     /// The relay serves another history than this device saw (a fork of the log). Do not
     /// trust it; members compare notes outside Zafe.
     RelayForked,
+    /// This device's own copy of the vault history doesn't verify. The member can follow
+    /// the relay's history instead, after checking with the others.
+    LogCopyInvalid,
     /// The relay's member list or threshold differs from the vault's (someone seeded it
     /// wrongly when restoring it): do not trust it; funds are not at risk.
     RelayMembership,
     /// The relay no longer knows this vault (wiped), though this device has its log: a
     /// member can restore it from the device copy.
     RelayLostVault,
-    /// The relay takes no new vaults for now (a capped beta). Existing vaults still work.
-    RelayAtCapacity,
     /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
     /// another host, or a server that doesn't speak TLS).
     Tls,
@@ -63,6 +64,10 @@ pub enum ZafeErrorKind {
     /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
     VaultNotOnRelay,
     Other,
+    /// Key generation timed out because some members never took part (`members`).
+    KeygenIncomplete,
+    /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
+    InviteExpired,
 }
 
 /// Which server an error came from, when it came from one.
@@ -78,6 +83,9 @@ pub struct ZafeError {
     pub kind: ZafeErrorKind,
     pub message: String,
     pub endpoint: ZafeEndpoint,
+    /// Members the error is about (signing keys, hex): `KeygenIncomplete` lists those
+    /// who never took part. Empty otherwise.
+    pub members: Vec<String>,
 }
 
 impl ZafeError {
@@ -86,6 +94,7 @@ impl ZafeError {
             kind,
             message: message.into(),
             endpoint: ZafeEndpoint::None,
+            members: Vec::new(),
         }
     }
 
@@ -163,24 +172,35 @@ impl From<NodeError> for ZafeError {
             {
                 ZafeErrorKind::VaultNotOnRelay
             }
+            NodeError::Relay(RelayClientError::Status { status: 410, .. }) => {
+                ZafeErrorKind::InviteExpired
+            }
             NodeError::Relay(RelayClientError::RateLimited { .. }) => ZafeErrorKind::NotReady,
             NodeError::Relay(RelayClientError::StorageFull { .. }) => {
                 ZafeErrorKind::RelayStorageFull
             }
             NodeError::RelayRolledBack { .. } => ZafeErrorKind::RelayRolledBack,
             NodeError::RelayForked { .. } => ZafeErrorKind::RelayForked,
+            NodeError::LogCopyInvalid(_) => ZafeErrorKind::LogCopyInvalid,
             NodeError::RelayMembership(_) => ZafeErrorKind::RelayMembership,
             NodeError::RelayLostVault { .. } => ZafeErrorKind::RelayLostVault,
-            NodeError::Relay(RelayClientError::AtCapacity) => ZafeErrorKind::RelayAtCapacity,
             NodeError::NotReady(_) => ZafeErrorKind::NotReady,
             NodeError::Timeout(_) => ZafeErrorKind::Timeout,
+            NodeError::KeygenStalled { .. } => ZafeErrorKind::KeygenIncomplete,
             NodeError::Verification(_)
             | NodeError::SafetyNumberMismatch { .. }
             | NodeError::EchoMismatch => ZafeErrorKind::Verification,
             NodeError::BadInvite => ZafeErrorKind::InvalidInput,
             _ => ZafeErrorKind::Other,
         };
-        Self::new(kind, e.to_string()).at(endpoint)
+        let members = match &e {
+            NodeError::KeygenStalled { missing, .. } => missing.iter().map(hex::encode).collect(),
+            _ => Vec::new(),
+        };
+        Self {
+            members,
+            ..Self::new(kind, e.to_string()).at(endpoint)
+        }
     }
 }
 
@@ -212,6 +232,7 @@ impl From<WalletError> for ZafeError {
             WalletError::Remote { failure, .. } => net_kind(*failure),
             WalletError::WrongNetwork { .. } => ZafeErrorKind::WrongNetwork,
             WalletError::ServerBehind { .. } => ZafeErrorKind::ServerBehind,
+            WalletError::AppOutdated(_) => ZafeErrorKind::UpdateRequired,
             WalletError::Db(_) | WalletError::WrongKey => ZafeErrorKind::WalletDatabase,
             WalletError::Payment(_) => ZafeErrorKind::InvalidInput,
             WalletError::FundsReserved => ZafeErrorKind::FundsReserved,

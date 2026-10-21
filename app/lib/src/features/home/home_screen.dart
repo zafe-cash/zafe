@@ -8,14 +8,17 @@ import '../../core/config/beta.dart';
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
 import '../../core/formatting/zec_amount.dart';
+import '../../core/privacy/amount_display.dart';
+import '../../rust/api/vault.dart' show Balance;
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/layout/mobile/mobile_top_scroll_fade.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
-import '../../core/widgets/app_toast.dart';
+import '../../notifications/notification_primer.dart';
 import '../../notifications/vault_watch.dart';
+import '../../providers/app_notices_provider.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../services/live_vault_watch.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
@@ -23,6 +26,7 @@ import '../vaults/vault_emblem.dart';
 import '../vaults/vault_switcher_sheet.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/vault_names_provider.dart';
+import 'needs_you.dart';
 import 'sync_status_sheet.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/received_provider.dart';
@@ -30,6 +34,8 @@ import '../../providers/tor_provider.dart';
 import '../../providers/unapproved_spends_provider.dart';
 import '../../core/privacy/privacy_mask.dart';
 import '../proposals/activity_feed.dart';
+import '../proposals/proposal_status.dart' show needsMyAction;
+import '../../providers/other_vaults_waiting_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/zec_price_provider.dart';
 import '../../services/app_update.dart';
@@ -48,7 +54,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Other members' activity as it happens (relay long poll); the poll is the fallback.
   late final LiveVaultWatch _live = LiveVaultWatch(
     onRefresh: () => ref.read(proposalsProvider.notifier).refreshSoon(),
+    onInbox: () =>
+        ref.read(proposalsProvider.notifier).respondPolicy.inboxNews(),
     onPollIntervalChanged: (_) {
+      ref.read(proposalsProvider.notifier).respondPolicy.live =
+          _live.policy.live;
       if (_poll != null) _startPoll();
     },
   );
@@ -60,7 +70,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     Future.microtask(_refresh);
     _startPoll();
     // A vault exists from here on: notifications, background checks, push.
-    unawaited(startVaultWatch());
+    unawaited(_startWatch());
     Future.microtask(_startLive);
     // Another vault or relay: watch that one instead.
     ref.listenManual(
@@ -98,6 +108,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Background checks and pushes; the first time, the notifications primer before the
+  /// system's permission prompt (never the prompt on its own, and never again after).
+  Future<void> _startWatch() async {
+    await startWatchWithPrimer(context);
+    if (mounted) ref.invalidate(notificationsEnabledProvider);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
@@ -109,25 +126,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       unawaited(scheduleSoonCheck());
     }
     if (state == AppLifecycleState.resumed) {
+      // The owner may have turned notifications on in the system settings.
+      ref.invalidate(notificationsEnabledProvider);
       if (_poll == null) _startPoll();
       if (!_live.running) _startLive();
       unawaited(_refresh(force: true));
     }
-  }
-
-  /// Play installs the downloaded update and restarts the app: never in the middle of
-  /// sending a payment.
-  void _restartForUpdate(BuildContext context) {
-    final sending = ref
-        .read(proposalsProvider)
-        .sends
-        .values
-        .any((s) => s.running);
-    if (sending) {
-      showAppToast(context, 'Restart once the payment has been sent');
-      return;
-    }
-    unawaited(ref.read(appUpdateProvider.notifier).restart());
   }
 
   /// The poll: proposals, then the wallet only if the chain tip moved (or proposals
@@ -135,8 +139,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _refresh({bool force = false}) async {
     // Proposals first: answering signing requests needs the synced tip, which the
     // previous sync already stored.
-    await ref.read(proposalsProvider.notifier).refresh();
-    await ref.read(vaultProvider.notifier).sync(force: force);
+    // Both read before the first await: Home can be gone when the refresh ends (a
+    // vault removed or switched), and `ref` must not be used after that.
+    final proposals = ref.read(proposalsProvider.notifier);
+    final vault = ref.read(vaultProvider.notifier);
+    await proposals.refresh();
+    if (!mounted) return;
+    await vault.sync(force: force);
   }
 
   @override
@@ -154,6 +163,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final vault = ref.watch(vaultProvider);
     final summary = vault.summary;
     if (summary == null) return const SizedBox.shrink();
+    final needsBackup = ref.watch(backupStatusProvider).value == false;
+    final funded = (vault.balance?.totalZat ?? BigInt.zero) > BigInt.zero;
 
     // A failure stays on screen while the next attempt runs, so the status doesn't
     // flicker between "Syncing..." and the error on every poll.
@@ -167,7 +178,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } else if (failure != null) {
       syncLabel = failure.statusLabel;
     } else if (vault.syncing) {
-      syncLabel = 'Syncing...';
+      syncLabel = vault.firstSync ? 'First sync...' : 'Syncing...';
     } else if (vault.balance != null) {
       syncLabel = 'Synced';
     } else {
@@ -176,35 +187,67 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Scaffold(
       backgroundColor: colors.background.window,
-      body: AppToastHost(
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              MobileTopNav.account(
-                accountName: ref.watch(activeVaultNameProvider) ?? summary.name,
-                syncLabel: syncLabel,
-                syncLabelColor:
-                    tor.failed ||
-                        (torLabel == null &&
-                            failure != null &&
-                            !failure.isTransient)
-                    ? colors.sync.textError
-                    : colors.sync.text,
-                syncAnimated:
-                    tor.connecting ||
-                    (vault.syncing && (failure?.isTransient ?? true)),
-                onSyncTap: () => showSyncStatusSheet(context, retry: _refresh),
-                onAccountTap: () => showVaultSwitcher(context),
-                avatar: VaultEmblem(vaultId: vault.activeId!),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            MobileTopNav.account(
+              accountName: ref.watch(activeVaultNameProvider) ?? summary.name,
+              syncLabel: syncLabel,
+              syncLabelColor:
+                  tor.failed ||
+                      (torLabel == null &&
+                          failure != null &&
+                          !failure.isTransient)
+                  ? colors.sync.textError
+                  : tor.enabled
+                  ? colors.sync.torText
+                  : colors.sync.text,
+              // Tor's purple while Tor is on, so the status line shows it.
+              syncIndicatorColor: tor.enabled ? colors.sync.torGlow : null,
+              syncAnimated:
+                  tor.connecting ||
+                  (vault.syncing && (failure?.isTransient ?? true)),
+              onSyncTap: () => showSyncStatusSheet(context, retry: _refresh),
+              onAccountTap: () => showVaultSwitcher(context),
+              avatar: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  VaultEmblem(vaultId: vault.activeId!),
+                  // Another vault has a payment waiting for you (the switcher shows
+                  // which).
+                  if (ref.watch(otherVaultsWaitingProvider).value ?? false)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Semantics(
+                        label: 'Another vault needs you',
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: colors.background.brandStrong,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: colors.background.window,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              Expanded(
-                child: MobileTopScrollFade(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 64 + 48),
-                    children: [
-                      BalanceCard(
-                        totalZat: vault.balance?.totalZat,
+            ),
+            Expanded(
+              child: MobileTopScrollFade(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 64 + 48),
+                  children: [
+                    CountUp(
+                      value: vault.balance?.totalZat,
+                      builder: (shown) => BalanceCard(
+                        totalZat: shown,
                         // The total includes money still confirming: what's pending
                         // shows in the activity rows, not on the card.
                         fiatText: vault.balance == null
@@ -213,6 +256,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 vault.balance!.totalZat,
                                 ref.watch(zecPriceProvider),
                               ),
+                        confirmingText: _confirmingText(
+                          vault.balance,
+                          hide: ref.watch(privacyModeProvider),
+                        ),
                         hidden: ref.watch(privacyModeProvider),
                         threshold: summary.threshold,
                         members: summary.members.length,
@@ -221,126 +268,213 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ref.read(privacyModeProvider.notifier).toggle();
                         },
                       ),
-                      const SizedBox(height: AppSpacing.s),
-                      // Only once the balance is known: while it loads, a vault with
-                      // history would flash the first-deposit prompt.
-                      if (vault.balance?.totalZat == BigInt.zero)
-                        AppButton(
-                          expand: true,
-                          onPressed: () => context.push('/receive'),
-                          leading: const AppIcon(AppIcons.addNew, size: 20),
-                          child: const Text(
-                            'Receive your first $kZcashDefaultCurrencyTicker',
+                    ),
+                    const SizedBox(height: AppSpacing.s),
+                    // Only once the balance is known: while it loads, a vault with
+                    // history would flash the first-deposit prompt.
+                    if (vault.balance?.totalZat == BigInt.zero)
+                      AppButton(
+                        expand: true,
+                        onPressed: () => context.push('/receive'),
+                        leading: const AppIcon(AppIcons.addNew, size: 20),
+                        child: const Text(
+                          'Receive your first $kZcashDefaultCurrencyTicker',
+                        ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: AppButton(
+                              expand: true,
+                              onPressed: () => context.push('/send'),
+                              leading: const AppIcon(AppIcons.plane, size: 20),
+                              child: const Text('New payment'),
+                            ),
                           ),
+                          const SizedBox(width: AppSpacing.xs),
+                          Expanded(
+                            child: AppButton(
+                              expand: true,
+                              variant: AppButtonVariant.secondary,
+                              onPressed: () => context.push('/receive'),
+                              leading: const AppIcon(
+                                AppIcons.arrowDownCircle,
+                                size: 20,
+                              ),
+                              child: const Text('Receive'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: AppSpacing.md),
+                    if (ref.watch(unapprovedSpendsProvider).isNotEmpty) ...[
+                      NoticeCard(
+                        title: 'Money left without approval',
+                        body:
+                            'A transaction spent this vault\'s funds with no '
+                            'approved payment. Check with the other members now.',
+                        onTap: () => context.go('/activity'),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    // What the group is waiting on this member for, before any notice.
+                    NeedsYou(height: vault.balance?.height),
+                    // Things that happened on their own (a link expired, the server
+                    // changed): tap to dismiss.
+                    const AppNoticeCards(gap: AppSpacing.md),
+                    // Once the vault holds money, a missing backup outranks every
+                    // other notice (a lost phone could cost the group its funds).
+                    if (needsBackup && funded) ...[
+                      NoticeCard(
+                        title: 'Back up this vault',
+                        body:
+                            'It holds money, and your key share lives only on this '
+                            'phone',
+                        onTap: () => context.push('/export'),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (ref.watch(
+                          proposalsProvider.select(
+                            (p) => p.newerVersionEntries,
+                          ),
+                        ) >
+                        0) ...[
+                      const NoticeCard(
+                        title: 'Update Zafe',
+                        body:
+                            'Other members use a newer version. Some vault activity '
+                            'only shows after you update.',
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (ref.watch(appUpdateProvider) ==
+                        AppUpdateState.ready) ...[
+                      // Never in the middle of sending a payment: the card says so
+                      // and waits.
+                      if (ref
+                          .watch(proposalsProvider)
+                          .sends
+                          .values
+                          .any((s) => s.running))
+                        const NoticeCard(
+                          title: 'Update ready',
+                          body: 'Restarts after the payment is sent',
+                          warning: false,
                         )
                       else
-                        Row(
-                          children: [
-                            Expanded(
-                              child: AppButton(
-                                expand: true,
-                                onPressed: () => context.push('/send'),
-                                leading: const AppIcon(
-                                  AppIcons.plane,
-                                  size: 20,
-                                ),
-                                child: const Text('New payment'),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.xs),
-                            Expanded(
-                              child: AppButton(
-                                expand: true,
-                                variant: AppButtonVariant.secondary,
-                                onPressed: () => context.push('/receive'),
-                                leading: const AppIcon(
-                                  AppIcons.arrowDownCircle,
-                                  size: 20,
-                                ),
-                                child: const Text('Receive'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      const SizedBox(height: AppSpacing.md),
-                      if (ref.watch(
-                            proposalsProvider.select(
-                              (p) => p.newerVersionEntries,
-                            ),
-                          ) >
-                          0) ...[
-                        const NoticeCard(
-                          title: 'Update Zafe',
-                          body:
-                              'Other members use a newer version. Some vault activity '
-                              'only shows after you update.',
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (ref.watch(appUpdateProvider) ==
-                          AppUpdateState.ready) ...[
                         NoticeCard(
                           title: 'Update ready',
                           body: 'Restart Zafe to finish updating',
                           warning: false,
-                          onTap: () => _restartForUpdate(context),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (ref.watch(unapprovedSpendsProvider).isNotEmpty) ...[
-                        NoticeCard(
-                          title: 'Money left without approval',
-                          body:
-                              'A transaction spent this vault\'s funds with no '
-                              'approved payment. Check with the other members now.',
-                          onTap: () => context.go('/activity'),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (kIsBeta) ...[
-                        if (overBetaCap(vault.balance?.totalZat))
-                          NoticeCard(
-                            title: 'Over the beta limit',
-                            body: betaOverCapNote(),
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.xxs,
-                            ),
-                            child: Text(
-                              betaNote(),
-                              style: AppTypography.bodySmall.copyWith(
-                                color: colors.text.muted,
-                              ),
-                            ),
+                          onTap: () => unawaited(
+                            ref.read(appUpdateProvider.notifier).restart(),
                           ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      if (ref.watch(backupStatusProvider).value == false) ...[
-                        NoticeCard(
-                          title: 'Back up this vault',
-                          body: 'Your key share lives only on this phone',
-                          onTap: () => context.push('/export'),
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
-                      _Payments(
-                        proposals: ref.watch(proposalsProvider),
-                        received: ref.watch(receivedProvider),
-                        hideAmounts: ref.watch(privacyModeProvider),
-                        height: vault.balance?.height,
-                      ),
+                      const SizedBox(height: AppSpacing.md),
                     ],
-                  ),
+                    if (ref.watch(notificationsEnabledProvider).value ==
+                        false) ...[
+                      NoticeCard(
+                        title: 'Notifications are off',
+                        body:
+                            'You won\'t hear when a payment needs your approval',
+                        onTap: () => enableNotifications(ref),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (kIsBeta) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.xxs,
+                        ),
+                        child: Text(
+                          betaNote,
+                          style: AppTypography.bodySmall.copyWith(
+                            color: colors.text.muted,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    if (needsBackup && !funded) ...[
+                      NoticeCard(
+                        title: 'Back up this vault',
+                        body: 'Your key share lives only on this phone',
+                        onTap: () => context.push('/export'),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    _Payments(
+                      proposals: ref.watch(proposalsProvider),
+                      received: ref.watch(receivedProvider),
+                      hideAmounts: ref.watch(privacyModeProvider),
+                      height: vault.balance?.height,
+                      funded: funded,
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+/// Rolls a balance up to its new value when it grows (money arrived): 900 ms, easing
+/// out, from the old value. Decreases and the first value show at once, as does
+/// everything with reduced motion.
+class CountUp extends StatefulWidget {
+  const CountUp({super.key, required this.value, required this.builder});
+  final BigInt? value;
+  final Widget Function(BigInt? shown) builder;
+
+  @override
+  State<CountUp> createState() => _CountUpState();
+}
+
+class _CountUpState extends State<CountUp> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+  BigInt? _from;
+
+  @override
+  void didUpdateWidget(CountUp old) {
+    super.didUpdateWidget(old);
+    final before = old.value, now = widget.value;
+    if (before != null &&
+        now != null &&
+        now > before &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _from = _shown(old.value);
+      _c.forward(from: 0);
+    }
+  }
+
+  BigInt? _shown(BigInt? target) {
+    final from = _from;
+    if (target == null || from == null || !_c.isAnimating) return target;
+    final t = Curves.easeOutCubic.transform(_c.value);
+    final delta = (target - from).toDouble() * t;
+    return from + BigInt.from(delta.round());
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _c,
+    builder: (context, _) => widget.builder(_shown(widget.value)),
+  );
 }
 
 /// Zafe's vault card: the balance on the vault card (`colors.vaultCard`: ink in dark
@@ -351,6 +485,7 @@ class BalanceCard extends StatelessWidget {
     super.key,
     required this.totalZat,
     required this.fiatText,
+    this.confirmingText,
     required this.hidden,
     required this.onToggle,
     required this.threshold,
@@ -359,6 +494,9 @@ class BalanceCard extends StatelessWidget {
 
   /// The total in dollars ("$1,234.56"); null off mainnet or without a price.
   final String? fiatText;
+
+  /// Money in the total that can't be spent yet ("0.001 ZEC confirming"); null when none.
+  final String? confirmingText;
   final BigInt? totalZat;
   final bool hidden;
   final VoidCallback onToggle;
@@ -374,8 +512,10 @@ class BalanceCard extends StatelessWidget {
         : ZecAmount.fromZatoshi(total).compactBalance.amountText;
     final card = colors.vaultCard;
 
+    // Taller with large system text (amount, label and lines grow; it overflowed).
+    final grow = (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 40);
     return Container(
-      height: 216,
+      height: 216 + grow * 3,
       decoration: BoxDecoration(
         color: card.background,
         borderRadius: BorderRadius.circular(AppRadii.large),
@@ -401,21 +541,34 @@ class BalanceCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(
-                      'VAULT BALANCE',
-                      style: AppTypography.labelSmall.copyWith(
-                        color: card.textSecondary,
-                        letterSpacing: 1.6,
-                        fontWeight: FontWeight.w600,
+                    // The label takes what it needs and ellipsizes only when the
+                    // card is too narrow (narrow phones, large system text).
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              kNetworkBadge.isEmpty
+                                  ? 'VAULT BALANCE'
+                                  : 'VAULT BALANCE · $kNetworkBadge',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.labelSmall.copyWith(
+                                color: card.textSecondary,
+                                letterSpacing: 1.6,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          AppIcon(
+                            AppIcons.shieldKeyhole,
+                            size: 14,
+                            color: card.accent,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.xs),
-                    AppIcon(
-                      AppIcons.shieldKeyhole,
-                      size: 14,
-                      color: card.accent,
-                    ),
-                    const Spacer(),
                     AppTappable(
                       onTap: onToggle,
                       semanticsLabel: hidden ? 'Show balance' : 'Hide balance',
@@ -475,6 +628,18 @@ class BalanceCard extends StatelessWidget {
                       color: card.textSecondary,
                     ),
                   ),
+                if (confirmingText case final confirming?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      confirming,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.bodySmall.copyWith(
+                        color: card.textSecondary,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: AppSpacing.sm),
                 _ThresholdStrip(threshold: threshold, members: members),
               ],
@@ -512,9 +677,13 @@ class _ThresholdStrip extends StatelessWidget {
             ),
           ),
         const SizedBox(width: 4),
-        Text(
-          '$threshold of $members signers to send',
-          style: AppTypography.labelSmall.copyWith(color: card.textSecondary),
+        Flexible(
+          child: Text(
+            '$threshold of $members signers to send',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.labelSmall.copyWith(color: card.textSecondary),
+          ),
         ),
       ],
     );
@@ -577,19 +746,24 @@ class _Payments extends StatelessWidget {
     required this.received,
     required this.hideAmounts,
     this.height,
+    this.funded = false,
   });
   final ProposalsState proposals;
   final ReceivedState received;
   final bool hideAmounts;
   final int? height;
 
+  /// The vault holds money: the empty state suggests a payment, else receiving first.
+  final bool funded;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final items = mergeActivity(
-      proposals.items,
-      received.items,
-    ).take(kRecentActivityLimit).toList();
+    // Payments that need this member are listed above, under "Needs you".
+    final items = mergeActivity([
+      for (final p in proposals.items)
+        if (!needsMyAction(p, height: height)) p,
+    ], received.items).take(kRecentActivityLimit).toList();
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.xs,
@@ -598,8 +772,8 @@ class _Payments extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: 24,
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 24),
             child: Row(
               children: [
                 Expanded(
@@ -653,7 +827,9 @@ class _Payments extends StatelessWidget {
                     if (proposals.loaded) ...[
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
-                        'How about proposing\nyour first payment?',
+                        funded
+                            ? 'How about proposing\nyour first payment?'
+                            : 'Receive funds first: share the\nvault address with the payer.',
                         textAlign: TextAlign.center,
                         style: AppTypography.bodyMedium.copyWith(
                           color: colors.text.secondary,
@@ -676,6 +852,29 @@ class _Payments extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The app's notices ([appNoticesProvider]) as cards, each followed by [gap]; tapping
+/// one dismisses it.
+class AppNoticeCards extends ConsumerWidget {
+  const AppNoticeCards({super.key, this.gap = AppSpacing.s});
+  final double gap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final n in ref.watch(appNoticesProvider)) ...[
+        NoticeCard(
+          title: n.title,
+          body: n.body,
+          warning: false,
+          onTap: () => ref.read(appNoticesProvider.notifier).dismiss(n.id),
+        ),
+        SizedBox(height: gap),
+      ],
+    ],
+  );
 }
 
 /// Until this device's copy of the vault is backed up (spec §12.2 "backup health").
@@ -779,4 +978,17 @@ class NoticeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "0.001 ZEC confirming" for money in the total that can't be spent yet (received funds
+/// and the vault's own change wait for confirmations); null when there is none.
+String? _confirmingText(Balance? balance, {required bool hide}) {
+  if (balance == null) return null;
+  final pending = balance.incomingPendingZat + balance.changePendingZat;
+  if (pending <= BigInt.zero) return null;
+  final amount = amountWithTicker(
+    ZecAmount.fromZatoshi(pending).balance.amountText,
+    hide: hide,
+  );
+  return '$amount confirming';
 }

@@ -39,7 +39,8 @@ Future<void> _loadFonts() async {
 
 const _me = 'a3f09c41d2e87b5566c0de19f4a2b7c8e1d0937a6b5c4d3e2f1a0b9c8d7e6f50';
 const _bob = '5e17b2c9a4d86f3310ab77e2c4d9f1086b3a2c5d7e9f0a1b2c3d4e5f6a7b8c9d';
-const _cara = 'c2d4e6f8a0b1c3d5e7f9a1b3c5d7e9f1a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2';
+const _cara =
+    'c2d4e6f8a0b1c3d5e7f9a1b3c5d7e9f1a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2';
 const _dev = '9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b';
 
 /// The Signers tab's cards for a 2-of-4 vault where `backedUp` signers have a backup.

@@ -13,13 +13,20 @@ const double kMobileTabBarHeight = 64;
 
 /// One destination in the floating mobile tab bar.
 class AppMobileTabItem {
-  const AppMobileTabItem({required this.iconName, required this.label});
+  const AppMobileTabItem({
+    required this.iconName,
+    required this.label,
+    this.badge = false,
+  });
 
   /// `AppIcons` name rendered at 28px.
   final String iconName;
 
   /// Accessibility label; the bar itself is icon-only.
   final String label;
+
+  /// A dot on the icon: something on that tab waits for you.
+  final bool badge;
 }
 
 /// Floating pill-shaped bottom tab bar — Figma `Mobile Nav`
@@ -222,7 +229,9 @@ class _TabBarItemState extends State<_TabBarItem>
         : colors.icon.muted;
 
     return Semantics(
-      label: widget.item.label,
+      label: widget.item.badge
+          ? '${widget.item.label}, needs you'
+          : widget.item.label,
       button: true,
       selected: widget.active,
       child: GestureDetector(
@@ -248,12 +257,34 @@ class _TabBarItemState extends State<_TabBarItem>
                   duration: widget.motion
                       ? AppMobileTabBar.selectDuration
                       : Duration.zero,
-                  builder: (_, color, _) => AppIcon(
-                    widget.item.iconName,
-                    size: AppMobileTabBar._iconSize,
-                    color: color ?? iconColor,
-                    // Patina: solid for the current tab, two-tone otherwise.
-                    active: widget.active,
+                  builder: (_, color, _) => Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      AppIcon(
+                        widget.item.iconName,
+                        size: AppMobileTabBar._iconSize,
+                        color: color ?? iconColor,
+                        // Patina: solid for the current tab, two-tone otherwise.
+                        active: widget.active,
+                      ),
+                      Positioned(
+                        right: -3,
+                        top: -2,
+                        child: AnimatedScale(
+                          scale: widget.item.badge ? 1 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutBack,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: context.colors.background.brandStrong,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

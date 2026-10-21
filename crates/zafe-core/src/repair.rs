@@ -32,15 +32,15 @@ use reddsa::frost::redpallas::{
 };
 use serde::{Deserialize, Serialize};
 use zafe_proto::{
-    relay::ReplaceApproval,
+    relay::{RecoveryPut, RecoveryValueKind, ReplaceApproval, Signed},
     version::{self, Format},
     Envelope, Identity, IdentityPublic, Kind, LogKey, MailboxId,
 };
 
 use crate::{
     node::{
-        append_event, frost_id_of, load_log, load_state, members_by_pk, read_inbox, Invite,
-        NodeError, SeqCounter, VaultMaterial,
+        append_event, frost_id_of, load_log, load_state, members_by_pk, read_inbox, send_fresh,
+        Invite, NodeError, SeqCounter, VaultMaterial,
     },
     relay_client::RelayClient,
     vault::{Replacement, VaultEvent, VaultState},
@@ -80,33 +80,209 @@ impl RecoveryRequest {
         version::check(Format::RecoveryRequest, found)?;
         postcard::from_bytes(&hex::decode(body).map_err(|_| bad())?).map_err(|_| bad())
     }
+}
 
-    /// Eight digits ("1234 5678") both phones show, read out to check that the code
-    /// wasn't swapped on the way.
-    pub fn safety_code(&self) -> String {
-        let hash = blake2b_simd::Params::new()
-            .hash_length(16)
-            .personal(b"Zafe_RecoverCode")
-            .to_state()
-            .update(&self.identity.sig_pk)
-            .update(&self.identity.enc_pk)
-            .finalize();
-        let n = u64::from_le_bytes(hash.as_bytes()[..8].try_into().expect("8 bytes")) % 100_000_000;
-        format!("{:04} {:04}", n / 10_000, n % 10_000)
+// --- The recovery's safety words (commit, challenge, reveal; spec §10.1) ---------------
+//
+// The recovery code travels over a chat app, so whoever relays it can swap it for one of
+// their own. Before approving, each co-signer and the new phone compare words that depend
+// on the new phone's secret (committed before any challenge exists) and the co-signer's
+// challenge: a swapped code gets one guess. The values pass through the relay
+// (`/v1/recovery/*`; the new phone isn't a member of any mailbox yet), signed; nothing is
+// stored on either phone, each value being derived from a signature by its own key.
+
+/// The new phone's secret for its recovery (a deterministic signature: a restarted app
+/// reveals what it committed to).
+fn recovery_secret(me: &Identity) -> [u8; 32] {
+    signed_value(me, b"Zafe seat recovery secret v1", &[])
+}
+
+/// A co-signer's challenge to the new phone `subject`, bound to the commitment it saw.
+fn recovery_challenge(me: &Identity, subject: &[u8; 32], commitment: &[u8; 32]) -> [u8; 32] {
+    signed_value(
+        me,
+        b"Zafe seat recovery challenge v1",
+        &[subject, commitment],
+    )
+}
+
+fn signed_value(me: &Identity, label: &[u8], parts: &[&[u8; 32]]) -> [u8; 32] {
+    let mut message = label.to_vec();
+    for p in parts {
+        message.extend_from_slice(*p);
+    }
+    let sig = me.sign(&message);
+    blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"Zafe_RecovValue_")
+        .hash(&sig)
+        .as_bytes()
+        .try_into()
+        .expect("32 bytes")
+}
+
+/// The values of `kind` among those read for a subject.
+fn values_by(
+    values: &[Signed<RecoveryPut>],
+    kind: RecoveryValueKind,
+) -> impl Iterator<Item = &Signed<RecoveryPut>> {
+    values.iter().filter(move |v| v.payload.kind == kind)
+}
+
+fn older_relay(e: crate::relay_client::RelayClientError) -> NodeError {
+    match e {
+        crate::relay_client::RelayClientError::Status { status: 404, .. } => NodeError::NotReady(
+            "the relay doesn't support safe seat recovery yet; ask whoever runs it to update"
+                .into(),
+        ),
+        e => e.into(),
     }
 }
 
-/// Member: approves moving `old`'s seat to the device that made `request`. Returns whether
-/// the seat has moved (this approval completed it); the relay is then told right away.
+/// Words a co-signer showed the new phone, by the co-signer's key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecoveryCheck {
+    pub cosigner: [u8; 32],
+    pub words: String,
+}
+
+/// New phone: one step of the safety check (the app polls it). Publishes the commitment
+/// if the relay doesn't have it, reveals the secret once a co-signer has challenged, and
+/// returns the words for each co-signer who did.
+pub async fn recovery_checks(
+    relay: &RelayClient,
+    me: &Identity,
+) -> Result<Vec<RecoveryCheck>, NodeError> {
+    let subject = me.public().sig_pk;
+    let secret = recovery_secret(me);
+    let values = relay
+        .recovery_read(me, subject)
+        .await
+        .map_err(older_relay)?;
+    let mine = |kind| values_by(&values, kind).any(|v| v.signer == *me.public());
+    if !mine(RecoveryValueKind::Commit) {
+        let commitment = crate::sas::recovery_commitment(me.public(), &secret);
+        relay
+            .recovery_put(me, subject, RecoveryValueKind::Commit, commitment)
+            .await
+            .map_err(older_relay)?;
+        // A challenge needs the commitment first; nothing to show yet.
+        return Ok(Vec::new());
+    }
+    let challenges: Vec<_> = values_by(&values, RecoveryValueKind::Challenge)
+        .filter(|v| v.signer.sig_pk != subject)
+        .collect();
+    if challenges.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !mine(RecoveryValueKind::Reveal) {
+        // Only now, with a challenge fixed, does the secret leave the phone.
+        relay
+            .recovery_put(me, subject, RecoveryValueKind::Reveal, secret)
+            .await
+            .map_err(older_relay)?;
+    }
+    Ok(challenges
+        .iter()
+        .map(|c| RecoveryCheck {
+            cosigner: c.signer.sig_pk,
+            words: crate::sas::recovery_words(
+                me.public(),
+                &c.signer.sig_pk,
+                &secret,
+                &c.payload.value,
+            ),
+        })
+        .collect())
+}
+
+/// Co-signer: one step of the safety check with the new phone `new` (from its recovery
+/// code or the vault log). Challenges once the new phone's commitment is there, and once
+/// it has revealed a secret that matches, returns the words to compare. `None` while
+/// waiting for the new phone.
+pub async fn new_phone_words(
+    relay: &RelayClient,
+    me: &Identity,
+    new: &IdentityPublic,
+) -> Result<Option<String>, NodeError> {
+    let subject = new.sig_pk;
+    if subject == me.public().sig_pk {
+        return Err(NodeError::Protocol(
+            "that recovery code is this phone's own".into(),
+        ));
+    }
+    let values = relay
+        .recovery_read(me, subject)
+        .await
+        .map_err(older_relay)?;
+    let by_new = |kind| values_by(&values, kind).find(|v| v.signer == *new);
+    let Some(commit) = by_new(RecoveryValueKind::Commit) else {
+        return Ok(None); // the new phone hasn't opened its recovery screen yet
+    };
+    let commitment = commit.payload.value;
+    let challenge = recovery_challenge(me, &subject, &commitment);
+    match values_by(&values, RecoveryValueKind::Challenge).find(|v| v.signer == *me.public()) {
+        None => {
+            relay
+                .recovery_put(me, subject, RecoveryValueKind::Challenge, challenge)
+                .await
+                .map_err(older_relay)?;
+            return Ok(None);
+        }
+        // Our challenge was made for another commitment than the one shown now: the
+        // relay swapped it (or the new phone started over). Never compare those words.
+        Some(posted) if posted.payload.value != challenge => {
+            return Err(NodeError::Verification(
+                "the new phone's safety value changed after it was challenged: don't approve; \
+                 ask them to start over"
+                    .into(),
+            ))
+        }
+        Some(_) => {}
+    }
+    let Some(reveal) = by_new(RecoveryValueKind::Reveal) else {
+        return Ok(None);
+    };
+    if crate::sas::recovery_commitment(new, &reveal.payload.value) != commitment {
+        return Err(NodeError::Verification(
+            "the new phone's safety value doesn't match what it committed to: don't approve".into(),
+        ));
+    }
+    Ok(Some(crate::sas::recovery_words(
+        new,
+        &me.public().sig_pk,
+        &reveal.payload.value,
+        &challenge,
+    )))
+}
+
+/// Member: approves moving `old`'s seat to the device that made `request`, after its
+/// owner compared `confirmed_words` with the new phone ([`new_phone_words`]; checked again
+/// here). Returns whether the seat has moved (this approval completed it); the relay is
+/// then told right away.
+#[allow(clippy::too_many_arguments)]
 pub async fn approve_replacement<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,
     old: [u8; 32],
     request: &RecoveryRequest,
+    confirmed_words: &str,
     rng: &mut R,
 ) -> Result<bool, NodeError> {
-    let (mut chain, mut state) = load_state(relay, me, material).await?;
+    // Both read the relay (over Tor each request is a new stream, ~1 s): at once.
+    let (words, loaded) = tokio::join!(
+        new_phone_words(relay, me, &request.identity),
+        load_state(relay, me, material)
+    );
+    let words = words?
+        .ok_or_else(|| NodeError::NotReady("the new phone hasn't shown its words yet".into()))?;
+    if crate::sas::normalize(confirmed_words) != words {
+        return Err(NodeError::Verification(
+            "those aren't the words this phone shows for the new phone: don't approve".into(),
+        ));
+    }
+    let (mut chain, mut state) = loaded?;
     let approval = ReplaceApproval {
         mailbox: state.descriptor.vault_id,
         old,
@@ -316,17 +492,12 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
                     attempt: r.attempt,
                     delta: hs.deltas[pk].clone(),
                 };
-                let env = Envelope::sealed(
-                    me,
-                    to,
-                    mailbox,
-                    seq.next_seq(),
-                    Kind::RepairDelta,
-                    &version::encode(Format::Repair, &msg)?,
-                    rng,
-                )
-                .map_err(proto)?;
-                relay.send(&env).await?;
+                let payload = version::encode(Format::Repair, &msg)?;
+                send_fresh(relay, &mut seq, |n| {
+                    Envelope::sealed(me, to, mailbox, n, Kind::RepairDelta, &payload, rng)
+                        .map_err(proto)
+                })
+                .await?;
             }
             hs.sent = true;
             write_atomic(&state_path, &version::encode(Format::Repair, &hs)?)?;
@@ -361,17 +532,12 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
                 log_key: material.log_key,
             },
         };
-        let env = Envelope::sealed(
-            me,
-            &r.new,
-            mailbox,
-            seq.next_seq(),
-            Kind::RepairSigma,
-            &version::encode(Format::Repair, &msg)?,
-            rng,
-        )
-        .map_err(proto)?;
-        relay.send(&env).await?;
+        let payload = version::encode(Format::Repair, &msg)?;
+        send_fresh(relay, &mut seq, |n| {
+            Envelope::sealed(me, &r.new, mailbox, n, Kind::RepairSigma, &payload, rng)
+                .map_err(proto)
+        })
+        .await?;
         write_atomic(&helper_path(dir, r, DONE_EXT), b"")?;
         let _ = std::fs::remove_file(&state_path);
         let _ = relay.ack_inbox(me, mailbox, &cursors).await;
@@ -497,7 +663,8 @@ async fn recover_from(
         .vault_keys()?
         .ufvk()
         .map_err(proto)?
-        .encode(&network);
+        .encode(&network)
+        .map_err(proto)?;
     if ufvk != state.descriptor.ufvk {
         return Err(failed(
             "the vault secret doesn't give the vault's viewing key",

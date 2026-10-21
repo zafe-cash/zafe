@@ -169,11 +169,11 @@ fn zcash_sign_agrees_with_zafe() {
 
     // 4. zcash-sign's signed PCZT proves and extracts into a fully valid transaction.
     let proved = Prover::new(their_signed)
-        .create_ironwood_proof(proving_key())
+        .create_ironwood_proof(zafe_core::zrng::zrng(), proving_key())
         .unwrap()
         .finish();
     TransactionExtractor::new(proved)
         .with_orchard(verifying_key())
-        .extract()
+        .extract(zafe_core::zrng::zrng())
         .expect("valid transaction");
 }

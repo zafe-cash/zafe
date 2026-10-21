@@ -1,32 +1,34 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/platform/sensitive_clipboard.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/storage/member_names.dart';
 import '../../core/storage/vault_summaries.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
-import '../onboarding/onboarding_art.dart';
 import 'backup_prompt_screen.dart' show backupStatusProvider;
 import '../../rust/api/backup.dart' as rust;
 
 /// Export this device's copy of the vault as a passphrase-encrypted backup (spec §12.2).
+/// The passphrase is always generated: 12 words the member saves, then proves by typing
+/// three of them back (choosing one was left to people, and "Suggest" filled both
+/// fields, so nothing ever checked the words were written down).
 class ExportScreen extends ConsumerStatefulWidget {
   const ExportScreen({super.key});
 
@@ -35,67 +37,59 @@ class ExportScreen extends ConsumerStatefulWidget {
 }
 
 class _ExportScreenState extends ConsumerState<ExportScreen> {
-  final _pass = TextEditingController();
-  final _passFocus = FocusNode();
-  final _confirm = TextEditingController();
-  final _confirmFocus = FocusNode();
-  bool _busy = false;
+  /// The 12 words, made once per visit.
+  late final List<String> _words = rust
+      .suggestBackupPassphrase()
+      .split(' ')
+      .where((w) => w.isNotEmpty)
+      .toList();
+
+  /// Which three words (0-based) the check asks for, in order.
+  late final List<int> _asked = () {
+    final rng = math.Random.secure();
+    final picked = <int>{};
+    while (picked.length < 3) {
+      picked.add(rng.nextInt(_words.length));
+    }
+    return picked.toList()..sort();
+  }();
+  final _answers = [for (var i = 0; i < 3; i++) TextEditingController()];
+  final _focus = [for (var i = 0; i < 3; i++) FocusNode()];
+
+  /// The words are on screen (false: the check).
+  bool _showWords = true;
   rust.ExportedBackup? _done;
 
   @override
   void dispose() {
-    _pass.dispose();
-    _passFocus.dispose();
-    _confirm.dispose();
-    _confirmFocus.dispose();
+    for (final c in _answers) {
+      c.dispose();
+    }
+    for (final f in _focus) {
+      f.dispose();
+    }
     super.dispose();
   }
 
-  rust.PassphraseCheck get _check =>
-      rust.checkBackupPassphrase(passphrase: _pass.text);
+  bool _matches(int i) =>
+      _answers[i].text.trim().toLowerCase() == _words[_asked[i]].toLowerCase();
 
-  bool get _ready =>
-      _pass.text.isNotEmpty && _check.ok && _confirm.text == _pass.text;
-
-  void _suggest() {
-    final words = rust.suggestBackupPassphrase();
-    setState(() {
-      _pass.text = words;
-      _confirm.text = words;
-    });
-  }
+  bool get _checked =>
+      [for (var i = 0; i < 3; i++) _matches(i)].every((m) => m);
 
   Future<void> _export() async {
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Unlock to export a backup',
-    )) {
-      return;
+    if (!await confirmUnlock(context, ref, reason: 'Export a backup')) {
+      throw const ActionCancelled();
     }
     final vault = ref.read(vaultProvider);
-    setState(() => _busy = true);
-    try {
-      final backup = await rust.exportVaultBackup(
-        seeds: vault.identity!,
-        material: vault.material!,
-        invite: vault.invite!,
-        names: MemberNames.toSigners(await MemberNames.read(vault.activeId!)),
-        passphrase: _pass.text,
-      );
-      setState(() => _done = backup);
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    final backup = await rust.exportVaultBackup(
+      seeds: vault.identity!,
+      material: vault.material!,
+      invite: vault.invite!,
+      names: MemberNames.toSigners(await MemberNames.read(vault.activeId!)),
+      passphrase: _words.join(' '),
+    );
+    if (mounted) setState(() => _done = backup);
   }
 
   String get _fileName {
@@ -109,7 +103,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   /// The backup left the app (saved or sent): stop the reminder and tell the other
   /// members (the next refresh attests it in the vault log).
   Future<void> _saved() async {
-    await VaultSummaries.write(ref.read(vaultProvider).activeId!, backedUp: true);
+    await VaultSummaries.write(
+      ref.read(vaultProvider).activeId!,
+      backedUp: true,
+    );
     ref.invalidate(backupStatusProvider);
     unawaited(ref.read(proposalsProvider.notifier).refresh());
   }
@@ -123,7 +120,11 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       ShareParams(files: [XFile(file.path)], fileNameOverrides: [_fileName]),
     );
     // `unavailable`: the platform can't tell whether a target was picked.
-    if (result.status != ShareResultStatus.dismissed) await _saved();
+    if (result.status != ShareResultStatus.dismissed) {
+      await _saved();
+      // Saved somewhere: nothing left to do here.
+      if (mounted) context.go('/home');
+    }
     // The share sheet has copied or sent it; don't leave the backup lying in the cache.
     try {
       await file.delete();
@@ -131,14 +132,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 
   Future<void> _copyText() async {
-    await Clipboard.setData(ClipboardData(text: _done!.text));
+    await copySecret(_done!.text);
     await _saved();
-    if (mounted) {
-      showAppToast(
-        context,
-        'Backup copied. Paste it into your password manager',
-      );
-    }
   }
 
   @override
@@ -152,9 +147,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           _Note(
             icon: AppIcons.checkCircle,
             iconColor: colors.icon.value,
-            text:
-                'Encrypted with your passphrase. Keep the file and the passphrase in different '
-                'places: together they give full signing power in "$name".',
+            text: 'Store the file and passphrase apart.',
           ),
           const SizedBox(height: AppSpacing.md),
           AppButton(
@@ -164,24 +157,47 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             child: const Text('Save or share the file'),
           ),
           const SizedBox(height: AppSpacing.s),
-          AppButton(
-            expand: true,
+          ActionButton(
+            label: 'Copy as text',
+            icon: AppIcons.copy,
+            doneLabel: 'Copied',
+            resetAfterDone: true,
             variant: AppButtonVariant.secondary,
-            leading: const AppIcon(AppIcons.copy, size: 20),
             onPressed: _copyText,
-            child: const Text('Copy as text'),
           ),
-          const SizedBox(height: AppSpacing.s),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => context.go('/home'),
-            child: const Text('Done'),
+        ],
+      );
+    }
+
+    if (_showWords) {
+      return ZafeScreen(
+        title: 'Back up vault',
+        bottom: AppButton(
+          expand: true,
+          onPressed: () => setState(() => _showWords = false),
+          child: const Text('I saved them'),
+        ),
+        children: [
+          _Note(
+            icon: AppIcons.lock,
+            iconColor: colors.icon.accent,
+            text:
+                'Anyone with the file and these words can sign for you in "$name".',
           ),
           const SizedBox(height: AppSpacing.md),
+          BackupWordGrid(words: _words),
+          const SizedBox(height: AppSpacing.sm),
+          ActionButton(
+            label: 'Copy words',
+            icon: AppIcons.copy,
+            doneLabel: 'Copied',
+            resetAfterDone: true,
+            variant: AppButtonVariant.secondary,
+            onPressed: () => copySecret(_words.join(' ')),
+          ),
+          const SizedBox(height: AppSpacing.sm),
           Text(
-            'Moving to a new phone? Restore this backup there first, check the vault works, '
-            'then remove it from this phone in Settings.',
+            'Write them down or keep them in a password manager. Zafe can\'t show them again.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),
@@ -190,80 +206,95 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       );
     }
 
-    final check = _check;
-    final mismatch = _confirm.text.isNotEmpty && _confirm.text != _pass.text;
     return ZafeScreen(
-      title: 'Back up vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: _ready && !_busy ? _export : null,
-        child: Text(_busy ? 'Encrypting...' : 'Create backup'),
+      title: 'Check your words',
+      bottom: ActionButton(
+        label: 'Create backup',
+        busyLabel: 'Encrypting...',
+        enabled: _checked,
+        onPressed: _export,
       ),
       children: [
-        const OnboardingBanner('backup_seal'),
-        const SizedBox(height: AppSpacing.md),
-        _Note(
-          icon: AppIcons.lock,
-          iconColor: colors.icon.accent,
-          text:
-              'A backup restores your seat in "$name" on another phone: your key share and '
-              'vault access. Anyone with the backup and its passphrase gets your signing power '
-              'here, so choose a strong passphrase and keep it separate from the file. '
-              'Signing nonces are never included.',
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          'Passphrase',
-          style: AppTypography.labelLarge.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        MobileTextField(
-          controller: _pass,
-          focusNode: _passFocus,
-          hintText: '12 words, or a long unique phrase',
-          onChanged: (_) => setState(() {}),
-          trailing: _Pill(label: 'Suggest', onTap: _suggest),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        if (_pass.text.isNotEmpty)
+        for (var i = 0; i < 3; i++) ...[
           Text(
-            check.ok ? 'Strong passphrase' : check.hint,
-            style: AppTypography.bodySmall.copyWith(
-              color: check.ok ? colors.text.value : colors.text.destructive,
+            'Word ${_asked[i] + 1}',
+            style: AppTypography.labelLarge.copyWith(
+              color: colors.text.secondary,
             ),
           ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'Confirm passphrase',
-          style: AppTypography.labelLarge.copyWith(
-            color: colors.text.secondary,
+          const SizedBox(height: AppSpacing.xs),
+          MobileTextField(
+            secret: true,
+            controller: _answers[i],
+            focusNode: _focus[i],
+            onChanged: (_) => setState(() {}),
           ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        MobileTextField(
-          controller: _confirm,
-          focusNode: _confirmFocus,
-          hintText: 'Type it again',
-          onChanged: (_) => setState(() {}),
-        ),
-        if (mismatch)
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.xs),
-            child: Text(
-              "Passphrases don't match",
-              style: AppTypography.bodySmall.copyWith(
-                color: colors.text.destructive,
+          if (_answers[i].text.trim().isNotEmpty && !_matches(i))
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(
+                "That's not word ${_asked[i] + 1}",
+                style: AppTypography.bodySmall.copyWith(
+                  color: colors.text.destructive,
+                ),
               ),
             ),
-          ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'Write the passphrase down. Zafe can\'t recover it for you.',
-          style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        AppButton(
+          variant: AppButtonVariant.ghost,
+          onPressed: () => setState(() => _showWords = true),
+          child: const Text('Show the words again'),
         ),
       ],
+    );
+  }
+}
+
+/// The backup words, numbered: two columns, one with large text (two wrapped them).
+class BackupWordGrid extends StatelessWidget {
+  const BackupWordGrid({super.key, required this.words});
+  final List<String> words;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final oneColumn = MediaQuery.textScalerOf(context).scale(16) > 21;
+    final half = oneColumn ? words.length : (words.length / 2).ceil();
+    Widget column(int from, int to) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = from; i < to; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '${i + 1}'.padLeft(2),
+                      style: TextStyle(color: colors.text.secondary),
+                    ),
+                    TextSpan(text: '  ${words[i]}'),
+                  ],
+                ),
+                style: TextStyle(
+                  fontFamily: 'JetBrains Mono',
+                  fontSize: 16,
+                  height: 1.4,
+                  color: colors.text.primary,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    return MobileSurfaceCard(
+      cornerRadius: AppRadii.large,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [column(0, half), if (!oneColumn) column(half, words.length)],
+      ),
     );
   }
 }
@@ -297,33 +328,6 @@ class _Note extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: colors.background.neutralSubtleOpacity,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          label,
-          style: AppTypography.labelLarge.copyWith(color: colors.text.accent),
-        ),
       ),
     );
   }

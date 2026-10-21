@@ -1,0 +1,131 @@
+#!/bin/bash
+# The only thing the CI deploy keys can run on the VPS. Installed by bootstrap.sh as
+# /usr/local/sbin/zafe-deploy (root:root, 0755); never replaced by a deploy.
+#
+# Each key is pinned in authorized_keys to
+#   restrict,command="sudo -n /usr/local/sbin/zafe-deploy <testnet|mainnet>"
+# of its own unix user (zafe-testnet / zafe-mainnet), and sudoers lets that user run
+# exactly that line. sshd puts what CI asked for in SSH_ORIGINAL_COMMAND; this script
+# parses it as a fixed grammar (never eval, never a shell string) and runs as root:
+#
+#   sync <40 hex commit>              install infra/relay/vps files of that commit
+#   secrets <fcm|litestream>          stdin: the env file (empty fcm = remove it)
+#   check <sha256:hex> <soak hours>   mainnet only: testnet runs this digest, soaked, healthy
+#   deploy <sha256:hex> <domain> [soak hours]   stdin: registry token; runs deploy.sh
+#
+# Why it is safe to run files as root: CI never sends files. `sync` downloads the commit
+# from GitHub itself and refuses any commit that is not on `main`, so the content comes
+# from the reviewed branch, not from whoever holds the key. A key can then only pick a
+# main commit and an image digest of ours, and only touch its own network: testnet's key
+# cannot write mainnet's secrets, domain or services, and mainnet's key cannot write
+# testnet's.
+set -euo pipefail
+umask 022
+
+network=${1:-}
+case $network in testnet | mainnet) ;; *) echo "usage: zafe-deploy <testnet|mainnet>" >&2; exit 2 ;; esac
+[ "$(id -u)" = 0 ] || { echo "must run through sudo" >&2; exit 2; }
+[ "${SUDO_USER:-}" = "zafe-$network" ] || { echo "wrong user for $network" >&2; exit 2; }
+
+app=/opt/zafe-relay
+repo=zafe-cash/zafe
+image_repo=ghcr.io/zafe-cash/zafe-relay
+TESTNET_DOMAIN=testnet.relay.zafe.cash
+MAINNET_DOMAIN=relay.zafe.cash
+# shellcheck disable=SC1091
+[ -f /etc/zafe-deploy.conf ] && . /etc/zafe-deploy.conf
+if [ "$network" = testnet ]; then domain_ok=$TESTNET_DOMAIN; else domain_ok=$MAINNET_DOMAIN; fi
+
+die() { echo "zafe-deploy: $*" >&2; exit 1; }
+
+exec 9>/var/lock/zafe-deploy.lock
+flock -w 600 9 || die "another deploy is running"
+
+# Fixed grammar: words of [A-Za-z0-9:._-] only.
+cmd=${SSH_ORIGINAL_COMMAND:-}
+[[ $cmd =~ ^[A-Za-z0-9:._\ -]{1,200}$ ]] || die "bad command"
+read -r -a words <<<"$cmd"
+action=${words[0]:-}
+sha_re='^[0-9a-f]{40}$'
+digest_re='^sha256:[0-9a-f]{64}$'
+num_re='^[0-9]{1,4}$'
+
+soak_check() { # <digest> <hours>
+    [[ $1 =~ $digest_re ]] || die "bad digest"
+    [[ $2 =~ $num_re ]] || die "bad soak hours"
+    local rec="$app/deployed/testnet.json" image at hours
+    [ -f "$rec" ] || die "no testnet deploy record"
+    image=$(jq -r .image "$rec"); at=$(jq -r .at "$rec")
+    [[ $at =~ ^[0-9]+$ ]] || die "bad timestamp in the testnet deploy record"
+    [ "$image" = "$image_repo@$1" ] || die "testnet runs $image, not $image_repo@$1: promote what testnet runs"
+    hours=$(( ($(date -u +%s) - at) / 3600 ))
+    [ "$hours" -ge "$2" ] || die "that digest has run on testnet for $hours h, the minimum is $2 h"
+    [ "$(curl -fsS --max-time 10 "https://$TESTNET_DOMAIN/health")" = ok ] || die "testnet is not healthy"
+    echo "testnet has run $image for $hours h"
+}
+
+case $action in
+sync)
+    sha=${words[1]:-}; [ "${#words[@]}" = 2 ] && [[ $sha =~ $sha_re ]] || die "usage: sync <commit>"
+    status=$(curl -fsS --max-time 20 "https://api.github.com/repos/$repo/compare/main...$sha" | jq -r .status) ||
+        die "cannot ask GitHub about $sha"
+    case $status in identical | behind) ;; *) die "commit $sha is not on main ($status)" ;; esac
+    work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+    curl -fsSL --max-time 60 "https://codeload.github.com/$repo/tar.gz/$sha" -o "$work/src.tgz"
+    mkdir "$work/src"
+    tar -xzf "$work/src.tgz" -C "$work/src" --strip-components=4 --no-same-owner --no-same-permissions \
+        --wildcards '*/infra/relay/vps/*'
+    [ -z "$(find "$work/src" -type l -print -quit)" ] || die "symlink in the bundle"
+    src=$work/src
+    install -d -m755 "$app" "$app/caddy"
+    install -m644 "$src/compose.yml" "$src/litestream.yml" "$app/"
+    install -m755 "$src/backup.sh" "$src/deploy.sh" "$app/"
+    install -m644 "$src/caddy/Caddyfile" "$app/caddy/Caddyfile"
+    if [ "$network" = mainnet ]; then
+        install -d -m755 "$app/caddy/mainnet"
+        install -m644 "$src/mainnet/relay.caddy" "$app/caddy/mainnet/relay.caddy"
+    fi
+    echo "synced $sha"
+    ;;
+secrets)
+    which=${words[1]:-}; [ "${#words[@]}" = 2 ] || die "usage: secrets <fcm|litestream>"
+    content=$(head -c 16384)
+    case "$network:$which" in
+    testnet:fcm) file=secrets.env ;;
+    mainnet:fcm) file=secrets-mainnet.env ;;
+    mainnet:litestream) file=litestream.env ;;
+    *) die "$network may not write $which" ;;
+    esac
+    if [ "$which" = fcm ]; then
+        if [ -z "$content" ]; then rm -f "$app/$file"; echo "removed $file"; exit 0; fi
+        printf '%s\n' "$content" | grep -Eqx "ZAFE_FCM_SERVICE_ACCOUNT_JSON='[^']+'" || die "bad fcm line"
+        [ "$(printf '%s\n' "$content" | wc -l)" = 1 ] || die "fcm must be one line"
+    else
+        keys='LITESTREAM_ACCESS_KEY_ID|LITESTREAM_SECRET_ACCESS_KEY|LITESTREAM_BUCKET|LITESTREAM_ENDPOINT|LITESTREAM_REGION'
+        [ "$(printf '%s\n' "$content" | grep -Ecx "($keys)='[^']*'")" = 5 ] || die "bad litestream env"
+        [ "$(printf '%s\n' "$content" | wc -l)" = 5 ] || die "bad litestream env"
+        [ "$(printf '%s\n' "$content" | cut -d= -f1 | sort -u | wc -l)" = 5 ] || die "duplicate keys"
+    fi
+    (umask 077 && printf '%s\n' "$content" >"$app/$file.new" && mv "$app/$file.new" "$app/$file")
+    echo "wrote $file"
+    ;;
+check)
+    [ "$network" = mainnet ] || die "check is for mainnet"
+    [ "${#words[@]}" = 3 ] || die "usage: check <digest> <soak hours>"
+    soak_check "${words[1]}" "${words[2]}"
+    ;;
+deploy)
+    [ "${#words[@]}" -ge 3 ] || die "usage: deploy <digest> <domain> [soak hours]"
+    digest=${words[1]}; domain=${words[2]}
+    [[ $digest =~ $digest_re ]] || die "bad digest"
+    [ "$domain" = "$domain_ok" ] || die "domain must be $domain_ok for $network"
+    if [ "$network" = mainnet ]; then
+        [ "${#words[@]}" = 4 ] || die "mainnet needs the soak hours"
+        soak_check "$digest" "${words[3]}"
+    else
+        [ "${#words[@]}" = 3 ] || die "usage: deploy <digest> <domain>"
+    fi
+    exec bash "$app/deploy.sh" "$network" "$image_repo@$digest" "$domain"
+    ;;
+*) die "unknown command" ;;
+esac

@@ -31,7 +31,7 @@ const _cara =
     'c84d1e6fa2b937054e8d6c1b0a9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7';
 const _dev = '0b92e4f7c1a6d3588d2e1f0c9b8a7f6e5d4c3b2a19087f6e5d4c3b2a1f0e9d8c';
 const _addr =
-    'utest1k3v8m2q9x7h5f4d6s8a0p2o4i6u8y0t2r4e6w8q0z9x7c5v3b1n2m4l6k8j0h2g4f6d8s0a';
+    'u1k3v8m2q9x7h5f4d6s8a0p2o4i6u8y0t2r4e6w8q0z9x7c5v3b1n2m4l6k8j0h2g4f6d8s0a';
 
 rust.ProposalInfo _proposal({
   rust.ProposalStage stage = rust.ProposalStage.open,
@@ -69,6 +69,7 @@ rust.ProposalInfo _proposal({
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  needsNewProposal: false,
 );
 
 final _review = rust.ReviewInfo(
@@ -170,11 +171,7 @@ final _scenarios = <String, (String, List<Widget>)>{
         members: _members,
         me: _me,
       ),
-      _actions(
-        'Send now',
-        note:
-            'Every signature is in. It is sent automatically by the signer who approved last; you can also send it yourself.',
-      ),
+      _actions('Send now'),
     ],
   ),
   'proposal_rejected': (
@@ -247,7 +244,7 @@ final _scenarios = <String, (String, List<Widget>)>{
             DetailDivider(),
             DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
             DetailDivider(),
-            DetailRow(label: 'Tx fee', value: 'Set by ZIP 317'),
+            DetailRow(label: 'Network fee', value: 'At least 0.0001 TAZ'),
           ],
         ),
       ),

@@ -16,7 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/mobile/mobile_transaction_progress_screen.dart';
-import 'package:zafe/src/features/onboarding/onboarding_art.dart';
+import 'package:zafe/src/features/proposals/sent_art.dart';
 
 Future<void> _loadFonts() async {
   final families = <String, List<String>>{
@@ -37,20 +37,21 @@ Future<void> _loadFonts() async {
 
 // The in-progress phase is shown without its action: the app's label ('Keep sending in
 // background') wraps inside the button at this width.
-final _phases = <String, (MobileTransactionProgressPhase, String, String, String?)>{
-  'sending_progress': (
-    MobileTransactionProgressPhase.inProgress,
-    'Sending...',
-    'Building the private transaction and submitting it to the network...',
-    null,
-  ),
-  'sending_sent': (
-    MobileTransactionProgressPhase.succeeded,
-    'Sent!',
-    'It will confirm on-chain shortly. Track it in Activity.',
-    'Done',
-  ),
-};
+final _phases =
+    <String, (MobileTransactionProgressPhase, String, String, String?)>{
+      'sending_progress': (
+        MobileTransactionProgressPhase.inProgress,
+        'Sending...',
+        'Building the private transaction and submitting it to the network...',
+        null,
+      ),
+      'sending_sent': (
+        MobileTransactionProgressPhase.succeeded,
+        'Sent!',
+        'It will confirm on-chain shortly. Track it in Activity.',
+        'Done',
+      ),
+    };
 
 void main() {
   testWidgets('render the sending screen', (tester) async {
@@ -83,7 +84,9 @@ void main() {
                     body: body,
                     canPop: true,
                     bodyMaxWidth: 260,
-                    background: const IllustrationBackground('sent_slot'),
+                    background: SentArt(
+                      sent: phase == MobileTransactionProgressPhase.succeeded,
+                    ),
                     primaryActionLabel: action,
                     onPrimaryAction: action == null ? null : () {},
                   ),

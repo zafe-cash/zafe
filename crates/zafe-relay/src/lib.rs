@@ -44,9 +44,10 @@ use wait::Waiters;
 use zafe_proto::{
     log::GENESIS_PREV_HASH,
     relay::{
-        encode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo, MailboxesRead,
-        MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Remove,
+        encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
+        InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
+        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, RenewInvite,
         ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
         WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
         UNSUPPORTED_VERSION_HEADER,
@@ -55,8 +56,16 @@ use zafe_proto::{
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
 };
 
-/// Largest number of items returned by one read.
-const PAGE: i64 = 500;
+/// How long a seat recovery's safety-check values stay (a recovery takes minutes to days).
+pub const RECOVERY_RETENTION_SECS: u64 = 7 * 24 * 3600;
+
+/// Most co-signers' challenges kept for one recovering phone: more than any vault has
+/// approvers, few enough that a stranger can't bury the real ones.
+pub const MAX_RECOVERY_CHALLENGES: i64 = 16;
+
+/// Largest number of items returned by one read (clients rely on it: a shorter log read
+/// is the end of the log).
+const PAGE: i64 = zafe_proto::relay::READ_PAGE as i64;
 
 /// Largest request body. The biggest real bodies are log entries carrying a proposal's
 /// PCZT (tens of KB for a few payments; a 50-recipient batch stays well under this) and
@@ -109,6 +118,9 @@ pub enum RelayError {
     Forbidden,
     #[error("unknown mailbox")]
     NotFound,
+    /// The invite is older than `INVITE_TTL_SECS` and wasn't renewed (HTTP 410 Gone).
+    #[error("this invite expired")]
+    InviteExpired,
     #[error("mailbox already exists")]
     Exists,
     #[error("request timestamp outside the allowed window")]
@@ -168,6 +180,7 @@ impl IntoResponse for RelayError {
             RelayError::Unauthenticated => StatusCode::UNAUTHORIZED,
             RelayError::Forbidden => StatusCode::FORBIDDEN,
             RelayError::NotFound => StatusCode::NOT_FOUND,
+            RelayError::InviteExpired => StatusCode::GONE,
             RelayError::Exists | RelayError::Replay => StatusCode::CONFLICT,
             RelayError::Storage | RelayError::UnsupportedVersion(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -175,14 +188,6 @@ impl IntoResponse for RelayError {
             RelayError::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
             RelayError::QuotaExceeded(_) => StatusCode::INSUFFICIENT_STORAGE,
         };
-        if let RelayError::QuotaExceeded(quota) = self {
-            return (
-                status,
-                [(zafe_proto::relay::QUOTA_HEADER, quota.token())],
-                self.to_string(),
-            )
-                .into_response();
-        }
         (status, self.to_string()).into_response()
     }
 }
@@ -242,6 +247,14 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     platform TEXT NOT NULL,
     token TEXT NOT NULL,
     PRIMARY KEY (mailbox, member)
+);
+CREATE TABLE IF NOT EXISTS recovery_values (
+    subject BLOB NOT NULL,
+    signer BLOB NOT NULL,
+    kind INTEGER NOT NULL,
+    signed BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (subject, signer, kind)
 );
 ";
 
@@ -393,12 +406,16 @@ impl Relay {
             .route("/v1/mailbox/join", post(join))
             .route("/v1/mailbox/seal", post(seal))
             .route("/v1/mailbox/remove", post(remove))
+            .route("/v1/mailbox/cancel", post(cancel_setup))
+            .route("/v1/mailbox/renew", post(renew_invite))
             .route("/v1/mailbox/members", post(members))
             .route("/v1/mailbox/info", post(mailbox_info))
             .route("/v1/mailbox/threshold", post(set_threshold))
             .route("/v1/mailbox/replace", post(replace_member))
             .route("/v1/mailbox/reseed", post(reseed))
             .route("/v1/mailboxes", post(mailboxes))
+            .route("/v1/recovery/put", post(recovery_put))
+            .route("/v1/recovery/read", post(recovery_read))
             .route("/v1/push/register", post(register_push))
             .route("/v1/envelope", post(post_envelope))
             .route("/v1/inbox", post(inbox))
@@ -438,6 +455,11 @@ impl Relay {
         let deleted = tx.execute(
             "DELETE FROM deliveries WHERE created_at < ?1",
             params![cutoff],
+        )?;
+        let recovery_cutoff = self.now().saturating_sub(RECOVERY_RETENTION_SECS) as i64;
+        tx.execute(
+            "DELETE FROM recovery_values WHERE created_at < ?1",
+            params![recovery_cutoff],
         )?;
         tx.commit()?;
         Ok(deleted)
@@ -531,6 +553,8 @@ struct MailboxRow {
     max_members: u16,
     sealed: bool,
     threshold: u16,
+    /// When the invite was issued or last renewed (`created_at`, seconds).
+    issued_at: u64,
 }
 
 fn arr32(v: Vec<u8>) -> Result<[u8; 32], RelayError> {
@@ -540,7 +564,7 @@ fn arr32(v: Vec<u8>) -> Result<[u8; 32], RelayError> {
 fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
     let row = db
         .query_row(
-            "SELECT creator, join_token_hash, max_members, sealed, threshold
+            "SELECT creator, join_token_hash, max_members, sealed, threshold, created_at
              FROM mailboxes WHERE id = ?1",
             params![&id[..]],
             |r| {
@@ -550,6 +574,7 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
                 ))
             },
         )
@@ -561,6 +586,7 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
         max_members: u16::try_from(row.2).map_err(|_| RelayError::Storage)?,
         sealed: row.3 != 0,
         threshold: u16::try_from(row.4).map_err(|_| RelayError::Storage)?,
+        issued_at: u64::try_from(row.5).unwrap_or(0),
     })
 }
 
@@ -665,7 +691,6 @@ async fn create(
             return Err(RelayError::QuotaExceeded(Quota::Mailboxes));
         }
     }
-    check_capacity(&relay, &tx)?;
     tx.execute(
         "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
         params![
@@ -678,17 +703,6 @@ async fn create(
     ok(&())
 }
 
-/// Refuses a new mailbox (already inserted in `tx`) when the relay is over its total.
-fn check_capacity(relay: &Relay, tx: &rusqlite::Transaction) -> Result<(), RelayError> {
-    if let Some(max) = relay.quotas.mailboxes_total {
-        let all: i64 = tx.query_row("SELECT COUNT(*) FROM mailboxes", [], |r| r.get(0))?;
-        if all as u64 > max {
-            return Err(RelayError::QuotaExceeded(Quota::Capacity));
-        }
-    }
-    Ok(())
-}
-
 async fn join(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<Join>(&relay, &body)?;
     let mut db = relay.db.lock().expect("lock");
@@ -698,9 +712,16 @@ async fn join(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::Forbidden);
     }
     let current = members_of(&tx, &req.payload.mailbox)?;
-    if !current.iter().any(|m| m.sig_pk == req.signer.sig_pk)
-        && current.len() >= usize::from(mb.max_members)
+    let already = current.iter().any(|m| m.sig_pk == req.signer.sig_pk);
+    // A new member needs a live invite; one already in can always rejoin.
+    if !already
+        && relay.now()
+            > mb.issued_at
+                .saturating_add(zafe_proto::relay::INVITE_TTL_SECS)
     {
+        return Err(RelayError::InviteExpired);
+    }
+    if !already && current.len() >= usize::from(mb.max_members) {
         return Err(RelayError::Forbidden);
     }
     tx.execute(
@@ -750,6 +771,60 @@ async fn remove(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         "DELETE FROM members WHERE mailbox = ?1 AND sig_pk = ?2",
         params![&req.payload.mailbox[..], &req.payload.member[..]],
     )?;
+    ok(&())
+}
+
+/// Deletes a mailbox whose setup the creator abandoned (wrong details, changed their
+/// mind), so its invite stops working and the members waiting in it learn the setup is
+/// gone (their next read answers 404). Only before sealing and only while the log is
+/// empty: a vault that exists is never deleted by this. Byte counters live on the
+/// mailbox row, so they go with it.
+/// The creator restarts the invite's clock (`INVITE_TTL_SECS`), until the setup locks.
+async fn renew_invite(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RenewInvite>(&relay, &body)?;
+    let id = &req.payload.mailbox;
+    let db = relay.db.lock().expect("lock");
+    let mb = mailbox(&db, id)?;
+    if req.signer.sig_pk != mb.creator || mb.sealed {
+        return Err(RelayError::Forbidden);
+    }
+    let now = i64::try_from(relay.now()).unwrap_or(i64::MAX);
+    db.execute(
+        "UPDATE mailboxes SET created_at = ?1 WHERE id = ?2",
+        params![now, &id[..]],
+    )?;
+    ok(&())
+}
+
+async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<CancelSetup>(&relay, &body)?;
+    let id = &req.payload.mailbox;
+    let mut db = relay.db.lock().expect("lock");
+    let mb = mailbox(&db, id)?;
+    // Sealed is fine: until the vault's first log entry no keys exist, and a setup whose
+    // member never came back must be cancellable.
+    if req.signer.sig_pk != mb.creator {
+        return Err(RelayError::Forbidden);
+    }
+    let logged: i64 = db.query_row(
+        "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
+        params![&id[..]],
+        |r| r.get(0),
+    )?;
+    if logged > 0 {
+        return Err(RelayError::Forbidden);
+    }
+    let tx = db.transaction()?;
+    for table in ["members", "deliveries", "sender_seqs", "push_tokens"] {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE mailbox = ?1"),
+            params![&id[..]],
+        )?;
+    }
+    tx.execute("DELETE FROM mailboxes WHERE id = ?1", params![&id[..]])?;
+    tx.commit()?;
+    drop(db);
+    relay.waiters.signal(id);
     ok(&())
 }
 
@@ -921,7 +996,6 @@ async fn reseed(
                     return Err(RelayError::QuotaExceeded(Quota::Mailboxes));
                 }
             }
-            check_capacity(&relay, &tx)?;
             for m in &p.members {
                 tx.execute(
                     "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
@@ -1042,6 +1116,65 @@ async fn mailboxes(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         })
         .collect::<Result<Vec<MailboxId>, RelayError>>()?;
     ok(&MailboxesResponse { mailboxes })
+}
+
+/// Keeps one value of a seat recovery's safety check (see [`RecoveryPut`]). The new phone
+/// (the subject) leaves its commitment and later its secret; anyone else may leave one
+/// challenge. The first of each (subject, signer, kind) stays: a value can't be changed
+/// after the other side has seen it.
+async fn recovery_put(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RecoveryPut>(&relay, &body)?;
+    let p = &req.payload;
+    relay.check_fresh(p.timestamp)?;
+    let by_subject = req.signer.sig_pk == p.subject;
+    let allowed = match p.kind {
+        RecoveryValueKind::Commit | RecoveryValueKind::Reveal => by_subject,
+        RecoveryValueKind::Challenge => !by_subject,
+    };
+    if !allowed {
+        return Err(RelayError::Forbidden);
+    }
+    // The canonical bytes, not the body: nothing extra rides along.
+    let signed = req.to_bytes().map_err(|_| RelayError::BadRequest)?;
+    let db = relay.db.lock().expect("lock");
+    if p.kind == RecoveryValueKind::Challenge {
+        let challenges: i64 = db.query_row(
+            "SELECT COUNT(*) FROM recovery_values WHERE subject = ?1 AND kind = ?2",
+            params![&p.subject[..], p.kind as i64],
+            |r| r.get(0),
+        )?;
+        if challenges >= MAX_RECOVERY_CHALLENGES {
+            return Err(RelayError::Forbidden);
+        }
+    }
+    db.execute(
+        "INSERT OR IGNORE INTO recovery_values (subject, signer, kind, signed, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            &p.subject[..],
+            &req.signer.sig_pk[..],
+            p.kind as i64,
+            &signed[..],
+            relay.now() as i64
+        ],
+    )?;
+    ok(&())
+}
+
+/// Every value left for a recovering phone, as posted (clients verify the signatures).
+async fn recovery_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RecoveryRead>(&relay, &body)?;
+    relay.check_fresh(req.payload.timestamp)?;
+    let db = relay.db.lock().expect("lock");
+    let mut stmt = db.prepare(
+        "SELECT signed FROM recovery_values WHERE subject = ?1 ORDER BY kind, created_at",
+    )?;
+    let values = stmt
+        .query_map(params![&req.payload.subject[..]], |r| {
+            r.get::<_, Vec<u8>>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    ok(&RecoveryValues { values })
 }
 
 async fn register_push(State(relay): State<Relay>, body: Bytes) -> RelayResult {
@@ -1244,6 +1377,12 @@ async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::Forbidden);
     }
     let author = member(&tx, &h.mailbox, &h.author)?.ok_or(RelayError::Forbidden)?;
+    // Verify before answering anything about the log, `Conflict { len }` included: only
+    // a member's signed entry learns the log length (audit L7).
+    entry
+        .verify_signature(&author)
+        .map_err(|_| RelayError::Unauthenticated)?;
+    relay.limit_key(&author.sig_pk)?;
 
     let len: i64 = tx.query_row(
         "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
@@ -1264,10 +1403,6 @@ async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     if h.index != len as u64 || h.prev_hash != head {
         return ok(&AppendResult::Conflict { len: len as u64 });
     }
-    entry
-        .verify_signature(&author)
-        .map_err(|_| RelayError::Unauthenticated)?;
-    relay.limit_key(&author.sig_pk)?;
     let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
     if let Some(cap) = relay.quotas.log_bytes {
         let used: i64 = tx.query_row(

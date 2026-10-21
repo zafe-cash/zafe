@@ -14,9 +14,12 @@ String _asset(BuildContext context, String name) {
 /// colour, so text and buttons below sit on a clean background
 /// (content sits at the bottom).
 class OnboardingHero extends StatelessWidget {
-  const OnboardingHero(this.name, {super.key});
+  const OnboardingHero(this.name, {super.key, this.art});
 
   final String name;
+
+  /// Drawn instead of the still scene (an animated version of it, same canvas).
+  final Widget? art;
 
   @override
   Widget build(BuildContext context) {
@@ -30,23 +33,28 @@ class OnboardingHero extends StatelessWidget {
           children: [
             AspectRatio(
               aspectRatio: 1080 / 1240,
-              child: SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
+              child:
+                  art ??
+                  SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
             ),
             Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    // Soft scrim under the status bar, clear art, then a
-                    // fade into the window colour before the text starts.
-                    stops: const [0, 0.1, 0.4, 0.74],
-                    colors: [
-                      window.withValues(alpha: 0.85),
-                      window.withValues(alpha: 0),
-                      window.withValues(alpha: 0),
-                      window,
-                    ],
+              // Only paint: an animated scene below may take taps.
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      // Soft scrim under the status bar, clear art, then a
+                      // fade into the window colour before the text starts.
+                      stops: const [0, 0.1, 0.4, 0.74],
+                      colors: [
+                        window.withValues(alpha: 0.85),
+                        window.withValues(alpha: 0),
+                        window.withValues(alpha: 0),
+                        window,
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -75,26 +83,6 @@ class OnboardingBanner extends StatelessWidget {
           aspectRatio: aspectRatio,
           child: SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
         ),
-      ),
-    );
-  }
-}
-
-/// Full-page art behind a screen's content (e.g. `MobileTransactionProgressScreen`'s
-/// `background`). The art fills the page, cropped equally top and bottom on
-/// shorter screens; its middle is left empty for the content.
-class IllustrationBackground extends StatelessWidget {
-  const IllustrationBackground(this.name, {super.key});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    // Its own layer: the sending screen animates a loader on top, and without the
-    // boundary the full-page SVG was repainted every frame.
-    return RepaintBoundary(
-      child: ExcludeSemantics(
-        child: SvgPicture.asset(_asset(context, name), fit: BoxFit.cover),
       ),
     );
   }

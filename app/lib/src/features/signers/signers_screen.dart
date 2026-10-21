@@ -5,10 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/layout/mobile/mobile_top_scroll_fade.dart';
 import '../../core/formatting/member_label.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/security/unlock_gate.dart';
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -58,16 +57,6 @@ class SignersScreen extends ConsumerWidget {
                             color: colors.text.accent,
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          threshold == 1
-                              ? 'Any one signer can send a payment on their own.'
-                              : 'Every payment needs approvals from $threshold '
-                                    'of these signers before it can be sent.',
-                          style: AppTypography.bodyMedium.copyWith(
-                            color: colors.text.secondary,
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -75,7 +64,6 @@ class SignersScreen extends ConsumerWidget {
                     const SizedBox(height: AppSpacing.md),
                     SeatMoveCard(
                       who: memberLabel(move.oldKeyHex, me: me, names: names),
-                      safetyCode: move.safetyCode,
                       approvals: move.approvals.length,
                       needed: move.needed,
                       // The signer who lost the phone can't approve; nor twice.
@@ -136,19 +124,6 @@ class SignersScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.s),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xxs,
-                    ),
-                    child: Text(
-                      'Tap a signer to name them on this phone. Names stay on this '
-                      'phone; other members don\'t see them.',
-                      style: AppTypography.bodySmall.copyWith(
-                        color: colors.text.muted,
-                      ),
-                    ),
-                  ),
                   if (members.length > 1) ...[
                     const SizedBox(height: AppSpacing.md),
                     AppButton(
@@ -182,8 +157,8 @@ Future<void> _takeOver(
     builder: (c) => AlertDialog(
       title: Text('Help instead of $name?'),
       content: Text(
-        'Your phone takes $name\'s place in rebuilding the key, and the rebuild starts '
-        'over. Do this only if $name can\'t open Zafe for a while.',
+        'Your phone takes $name\'s place and the rebuild starts over. Only do this '
+        'if $name can\'t open Zafe for a while.',
       ),
       actions: [
         TextButton(
@@ -197,31 +172,12 @@ Future<void> _takeOver(
       ],
     ),
   );
-  if (ok != true || !context.mounted) return;
-  if (!await confirmUnlock(
-    context,
-    ref,
-    reason: 'Unlock to help rebuild a key',
-  )) {
-    return;
+  if (ok != true || !context.mounted) throw const ActionCancelled();
+  if (!await confirmUnlock(context, ref, reason: 'Help rebuild a key')) {
+    throw const ActionCancelled();
   }
-  try {
-    await ref
-        .read(proposalsProvider.notifier)
-        .retryRepair(replacement, stalled);
-    if (context.mounted) {
-      showAppToast(context, 'Your phone helps rebuild the key now.');
-    }
-  } catch (e) {
-    if (context.mounted) {
-      showAppToast(
-        context,
-        zafeErrorMessage(e, fallback: 'Couldn\'t start over. Try again.'),
-        iconName: AppIcons.warningCircle,
-        tone: AppToastTone.destructive,
-      );
-    }
-  }
+  // The card then shows this phone among the helpers.
+  await ref.read(proposalsProvider.notifier).retryRepair(replacement, stalled);
 }
 
 /// How many signers told the vault they have a backup, and what it means if they don't
@@ -319,14 +275,12 @@ class SeatMoveCard extends StatelessWidget {
   const SeatMoveCard({
     super.key,
     required this.who,
-    required this.safetyCode,
     required this.approvals,
     required this.needed,
     this.onApprove,
   });
 
   final String who;
-  final String safetyCode;
   final int approvals;
   final int needed;
 
@@ -357,8 +311,10 @@ class SeatMoveCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Approvals: $approvals of $needed. Before approving, ask $who to read the '
-            'safety code on their new phone: it must be $safetyCode.',
+            onApprove == null
+                ? 'Approvals: $approvals of $needed.'
+                : 'Approvals: $approvals of $needed. Compare safety words with $who '
+                      'before approving.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),
@@ -397,7 +353,7 @@ class RepairCard extends StatelessWidget {
   /// `(key hex, label)` of the helpers in the current attempt.
   final List<(String, String)> helpers;
   final bool meHelping;
-  final void Function(String stalled, String name)? onTakeOver;
+  final Future<void> Function(String stalled, String name)? onTakeOver;
 
   @override
   Widget build(BuildContext context) {
@@ -425,10 +381,10 @@ class RepairCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(
             meHelping
-                ? 'Your phone is one of the helpers ($names). It does its part '
-                      'whenever Zafe is open or checks in the background.'
-                : 'The phones of $names rebuild it on $who\'s new phone when they open '
-                      'Zafe. If one of them can\'t for a while, help in their place.',
+                ? 'Your phone is a helper, with $names. It does its part whenever '
+                      'Zafe runs.'
+                : '$names rebuild it on $who\'s new phone when they open Zafe. If '
+                      'one can\'t for a while, help in their place.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),
@@ -438,12 +394,12 @@ class RepairCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.s),
               SizedBox(
                 width: double.infinity,
-                child: AppButton(
-                  expand: true,
+                child: ActionButton(
+                  label: 'Help instead of $name',
                   variant: AppButtonVariant.secondary,
                   size: AppButtonSize.medium,
+                  errorFallback: 'Couldn\'t start over. Try again.',
                   onPressed: () => onTakeOver!(key, name),
-                  child: Text('Help instead of $name'),
                 ),
               ),
             ],

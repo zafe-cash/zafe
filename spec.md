@@ -216,9 +216,11 @@ interface Envelope {
 - Vault log entries: XChaCha20-Poly1305 under the vault log key.
 - Recipients drop any envelope whose signature fails, whose sender isn't a current member, or whose `seq` was already seen.
 
-### 5.3 Safety number
+### 5.3 Safety words
 
-A **safety number** is a short fingerprint over the sorted list of all members' `IdentityPublic` keys plus `vaultId`, shown as 12 digits and as a QR code. All members must confirm the same safety number **before the DKG starts** (§7.2). This is the only defence against a malicious relay impersonating members during setup.
+The **safety words** are four BIP-39 words that every member compares out of band. All members must confirm the same words **before the DKG starts** (§7.2). This is the only defence against a malicious relay impersonating members during setup.
+
+They come from a commit-then-reveal exchange after membership is locked (2026-10-15, replacing a 12-digit hash of the member keys, which a relay could grind in days on one core). Each member derives a secret value from a signature by its identity key over the mailbox id, sends a commitment to it (`SafetyCommit` envelope), and sends the value (`SafetyReveal`) only once it holds every other member's commitment. The words hash the mailbox id and every member's key and value. A relay that shows two members different member lists must commit to its own values before it learns the honest members' values, so a match is a one-shot guess: 2^-44.
 
 ---
 
@@ -243,7 +245,7 @@ A **safety number** is a short fingerprint over the sorted list of all members' 
 | Censor or delay messages (members see stalled sessions and can switch relay; relay is self-hostable) | Spend |
 | Withhold or reorder log entries (hash chain and member signatures detect gaps and forks) | Forge member messages or votes |
 | Serve an older log (restore an old database, or lose data), or a different history (each device keeps its own copy of the log and refuses a relay that no longer holds its last entry, §6.3) | Make a device accept a log shorter than the one it already saw |
-| Impersonate members during setup **if the safety number is skipped** (the UI blocks the DKG until it is confirmed) | Read content |
+| Impersonate members during setup **if the safety words are skipped** (the UI blocks the DKG until they are confirmed) | Read content |
 
 ### 6.3 Vault log
 
@@ -293,10 +295,16 @@ Name, network (`test` / `main`), `N`, `t`, and optional initial rules and addres
 2  Invite:  link (remote) or QR (in person); carries mailbox id,
             creator sigPk fingerprint, one-time join token
 3  Members join, publish IdentityPublic
-4  ALL members confirm the safety number
-      remote: read the 12 digits over a call / trusted channel
-      in person: scan each other's QR
-   → DKG is disabled in the UI until every member has confirmed
+   (the creator's phone locks membership itself once every seat is taken)
+4  ALL members confirm the safety words
+      remote: read the 4 words over a call / a chat the members trust
+      in person: show them side by side
+   → a member's round 1 goes out only after it confirmed ("They match")
+   Steps 4-8 run as repeated steps (node::keygen_step), each member's state saved on
+   its phone (encrypted, written before anything it covers is sent), driven by the app
+   and by background checks woken by pushes: members don't have to be online together.
+   Every member still has to take part. Until the vault's first log entry the creator
+   can cancel the setup on the relay.
 5  FROST DKG (frost-core dkg part1/2/3, redpallas):
       part1 packages → broadcast via relay
       echo check: each member broadcasts H(all part1 packages it received);
@@ -565,7 +573,7 @@ Changing members depends on the group, so Zafe offers two operations and explain
 The member keeps their seat. Two ways back in (§12): restore from an encrypted backup, or **repair** (§10.4.2), where t other members regenerate the member's share on the new device.
 
 **Repair as implemented (2026-10-01; `zafe_core::repair`, `VaultEvent::ReplaceApproval`, event version 4):**
-1. The new phone makes a fresh identity and shows a **recovery code** (`zafe-recover-v1:<hex postcard {identity}>`, shared like an invite) and an 8-digit **safety code** (BLAKE2b of the new keys), which co-signers compare with the member by voice or in person.
+1. The new phone makes a fresh identity and shows a **recovery code** (`zafe-recover-v1:<hex postcard {identity}>`, shared like an invite). Before approving, each co-signer and the new phone compare four **safety words** by voice or in person (2026-10-15; until then an 8-digit code of the new keys, which someone who swaps the code in transit could match by generating keys for seconds). The words come from a commit-reveal exchange through the relay (`/v1/recovery/put|read`, signed values): the new phone publishes a commitment to a secret, the co-signer then publishes a challenge (derived from its signature over the new key and that commitment), the new phone reveals its secret only once challenged, and both compute `BLAKE2b(new identity, co-signer key, secret, challenge)` as 4 BIP-39 words. A swapped code is committed before the challenge exists, so a match is a one-shot guess (2^-44). The new phone lists words per co-signer key; approving takes the confirmed words.
 2. Co-signers approve in the log: `ReplaceApproval { old, new, signature }`, where `signature` is the author's Ed25519 signature over `("Zafe replace member v1", vault id, old, new)`. Replay accepts it only from a current member other than `old`, for a current `old` and a `new` that is not and never was a member. At **t approvals** for the same `(old, new)` the seat moves (`VaultState::replacements`): the descriptor's member identity is swapped in the replayed state, and votes, one-tap shares, signer-group slots and the shared name move to the new key. Interactive approvals are voided (their nonces were on the lost device; a proposal approved at exactly t reopens). The old key's pool and backup attestation are dropped. From then on the old key's entries are ignored and chain verification uses the membership as of each entry.
 3. The relay swaps the key (`POST /v1/mailbox/replace`) when shown t valid approval signatures from other current members. It learns t from the creator before sealing (`/v1/mailbox/threshold`; vaults created on an older relay can't move seats). The new phone finds its vault with `/v1/mailboxes`.
 4. The first t approvers are the **helpers**. Each runs RTS part 1 (deltas, saved before anything is sent), seals a delta to every other helper, then part 2, and seals its sigma to the new phone with the public key package, `sk` and the log key (`Kind::RepairDelta` / `RepairSigma`, `Format::Repair`). This runs on every refresh.
@@ -729,7 +737,7 @@ Restore the backup, then sync the vault log from the relay, then resync the wall
 
 ### 13.2 Assumptions
 
-- Members actually compare safety numbers during setup.
+- Members actually compare safety words during setup.
 - Members' devices and OS secure storage are not compromised.
 - Upstream libraries (`frost-core`, `reddsa`, `orchard`, `pczt`, librustzcash) are correct.
 - In a rotation or reshare, departing members delete their shares, and every member deletes old shares and old backups (only migration removes this assumption; §10.4.4).
@@ -791,7 +799,7 @@ DKG + safety number + `sk` agreement + UFVK/address → sync → PCZT → FROST 
 Flutter app with vault creation (invite link and QR), receive, balance, history, payment proposals, independent verification screen, approve/reject, async signing, push notifications, hosted relay.
 
 **M2: v1 feature-complete (mainnet beta)**
-Batch payments, address book, rules, CSV export, encrypted backup and restore, repair, backup health. External security audit of zafe-core and the protocol before mainnet funds. **Mainnet gate:** the external audit, a hosted relay and a small end-to-end mainnet dry run, then a capped beta. (U1, ZF confirming the key derivation gives recoverable vaults, was answered 2026-10-01.)
+Batch payments, address book, rules, CSV export, encrypted backup and restore, repair, backup health. External security audit of zafe-core and the protocol before mainnet funds. **Mainnet gate:** the external audit, a hosted relay and a small end-to-end mainnet dry run, then a beta (label only, no cap). (U1, ZF confirming the key derivation gives recoverable vaults, was answered 2026-10-01.)
 
 **M3: Membership**
 Rotation (repair to add members, refresh to remove them, resharing to change t, §10.2), one-time ceremony keys (§10.4.4), migration flow with late-payment sweeps, unapproved-spend alert, desktop builds.

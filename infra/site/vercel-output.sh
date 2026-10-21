@@ -71,12 +71,19 @@ for f in assetlinks.json apple-app-site-association; do
   fi
 done
 
+# The testnet host serves the testnet invite page (join-testnet.html) at /join: the same
+# site and deployment answers both hosts, so the host decides which page an invite link gets.
+testnet_host="${ZAFE_TESTNET_HOST:-testnet.zafe.cash}"
+[[ "$testnet_host" =~ ^[a-z0-9.-]+$ ]] || die "ZAFE_TESTNET_HOST must be a bare lower-case host"
+testnet_host_re="${testnet_host//./\\\\.}"
+
 cat > "$output/config.json" <<EOF
 {
   "version": 3,
   "routes": [
 $redirects    { "src": "^/(.*)$", "headers": { $headers_json }, "continue": true }$asset_routes,
     { "src": "^/\\\\.well-known/(.*)$", "headers": { "Cache-Control": "public, max-age=300" }, "continue": true },
+    { "src": "^/join/?$", "has": [{ "type": "host", "value": "$testnet_host_re" }], "dest": "/join-testnet" },
     { "handle": "filesystem" },
     { "handle": "error" },
     { "status": 404, "src": "^/(.*)$", "dest": "/404" }

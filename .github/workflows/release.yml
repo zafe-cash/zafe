@@ -7,7 +7,8 @@ name: Release (Android)
 # Needs, see docs/releasing.md:
 #   repository variables
 #     ZAFE_RELAY_URL             the deployed testnet relay (https://testnet.relay.zafe.cash)
-#     ZAFE_LINK_HOST             optional: host of the invite landing site (infra/site/),
+#     ZAFE_TESTNET_LINK_HOST     required: host of the invite landing site for testnet builds
+#                                (testnet.zafe.cash: the same site, a second domain; infra/site/),
 #                                e.g. zafe.cash; without it invites are zafe:// links
 #   secrets of the environment `android-release` (only v* tags may use it, so no branch or
 #   pull-request workflow can read the signing key)
@@ -23,6 +24,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # start the site workflow so its download links follow this release
 
 concurrency:
   group: release-${{ github.ref }}
@@ -39,7 +41,7 @@ jobs:
     environment: android-release
     env:
       ZAFE_RELAY_URL: ${{ vars.ZAFE_RELAY_URL }}
-      ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+      ZAFE_LINK_HOST: ${{ vars.ZAFE_TESTNET_LINK_HOST }}
     steps:
       - uses: actions/checkout@v5
 
@@ -64,7 +66,9 @@ jobs:
           [ -n "$ZAFE_RELAY_URL" ] || { echo "::error::Set the repository variable ZAFE_RELAY_URL"; missing=1; }
           case "$ZAFE_RELAY_URL" in https://*|'') ;; *) echo "::error::ZAFE_RELAY_URL must be https://"; missing=1;; esac
           case "$ZAFE_LINK_HOST" in
-            '') echo "::warning::No ZAFE_LINK_HOST: invites are zafe:// links, which need Zafe installed" ;;
+            # Required: a release must open invites through verified https App Links; any
+            # app can claim the zafe:// scheme and receive the invite instead.
+            '') echo "::error::Set ZAFE_LINK_HOST: without it invites are zafe:// links, which another app can claim"; missing=1 ;;
             *[!a-z0-9.-]*|.*|*.|*..*) echo "::error::ZAFE_LINK_HOST must be a bare lower-case host like zafe.example"; missing=1 ;;
           esac
           for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
@@ -119,6 +123,10 @@ jobs:
             echo "::warning::No GOOGLE_SERVICES_JSON: the APK relies on background checks, no push"
           fi
 
+      # Version code: Flutter adds 2000 for arm64 split APKs, so this ships 4100 + run
+      # number. The base moved up on 2026-10-16 (a local release build reached 4019 on a
+      # tester's phone; a lower code is a downgrade Android refuses). Testnet is sideloaded
+      # only, so its codes are free to jump.
       - name: Build
         working-directory: app
         run: |
@@ -127,9 +135,13 @@ jobs:
             --dart-define=ZAFE_NETWORK=test \
             --dart-define=ZAFE_RELAY_URL="$ZAFE_RELAY_URL" \
             --dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST" \
+            --dart-define=ZAFE_VERSION='${{ steps.version.outputs.name }}' \
             --build-name='${{ steps.version.outputs.name }}' \
-            --build-number='${{ github.run_number }}'
+            --build-number=$((2100 + ${{ github.run_number }}))
 
+      # The release notes are written here, at tag time, from this file as of the tagged commit:
+      # a later change to this text reaches only the next tag (fix an old release with
+      # `gh release edit <tag> --notes-file ...`).
       - name: Package
         id: package
         run: |
@@ -148,6 +160,16 @@ jobs:
             echo "**Install (Android 7+, arm64):** download \`$apk\` on the phone, open it and allow"
             echo "installing from your browser or files app when Android asks."
             echo
+            echo "**You need testnet coins (TAZ) to make a payment.** They have no value. Paste your"
+            echo "vault's address (Receive) into the [Valar testnet faucet](https://faucet.testnet.valargroup.dev/):"
+            echo "0.125 TAZ per request, one payout per IP address every 24 hours. More in the"
+            echo "[Zcash testnet guide](https://zcash.readthedocs.io/en/latest/rtd_pages/testnet_guide.html)."
+            echo
+            echo "**Known issue: sending is blocked on testnet.** The testnet moved to the NU7 network upgrade on"
+            echo "2026-10-04 and this build doesn't support NU7 yet, so the network rejects payments (nothing is sent,"
+            echo "funds don't move). Creating a vault, receiving, proposing and approving work. Mainnet is not affected"
+            echo "until NU7 activates there (targeted 2026-11-05); Zafe will update before then."
+            echo
             echo "Relay: \`$ZAFE_RELAY_URL\` · size $size"
             echo
             echo "Verify: \`sha256sum -c $apk.sha256\`; signing certificate SHA-256:"
@@ -165,6 +187,13 @@ jobs:
           files: |
             dist/${{ steps.package.outputs.apk }}
             dist/${{ steps.package.outputs.apk }}.sha256
+
+      # The site's download links are the newest release of each kind; rebuild it now.
+      - name: Refresh the site links
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run site.yml --repo "$GITHUB_REPOSITORY" --ref main
 
       - name: Remove the key
         if: always()

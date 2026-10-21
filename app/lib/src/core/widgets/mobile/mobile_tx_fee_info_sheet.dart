@@ -10,10 +10,10 @@ import '../app_button.dart';
 /// status detail cards.
 Future<void> showMobileTxFeeInfoSheet(
   BuildContext context, {
-  String title = 'Tx fee',
+  String title = 'Network fee',
   String description =
-      'The network fee is set by the Zcash protocol (ZIP 317) '
-      'based on the transaction size. Zafe adds no extra fee.',
+      'Set by the Zcash protocol (ZIP 317) from the transaction\'s size. Zafe adds '
+      'no fee of its own.',
 }) {
   return showAppMobileSheet<void>(
     context: context,

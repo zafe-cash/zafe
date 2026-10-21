@@ -444,63 +444,6 @@ async fn acknowledged_deliveries_are_deleted_and_free_their_bytes() {
     );
 }
 
-/// A capped beta takes only so many vaults in total; the ones it has keep working.
-#[tokio::test]
-async fn a_relay_at_capacity_takes_no_new_vaults() {
-    let relay = Relay::new().with_quotas(Quotas {
-        mailboxes_total: Some(2),
-        ..Quotas::none()
-    });
-    let app = relay.router();
-    let mut rng = StdRng::seed_from_u64(7);
-    let ids: Vec<Identity> = (0..4).map(|_| Identity::generate(&mut rng)).collect();
-    let create = |n: u8| CreateMailbox {
-        mailbox: [n; 16],
-        join_token_hash: join_token_hash(&TOKEN),
-        max_members: 2,
-    };
-    for n in 0..2u8 {
-        let status = signed(&app, "/v1/mailbox/create", &ids[usize::from(n)], create(n)).await;
-        assert_eq!(status, StatusCode::OK);
-    }
-    // The third is refused with the typed quota header, and leaves nothing behind.
-    let body = Signed::new(&ids[2], create(2)).unwrap().to_bytes().unwrap();
-    let r = app
-        .clone()
-        .oneshot(
-            Request::post("/v1/mailbox/create")
-                .body(Body::from(body))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
-    assert_eq!(
-        r.headers().get(zafe_proto::relay::QUOTA_HEADER).unwrap(),
-        zafe_proto::relay::QUOTA_CAPACITY
-    );
-    // An existing vault's creator can still retry its create (it answers "exists").
-    let status = signed(&app, "/v1/mailbox/create", &ids[0], create(0)).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    // Restoring a vault the relay doesn't know counts as a new one.
-    let reseed = zafe_proto::relay::Reseed {
-        mailbox: [9; 16],
-        members: vec![*ids[2].public(), *ids[3].public()],
-        threshold: 2,
-        from: 0,
-        entries: vec![],
-        finish: false,
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    };
-    assert_eq!(
-        signed(&app, "/v1/mailbox/reseed", &ids[2], reseed).await,
-        StatusCode::INSUFFICIENT_STORAGE
-    );
-}
-
 /// A recorded restore request can't be replayed later to give a mailbox an old member list.
 #[tokio::test]
 async fn a_stale_reseed_is_refused() {

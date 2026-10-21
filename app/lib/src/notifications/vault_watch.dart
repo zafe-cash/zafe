@@ -12,6 +12,7 @@ import 'package:workmanager/workmanager.dart';
 import '../core/config/endpoints.dart';
 import '../core/diagnostics/crash_log.dart';
 import '../core/errors/zafe_error_copy.dart';
+import '../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../core/network/tor_setting.dart';
 import '../core/storage/member_names.dart';
 import '../core/storage/vault_name.dart';
@@ -20,6 +21,7 @@ import '../core/storage/zafe_paths.dart';
 import '../core/storage/zafe_secure_store.dart';
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../providers/privacy_mode_provider.dart' show kPrivacyModeKey;
+import '../providers/vault_provider.dart' show kActiveVaultKey;
 import '../rust/api/app.dart' show initLogCache;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/received.dart' as rust_received;
@@ -27,7 +29,9 @@ import '../rust/api/spends.dart' as rust_spends;
 import '../rust/api/tor.dart';
 import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
+import '../providers/setup_step.dart';
 import 'vault_updates.dart';
+import '../core/storage/wallet_key.dart';
 
 /// Vault notifications (spec §6.1). The relay is blind: a push (FCM) or a periodic
 /// background check (WorkManager) only wakes the app; it then reads the encrypted vault
@@ -81,9 +85,18 @@ Future<void> initVaultNotifications() async {
   }
 }
 
-/// Once a vault exists: ask for notification permission, schedule the periodic background
-/// check, and register for pushes when Firebase is configured.
-Future<void> startVaultWatch() async {
+/// Whether this app may show notifications (always true where it can't tell).
+Future<bool> notificationsEnabled() async =>
+    await _notifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.areNotificationsEnabled() ??
+    true;
+
+/// Shows the system's notification permission prompt (Android 13+). Returns whether
+/// notifications are on afterwards.
+Future<bool> requestNotifications() async {
   await _notifications
       .resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin
@@ -94,8 +107,16 @@ Future<void> startVaultWatch() async {
         IOSFlutterLocalNotificationsPlugin
       >()
       ?.requestPermissions(alert: true, badge: true, sound: true);
+  return notificationsEnabled();
+}
+
+/// Once a vault exists: schedule the periodic background check and register for pushes
+/// when Firebase is configured. [askPermission]: show the system prompt first (only after
+/// the app's own primer said why).
+Future<void> startVaultWatch({bool askPermission = true}) async {
+  if (askPermission) await requestNotifications();
   // iOS runs the periodic task through BGTaskScheduler (Info.plist, AppDelegate.swift):
-  // best effort, whenever the system allows. The one-off check below is Android only.
+  // best effort, whenever the system allows. The one-off check is Android only.
   if (Platform.isAndroid || Platform.isIOS) {
     await Workmanager().initialize(workmanagerDispatcher);
     await Workmanager().registerPeriodicTask(
@@ -106,7 +127,7 @@ Future<void> startVaultWatch() async {
       existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
   }
-  await _registerPush();
+  await _registerPush(askPermission: askPermission);
 }
 
 /// When the app goes to the background: check again soon, so a proposal made while the
@@ -123,7 +144,10 @@ Future<void> scheduleSoonCheck() async {
 }
 
 /// FCM: only when the app was built with a Firebase config (google-services.json).
-Future<void> _registerPush() async {
+/// Push registration runs again on a relay change: listen in the foreground once.
+bool _listeningInForeground = false;
+
+Future<void> _registerPush({bool askPermission = true}) async {
   try {
     await Firebase.initializeApp();
   } catch (_) {
@@ -132,7 +156,17 @@ Future<void> _registerPush() async {
   }
   final messaging = FirebaseMessaging.instance;
   FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
-  await messaging.requestPermission();
+  // A push while the app is open: the open vault refreshes live (its relay watch), but
+  // the others had nothing (no notification, no dot in the vault switcher) until the app
+  // went to the background. Check them; the open one is the app's.
+  if (!_listeningInForeground) {
+    _listeningInForeground = true;
+    FirebaseMessaging.onMessage.listen((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      await checkVaultAndNotify(skipVaultId: prefs.getString(kActiveVaultKey));
+    });
+  }
+  if (askPermission) await messaging.requestPermission();
   final token = await messaging.getToken();
   if (token != null) await _registerToken(token);
   messaging.onTokenRefresh.listen(_registerToken);
@@ -142,13 +176,14 @@ Future<void> _registerPush() async {
 /// identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
+  // Vaults still being set up too: their setup steps run in background checks.
   for (final v in await ZafeSecureStore.instance.readAll()) {
-    if (!v.ready) continue;
+    if (v.identity == null) continue;
     try {
       await rust_vault.registerPush(
         relayUrl: relayUrl,
         seeds: v.identity!,
-        material: v.material!,
+        vaultId: v.id,
         platform: Platform.isIOS ? 'apns' : 'fcm',
         token: token,
       );
@@ -245,7 +280,9 @@ Future<void> _ensureRust() async {
 
 /// The background check: sync, read the vault log, answer interactive signing requests,
 /// finish an auto-send this member owes, and notify about changes. Never throws.
-Future<void> checkVaultAndNotify() async {
+/// [skipVaultId]: a vault the app shows live right now (a push while the app is open),
+/// left to the app so nothing on screen is also announced.
+Future<void> checkVaultAndNotify({String? skipVaultId}) async {
   await installBackgroundCrashLog();
   // One check at a time: the periodic task, the one-off after backgrounding and a push can
   // fire together (seen on the emulator); a lock older than 5 minutes is stale.
@@ -262,7 +299,7 @@ Future<void> checkVaultAndNotify() async {
     await lock.writeAsString('${DateTime.now()}');
   } catch (_) {}
   try {
-    await _check();
+    await _check(skipVaultId);
   } catch (e, st) {
     await _logBackgroundError('check', e, st);
   } finally {
@@ -292,10 +329,20 @@ Future<void> _logBackgroundError(
   StackTrace stack,
 ) async {
   debugPrint('vault check $source failed: ${describeError(error)}');
+  // Offline, a timeout or Tor still connecting is routine for a check that runs at any
+  // time: not logged, so it can't push real errors out of the 20-entry log.
+  if (error is ZafeError &&
+      const {
+        ZafeErrorKind.network,
+        ZafeErrorKind.networkTimeout,
+        ZafeErrorKind.torConnecting,
+      }.contains(error.kind)) {
+    return;
+  }
   await CrashLog.instance?.record('background-$source', error, stack);
 }
 
-Future<void> _check() async {
+Future<void> _check(String? skipVaultId) async {
   WidgetsFlutterBinding.ensureInitialized();
   await _ensureRust();
   await _initNotifications();
@@ -323,9 +370,85 @@ Future<void> _check() async {
   // The URLs the user set in Settings (read after the reload: prefs cache per isolate).
   final endpoints = ZafeEndpoints.fromPrefs(prefs);
   for (final v in vaults) {
-    if (v.ready) await _checkVault(v, hideAmounts, endpoints);
+    if (v.id == skipVaultId) continue;
+    if (v.ready) {
+      await _checkVault(v, hideAmounts, endpoints);
+    } else if (v.identity != null && v.invite != null) {
+      await _checkSetup(v, prefs, endpoints);
+    }
   }
 }
+
+/// Payload of the "compare safety words" and "vault ready" notifications.
+const kSetupPayload = 'setup';
+const kVaultReadyPayload = 'ready';
+
+/// A vault still being set up: one setup step (it can lock membership, send this
+/// member's part of the safety check, continue key generation, and save the vault once
+/// it exists). Two notifications only, the moments that need the member: the words are
+/// there to compare, and the vault is ready to back up.
+Future<void> _checkSetup(
+  StoredVault v,
+  SharedPreferences prefs,
+  ZafeEndpoints endpoints,
+) async {
+  try {
+    final p = await stepSetup(
+      endpoints: endpoints,
+      vaultId: v.id,
+      seeds: v.identity!,
+      invite: v.invite!,
+    );
+    final name = rust_vault.parseInvite(invite: v.invite!).name;
+    if (p.material != null) {
+      await _notifySetup(
+        v.id,
+        kVaultReadyPayload,
+        '$name is ready',
+        'Back it up now.',
+      );
+    } else if (p.safetyNumber != null && !p.started) {
+      final key = 'zafe_setup_words_shown_${v.id}';
+      if (prefs.getBool(key) ?? false) return;
+      await prefs.setBool(key, true);
+      await _notifySetup(
+        v.id,
+        kSetupPayload,
+        '$name: compare safety words',
+        'Everyone has joined.',
+      );
+    }
+  } catch (e, st) {
+    debugPrint('setup check failed for ${v.id}: ${describeError(e)}');
+    await _logBackgroundError('setup', e, st);
+  }
+}
+
+Future<void> _notifySetup(
+  String vaultId,
+  String what,
+  String title,
+  String body,
+) => _notifications.show(
+  id: notificationPayload(vaultId, what).hashCode & 0x7fffffff,
+  title: title,
+  body: body,
+  notificationDetails: const NotificationDetails(
+    android: AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription:
+          'Payments that need you, payments sent or rejected, and money received',
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: 'ic_notification',
+      color: Color(0xFF00736C),
+      visibility: NotificationVisibility.private,
+    ),
+    iOS: DarwinNotificationDetails(),
+  ),
+  payload: notificationPayload(vaultId, what),
+);
 
 /// One vault: sync, read the log, answer interactive signing requests, finish an auto-send
 /// this member owes, update the switcher summary, and notify about changes.
@@ -339,7 +462,7 @@ Future<void> _checkVault(
     final material = v.material!;
     final paths = await ZafePaths.get();
     final stateDir = await paths.stateDir(v.id);
-    final dbKey = await ZafeSecureStore.instance.walletKey(v.id);
+    final dbKey = walletKeyFor(seeds, v.id);
     final summary = rust_vault.vaultSummary(material: material);
     debugPrint('vault check: ${summary.name}');
 
@@ -470,6 +593,9 @@ Future<void> _checkVault(
             // The Z from the app icon (scripts/brand/brand.py), tinted brand verdigris.
             icon: 'ic_notification',
             color: Color(0xFF00736C),
+            // Amounts and recipients stay off the lock screen (Android shows the app
+            // name and "Contents hidden" until the phone is unlocked).
+            visibility: NotificationVisibility.private,
           ),
           iOS: DarwinNotificationDetails(),
         ),

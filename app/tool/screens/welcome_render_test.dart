@@ -111,7 +111,7 @@ void main() {
             boundary.currentContext!.findRenderObject()!
                 as RenderRepaintBoundary;
         final bytes = await tester.runAsync(() async {
-          final image = await target.toImage(pixelRatio: 2);
+          final image = await target.toImage(pixelRatio: _scale);
           final data = await image.toByteData(format: ui.ImageByteFormat.png);
           return data!.buffer.asUint8List();
         });
@@ -123,3 +123,8 @@ void main() {
     }
   });
 }
+
+// SCREEN_PREVIEW_SCALE renders larger (the store listing uses 3).
+final _scale = double.parse(
+  Platform.environment['SCREEN_PREVIEW_SCALE'] ?? '2',
+);

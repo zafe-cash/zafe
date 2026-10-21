@@ -1,12 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../core/storage/my_name.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
@@ -22,6 +25,8 @@ class CreateVaultScreen extends ConsumerStatefulWidget {
 class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   final _name = TextEditingController();
   final _nameFocus = FocusNode();
+  final _myName = TextEditingController();
+  final _myNameFocus = FocusNode();
   int _members = 3;
   int _threshold = 2;
   bool _busy = false;
@@ -32,9 +37,36 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   static const _expiryChoices = [1, 3, 7, 14];
 
   @override
+  void initState() {
+    super.initState();
+    unawaited(
+      MyName.lastUsed().then((n) {
+        if (mounted && _myName.text.isEmpty) _myName.text = n;
+      }),
+    );
+    // Back from "Cancel setup": the details the creator had typed.
+    final prefill = ref.read(createPrefillProvider);
+    if (prefill != null) {
+      _name.text = prefill.name;
+      _members = prefill.members;
+      _threshold = prefill.threshold;
+      if (_expiryChoices.contains(prefill.expiryDays)) {
+        _expiryDays = prefill.expiryDays;
+      }
+      // Cleared after the first frame: Riverpod forbids changing a provider while the
+      // widget tree is building.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(createPrefillProvider.notifier).set(null);
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _nameFocus.dispose();
+    _myName.dispose();
+    _myNameFocus.dispose();
     super.dispose();
   }
 
@@ -48,17 +80,9 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
             threshold: _threshold,
             members: _members,
             expiryDays: _expiryDays,
+            myName: _myName.text,
           );
       if (mounted) context.go('/setup');
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          'Couldn\'t create the vault. $e',
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -73,11 +97,11 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
         _threshold <= _members;
     return ZafeScreen(
       title: 'New vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: valid && !_busy ? _create : null,
-        leading: _busy ? const AppIcon(AppIcons.loader, size: 20) : null,
-        child: Text(_busy ? 'Creating...' : 'Create vault'),
+      bottom: ActionButton(
+        label: 'Create vault',
+        enabled: valid,
+        errorFallback: 'Couldn\'t create the vault. Try again.',
+        onPressed: _create,
       ),
       children: [
         const OnboardingBanner('create_stones'),
@@ -94,6 +118,19 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
           focusNode: _nameFocus,
           hintText: 'e.g. Grants committee',
           onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(
+          'Your name',
+          style: AppTypography.labelMedium.copyWith(
+            color: colors.text.secondary,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        MobileTextField(
+          controller: _myName,
+          focusNode: _myNameFocus,
+          hintText: 'Shown to the other members',
         ),
         const SizedBox(height: AppSpacing.md),
         MobileSurfaceCard(
@@ -169,9 +206,8 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          'A proposed payment must be approved and sent within $_expiryDays '
-          'day${_expiryDays == 1 ? '' : 's'}, or it expires and nothing is sent. '
-          'It can\'t be changed later.',
+          'Unsent payments expire after $_expiryDays '
+          'day${_expiryDays == 1 ? '' : 's'}. This can\'t be changed later.',
           style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
         ),
       ],

@@ -1,7 +1,11 @@
 import 'dart:math' as math;
 
+import 'dart:async';
+
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../../config/block_explorer.dart';
 import '../../config/network_config.dart';
 import '../../formatting/member_label.dart';
 import '../../privacy/privacy_mask.dart';
@@ -111,41 +115,50 @@ class PaymentCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.s),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: hidden ? fixedPrivacyMask() : amountText,
-                        style: TextStyle(
-                          fontFamily: 'Space Grotesk',
-                          fontWeight: FontWeight.w500,
-                          fontSize: 42,
-                          height: 1.05,
-                          letterSpacing: -1.6,
-                          color: card.text.withValues(
-                            alpha: strikethrough ? 0.55 : 1,
-                          ),
-                          decoration: decoration,
-                          decorationColor: card.text.withValues(alpha: 0.55),
-                        ),
-                      ),
-                      TextSpan(
-                        text: ' $kZcashDefaultCurrencyTicker',
-                        style: TextStyle(
-                          fontFamily: 'Space Grotesk',
-                          fontWeight: FontWeight.w500,
-                          fontSize: 20,
-                          color: card.ticker.withValues(
-                            alpha: strikethrough ? 0.55 : 1,
+                // Shrinks to fit rather than cut the ticker on narrow phones with
+                // large system text.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: hidden ? fixedPrivacyMask() : amountText,
+                          style: TextStyle(
+                            fontFamily: 'Space Grotesk',
+                            fontWeight: FontWeight.w500,
+                            fontSize: 42,
+                            height: 1.05,
+                            letterSpacing: -1.6,
+                            color: card.text.withValues(
+                              alpha: strikethrough ? 0.55 : 1,
+                            ),
+                            decoration: decoration,
+                            decorationColor: card.text.withValues(alpha: 0.55),
                           ),
                         ),
-                      ),
-                    ],
+                        TextSpan(
+                          text: ' $kZcashDefaultCurrencyTicker',
+                          style: TextStyle(
+                            fontFamily: 'Space Grotesk',
+                            fontWeight: FontWeight.w500,
+                            fontSize: 20,
+                            color: card.ticker.withValues(
+                              alpha: strikethrough ? 0.55 : 1,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-                if (address != null) ...[
+                // One recipient: its address and "Full address". Several: the
+                // recipients list under the card shows each one (here the first one's
+                // address and a "Full address" read as the only recipient).
+                if (address != null && recipients == 1) ...[
                   const SizedBox(height: AppSpacing.md),
                   _Recipient(
                     address: address!,
@@ -175,6 +188,65 @@ class _Recipient extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final card = context.colors.vaultCard;
+    final info = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            AppIcon(AppIcons.shieldKeyhole, size: 12, color: card.accent),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                recipients == 1 ? 'Shielded' : '$recipients recipients',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.labelSmall.copyWith(
+                  color: card.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          compactAddress(address),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontFamily: 'JetBrains Mono',
+            fontSize: 13,
+            height: 1.3,
+            color: card.text,
+          ),
+        ),
+      ],
+    );
+    final button = AppTappable(
+      onTap: onFullAddress,
+      semanticsLabel: 'Full address',
+      child: Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: card.chip,
+          borderRadius: BorderRadius.circular(AppRadii.xSmall),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIcon(AppIcons.eye, size: 14, color: card.text),
+            const SizedBox(width: 6),
+            Text(
+              'Full address',
+              style: AppTypography.labelSmall.copyWith(
+                color: card.text,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
@@ -182,78 +254,24 @@ class _Recipient extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.small),
         border: Border.all(color: card.insetBorder),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
+      // Zafe: at large system text the button goes under the address (side by side
+      // they squeezed each other to a few letters).
+      child: MediaQuery.textScalerOf(context).scale(10) >= 15
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    AppIcon(
-                      AppIcons.shieldKeyhole,
-                      size: 12,
-                      color: card.accent,
-                    ),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        recipients == 1
-                            ? 'To shielded address'
-                            : 'To $recipients recipients',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.labelSmall.copyWith(
-                          color: card.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  compactAddress(address),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    fontSize: 13,
-                    height: 1.3,
-                    color: card.text,
-                  ),
-                ),
+                info,
+                const SizedBox(height: AppSpacing.xs),
+                button,
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(child: info),
+                const SizedBox(width: AppSpacing.xs),
+                button,
               ],
             ),
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          AppTappable(
-            onTap: onFullAddress,
-            semanticsLabel: 'Full address',
-            child: Container(
-              height: 32,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: card.chip,
-                borderRadius: BorderRadius.circular(AppRadii.xSmall),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AppIcon(AppIcons.eye, size: 14, color: card.text),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Full address',
-                    style: AppTypography.labelSmall.copyWith(
-                      color: card.text,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -320,46 +338,170 @@ class DetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 32),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: AppTypography.labelLarge.copyWith(
-              color: colors.text.secondary,
+    final labelText = Text(
+      label,
+      style: AppTypography.labelLarge.copyWith(color: colors.text.secondary),
+    );
+    final help = onHelp == null
+        ? null
+        : AppTappable(
+            onTap: onHelp,
+            semanticsLabel: 'What is "$label"?',
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.xxs),
+              child: AppIcon(AppIcons.help, size: 16, color: colors.icon.muted),
             ),
+          );
+    // Zafe: at large system text (1.5x and up) label and value don't fit side by side:
+    // the value goes under the label.
+    if (MediaQuery.textScalerOf(context).scale(10) >= 15) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Flexible(child: labelText),
+              ?help,
+            ],
           ),
-          if (onHelp != null)
-            AppTappable(
-              onTap: onHelp,
-              semanticsLabel: 'What is "$label"?',
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xxs),
-                child: AppIcon(
-                  AppIcons.help,
-                  size: 16,
-                  color: colors.icon.muted,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.accent,
+                  ),
                 ),
               ),
-            ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.end,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.labelLarge.copyWith(
-                color: colors.text.accent,
-              ),
+              if (trailing != null) ...[
+                const SizedBox(width: AppSpacing.xs),
+                trailing!,
+              ],
+            ],
+          ),
+        ],
+      );
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 32),
+      // Zafe: label (up to 2/5) and value (up to 3/5) each wrap only when they don't
+      // fit, label left and value right, so a short value never breaks mid-word next
+      // to a long label on a narrow phone.
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // The label and its help icon stay together on the left (as the value and
+          // its icon do on the right).
+          Flexible(
+            flex: 2,
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    style: AppTypography.labelLarge.copyWith(
+                      color: colors.text.secondary,
+                    ),
+                  ),
+                ),
+                ?help,
+              ],
             ),
           ),
-          if (trailing != null) ...[
-            const SizedBox(width: AppSpacing.xs),
-            trailing!,
-          ],
+          const SizedBox(width: AppSpacing.sm),
+          // The value and its icon sit together at the right edge (spread apart by
+          // spaceBetween, a value with an icon floated mid-row).
+          Flexible(
+            flex: 3,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    value,
+                    textAlign: TextAlign.end,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.labelLarge.copyWith(
+                      color: colors.text.accent,
+                    ),
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: AppSpacing.xs),
+                  trailing!,
+                ],
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// A transaction id: tap opens it in the block explorer (ZecBlock), long-press copies
+/// it. Where there is no explorer (regtest) or nothing can open it, a tap copies.
+class TxIdRow extends StatefulWidget {
+  const TxIdRow({super.key, required this.txid});
+  final String txid;
+
+  @override
+  State<TxIdRow> createState() => _TxIdRowState();
+}
+
+/// Tap opens the explorer (copies where there is none); long press copies. A copy
+/// turns the icon into a check for a moment, no toast.
+class _TxIdRowState extends State<TxIdRow> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.txid));
+    unawaited(HapticFeedback.lightImpact());
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final txid = widget.txid;
+    final explorer = explorerTxUri(txid) != null;
+    return GestureDetector(
+      onLongPress: _copy,
+      child: AppTappable(
+        onTap: () async {
+          if (!await openTxInExplorer(txid) && mounted) await _copy();
+        },
+        semanticsLabel: explorer
+            ? 'Open transaction in block explorer'
+            : 'Copy transaction ID',
+        child: DetailRow(
+          label: 'Tx ID',
+          value: txid.length > 16
+              ? '${txid.substring(0, 8)}...${txid.substring(txid.length - 8)}'
+              : txid,
+          trailing: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            transitionBuilder: (child, a) =>
+                ScaleTransition(scale: a, child: child),
+            child: _copied
+                ? AppIcon(
+                    AppIcons.check,
+                    key: const ValueKey('copied'),
+                    size: 16,
+                    color: context.colors.icon.value,
+                  )
+                : AppIcon(
+                    explorer ? AppIcons.arrowUpRight : AppIcons.copy,
+                    key: const ValueKey('icon'),
+                    size: 16,
+                    color: context.colors.icon.muted,
+                  ),
+          ),
+        ),
       ),
     );
   }

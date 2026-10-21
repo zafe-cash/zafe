@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/errors/zafe_error_copy.dart';
 import '../../core/feedback/payment_feedback.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/config/network_upgrade.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_loading_icon.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/member_names_provider.dart';
@@ -35,9 +35,6 @@ class ProposalScreen extends ConsumerStatefulWidget {
 }
 
 class _ProposalScreenState extends ConsumerState<ProposalScreen> {
-  bool _voting = false;
-  bool _cancelling = false;
-  bool _invalidating = false;
   Timer? _poll;
 
   @override
@@ -58,55 +55,86 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     super.dispose();
   }
 
-  Future<void> _vote(bool approve) async {
-    if (approve &&
-        !await confirmUnlock(
-          context,
-          ref,
-          reason: 'Unlock to approve and sign this payment',
-        )) {
-      return;
+  /// "Approve again" (a signing round didn't finish, or the phone was restored).
+  Future<void> _reapprove() async {
+    await _unlock('Approve this payment. It can\'t be undone.');
+    final r = await ref.read(proposalsProvider.notifier).approve(widget.id);
+    unawaited(
+      PaymentFeedback.play(
+        approvalMoment(completed: r.completed),
+        sound: ref.read(paymentSoundsProvider),
+      ),
+    );
+    if (!mounted) return;
+    if (r.completed && r.autoSend) {
+      unawaited(context.push('/proposal/${widget.id}/send'));
+    } else if (!r.completed) {
+      _leave();
     }
-    setState(() => _voting = true);
-    final notifier = ref.read(proposalsProvider.notifier);
+  }
+
+  /// The request stays on screen from the tap until its button has shown "Approved"
+  /// or "Declined" (the vote changes the payment, which would swap the page at once).
+  bool _holdRequest = false;
+  rust.ApproveResult? _approved;
+
+  /// "Approve" on a request: the unlock prompt is the confirmation.
+  Future<void> _approveRequest() async {
+    setState(() => _holdRequest = true);
     try {
-      if (approve) {
-        final r = await notifier.approve(widget.id);
-        unawaited(
-          PaymentFeedback.play(
-            approvalMoment(completed: r.completed),
-            sound: ref.read(paymentSoundsProvider),
-          ),
-        );
-        if (mounted && r.completed && r.autoSend) {
-          // This approval completed the signatures: watch it go out.
-          context.push('/proposal/${widget.id}/send');
-        } else if (mounted) {
-          showAppToast(
-            context,
-            r.completed
-                ? (r.autoSend
-                      ? 'Approved. Sending now'
-                      : 'Approved. Ready to send')
-                : (r.signed ? 'Approved and signed' : 'Approved'),
-          );
-        }
-      } else {
-        await notifier.reject(widget.id);
-        if (mounted) showAppToast(context, 'Rejected');
+      if (!await confirmUnlock(
+        context,
+        ref,
+        reason: 'Approve this payment. It can\'t be undone.',
+      )) {
+        throw const ActionCancelled();
       }
-    } catch (e) {
-      debugPrint('vote failed: ${describeError(e)}');
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _voting = false);
+      final r = await ref.read(proposalsProvider.notifier).approve(widget.id);
+      _approved = r;
+      unawaited(
+        PaymentFeedback.play(
+          approvalMoment(completed: r.completed),
+          sound: ref.read(paymentSoundsProvider),
+        ),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _holdRequest = false);
+      rethrow;
+    }
+  }
+
+  void _afterApprove() {
+    final r = _approved;
+    if (!mounted || r == null) return;
+    // Leaving keeps the request on screen as it slides away; only a payment that stays
+    // here (complete, sent by hand) switches to its status.
+    if (r.completed && r.autoSend) {
+      // This approval completed the signatures: watch it go out.
+      context.push('/proposal/${widget.id}/send');
+    } else if (!r.completed) {
+      // Nothing left to do here until more signers approve.
+      _leave();
+    } else {
+      setState(() => _holdRequest = false);
+    }
+  }
+
+  Future<void> _declineRequest() async {
+    setState(() => _holdRequest = true);
+    try {
+      await ref.read(proposalsProvider.notifier).reject(widget.id);
+    } catch (_) {
+      if (mounted) setState(() => _holdRequest = false);
+      rethrow;
+    }
+  }
+
+  /// Back to where the payment was opened from (Home if it was opened directly).
+  void _leave() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/home');
     }
   }
 
@@ -154,10 +182,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             children: [
               Text(
                 p.ready
-                    ? 'Signers stop working on it and its funds become available for new '
-                          'payments. Every signature is already in, though: until it expires, '
-                          'a signer could still send it. A new payment that uses the same '
-                          'funds makes it impossible to send.'
+                    ? 'Its funds become free for new payments. All signatures are in, so it can still be sent until it expires, unless a new payment uses the same funds.'
                     : 'Signers stop working on it and its funds become available for new '
                           'payments. This can\'t be undone.',
                 style: AppTypography.bodyMedium.copyWith(
@@ -183,54 +208,32 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
         );
       },
     );
-    if (cancel != true || !mounted) return;
-    setState(() => _cancelling = true);
-    try {
-      await ref.read(proposalsProvider.notifier).cancel(widget.id);
-      if (mounted) showAppToast(context, 'Payment cancelled');
-    } catch (e) {
-      debugPrint('cancel failed: ${describeError(e)}');
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(e, fallback: 'Couldn\'t cancel. Try again.'),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _cancelling = false);
+    if (cancel != true || !mounted) throw const ActionCancelled();
+    await ref.read(proposalsProvider.notifier).cancel(widget.id);
+    // Leave from here, not from the button's onDone: cancelling refreshes the payment,
+    // the page rebuilds as "Cancelled" without this button, and its onDone never ran.
+    if (mounted) _leave();
+  }
+
+  /// The unlock prompt before an action; backing out cancels it quietly.
+  Future<void> _unlock(String reason) async {
+    if (!await confirmUnlock(context, ref, reason: reason)) {
+      throw const ActionCancelled();
     }
   }
 
   Future<void> _invalidate(rust.ProposalInfo p) async {
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Unlock to propose moving these funds back to the vault',
-    )) {
-      return;
-    }
-    setState(() => _invalidating = true);
-    try {
-      final id = await ref.read(proposalsProvider.notifier).invalidate(p.id);
-      if (mounted) context.push('/proposal/$id');
-    } catch (e) {
-      debugPrint('invalidate failed: ${describeError(e)}');
-      if (mounted) {
-        showAppToast(
-          context,
-          zafeErrorMessage(
-            e,
-            fallback: 'Couldn\'t build the transaction. Try again.',
-          ),
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _invalidating = false);
-    }
+    await _unlock('Propose moving these funds back to the vault');
+    final id = await ref.read(proposalsProvider.notifier).invalidate(p.id);
+    if (mounted) unawaited(context.push('/proposal/$id'));
+  }
+
+  /// Cancels a payment that can no longer be signed the one-tap way and proposes the
+  /// same payment again, so everyone can approve it with one tap.
+  Future<void> _repropose(rust.ProposalInfo p) async {
+    await _unlock('Propose this payment again');
+    final id = await ref.read(proposalsProvider.notifier).proposeAgain(p.id);
+    if (mounted) context.pushReplacement('/proposal/$id');
   }
 
   void _proposeAgain(rust.ProposalInfo p) {
@@ -245,7 +248,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
               memo: x.memo,
             ),
         ],
-        autoSend: p.autoSend,
       ),
     );
   }
@@ -278,12 +280,68 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       );
     }
 
-    final send = proposals.sends[p.id];
+    // A leftover send state (a failed attempt) means nothing once the payment is closed.
+    final closed =
+        p.stage == rust.ProposalStage.cancelled ||
+        p.stage == rust.ProposalStage.rejected;
+    final send = closed ? null : proposals.sends[p.id];
     final progress = send?.progress;
     final sending = send?.running ?? false;
     final sent =
         p.stage == rust.ProposalStage.sent ||
         progress?.stage == rust.SendStage.sent;
+
+    // A payment that waits for this member's vote: a request with Approve and Decline
+    // always in reach.
+    final request =
+        _holdRequest ||
+        !sent &&
+            send == null &&
+            p.stage == rust.ProposalStage.open &&
+            p.myVote == rust.MyVote.none &&
+            !p.needsReapproval &&
+            !p.needsNewProposal &&
+            !proposalExpired(p, height);
+    if (request) {
+      final review = ref.watch(proposalReviewProvider(p.id));
+      final verified = review.value?.verified == true;
+      return ZafeScreen(
+        title: 'Payment request',
+        bottom: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ActionButton(
+              label: 'Approve',
+              icon: AppIcons.check,
+              doneLabel: 'Approved',
+              enabled: verified || _holdRequest,
+              onPressed: _approveRequest,
+              onDone: _afterApprove,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            ActionButton(
+              label: 'Decline',
+              variant: AppButtonVariant.ghost,
+              doneLabel: 'Declined',
+              onPressed: _declineRequest,
+              onDone: () {
+                if (mounted) _leave();
+              },
+            ),
+          ],
+        ),
+        children: [
+          PaymentRequestView(
+            proposal: p,
+            members: vault.summary!.members,
+            me: me,
+            names: ref.watch(signerNamesProvider),
+            height: height,
+          ),
+        ],
+      );
+    }
 
     return PopScope(
       canPop: !sending,
@@ -307,16 +365,14 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
   }
 
   List<Widget> _approveAgain(TextStyle note) => [
-    AppButton(
-      expand: true,
-      leading: _voting ? null : const AppIcon(AppIcons.check, size: 20),
-      onPressed: _voting ? null : () => _vote(true),
-      child: Text(_voting ? 'Checking and approving...' : 'Approve again'),
+    ActionButton(
+      label: 'Approve again',
+      icon: AppIcons.check,
+      onPressed: _reapprove,
     ),
     const SizedBox(height: AppSpacing.xs),
     Text(
-      'Your signature went into a signing round that didn\'t finish, or this phone '
-      'was restored from a backup. Approve again so a new round can include you.',
+      'Approve again: your last signing round didn\'t finish, or this phone was restored.',
       textAlign: TextAlign.center,
       style: note,
     ),
@@ -374,7 +430,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
               Text(
                 sending
                     ? p.ready
-                          ? 'Every signature is in. Building the private transaction proof on this phone; keep Zafe open.'
+                          ? 'Every signature is in. Building the transaction; keep Zafe open.'
                           : 'The private transaction proof is built on this phone meanwhile. Keep Zafe open.'
                     : send.error!,
                 style: AppTypography.bodySmall.copyWith(
@@ -407,10 +463,20 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
-              'Starts a new signing round without the signers who didn\'t answer. '
-              'Signers who already signed this round need to approve again.',
+              'Starts over without the signers who didn\'t answer. Those who signed approve again.',
               textAlign: TextAlign.center,
               style: note,
+            ),
+          ],
+          // A payment that can't be sent (it fails the check, for example after a network
+          // upgrade) must still be cancellable by its author, or it holds its notes until it
+          // expires.
+          if (p.isMine) ...[
+            const SizedBox(height: AppSpacing.s),
+            ActionButton(
+              label: 'Cancel payment',
+              variant: AppButtonVariant.ghost,
+              onPressed: () => _cancel(p),
             ),
           ],
         ],
@@ -420,8 +486,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     if (proposalExpired(p, height)) {
       return [
         Text(
-          'This payment expired before it was sent: its transaction can no longer be '
-          'added to the chain, and nothing left the vault.',
+          'This payment expired before it was sent. Nothing left the vault.',
           textAlign: TextAlign.center,
           style: note,
         ),
@@ -439,23 +504,45 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       if (height != null && p.expiryHeight > 0) ...[
         const SizedBox(height: AppSpacing.sm),
         Text(
-          'Expires in ${expiresIn(p, height)} if it isn\'t sent.',
+          'Expires in ${expiresIn(p, height, nu7Height: nu7ActivationHeight())} if it isn\'t sent.',
           textAlign: TextAlign.center,
           style: note,
         ),
       ],
       if (p.isMine) ...[
         const SizedBox(height: AppSpacing.s),
-        AppButton(
-          expand: true,
+        ActionButton(
+          label: 'Cancel payment',
           variant: AppButtonVariant.ghost,
-          onPressed: _cancelling || _voting ? null : () => _cancel(p),
-          child: Text(_cancelling ? 'Cancelling...' : 'Cancel payment'),
+          onPressed: () => _cancel(p),
         ),
       ],
     ];
 
     if (p.needsReapproval) return [..._approveAgain(note), ...footer];
+
+    // A signer's phone was restored or replaced while this payment was open, so its
+    // signatures can't all be collected any more. Nothing was sent.
+    if (p.needsNewProposal) {
+      return [
+        Text(
+          p.isMine
+              ? 'A signer\'s phone was replaced, so this payment can\'t be signed. Nothing was sent. Propose it again.'
+              : 'A signer\'s phone was replaced, so this payment can\'t be signed. Nothing was sent. Ask its proposer to propose it again.',
+          textAlign: TextAlign.center,
+          style: note,
+        ),
+        if (p.isMine) ...[
+          const SizedBox(height: AppSpacing.sm),
+          ActionButton(
+            label: 'Propose again',
+            icon: AppIcons.renew,
+            onPressed: () => _repropose(p),
+          ),
+        ],
+        ...footer,
+      ];
+    }
 
     switch (p.stage) {
       case rust.ProposalStage.open:
@@ -474,41 +561,8 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             ...footer,
           ];
         }
-        final review = ref.watch(proposalReviewProvider(p.id));
-        final verified = review.value?.verified == true;
-        return [
-          AppButton(
-            expand: true,
-            leading: _voting ? null : const AppIcon(AppIcons.check, size: 20),
-            onPressed: verified && !_voting ? () => _vote(true) : null,
-            child: Text(
-              _voting
-                  ? (p.oneTap
-                        ? 'Checking and signing...'
-                        : 'Checking and approving...')
-                  : (p.oneTap ? 'Approve and sign' : 'Approve'),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            p.oneTap
-                ? 'Approving signs the payment on this device. It can\'t be withdrawn afterwards.'
-                : 'One-tap signing isn\'t available for this payment (not every signer had '
-                      'signing data ready), so approvers sign again when it\'s sent.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: _voting ? null : () => _vote(false),
-            child: const Text('Reject'),
-          ),
-          ...footer,
-        ];
+        // Not voted yet: the request view shows Approve and Decline instead.
+        return footer;
       case rust.ProposalStage.approved when p.ready:
         return [
           AppButton(
@@ -516,16 +570,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             leading: const AppIcon(AppIcons.plane, size: 20),
             onPressed: _startSend,
             child: const Text('Send now'),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            p.autoSend
-                ? 'Every signature is in. It is sent automatically by the signer who approved last; you can also send it yourself.'
-                : 'Every signature is in. Any signer can send it now; no one else needs to be online.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
           ),
           ...footer,
         ];
@@ -537,15 +581,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             onPressed: _startSend,
             child: Text(
               p.signingStarted ? 'Resume sending' : 'Collect signatures & send',
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Any signer can send once the payment is approved. The approvers sign automatically '
-            'when they open Zafe.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
             ),
           ),
           ...footer,
@@ -568,22 +603,16 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       case rust.ProposalStage.cancelled when p.stillSendable:
         return [
           Text(
-            'Every signature for this payment was already in, so it could still be sent '
-            'until it expires. Move its funds back to the vault to make that impossible '
-            '(needs ${p.threshold} approvals).',
+            'All signatures were in, so it can still be sent until it expires. Move its '
+            'funds back to the vault to stop that (needs ${p.threshold} approvals).',
             textAlign: TextAlign.center,
             style: note,
           ),
           const SizedBox(height: AppSpacing.sm),
-          AppButton(
-            expand: true,
-            leading: _invalidating
-                ? null
-                : const AppIcon(AppIcons.shieldKeyhole, size: 20),
-            onPressed: _invalidating ? null : () => _invalidate(p),
-            child: Text(
-              _invalidating ? 'Building transaction...' : 'Make it unsendable',
-            ),
+          ActionButton(
+            label: 'Make it unsendable',
+            icon: AppIcons.shieldKeyhole,
+            onPressed: () => _invalidate(p),
           ),
         ];
       case rust.ProposalStage.rejected:

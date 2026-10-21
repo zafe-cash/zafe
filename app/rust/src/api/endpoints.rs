@@ -15,7 +15,7 @@ use super::{
 /// Checks that a Zafe relay answers at `relay_url` (`GET /health`).
 pub fn check_relay(relay_url: String) -> Result<(), ZafeError> {
     runtime()
-        .block_on(RelayClient::new(relay_url).health())
+        .block_on(RelayClient::pooled(relay_url).health())
         .map_err(|e| ZafeError::from(e).at(ZafeEndpoint::Relay))
 }
 

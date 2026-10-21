@@ -1,6 +1,6 @@
 """Regenerates the site's images and web fonts from the app (run from the repo root).
 
-    cd app && HOME_NOTICE=0 flutter test tool/screens/ && flutter test tool/illustrations/preview_test.dart
+    cd app && HOME_NOTICE=0 HOME_FIAT=0 flutter test --dart-define=ZAFE_NETWORK=main tool/screens/ && flutter test tool/illustrations/preview_test.dart
     python3 infra/site/assets.py          # needs: pip install pillow fonttools brotli
 
 Images: the app's own renders (fake data, app/build/screen_preview/) and illustrations

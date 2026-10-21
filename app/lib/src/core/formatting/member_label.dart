@@ -1,12 +1,17 @@
 /// A member: "You", the local name this device gave them, or a short key.
+/// [withKey] adds the short key after a name ("Bob (97c9ce...123e)") where who did
+/// something matters (who proposed a payment): names are chosen by members themselves.
 String memberLabel(
   String keyHex, {
   String? me,
   Map<String, String> names = const {},
+  bool withKey = false,
 }) {
   if (keyHex == me) return 'You';
   final name = names[keyHex];
-  if (name != null && name.isNotEmpty) return name;
+  if (name != null && name.isNotEmpty) {
+    return withKey ? '$name (${shortKey(keyHex)})' : name;
+  }
   return shortKey(keyHex);
 }
 

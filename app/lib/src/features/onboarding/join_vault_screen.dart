@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../core/storage/my_name.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/vault.dart' as rust;
@@ -27,14 +31,20 @@ class JoinVaultScreen extends ConsumerStatefulWidget {
 class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   final _invite = TextEditingController();
   final _focus = FocusNode();
+  final _myName = TextEditingController();
+  final _myNameFocus = FocusNode();
   rust.InviteInfo? _info;
-  bool _busy = false;
   bool _fromLink = false;
 
   @override
   void initState() {
     super.initState();
     _prefill(widget.initialInvite);
+    unawaited(
+      MyName.lastUsed().then((n) {
+        if (mounted && _myName.text.isEmpty) _myName.text = n;
+      }),
+    );
   }
 
   @override
@@ -68,6 +78,8 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   void dispose() {
     _invite.dispose();
     _focus.dispose();
+    _myName.dispose();
+    _myNameFocus.dispose();
     super.dispose();
   }
 
@@ -94,24 +106,13 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   }
 
   Future<void> _join() async {
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(vaultProvider.notifier)
-          .joinVault(extractInvite(_invite.text) ?? _invite.text);
-      if (mounted) context.go('/setup');
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          'Couldn\'t join. $e',
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
+    await ref
+        .read(vaultProvider.notifier)
+        .joinVault(
+          extractInvite(_invite.text) ?? _invite.text,
+          myName: _myName.text,
         );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (mounted) context.go('/setup');
   }
 
   @override
@@ -120,11 +121,11 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
     final info = _info;
     return ZafeScreen(
       title: 'Join a vault',
-      bottom: AppButton(
-        expand: true,
-        onPressed: info != null && !_busy ? _join : null,
-        leading: _busy ? const AppIcon(AppIcons.loader, size: 20) : null,
-        child: Text(_busy ? 'Joining...' : 'Join vault'),
+      bottom: ActionButton(
+        label: 'Join vault',
+        enabled: info != null,
+        errorFallback: 'Couldn\'t join. Try again.',
+        onPressed: _join,
       ),
       children: [
         const OnboardingBanner('join_doorway'),
@@ -137,6 +138,7 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
         ),
         const SizedBox(height: AppSpacing.xs),
         MobileTextField(
+          secret: true,
           controller: _invite,
           focusNode: _focus,
           hintText: 'Paste the invite or link you received',
@@ -144,20 +146,37 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
             _fromLink = false;
             _parse();
           },
-          trailing: AppButton(
-            variant: AppButtonVariant.secondary,
-            size: AppButtonSize.mediumLarge,
-            onPressed: _paste,
-            child: const Text('Paste'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // The camera, as an icon: a QR glyph next to an invite field needs no
+              // words.
+              Tooltip(
+                message: 'Scan QR code',
+                child: AppTappable(
+                  semanticsLabel: 'Scan QR code',
+                  onTap: _scan,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: AppIcon(
+                        AppIcons.qr,
+                        size: 22,
+                        color: context.colors.icon.accent,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              AppButton(
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.mediumLarge,
+                onPressed: _paste,
+                child: const Text('Paste'),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
-          expand: true,
-          variant: AppButtonVariant.secondary,
-          onPressed: _busy ? null : _scan,
-          leading: const AppIcon(AppIcons.qr, size: 20),
-          child: const Text('Scan QR code'),
         ),
         const SizedBox(height: AppSpacing.md),
         if (info != null)
@@ -172,12 +191,25 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
               color: colors.text.destructive,
             ),
           ),
+        if (info != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Your name',
+            style: AppTypography.labelMedium.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          MobileTextField(
+            controller: _myName,
+            focusNode: _myNameFocus,
+            hintText: 'Shown to the other members',
+          ),
+        ],
         if (info != null && _fromLink) ...[
           const SizedBox(height: AppSpacing.sm),
           Text(
-            'Opened from a link. Join only if you were expecting this invite from '
-            'someone you know. You\'ll compare a safety number with every member '
-            'before any keys are made.',
+            'Opened from a link. Join only if you expected this invite. You\'ll compare safety words with every member first.',
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
             ),

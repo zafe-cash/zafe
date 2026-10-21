@@ -183,6 +183,6 @@ The **Zakura node itself supports NU6.3 on regtest**. Started with `"NU5"`, `"NU
 
 **Resolved (2026-10-02):** our PR #124 merged and shipped in `ths` v0.3.0 (Zakura 1.6.0, NU6.1-6.3 at height 1, Ironwood wallet). Since 2026-10-04 `infra/regtest/` runs `ths` itself (`ths start`, faucet, `ths mine`); our own Zakura config is gone.
 
-**Filed (2026-10-04):** issue [#145](https://github.com/zcashlabs/thus-spoke-zakura/issues/145), fix in PR [#146](https://github.com/zcashlabs/thus-spoke-zakura/pull/146). In 0.3.0, `ths --name X stop` from another shell deletes the environment but leaves the foreground `ths start` launcher running (it only exits on a signal). `infra/regtest/down.sh` sends SIGINT instead.
+**Filed (2026-10-04):** issue [#145](https://github.com/zcashlabs/thus-spoke-zakura/issues/145), fix in PR [#146](https://github.com/zcashlabs/thus-spoke-zakura/pull/146). In 0.3.0, `ths --name X stop` from another shell deletes the environment but leaves the foreground `ths start` launcher running (it only exits on a signal). `infra/regtest/down.sh` sends SIGINT instead. **Resolved:** merged 2026-10-11, shipped in v0.4.0 (Zafe pins it since 2026-10-19).
 
-**Asked (2026-10-04):** an opt-in `ths start --detach` for scripts and CI ([#147](https://github.com/zcashlabs/thus-spoke-zakura/issues/147)); offered to send the PR.
+**Asked (2026-10-04):** an opt-in `ths start --detach` for scripts and CI ([#147](https://github.com/zcashlabs/thus-spoke-zakura/issues/147)); offered to send the PR. PR [#308](https://github.com/zcashlabs/thus-spoke-zakura/pull/308) open since 2026-10-14 (conflicts with v0.4.0 resolved 2026-10-19), awaiting review.

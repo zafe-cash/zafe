@@ -7,7 +7,7 @@ STATE=${ZAFE_REGTEST_STATE:-$HOME/.cache/zafe-regtest}
 PID_FILE="$STATE/$NAME.pid"
 
 # Ctrl+C is how `ths start` expects to be stopped: it deletes the environment and exits.
-# (`ths stop` deletes it too, but leaves a foreground launcher running, as of 0.3.0.)
+# (`ths stop` also ends the launcher since 0.4.0; the fallback below catches the rest.)
 if [[ -f "$PID_FILE" ]]; then
   pid=$(cat "$PID_FILE")
   if kill -INT "$pid" 2>/dev/null; then

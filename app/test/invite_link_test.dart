@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/features/onboarding/invite_link.dart';
 
 void main() {
-  const invite = 'zafe-invite-v1:0a1b2c3d4e5f60718293a4b5c6d7e8f9';
+  const invite = 'zafe-invite-v2:0a1b2c3d4e5f60718293a4b5c6d7e8f9';
 
   group('inviteLink', () {
     test('embeds a URL-safe invite as is', () {
@@ -36,13 +36,15 @@ void main() {
       );
       expect(from('ZAFE://JOIN?invite=$invite'), invite);
       expect(from('zafe://join/?invite=$invite'), invite);
+      // The testnet app's own scheme is read by every build.
+      expect(from('zafe-testnet://join?invite=$invite'), invite);
     });
 
     test('rejects other schemes', () {
       expect(from('https://join?invite=$invite'), isNull);
       expect(from('http://zafe.xyz/join?invite=$invite'), isNull);
       expect(from('zcash://join?invite=$invite'), isNull);
-      expect(from('zafe-invite-v1:abcd'), isNull);
+      expect(from('zafe-invite-v2:abcd'), isNull);
     });
 
     test('rejects other hosts and paths', () {

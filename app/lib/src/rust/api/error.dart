@@ -17,14 +17,20 @@ class ZafeError implements FrbException {
   final String message;
   final ZafeEndpoint endpoint;
 
+  /// Members the error is about (signing keys, hex): `KeygenIncomplete` lists those
+  /// who never took part. Empty otherwise.
+  final List<String> members;
+
   const ZafeError({
     required this.kind,
     required this.message,
     required this.endpoint,
+    required this.members,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ message.hashCode ^ endpoint.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ message.hashCode ^ endpoint.hashCode ^ members.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -33,7 +39,8 @@ class ZafeError implements FrbException {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           message == other.message &&
-          endpoint == other.endpoint;
+          endpoint == other.endpoint &&
+          members == other.members;
 }
 
 enum ZafeErrorKind {
@@ -77,6 +84,10 @@ enum ZafeErrorKind {
   /// trust it; members compare notes outside Zafe.
   relayForked,
 
+  /// This device's own copy of the vault history doesn't verify. The member can follow
+  /// the relay's history instead, after checking with the others.
+  logCopyInvalid,
+
   /// The relay's member list or threshold differs from the vault's (someone seeded it
   /// wrongly when restoring it): do not trust it; funds are not at risk.
   relayMembership,
@@ -84,9 +95,6 @@ enum ZafeErrorKind {
   /// The relay no longer knows this vault (wiped), though this device has its log: a
   /// member can restore it from the device copy.
   relayLostVault,
-
-  /// The relay takes no new vaults for now (a capped beta). Existing vaults still work.
-  relayAtCapacity,
 
   /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
   /// another host, or a server that doesn't speak TLS).
@@ -113,4 +121,10 @@ enum ZafeErrorKind {
   /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
   vaultNotOnRelay,
   other,
+
+  /// Key generation timed out because some members never took part (`members`).
+  keygenIncomplete,
+
+  /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
+  inviteExpired,
 }

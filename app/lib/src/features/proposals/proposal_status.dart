@@ -10,6 +10,19 @@ import '../../rust/api/proposals.dart' as rust;
 /// Seconds per block (Zcash target spacing since Blossom).
 const _blockSeconds = 75;
 
+/// Seconds per block from the NU7 network upgrade on.
+const _blockSecondsNu7 = 25;
+
+/// Seconds the chain takes to go from block `from` to block `to`: 75 s blocks before the
+/// NU7 upgrade at `nu7Height` (null: not known, so every block counts 75 s) and 25 s after.
+int blocksToSeconds(int from, int to, {int? nu7Height}) {
+  if (to <= from) return 0;
+  if (nu7Height == null) return (to - from) * _blockSeconds;
+  final before = (nu7Height.clamp(from, to) - from) * _blockSeconds;
+  final after = (to - nu7Height.clamp(from, to)) * _blockSecondsNu7;
+  return before + after;
+}
+
 /// Whether an unsent proposal can no longer be mined: the chain (`height`, the synced
 /// tip) has reached its transaction's expiry height. Unknown height: not expired.
 bool proposalExpired(rust.ProposalInfo p, int? height) =>
@@ -20,8 +33,8 @@ bool proposalExpired(rust.ProposalInfo p, int? height) =>
     height >= p.expiryHeight;
 
 /// "about 6 days" until an unsent proposal expires, from the synced tip `height`.
-String expiresIn(rust.ProposalInfo p, int height) {
-  final seconds = (p.expiryHeight - height) * _blockSeconds;
+String expiresIn(rust.ProposalInfo p, int height, {int? nu7Height}) {
+  final seconds = blocksToSeconds(height, p.expiryHeight, nu7Height: nu7Height);
   final minutes = (seconds / 60).round();
   final hours = (seconds / 3600).round();
   final days = (seconds / 86400).round();
@@ -29,6 +42,23 @@ String expiresIn(rust.ProposalInfo p, int height) {
   if (minutes < 60) return 'about ${n(minutes < 1 ? 1 : minutes, 'minute')}';
   if (hours < 36) return 'about ${n(hours, 'hour')}';
   return 'about ${n(days, 'day')}';
+}
+
+/// A payment waiting for this member: a vote, or (once every signature is in and nobody
+/// is auto-sending) a send. Home's "Needs you" and the notifications use the same rule.
+bool needsMyAction(rust.ProposalInfo p, {int? height}) =>
+    !proposalExpired(p, height) &&
+    (p.needsReapproval ||
+        (p.stage == rust.ProposalStage.open && p.myVote == rust.MyVote.none) ||
+        (p.stage == rust.ProposalStage.approved && !(p.ready && p.autoSend)));
+
+/// " · expires in about 5 hours" when an unsent payment has less than a day left, else ''.
+String _soon(rust.ProposalInfo p, int? height) {
+  if (height == null || p.expiryHeight <= 0) return '';
+  final secs = blocksToSeconds(height, p.expiryHeight);
+  return secs > 0 && secs < 86400
+      ? ' · expires in ${expiresIn(p, height)}'
+      : '';
 }
 
 /// Title for a proposal from this member's point of view (sentence case).
@@ -79,65 +109,6 @@ String formatTimestamp(BigInt unixSeconds) {
   return '${_months[t.month - 1]} ${t.day}, ${two(t.hour)}:${two(t.minute)}';
 }
 
-class ProposalStatusChip extends StatelessWidget {
-  const ProposalStatusChip({
-    super.key,
-    required this.proposal,
-    this.sending = false,
-    this.height,
-  });
-  final rust.ProposalInfo proposal;
-  final bool sending;
-
-  /// Synced chain tip, to show expiry (unknown: never shown as expired).
-  final int? height;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final (icon, label, color) = sending
-        ? (AppIcons.loader, 'Sending', colors.text.secondary)
-        : proposalExpired(proposal, height)
-        ? (AppIcons.time, 'Expired', colors.text.muted)
-        : switch (proposal.stage) {
-            rust.ProposalStage.open => (
-              AppIcons.time,
-              // The count is on the line below the chip.
-              'Collecting votes',
-              colors.text.secondary,
-            ),
-            rust.ProposalStage.approved => (
-              AppIcons.check,
-              'Approved',
-              colors.text.value,
-            ),
-            rust.ProposalStage.rejected => (
-              AppIcons.cross,
-              'Rejected',
-              colors.text.destructive,
-            ),
-            rust.ProposalStage.cancelled => (
-              AppIcons.cross,
-              'Cancelled',
-              colors.text.muted,
-            ),
-            rust.ProposalStage.sent => (
-              AppIcons.checkCircle,
-              'Completed',
-              colors.text.value,
-            ),
-          };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AppIcon(icon, size: 13, color: color, patina: color),
-        const SizedBox(width: AppSpacing.xxs),
-        Text(label, style: AppTypography.labelMedium.copyWith(color: color)),
-      ],
-    );
-  }
-}
-
 /// 44px activity row for a proposal.
 class ProposalRow extends StatelessWidget {
   const ProposalRow({
@@ -159,22 +130,21 @@ class ProposalRow extends StatelessWidget {
     final colors = context.colors;
     final p = proposal;
     final expired = proposalExpired(p, height);
-    final needsMe =
-        !expired &&
-        p.stage == rust.ProposalStage.open &&
-        p.myVote == rust.MyVote.none;
+    final needsMe = needsMyAction(p, height: height);
     final subtitle = expired
         ? (p.createdAt > BigInt.zero ? formatTimestamp(p.createdAt) : '')
         : switch (p.stage) {
             rust.ProposalStage.open =>
-              '${p.approvals.length} of ${p.threshold} approved',
-            rust.ProposalStage.approved => 'Approved',
+              '${p.approvals.length} of ${p.threshold} approved'
+                  '${_soon(p, height)}',
+            rust.ProposalStage.approved => 'Approved${_soon(p, height)}',
             _ => p.createdAt > BigInt.zero ? formatTimestamp(p.createdAt) : '',
           };
     return AppTappable(
       onTap: onTap,
-      child: SizedBox(
-        height: 44,
+      // A minimum: with large system text the two lines need more than 44.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
           child: Row(

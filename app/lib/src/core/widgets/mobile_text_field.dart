@@ -38,6 +38,7 @@ class MobileTextField extends StatefulWidget {
     this.height,
     this.radius,
     this.enabled = true,
+    this.secret = false,
     super.key,
   });
 
@@ -57,7 +58,7 @@ class MobileTextField extends StatefulWidget {
   final Widget? leading;
 
   /// Rendered after the text (e.g. a clear button or contacts/scan icons).
-  /// Owns its own padding/sizing.
+  /// Owns its own sizing; the field insets it from the border.
   final Widget? trailing;
 
   /// Optional per-surface fill override for one-off Figma variants.
@@ -87,6 +88,10 @@ class MobileTextField extends StatefulWidget {
 
   /// Whether the field and its outer tap target accept input.
   final bool enabled;
+
+  /// Holds a secret (backup passphrase, backup or invite text): no suggestions,
+  /// autocorrect or keyboard learning, so the keyboard doesn't remember it.
+  final bool secret;
 
   @override
   State<MobileTextField> createState() => _MobileTextFieldState();
@@ -192,7 +197,12 @@ class _MobileTextFieldState extends State<MobileTextField> {
         // resolves these to 46 / 12. The surface fill, the focus-only inverse
         // outline and the layered surface shadow mirror the canonical
         // AppTextField shell.
-        height: widget.height ?? AppInputSizing.height,
+        // Zafe: a minimum, not a fixed height: with large system text the text (and
+        // a trailing pill) are taller than 60 and used to overflow.
+        constraints: BoxConstraints(
+          minHeight: widget.height ?? AppInputSizing.height,
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 6),
         decoration: BoxDecoration(
           color: widget.backgroundColor ?? colors.surface.input.primary,
           borderRadius: BorderRadius.circular(
@@ -211,7 +221,13 @@ class _MobileTextFieldState extends State<MobileTextField> {
         ),
         child: Row(
           children: [
-            if (widget.leading != null) widget.leading!,
+            // Zafe: an inset from the border, as above and below (callers' icons and
+            // pills used to touch it).
+            if (widget.leading != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 14),
+                child: widget.leading!,
+              ),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -227,6 +243,9 @@ class _MobileTextFieldState extends State<MobileTextField> {
                     textInputAction: widget.textInputAction,
                     keyboardType: widget.keyboardType,
                     inputFormatters: widget.inputFormatters,
+                    enableSuggestions: !widget.secret,
+                    autocorrect: !widget.secret,
+                    enableIMEPersonalizedLearning: !widget.secret,
                     style: textStyle,
                     cursorColor: colors.text.accent,
                     decoration: InputDecoration.collapsed(
@@ -237,7 +256,11 @@ class _MobileTextFieldState extends State<MobileTextField> {
                 ),
               ),
             ),
-            if (widget.trailing != null) widget.trailing!,
+            if (widget.trailing != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: widget.trailing!,
+              ),
           ],
         ),
       ),

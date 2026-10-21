@@ -26,8 +26,6 @@ import 'features/proposals/proposal_screen.dart';
 import 'features/proposals/sending_screen.dart';
 import 'features/receive/receive_screen.dart';
 import 'features/received/received_screen.dart';
-import 'core/widgets/app_icon.dart';
-import 'core/widgets/app_toast.dart';
 import 'features/send/payment_link.dart';
 import 'features/send/payment_request_screen.dart';
 import 'features/send/send_screen.dart';
@@ -39,11 +37,14 @@ import 'features/settings/viewing_key_screen.dart';
 import 'providers/device_lock_provider.dart';
 import 'providers/tor_provider.dart';
 import 'providers/mempool_watch_provider.dart';
+import 'providers/proposals_provider.dart';
 import 'providers/server_failover_provider.dart';
 import 'providers/theme_mode_provider.dart';
 import 'notifications/vault_updates.dart'
     show kReceivedPrefix, kSeatMovePrefix, kUnapprovedPrefix;
 import 'notifications/vault_watch.dart';
+import 'features/vaults/manage_vaults_screen.dart';
+import 'providers/app_notices_provider.dart';
 import 'providers/vault_provider.dart';
 import 'services/app_update.dart';
 import 'services/invite_links.dart';
@@ -68,6 +69,23 @@ final _routerProvider = Provider<GoRouter>((ref) {
     notificationTaps.value = null;
     final (vaultId, proposalId) = ids;
     final vaults = ref.read(vaultProvider);
+    if (proposalId == kSetupPayload || proposalId == kVaultReadyPayload) {
+      // A setup's notification: show that vault (its setup screen, or Home once the
+      // background check saved its keys; reload picks those up), then the backup.
+      if (!vaults.vaults.any((v) => v.id == vaultId)) return;
+      await ref.read(vaultProvider.notifier).showVault(vaultId);
+      final settingUp = ref.read(vaultProvider).isSettingUp;
+      // The backup prompt as right after keys are made in the app (`go`: no way back
+      // past its "Later" acknowledgement).
+      router.go(
+        settingUp
+            ? '/setup'
+            : proposalId == kVaultReadyPayload
+            ? '/backup-prompt'
+            : '/home',
+      );
+      return;
+    }
     if (!vaults.vaults.any((v) => v.id == vaultId && v.ready)) return;
     if (vaults.activeId != vaultId || vaults.isAdding) {
       await ref.read(vaultProvider.notifier).switchTo(vaultId);
@@ -94,14 +112,18 @@ final _routerProvider = Provider<GoRouter>((ref) {
   WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(openTapped()));
 
   // Invite links open the Join screen with the invite filled in; joining still takes a
-  // tap there and the safety number check after it. From inside a vault it's "Add vault".
+  // tap there and the safety-word check after it. From inside a vault it's "Add vault".
   // A link that arrives during key generation or the backup prompt right after it waits
   // for the next navigation away from them.
   void openInviteLink() {
     final invite = inviteLinks.value;
     if (invite == null) return;
+    // Like payment links: nothing moves while the app is locked, and a link never pulls
+    // the owner out of a setup in progress or a payment that is being sent.
+    if (ref.read(appLockedProvider)) return;
     final vaults = ref.read(vaultProvider);
-    if (vaults.isSettingUp && (vaults.membership?.sealed ?? false)) return;
+    if (vaults.isSettingUp) return;
+    if (ref.read(proposalsProvider).sends.values.any((s) => s.running)) return;
     final here = router.routerDelegate.currentConfiguration.uri.path;
     if (here == '/backup-prompt') return;
     inviteLinks.value = null;
@@ -130,27 +152,20 @@ final _routerProvider = Provider<GoRouter>((ref) {
   void openPaymentLink() {
     final link = paymentLinks.value;
     if (link == null) return;
-    void tell(String message) {
-      final context = router.routerDelegate.navigatorKey.currentContext;
-      if (context == null) return;
-      showAppToast(
-        context,
-        message,
-        iconName: AppIcons.warningCircle,
-        duration: const Duration(seconds: 4),
-      );
-    }
+    void tell(String title, String body) => ref
+        .read(appNoticesProvider.notifier)
+        .show(AppNotice(id: 'payment-link', title: title, body: body));
 
     if (paymentLinkExpired(link, DateTime.now())) {
       paymentLinks.value = null;
-      tell(kPaymentLinkExpiredMessage);
+      tell('Payment link expired', kPaymentLinkExpiredMessage);
       return;
     }
     if (ref.read(appLockedProvider)) return;
     final vaults = ref.read(vaultProvider);
     if (!vaults.vaults.any((v) => v.ready)) {
       paymentLinks.value = null;
-      tell(kPaymentLinkNoVaultMessage);
+      tell('No vault yet', kPaymentLinkNoVaultMessage);
       return;
     }
     if (vaults.isSettingUp && (vaults.membership?.sealed ?? false)) return;
@@ -165,17 +180,22 @@ final _routerProvider = Provider<GoRouter>((ref) {
 
   paymentLinks.addListener(openPaymentLink);
   ref.onDispose(() => paymentLinks.removeListener(openPaymentLink));
-  ref.listen(appLockedProvider, (_, _) => scheduleMicrotask(openPaymentLink));
+  ref.listen(appLockedProvider, (_, _) {
+    scheduleMicrotask(openPaymentLink);
+    scheduleMicrotask(openInviteLink);
+  });
   // Sync moved to another listed Zcash server: say so once.
   ref.listen(serverFailoverProvider, (_, moved) {
-    final context = router.routerDelegate.navigatorKey.currentContext;
-    if (moved == null || context == null) return;
-    showAppToast(
-      context,
-      moved.message,
-      iconName: AppIcons.warningCircle,
-      duration: const Duration(seconds: 4),
-    );
+    if (moved == null) return;
+    ref
+        .read(appNoticesProvider.notifier)
+        .show(
+          AppNotice(
+            id: 'server-failover',
+            title: 'Zcash server switched',
+            body: moved.message,
+          ),
+        );
   });
   WidgetsBinding.instance.addPostFrameCallback((_) {
     void retry() => scheduleMicrotask(openPaymentLink);
@@ -186,6 +206,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
 
   return router = GoRouter(
     initialLocation: initial,
+    // Ignore the platform's start route: on Android any app can start this activity
+    // with a `route` extra, which would otherwise open any screen (e.g. the viewing key)
+    // straight away. Links arrive through `app_links` and are checked there.
+    overridePlatformDefaultLocation: true,
     redirect: (context, state) {
       final vault = ref.read(vaultProvider);
       final loc = state.matchedLocation;
@@ -198,6 +222,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
         '/signers',
         '/viewing-key',
         '/vault-protection',
+        '/vaults',
         '/replace-signer',
         '/export',
         '/activity',
@@ -303,6 +328,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/vaults',
+        pageBuilder: (_, _) => page(const ManageVaultsScreen()),
+      ),
+      GoRoute(
         path: '/vault-protection',
         pageBuilder: (_, _) => page(const VaultProtectionScreen()),
       ),
@@ -313,9 +342,13 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/payment-request',
-        pageBuilder: (_, state) => page(
-          PaymentRequestScreen(link: state.extra! as PendingPaymentLink),
-        ),
+        pageBuilder: (_, state) => switch (state.extra) {
+          final PendingPaymentLink link => page(
+            PaymentRequestScreen(link: link),
+          ),
+          // Only `openPaymentLink` opens this route, with the link as `extra`.
+          _ => page(const SizedBox.shrink()),
+        },
       ),
       GoRoute(
         path: '/send',

@@ -5,18 +5,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/endpoints.dart';
 import '../core/errors/zafe_error_copy.dart';
+import '../core/storage/my_name.dart';
 import '../core/storage/zafe_paths.dart';
-import '../core/storage/zafe_secure_store.dart';
 import '../core/storage/vault_summaries.dart';
 import '../notifications/vault_updates.dart' show actionableCount;
 import '../notifications/vault_watch.dart' show recordSeen, reregisterPush;
 import '../features/proposals/proposal_status.dart' show proposalExpired;
 import '../rust/api/error.dart';
+import '../rust/api/names.dart' show SignerName;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/relay_log.dart' as rust_relay_log;
 import '../rust/api/repair.dart' as rust_repair;
 import 'endpoints_provider.dart';
 import 'vault_provider.dart';
+import '../core/storage/wallet_key.dart';
+import 'respond_policy.dart';
 
 /// A send in progress (or just failed) on this device.
 class SendState {
@@ -118,6 +121,9 @@ class ProposalsState {
 class ProposalsNotifier extends Notifier<ProposalsState> {
   bool _refreshing = false;
 
+  /// When a refresh also answers signing requests (Home tells it about the live watch).
+  final respondPolicy = RespondPolicy();
+
   /// A refresh was asked for while one was running (see [refreshSoon]).
   bool _again = false;
 
@@ -157,6 +163,16 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       return;
     }
     unawaited(refresh());
+  }
+
+  /// Like [refresh], but never returns early. Called after an action of this device
+  /// (propose, approve, cancel...): a refresh already running may have read the relay
+  /// before the action landed, so wait for it and run a full one after it.
+  Future<void> refreshFresh() async {
+    while (_refreshing) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    await refresh();
   }
 
   Future<void> refresh() async {
@@ -199,6 +215,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       if (!list.backedUp.contains(vault.myKeyHex)) {
         unawaited(_attestIfBackedUp(vault.activeId!));
       }
+      unawaited(_publishPendingName(vault.activeId!, list.sharedNames));
       // Seen on screen: never announced from the background. Only while the app is in
       // the foreground; a refresh running in the background must not swallow news.
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
@@ -214,7 +231,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       );
       _autoSend();
       _prewarm();
-      await _answerRequests(paths);
+      if (respondPolicy.take(DateTime.now())) await _answerRequests(paths);
     } catch (e) {
       debugPrint('refresh failed: ${describeError(e)}');
       state = state.copyWith(error: e);
@@ -227,16 +244,22 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     }
   }
 
-  /// Once any payment is approved, this device may be the one to send it: build the
-  /// proving key in the background (once per process) so the send doesn't wait for it.
+  /// Once this device may be the one to send a payment, build the proving key in the
+  /// background (once per process, 2-3 s on a phone) so the send doesn't wait for it:
+  /// a payment that is approved, or one waiting only for this member's approval (the
+  /// approval completes it and this phone sends at once; it used to build the key
+  /// during that send).
   void _prewarm() {
     if (_prewarmed) return;
-    final approved = state.items.any(
+    final sendable = state.items.any(
       (p) =>
-          p.stage == rust.ProposalStage.approved &&
-          !proposalExpired(p, _height),
+          !proposalExpired(p, _height) &&
+          (p.stage == rust.ProposalStage.approved ||
+              (p.stage == rust.ProposalStage.open &&
+                  p.myVote == rust.MyVote.none &&
+                  p.approvals.length + 1 >= p.threshold)),
     );
-    if (!approved) return;
+    if (!sendable) return;
     _prewarmed = true;
     unawaited(
       rust.prewarmProver().catchError((Object e) {
@@ -267,7 +290,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         relayUrl: _endpoints.relayUrl,
         lightwalletdUrl: _endpoints.lightwalletdUrl,
         dbDir: paths.dbDir,
-        dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+        dbKey: walletKeyFor(vault.identity!, vault.activeId!),
         stateDir: await paths.stateDir(vault.activeId!),
         seeds: vault.identity!,
         material: vault.material!,
@@ -275,28 +298,53 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       );
     } catch (_) {
       // Not synced yet or offline: the next poll retries.
+      respondPolicy.failed();
     }
   }
 
-  /// Logs a proposal paying `payments` (one, or a batch of up to 50).
-  Future<String> propose({
+  /// Proposes [payments] (one, or a batch of up to 50) and approves them as this member,
+  /// in one bridge call under the caller's unlock (the approval reuses the log the
+  /// proposal read). The new payment is in [state] when this returns, already showing
+  /// this member's approval; if the approval failed, the payment stays open for it.
+  Future<String> proposeAndApprove({
     required List<rust.PaymentInput> payments,
     required bool autoSend,
   }) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
-    final id = await rust.proposePayment(
+    final out = await rust.proposeAndApprove(
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
+      stateDir: await paths.stateDir(vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       payments: payments,
       autoSend: autoSend,
     );
-    await refresh();
-    return id;
+    if (out.approveError case final e?) {
+      debugPrint('approving my own proposal failed: ${describeError(e)}');
+    }
+    state = state.copyWith(items: out.items, loaded: true);
+    // Proposals hold notes: the next wallet sync runs in full.
+    ref.read(vaultProvider.notifier).markDirty();
+    // The rest of a refresh (auto-send, seen, summaries) follows in the background.
+    refreshSoon();
+    return out.id;
+  }
+
+  /// The exact network fee (zatoshis) proposing [payments] would pay now.
+  Future<BigInt> estimateFee(List<rust.PaymentInput> payments) async {
+    final vault = _vault;
+    final paths = await ZafePaths.get();
+    return rust.estimateFee(
+      lightwalletdUrl: _endpoints.lightwalletdUrl,
+      dbDir: paths.dbDir,
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
+      material: vault.material!,
+      payments: payments,
+    );
   }
 
   Future<rust.ReviewInfo> review(String id) async {
@@ -306,7 +354,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       proposalId: id,
@@ -314,15 +362,17 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
   }
 
   /// Approves (and, for one-tap proposals, signs). If this approval completed the
-  /// signatures and the proposer asked for auto-send, the refresh starts sending.
-  Future<rust.ApproveResult> approve(String id) async {
+  /// signatures, the sending screen (or the refresh that follows) starts sending.
+  /// Approves [id]. [refresh]: false when the caller awaits its own refresh (the
+  /// proposer, whose page must open with the approval already shown).
+  Future<rust.ApproveResult> approve(String id, {bool refresh = true}) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
     final result = await rust.approveProposal(
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       stateDir: await paths.stateDir(vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
@@ -332,7 +382,10 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     if (state.sends[id] case final send? when !send.running) {
       state = state.copyWith(sends: {...state.sends}..remove(id));
     }
-    await refresh();
+    // Not awaited: the refresh can start the auto-send, and the caller opens the
+    // sending screen to show it. Awaiting it kept the Approve button spinning through
+    // the whole send.
+    if (refresh) refreshSoon();
     return result;
   }
 
@@ -344,8 +397,29 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       proposalId: id,
     );
-    await refresh();
+    await refreshFresh();
   }
+
+  /// The name chosen during setup (Create or Join), published once the vault exists;
+  /// a name already shared (the member renamed themselves since) wins. Best effort:
+  /// a failure leaves it pending for the next refresh.
+  Future<void> _publishPendingName(String id, List<SignerName> shared) async {
+    final name = await MyName.pending(id);
+    if (name == null || !_namePublishing.add(id)) return;
+    try {
+      final vault = _vault;
+      if (vault.activeId != id) return;
+      final mine = shared.where((n) => n.keyHex == vault.myKeyHex);
+      if (mine.isEmpty) await setMyName(name);
+      await MyName.clearPending(id);
+    } catch (e) {
+      debugPrint('publishing the setup name failed: ${describeError(e)}');
+    } finally {
+      _namePublishing.remove(id);
+    }
+  }
+
+  static final _namePublishing = <String>{};
 
   /// Vaults this session already tried to attest a backup for.
   static final _attested = <String>{};
@@ -380,7 +454,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     );
     // A restored relay has forgotten this phone's push token.
     unawaited(reregisterPush());
-    await refresh();
+    await refreshFresh();
     return restored;
   }
 
@@ -394,13 +468,26 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       seeds: vault.identity!,
       material: vault.material!,
     );
-    await refresh();
+    await refreshFresh();
     return dropped;
   }
 
-  /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`. Returns whether
-  /// the seat moved (this was the last approval needed).
-  Future<bool> approveSeatMove(String oldKeyHex, String code) async {
+  /// One step of the safety check with the phone that showed `code`: `null` until the
+  /// new phone has taken part, then the words to compare with it.
+  Future<String?> newPhoneWords(String code) => rust_repair.newPhoneWords(
+    relayUrl: _endpoints.relayUrl,
+    seeds: _vault.identity!,
+    code: code,
+  );
+
+  /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`, after its owner
+  /// read out the same `words`. Returns whether the seat moved (this was the last
+  /// approval needed).
+  Future<bool> approveSeatMove(
+    String oldKeyHex,
+    String code,
+    String words,
+  ) async {
     final vault = _vault;
     final moved = await rust_repair.approveSeatMove(
       relayUrl: _endpoints.relayUrl,
@@ -408,8 +495,9 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       oldKeyHex: oldKeyHex,
       code: code,
+      words: words,
     );
-    await refresh();
+    await refreshFresh();
     return moved;
   }
 
@@ -424,7 +512,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       replacement: replacement,
       stalledKeyHex: stalledKeyHex,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Sets this member's name for the other members (empty clears it).
@@ -436,7 +524,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       name: name,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Cancels a proposal this member authored.
@@ -448,7 +536,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       proposalId: id,
     );
-    await refresh();
+    await refreshFresh();
   }
 
   /// Proposes moving a cancelled payment's funds back to the vault so it can never be
@@ -460,12 +548,30 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       relayUrl: _endpoints.relayUrl,
       lightwalletdUrl: _endpoints.lightwalletdUrl,
       dbDir: paths.dbDir,
-      dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       proposalId: id,
     );
-    await refresh();
+    await refreshFresh();
+    return newId;
+  }
+
+  /// Cancels a payment that can no longer be completed the one-tap way and proposes the
+  /// same payment again with fresh signing data. Returns the new proposal id.
+  Future<String> proposeAgain(String id) async {
+    final vault = _vault;
+    final paths = await ZafePaths.get();
+    final newId = await rust.proposeAgain(
+      relayUrl: _endpoints.relayUrl,
+      lightwalletdUrl: _endpoints.lightwalletdUrl,
+      dbDir: paths.dbDir,
+      dbKey: walletKeyFor(vault.identity!, vault.activeId!),
+      seeds: vault.identity!,
+      material: vault.material!,
+      proposalId: id,
+    );
+    await refreshFresh();
     return newId;
   }
 
@@ -495,7 +601,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
           relayUrl: _endpoints.relayUrl,
           lightwalletdUrl: _endpoints.lightwalletdUrl,
           dbDir: paths.dbDir,
-          dbKey: await ZafeSecureStore.instance.walletKey(vault.activeId!),
+          dbKey: walletKeyFor(vault.identity!, vault.activeId!),
           stateDir: await paths.stateDir(vault.activeId!),
           seeds: vault.identity!,
           material: vault.material!,

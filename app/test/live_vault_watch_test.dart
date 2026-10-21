@@ -4,8 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/rust/api/watch.dart';
 import 'package:zafe/src/services/live_vault_watch.dart';
 
-VaultActivity event(VaultActivityKind kind, {int retry = 0}) =>
-    VaultActivity(kind: kind, retryInSecs: retry);
+VaultActivity event(
+  VaultActivityKind kind, {
+  int retry = 0,
+  bool inbox = false,
+}) => VaultActivity(kind: kind, inbox: inbox, retryInSecs: retry);
 
 /// A fake Rust side: one stream controller per started watch.
 class FakeRust {
@@ -62,15 +65,18 @@ void main() {
   group('LiveVaultWatch', () {
     late FakeRust rust;
     late int refreshes;
+    late int inboxes;
     late List<Duration> intervals;
     late LiveVaultWatch watch;
 
     setUp(() {
       rust = FakeRust();
       refreshes = 0;
+      inboxes = 0;
       intervals = [];
       watch = LiveVaultWatch(
         onRefresh: () => refreshes++,
+        onInbox: () => inboxes++,
         onPollIntervalChanged: intervals.add,
         starter: rust.start,
         stopper: rust.stop,
@@ -89,9 +95,10 @@ void main() {
       expect(intervals, [LiveActivityPolicy.livePoll]);
 
       controller.add(event(VaultActivityKind.activity));
-      controller.add(event(VaultActivityKind.activity));
+      controller.add(event(VaultActivityKind.activity, inbox: true));
       await pumpEventQueue();
       expect(refreshes, 3);
+      expect(inboxes, 1, reason: 'only the delivery');
       expect(intervals, [LiveActivityPolicy.livePoll], reason: 'unchanged');
 
       controller.add(event(VaultActivityKind.failed, retry: 4));

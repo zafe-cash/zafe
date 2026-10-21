@@ -1,21 +1,28 @@
-//! Panic notes for the local diagnostic report (Settings > Diagnostic report).
+//! Notes for the local diagnostic report (Settings > Diagnostic report): panics and slow
+//! steps.
 //!
-//! The hook writes one line per panic to `<support>/diagnostics/rust-panics.log`:
+//! The panic hook writes one line per panic to `<support>/diagnostics/rust-panics.log`:
 //! a UTC timestamp and the panic's `file:line:column`, **never the message or payload**
-//! (they can hold secrets). Nothing is sent anywhere. The directory is learned from the
-//! first wallet call (`remember_support_dir`): until then a panic leaves no note.
+//! (they can hold secrets). `Stopwatch` writes one line to `timings.log` for a slow call
+//! (or the first of its kind in this process): the call's name and how long each fixed
+//! step took, nothing else. Nothing is sent anywhere. The directory is learned from the
+//! first wallet call (`remember_support_dir`): until then nothing is written.
 
 use std::{
     io::Write,
     panic::PanicHookInfo,
     path::{Path, PathBuf},
-    sync::OnceLock,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const FILE_NAME: &str = "rust-panics.log";
-/// Past this size the file is restarted, so it can't grow without bound.
-const MAX_BYTES: u64 = 8 * 1024;
+const TIMINGS_FILE: &str = "timings.log";
+/// A call at least this slow is noted (so is the first of each kind in a process).
+const SLOW: Duration = Duration::from_millis(1500);
+/// Past this size the file drops its older half, so it can't grow without bound. With Tor
+/// on most background calls are "slow", so the newest lines must survive a trim.
+const MAX_BYTES: u64 = 16 * 1024;
 
 static DIAG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -48,7 +55,7 @@ fn note(info: &PanicHookInfo<'_>) {
             Some(l) => format!("{}:{}:{}", l.file(), l.line(), l.column()),
             None => "unknown".to_string(),
         };
-        let _ = write_line(dir, &line(unix_now(), &location));
+        let _ = write_line(dir, FILE_NAME, &line(unix_now(), &location));
     }));
 }
 
@@ -61,6 +68,11 @@ fn unix_now() -> u64 {
 
 /// `<ISO-8601 UTC> panic at <file:line:col>`: the message is not included.
 fn line(secs: u64, location: &str) -> String {
+    format!("{} panic at {location}", stamp(secs))
+}
+
+/// `2026-10-07T10:00:00Z` for a Unix time in seconds.
+fn stamp(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     // Civil-from-days (Howard Hinnant).
@@ -74,24 +86,105 @@ fn line(secs: u64, location: &str) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
     format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z panic at {location}",
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
         rem / 3_600,
         rem % 3_600 / 60,
         rem % 60
     )
 }
 
-fn write_line(dir: &Path, text: &str) -> std::io::Result<()> {
+/// Times a call step by step. `lap` names the step that just ended; `finish` writes one
+/// line (`<time> sync total=7120ms lock=2ms open=1200ms ...`) when the call was slow or
+/// is the first of its kind in this process. Only fixed step names and durations.
+pub(crate) struct Stopwatch {
+    op: &'static str,
+    start: Instant,
+    last: Instant,
+    steps: Vec<(&'static str, u128)>,
+}
+
+impl Stopwatch {
+    pub(crate) fn new(op: &'static str) -> Self {
+        let now = Instant::now();
+        Self {
+            op,
+            start: now,
+            last: now,
+            steps: Vec::new(),
+        }
+    }
+
+    pub(crate) fn lap(&mut self, step: &'static str) {
+        let now = Instant::now();
+        self.steps
+            .push((step, now.duration_since(self.last).as_millis()));
+        self.last = now;
+    }
+
+    /// Steps timed elsewhere (e.g. inside a core call) that ran since the last lap.
+    pub(crate) fn steps(&mut self, steps: &[(&'static str, u128)]) {
+        self.steps.extend_from_slice(steps);
+        self.last = Instant::now();
+    }
+
+    pub(crate) fn finish(self) {
+        static SEEN: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+        let total = self.start.elapsed();
+        let first = SEEN.lock().is_ok_and(|mut seen| {
+            let first = !seen.contains(&self.op);
+            if first {
+                seen.push(self.op);
+            }
+            first
+        });
+        if total < SLOW && !first {
+            return;
+        }
+        let Some(dir) = DIAG_DIR.get() else { return };
+        let text = timing_text(unix_now(), self.op, total.as_millis(), &self.steps);
+        let _ = write_line(dir, TIMINGS_FILE, &text);
+    }
+}
+
+/// `<time> <op> total=<n>ms <step>=<n>ms ...`
+fn timing_text(secs: u64, op: &str, total_ms: u128, steps: &[(&str, u128)]) -> String {
+    let mut text = format!("{} {op} total={total_ms}ms", stamp(secs));
+    for (step, ms) in steps {
+        text.push_str(&format!(" {step}={ms}ms"));
+    }
+    text
+}
+
+fn write_line(dir: &Path, file: &str, text: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let path = dir.join(FILE_NAME);
+    let path = dir.join(file);
     let mut options = std::fs::OpenOptions::new();
     options.create(true).append(true);
     if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
-        std::fs::remove_file(&path).ok();
+        keep_newest_half(&path);
     }
     let mut file = options.open(&path)?;
     // One write call per line (append mode): safe next to the other threads' panics.
     file.write_all(format!("{text}\n").as_bytes())
+}
+
+/// Keeps the newer half of the file's lines (or nothing, if it can't be read). Two
+/// processes trimming at once can only lose lines.
+fn keep_newest_half(path: &Path) {
+    let kept = std::fs::read(path).ok().and_then(|bytes| {
+        let half = bytes.len() / 2;
+        let start = half + bytes[half..].iter().position(|b| *b == b'\n')? + 1;
+        Some(bytes[start..].to_vec())
+    });
+    let tmp = path.with_extension("trim");
+    match kept {
+        Some(kept) if std::fs::write(&tmp, &kept).is_ok() => {
+            let _ = std::fs::rename(&tmp, path);
+        }
+        _ => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -109,15 +202,24 @@ mod tests {
     }
 
     #[test]
-    fn restarts_a_large_file() {
+    fn timing_lines_hold_only_names_and_durations() {
+        assert_eq!(
+            timing_text(1_791_367_200, "sync", 7120, &[("lock", 2), ("open", 1200)]),
+            "2026-10-07T10:00:00Z sync total=7120ms lock=2ms open=1200ms"
+        );
+    }
+
+    #[test]
+    fn a_large_file_keeps_its_newest_lines() {
         let dir = std::env::temp_dir().join(format!("zafe-diag-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(FILE_NAME), vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
-        write_line(&dir, "new").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(dir.join(FILE_NAME)).unwrap(),
-            "new\n"
-        );
+        let lines: Vec<String> = (0..2000).map(|i| format!("line {i:05}")).collect();
+        std::fs::write(dir.join(FILE_NAME), lines.join("\n") + "\n").unwrap();
+        write_line(&dir, FILE_NAME, "new").unwrap();
+        let text = std::fs::read_to_string(dir.join(FILE_NAME)).unwrap();
+        assert!(text.len() as u64 <= MAX_BYTES);
+        assert!(text.starts_with("line ") && text.ends_with("line 01999\nnew\n"));
+        assert!(!text.contains("line 00000"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

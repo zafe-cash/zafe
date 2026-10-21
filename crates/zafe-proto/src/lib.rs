@@ -8,7 +8,7 @@ pub mod relay;
 pub mod version;
 
 pub use envelope::{Envelope, Header, Kind, MailboxId, Recipient, ReplayGuard};
-pub use identity::{safety_number, Identity, IdentityPublic, IdentitySeeds};
+pub use identity::{Identity, IdentityPublic, IdentitySeeds};
 pub use log::{Chain, ChainError, LogEntry, LogKey};
 pub use version::{Format, UnsupportedVersion};
 

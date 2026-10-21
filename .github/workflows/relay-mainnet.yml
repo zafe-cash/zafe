@@ -12,11 +12,13 @@ name: Relay mainnet
 #     this repository).
 #
 # Environment `relay-mainnet`:
-#   secret   RELAY_SSH_KEY / RELAY_KNOWN_HOSTS   as for relay-testnet (may be the same key)
+#   secret   RELAY_MAINNET_SSH_KEY               private key of the VPS user `zafe-mainnet`, set
+#                                                ONLY here (never as a repository or testnet
+#                                                secret): its forced command can only deploy
+#                                                mainnet, so the testnet job cannot reach it
+#   secret   RELAY_KNOWN_HOSTS                   `ssh-keyscan -t ed25519 <host>`, checked out of band
 #   variable RELAY_HOST                          the VPS address
 #   variable RELAY_DOMAIN                        relay.zafe.cash (DNS only, same VPS)
-#   variable RELAY_MAX_VAULTS                    capped beta: vaults the relay takes in total
-#                                                (default 25; 0 = no limit)
 #   secret   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY   bucket-only keys
 #   variable LITESTREAM_BUCKET / LITESTREAM_ENDPOINT / LITESTREAM_REGION   the S3 bucket
 #   secret   RELAY_FCM_SERVICE_ACCOUNT_JSON      optional, pushes (the mainnet app's project)
@@ -64,9 +66,7 @@ jobs:
           DIGEST: ${{ inputs.digest }}
           SOAK: ${{ inputs.min_soak_hours }}
           DOMAIN: ${{ vars.RELAY_DOMAIN }}
-          MAX_VAULTS: ${{ vars.RELAY_MAX_VAULTS }}
         run: |
-          [[ -z $MAX_VAULTS || $MAX_VAULTS =~ ^[0-9]+$ ]] || { echo "::error::RELAY_MAX_VAULTS must be a number"; exit 1; }
           [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::digest must be sha256:<64 hex>"; exit 1; }
           [[ $SOAK =~ ^[0-9]+$ ]] || { echo "::error::min_soak_hours must be a number"; exit 1; }
           [[ $DOMAIN =~ ^[a-z0-9.-]+$ ]] || { echo "::error::set the environment variable RELAY_DOMAIN"; exit 1; }
@@ -82,37 +82,25 @@ jobs:
             --cert-oidc-issuer https://token.actions.githubusercontent.com
       - name: SSH setup
         env:
-          SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
+          SSH_KEY: ${{ secrets.RELAY_MAINNET_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.RELAY_KNOWN_HOSTS }}
         run: |
+          [ -n "$SSH_KEY" ] || { echo "::error::set the environment secret RELAY_MAINNET_SSH_KEY (infra/relay/README.md)"; exit 1; }
           install -d -m700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          printf 'Host relay\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n' \
+          printf 'Host relay\n  HostName %s\n  User zafe-mainnet\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' \
             "${{ vars.RELAY_HOST }}" > ~/.ssh/config
       - name: Check that testnet runs this digest, and has for long enough
         env:
           DIGEST: ${{ inputs.digest }}
           SOAK: ${{ inputs.min_soak_hours }}
-        run: |
-          record=$(ssh relay 'cat /opt/zafe-relay/deployed/testnet.json') ||
-            { echo "::error::no testnet deploy record on the server (deployed/testnet.json)"; exit 1; }
-          image=$(jq -r .image <<<"$record"); at=$(jq -r .at <<<"$record")
-          # A missing or odd timestamp must not read as 0 (bash arithmetic) and pass the soak.
-          [[ $at =~ ^[0-9]+$ ]] || { echo "::error::bad timestamp in the testnet deploy record"; exit 1; }
-          [ "$image" = "${IMAGE}@${DIGEST}" ] ||
-            { echo "::error::testnet runs $image, not ${IMAGE}@${DIGEST}: promote what testnet runs"; exit 1; }
-          hours=$(( ($(date -u +%s) - at) / 3600 ))
-          [ "$hours" -ge "$SOAK" ] ||
-            { echo "::error::that digest has run on testnet for $hours h, the minimum is $SOAK h"; exit 1; }
-          echo "testnet has run $image for $hours h"
-          # And it is healthy right now.
-          [ "$(curl -fsS --max-time 10 https://testnet.relay.zafe.cash/health)" = ok ] ||
-            { echo "::error::testnet is not healthy"; exit 1; }
-      - name: Copy compose files
-        run: |
-          tar -C infra/relay/vps -cz compose.yml caddy backup.sh deploy.sh litestream.yml mainnet |
-            ssh relay 'tar -C /opt/zafe-relay -xz && install -d /opt/zafe-relay/caddy/mainnet && mv /opt/zafe-relay/mainnet/relay.caddy /opt/zafe-relay/caddy/mainnet/relay.caddy && rmdir /opt/zafe-relay/mainnet'
+        # The server decides (and checks again when it deploys): the digest is the one
+        # testnet runs, it has run there for SOAK hours, and testnet is healthy now.
+        run: ssh relay "check $DIGEST $SOAK"
+      - name: Install the compose files
+        # The server downloads this commit from GitHub itself (only commits on main).
+        run: ssh relay "sync ${{ github.sha }}"
       - name: Relay secrets
         env:
           FCM: ${{ secrets.RELAY_FCM_SERVICE_ACCOUNT_JSON }}
@@ -132,22 +120,21 @@ jobs:
           # Single-quoted: Compose then takes the values literally (a `$` or `#` in a key).
           printf "LITESTREAM_ACCESS_KEY_ID='%s'\nLITESTREAM_SECRET_ACCESS_KEY='%s'\nLITESTREAM_BUCKET='%s'\nLITESTREAM_ENDPOINT='%s'\nLITESTREAM_REGION='%s'\n" \
             "$LS_KEY" "$LS_SECRET" "$LS_BUCKET" "$LS_ENDPOINT" "$LS_REGION" |
-            ssh relay 'umask 077 && cat > /opt/zafe-relay/litestream.env'
+            ssh relay 'secrets litestream'
           if [ -n "$FCM" ]; then
             json=$(jq -ce . <<<"$FCM")
             case "$json" in *"'"*) echo "::error::the FCM key contains a single quote"; exit 1;; esac
-            printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'\n" "$json" |
-              ssh relay 'umask 077 && cat > /opt/zafe-relay/secrets-mainnet.env'
+            printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'" "$json" | ssh relay 'secrets fcm'
           else
-            ssh relay 'rm -f /opt/zafe-relay/secrets-mainnet.env'
+            ssh relay 'secrets fcm' </dev/null
           fi
       - name: Deploy
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MAX_VAULTS: ${{ vars.RELAY_MAX_VAULTS }}
+          DIGEST: ${{ inputs.digest }}
+          SOAK: ${{ inputs.min_soak_hours }}
         run: |
-          printf '%s' "$TOKEN" | ssh relay \
-            "RELAY_MAX_VAULTS='${MAX_VAULTS:-25}' bash /opt/zafe-relay/deploy.sh mainnet '${IMAGE}@${{ inputs.digest }}' '${{ vars.RELAY_DOMAIN }}'"
+          printf '%s' "$TOKEN" | ssh relay "deploy $DIGEST ${{ vars.RELAY_DOMAIN }} $SOAK"
       - name: Public health check
         run: |
           # The first deploy waits for Caddy's certificate.

@@ -6,7 +6,7 @@ finished ones, tick them and add the commit. Spec references are to `spec.md`.
 
 Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not yet decided
 
-Last updated: 2026-10-06 (relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
+Last updated: 2026-10-15 (security audit + one-tap/race fixes; onboarding design in docs/onboarding.md; mainnet release checklist; deploy-key migration; relay CI/CD deploy to the OVH VPS; relay loss/rollback gap; stack plan; Verdigris + Seam brand implemented; note reservation; versioned formats; relay TLS + packaging; wallet DB encryption; incoming payments; pending receipts from the mempool; https invite links + landing site; Astro landing page)
 
 ---
 
@@ -481,7 +481,7 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [x] App side of the above (2026-10-07, merged from `audit-prep-app`, codegen re-run):
       bridge (`init_log_cache`, `restore_relay`, `unapproved_spends`, error kinds), Dart
       copy, sync-sheet "Restore vault on the relay" (same relay only; no copy implies
-      moving a vault), beta cap (`core/config/beta.dart`), unapproved-spend card +
+      moving a vault), beta label (`core/config/beta.dart`), unapproved-spend card +
       notification, `kMainnetRelayUrl`. Dart tests: error copy, sync failure kinds,
       unapproved-spend notification, beta. `bridge_e2e` keeps the interactive fallback
       by letting only A publish a pool (no group fully covered) and asserts `!one_tap`.
@@ -524,7 +524,126 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] Mainnet relay: second compose service + `relay.zafe.cash` + Litestream to object
       storage + a `relay-mainnet` environment with required reviewers that promotes a
       digest already on testnet
-- [ ] Capped mainnet beta (per-vault limit, "beta" label) before full launch
+- [x] Deploy-key split (2026-10-11): `bootstrap.sh` run on the VPS, `RELAY_TESTNET_SSH_KEY`
+      set, testnet deploy green on it, old `deploy` user and `RELAY_SSH_KEY` deleted, legacy
+      branch removed from `relay-deploy.yml`. Left: delete the local key copies in
+      `~/.config/zafe/relay-keys` (`shred -u`); consider a separate host for mainnet.
+- [x] Mainnet beta: "beta" label only, no cap (decided 2026-10-07: no relay vault limit, no
+      per-vault fund limit)
+
+## Mainnet release checklist (2026-10-12)
+
+- **BLOCKER (found 2026-10-12): NU7.** Testnet has been on NU7 since block 4,465,026 (2026-10-04, branch id
+  `0x77190AD9`); mainnet is targeted for **2026-11-05** (decision 2026-10-20). Zafe's pinned librustzcash builds NU6.3
+  transactions, so **every testnet send is rejected today** (verified on a phone: "incorrect consensus branch id") and
+  **mainnet sends will be rejected from activation** unless users update first. Funds are safe (nothing is sent), but
+  vaults can't spend. See AGENTS.md "Upstream status" for the scope. Steps: [ ] upgrade to the librustzcash NU7 line;
+  [ ] fix `verify` for any NU7 fee/tx rule; [ ] regtest + bridge e2e on NU7; [ ] testnet send on a phone; [ ] mainnet
+  release + a heads-up to early users (in-app notice when the server's branch differs from the app's); [ ] ths/regtest
+  NU7 support. Mainnet launch today is possible (sends work until activation) but needs this release before 2026-11-05.
+
+Ordered; tick as done. Details in the M2 section above and `infra/relay/README.md` "Mainnet".
+
+- Relay
+  - [x] DNS `relay.zafe.cash`, R2 bucket `zafe-mainnet`, `relay-mainnet` environment with a required reviewer
+  - [x] Server bootstrap, separate deploy keys, legacy key and `deploy` user removed (2026-10-11)
+  - [x] R2 token -> `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` (environment secrets)
+  - [x] `LITESTREAM_ENDPOINT` = the EU-jurisdiction R2 host (`<account id>.eu.r2.cloudflarestorage.com`, no bucket in the URL)
+  - [x] Pushed (2026-10-12); soak bypassed with `min_soak_hours=0` for the first mainnet deploy (user's call)
+  - [x] `relay-mainnet.yml` run 38237861311 promoted testnet's digest `sha256:4aaf63b3...` (2026-10-12)
+  - [x] `https://relay.zafe.cash/health` ok; Litestream wrote snapshot + WAL to R2 (checked in its logs)
+  - [x] Restore from R2 checked (2026-10-12): `litestream restore` rebuilt the DB from snapshot + 2 WAL segments in a throwaway container on the VPS. Not yet on another machine, and the restored DB wasn't opened (no sqlite3 in the image)
+- Gate
+  - [ ] **(you)** Engage the external audit (`docs/audit-scope.md`); record the audit commit here
+- Validation
+  - [x] Mainnet dry run with real funds (done 2026-10-12, see the release plan below): create, receive, propose, sign, send, restore, incl. `zec.rocks:443`
+  - [ ] Device run of seat move and share repair
+  - [ ] Check the Verdigris colours on a device
+- Release
+  - [x] Mainnet beta APK workflow `release-mainnet.yml` (tag `mainnet-v*`, 2026-10-12); [x] `mainnet-v0.1.0` published (2026-10-12, pre-release, arm64 APK + sha256)
+  - [x] Site (2026-10-12): mainnet beta tag, "Get Zafe" -> the exact release, Google Play / App Store "Soon" chips with brand icons and a follow-on-X line (@zafecash; the mailto waitlist was dropped), X + GitHub icons in the footer, testnet link; the audit status is in the FAQ only, and in the release notes
+  - [x] Site phone screens regenerated with ZEC and `u1` data, no dollar line (`HOME_FIAT=0`, `--dart-define=ZAFE_NETWORK=main`; `infra/site/assets.py` docstring)
+  - [x] Testnet invite page (2026-10-12): `testnet.zafe.cash/join` says it is the testnet and links the testnet APK (`join-testnet.astro`, host route in `vercel-output.sh`); open: the `zafe://` scheme is shared by both apps
+  - [x] First-sync investigation (2026-10-12): the first sync of a new vault took ~5 min on the phone but ~3 s on desktop (`first_sync_timing`); timings now go to the diagnostic report ("Slow steps"); sync sheet no longer says "in sync" mid-sync; Tor purple status; Settings shows the real version. Fresh-vault run on the phone (v0.1.6, Tor on): the first sync started ~6.5 min after keygen, the Rust sync itself took ~9 s, `proposals` refreshes ~8 s each (Tor round trips); stall is before Rust (paths / wallet key / call into Rust). v0.1.7: per-step 45 s limits + report entries, shimmer capped at 10 s + RepaintBoundary, first-sync label fixed. **Cause found (v0.1.7 report, fresh vault 2026-10-12): `sync failed at wallet key after 45s`** — the secure-storage call for the wallet DB key went unanswered right after keygen. v0.1.8 derives the key from the identity seeds (no storage on the sync path; old wallet DBs resync once). CPU cause found by profiling (VM-service timeline, `flutter attach`): the cost is a full-screen redraw per frame (~5 ms; 3.3 ms even with the card, tab bar and fade hidden), so the fix is the animation's frame rate: ~16 updates/s via a timer instead of every vsync (raster 70% -> 15% of a core, measured), 10 s cap removed (v0.1.9). `flutter_secure_storage` 11.2.0 (+ `file_picker` 13, `share_plus` 13) done and verified by an in-place update on a phone (v0.1.10). Open: `proposals` over Tor is ~8 s per refresh; the floor of ~3 ms/frame for the Home screen on Impeller (any animation or scroll costs it); release-signed in-place update v0.1.8 -> v0.1.10 checked on a phone (2026-10-12: same vault, address, signer key, 0 storage errors). Mainnet: relay promoted to the cancel-route digest 85153e1b (soak 3 h, 2026-10-12); `mainnet-v0.1.1` tagged on v0.1.10's commit
+  - [x] Cancel a vault setup (2026-10-12): creator "Cancel setup" deletes the mailbox on the relay (`POST /v1/mailbox/cancel`) and returns to a prefilled "New vault"; joiners "Leave"; relay deploy + app build needed to ship (relay: testnet deploys on push, mainnet needs a promotion)
+  - [ ] When a store listing is live: swap its "Soon" chip for a link (`index.astro`)
+  - [x] Testnet app (2026-10-12): invite links on `testnet.zafe.cash` (`ZAFE_TESTNET_LINK_HOST`); testnet-first gate in `release-mainnet.yml`; site links follow the newest release (`site.yml` + release workflows); "· TESTNET" on the vault card; coins line in the testnet notes
+  - [ ] **(you)** `testnet.zafe.cash`: add the domain in Vercel (project Settings > Domains) and a DNS-only `testnet` CNAME in Cloudflare; check `https://testnet.zafe.cash/.well-known/assetlinks.json`
+  - [x] Testnet coins: the Valar faucet (https://faucet.testnet.valargroup.dev/, 0.125 TAZ per request, one per IP per 24 h, confirmed by the user 2026-10-12) is in the testnet release notes
+  - [ ] **(you)** Play Store listing (in progress); then an AAB build for the upload
+- Follow-ups
+  - [ ] `catch_relay_up` across seat moves
+  - [ ] Separate host for mainnet
+  - [ ] *(idea)* relay URL per vault in the invite
+
+### Release plan after the NU7 finding (2026-10-12)
+
+- [x] `mainnet-v0.1.1` published (pre-release; stall fix, low-rate animation, derived wallet key, secure storage 11.2.0,
+      cancel-setup UI); mainnet relay promoted to digest `85153e1b` (cancel route), soak bypassed to 3 h.
+- [x] **Mainnet dry run with real funds (2026-10-12, done)**: release-signed `0.1.1` updated in place from `0.1.0`
+      (then `0.1.2`), 2-of-2 vault with the CLI as co-signer. Keygen ~10 s, first sync ~11 s, receive, propose,
+      push notification (~5 s), approve, broadcast, mined (twice); backup, remove, restore (same vault, address,
+      signer key); after the `PoolReset` fix a restored phone signs again. **Second run, two real phones (2026-10-12,
+      user, release `0.1.2`)**: a 2-of-2 mainnet vault "hello zafe" between the user's two phones (no CLI): received
+      0.0005 ZEC (23:13), then a 0.0004 ZEC payment proposed, approved by both phones and sent (23:27, txid
+      cf482572...678af5e0); checked on one phone (both signer keys show "Approved", completed 2 of 2); the other
+      phone is the user's word. **Not covered, say so in announcements:**
+      seat moves / share repair on a device, a larger vault (3-of-5),
+      sending through Tor on mainnet, iOS (never built), an external audit (none yet, disclosed in the FAQ and
+      release notes), a device restored with a pre-0.1.2 build (keeps its dead pool).
+- [x] **Restore wedged signing (found by the mainnet restore test, 2026-10-12): fixed and verified on mainnet.**
+      `VAULT_EVENT` 8 `PoolReset` (AGENTS.md "Restore vs one-tap"), shipped as `mainnet-v0.1.2`. Re-test with the
+      release APK: backup, remove, restore, CLI approved first, the restored phone approved, sent (txid 75b60fd6...
+      mined). Not covered: a device restored with an *older* build keeps its dead pool (nobody outside the team
+      has restored yet); the reset only runs on a restore by a version 8 app. Dry run vault now empty.
+- [x] **NU7 port verified on testnet (2026-10-13, branch `nu7-migration`, testnet builds `v0.1.12`/`v0.1.13`)**: the
+      phone's testnet app updated in place (vault, balance kept; its old wallet DB migrated), flagged a proposal built
+      for NU6.3 as "consensus branch ID 0x37a5165b does not match expected 0x77190ad9", and a new 0.01 TAZ payment
+      (CLI co-signer + phone) was broadcast and mined on NU7 testnet (txid 8cfb8247...). Live regtest suites
+      (`regtest_e2e`, `bridge_e2e`) also pass on the new stack (ths 0.3.0 had no NU7; since 2026-10-19 ths 0.4.0 is
+      pinned and `regtest_network` sets `nu7` at height 1). **Still open before a mainnet release:**
+      mainnet's NU7 height is `None` in the pre-releases (set it ourselves if no crate has it by ~Oct 27); merge the
+      branch to `main`; the guard items below; a release-signed in-place update test on the mainnet app.
+- [x] A payment that fails the device check (e.g. built for the old network) can now be cancelled by its author, and the
+      proposal page leaves the stale failed-send state and goes back after cancelling (found on the phone 2026-10-13).
+- [x] **NU7 guards (2026-10-13, in `main`; not released)**: propose-time server-branch check ("Update Zafe"),
+      broadcast rejection mapped to the same error, expiry cut at a known NU7 height, 25 s-block time estimate, cancel for a
+      payment that fails the check. See AGENTS.md "NU7 guards". **Still to do for the release:** mainnet's NU7 height
+      (not in the crates yet; set it ourselves ~Oct 27 if needed, then the expiry cap and the time estimate
+      switch on by themselves), a release-signed in-place update test on the mainnet app, tag `v0.1.14` then
+      `mainnet-v0.1.3` (same commit), the testnet site/scheme change, tell early users to update.
+- [ ] **NU7 migration (before 2026-11-05)** on a branch: librustzcash NU7 line, height-based branch selection, `verify`
+      vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).
+      Dates: 2026-10-20 mainnet height decision; ~10-27 release candidate on testnet; ~10-28..31 tag `v…` then
+      `mainnet-v…` on the same commit; announce on the site and X, message early users; 11-05 activation.
+- [x] Mainnet push (2026-10-12): `relay-mainnet` had no `RELAY_FCM_SERVICE_ACCOUNT_JSON`, so `relay.zafe.cash` couldn't push
+      (members would only get background-check notifications, up to ~15 min late). Key added from the same
+      Firebase project (zafe-18c4d), relay redeployed (digest 85153e1b): log "FCM pushes enabled", a push reached the
+      phone ~1 s after a log entry (FLTFireMsg -> `vault check`). Still to see: a real "needs your approval" notification.
+- [ ] Heads-up copy for early users (site FAQ/banner + release notes): "an update is required before Nov 5; funds are
+      never at risk, sending pauses until you update".
+- [ ] Re-run the release-signed in-place update test for the NU7 release (v0.1.8 -> v0.1.10 passed on 2026-10-12).
+
+### UX issues found while testing on a phone (2026-10-12, v0.1.10)
+
+- [x] (done 2026-10-13) Amount screen "available" now follows the wallet; "Proposal not found" flash fixed
+      (`ProposalsNotifier.refreshFresh`: actions wait for a running refresh instead of returning early, which also
+      kept the page stale after cancelling); Signers copy reworded (your labels stay on your phone, members' own names
+      are shared); "X confirming" on Home and the amount screen.
+- [ ] "Proposals" refresh takes 6-11 s each over Tor (3-5 s pool top-up + 3-5 s log read, sequential round trips):
+      batch or parallelise the relay requests.
+- [ ] **Testnet app's own link scheme** (`zafe-testnet://`): app side done 2026-10-13 (manifest placeholder
+      `zafeScheme`, both builds read both schemes), **but the site half is held back**: the `/join` page's "Open in
+      Zafe" must switch to `zafe-testnet://` (`data-scheme` on `#open` in `JoinPage.astro`, read by `join.js`) only
+      once a testnet build with the scheme is released, or testers on `0.1.13` lose the button. The change: in
+      `JoinPage.astro` add `data-scheme={testnet ? 'zafe-testnet' : 'zafe'}` to `<a id="open">`; in `join.js` replace
+      `'zafe://join?invite=' + value` with `scheme + '://join?invite=' + value`, where `scheme` is that attribute
+      (`'zafe-testnet'` or else `'zafe'`). Ship it in the same push as the release that has the scheme.
+- [ ] Debug-signed builds (`flutter run`/profile) never get verified app links, and `flutter run` silently uninstalls and
+      reinstalls on a signature mismatch (wipes the app's data): use `adb install -r` with the release key when
+      data matters.
+- Done in this round: wrong version label ("v0.1.0" in Settings), "First sync…" on every start, the sync sheet saying
+  "in sync" mid-sync, the first-sync stall, the animation CPU cost, the secure-storage noise.
 
 ## M3 / M4 — later (spec §16)
 
@@ -548,6 +667,110 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
 - [ ] dApp SDK: proposal requests from third-party apps
 - [ ] Hardware members (Keystone/Ledger) if they gain FROST support
 - [ ] Payment disclosures (ZIP 311-style proofs for auditors)
+
+## Security audit and races (2026-10-14)
+
+Read-only audit of the Rust crates, the bridge and the Flutter app, plus a review of
+one-tap and races between members' apps and between one phone's app and background
+check. Fixed in the same change unless open:
+
+- [x] **One-tap vote lost after signing** (deadlock in 2-of-2): signing consumes the pool
+      nonces, so if the append failed (relay timeout, app closed) the member could only
+      approve interactively, and a one-tap vote is final for the others: the proposal could
+      never complete. `node::approve` now keeps the vote (`PoolStore::keep_vote`,
+      `<pool>/<id>-<pczt hash>.vote`) before appending, posts it again on the next approve,
+      treats "my shares are already logged" as done, and refuses an interactive approval
+      that can never reach t (`NotReady`). Test: `tests/one_tap_retry.rs`.
+- [x] **Duplicate send** (app + background check, or two members): the second broadcast
+      was reported as "broadcast rejected" though the payment went out. `broadcast` now
+      reads the whole mempool on a rejection and counts our txid there as sent; the bridge
+      reports a proposal already logged as sent as `Sent`.
+- [x] **Envelope seq race** between the app and a background check (relay 409 on a
+      non-increasing seq): `respond` re-seals the shares with a fresh seq (up to 3 times)
+      instead of losing them.
+- [x] **H1 seat move lockout**: the old (stolen) key could append one entry before the
+      relay learned of the move and stop every member's chain (`UnknownAuthor`). Chains
+      now accept former members' signed entries (`VaultState::log_authors`,
+      `former_members`); replay ignores them as before. Test: `vault.rs`
+      `a_seat_moves_at_the_threshold`.
+- [x] **M4** one member's bad one-tap shares stalled the ready group: `send_ready` tries
+      every complete group. **M5-A** a malformed interactive commitment aborted every
+      leader's request: skipped now.
+- [x] App: platform `route` intent extra ignored (`overridePlatformDefaultLocation`), the
+      app lock now applies after > 2 min away behind an unlock prompt, passphrase/backup/
+      invite fields turn off suggestions and keyboard learning (`MobileTextField.secret`),
+      custom server URLs and turning Tor off need an unlock, notifications are private on
+      the lock screen, invite links wait for unlock / setup / a running send, the recovery
+      share text no longer carries the safety code, shared names that look like "You",
+      duplicate another member's, or hide bidi/zero-width characters are not shown
+      (bridge `shared_names`, display only), typed error copy in the setup toasts.
+- [x] **M1** setup safety number (~40 bits) could be ground by a malicious relay. Fixed
+      2026-10-15: commit-then-reveal, 4 BIP-39 words (`zafe_core::sas`, `INVITE` 2).
+- [x] **M2** 8-digit seat-recovery code could be ground in seconds. Fixed 2026-10-15:
+      safety words from a commit-reveal exchange through the relay (`/v1/recovery/*`,
+      table `recovery_values`; no `RELAY_DB` or `RecoveryRequest` bump was needed: the
+      commitment lives on the relay, signed by the new phone).
+- [x] **M3** version-gated replay rules (v7 Broadcast txid check) could be skipped by
+      tagging an event with an older version. Fixed 2026-10-15 (`VAULT_EVENT` 9: versions
+      only go up once a v9 event is logged).
+- [x] **M5-B** the leader always picked the first t approvers by identifier, so a member
+      who sorts first could stall rounds. Fixed 2026-10-15: the leader asks itself first
+      and signers who left a round unanswered last (`node::order_signers`, `SilentSigners`).
+- [x] **L5** proposals whose PCZT doesn't parse drained every pool. Fixed 2026-10-15
+      (`VAULT_EVENT` 9 rejects them at replay).
+- [x] One-tap pool depth: a proposal with more spends than a member's pool covers lost
+      one-tap. Fixed 2026-10-15: pools are sized to the vault's unspent note count
+      (`pool_target_for_notes`, capped at 1024 commitments). Still falls back above the
+      cap, and right after install until the first sync records the count.
+- [x] One-tap and interactive don't mix: members whose one-tap shares are logged can't add
+      interactive commitments (VoteFinal). Decided 2026-10-15: no mixing; a payment no
+      group can complete shows "Propose again" to its proposer (`node::propose_again`).
+- [x] Low, fixed 2026-10-15: fsync nonce files and their directory (L1); atomic leader
+      files (L2); interactive replies kept until sent (L3); `respond` skips closed
+      proposals (L4); relay responses capped at 64 MiB (L6); signature verified before
+      `Conflict{len}` (L7); joiners refuse a birthday ahead of the chain (L8); a local log
+      copy that fails to verify is an error with a follow-the-relay exit (L9); `VaultKeys`
+      Debug redacted (L10).
+- [x] App, low, fixed 2026-10-15: strong biometrics or PIN only (Android native prompt);
+      sensitive clipboard flag + auto-clear; share_plus cache cleanup at launch;
+      `filterTouchesWhenObscured`; `ZAFE_LINK_HOST` required in release workflows; nonce
+      files encrypted (`NONCES`/`POOL_NONCE` 2); hidden/bidi characters shown in memos and
+      link labels; short key next to shared names in "Proposed by" and notifications.
+      Still open: iOS has no clipboard flag or capture shield yet.
+
+## Onboarding (designed 2026-10-15, docs/onboarding.md)
+
+- [x] Typed error copy in create/join/lock/keygen toasts (was raw `$e`).
+- [x] P0: exit after membership is locked + keygen timeout naming who didn't take part
+      (2026-10-15: "Abandon setup" for any member once sealed, local only; keygen
+      timeout = `NodeError::KeygenStalled` → `ZafeErrorKind::KeygenIncomplete` with
+      `ZafeError.members`; the setup screen names them and offers "Try again").
+- [x] Async setup (2026-10-16): nobody has to be online at the same time. Membership
+      locks itself when full (creator), "They match" is the one tap and starts this
+      member's keys, every other step runs in background checks woken by pushes
+      (registered at join), two notifications only ("compare safety words", "vault ready,
+      back it up"); the creator can cancel a locked setup until the vault exists; the
+      setup screen names who it waits for. Live-tested on the emulator with the app closed
+      (words notification 12 s after the lock, keys 3 s after the others started).
+- [x] P0: backup card first once the vault holds funds; acknowledgement on "Later"
+      (2026-10-16: `confirmSkipBackup`, wording per t/n in `skipBackupRisk`).
+- [x] P0: notification primer before the OS prompt, and a denied state (2026-10-16:
+      `notification_primer.dart`, shown once on Home; "Notifications are off" card with
+      "Turn on" = system prompt or app settings). Not yet on the Signers tab.
+- [x] P0: empty-state copy (2026-10-16: "Receive funds first" at zero balance).
+- [x] P1: per-member confirmation of the safety words (same-room QR dropped 2026-10-16: reading the words aloud works). (Done
+      2026-10-15: commit-then-reveal words for setup and seat recovery, M1/M2.)
+- [x] P1: invite expiry (2026-10-16): 72 h for new members, enforced by the relay (HTTP 410), renewed when
+      the creator opens the setup or shares the invite again. Waiting room and setup push: done with async setup.
+- [x] P1: name in setup (2026-10-16: "Your name" on Create and Join, prefilled with the last one; kept in
+      `<vaultDir>/my_name_pending.txt` and published as the shared `Name` by the first refresh once the vault
+      exists, unless the member already named themselves). Threshold presets, the t = n sheet and the "before you invite" brief: dropped
+      (2026-10-16, user: people who set up a multisig know the numbers; the warning under the steppers stays).
+- [x] P1: recall check (2026-10-16): the backup passphrase is always 12 generated words, and the member
+      types three of them back before export. Readiness card and the Receive interstitial: dropped (more
+      cards and nags than they're worth; the backup card and signer dots cover it).
+- [ ] P2: guided test payment, one-time tips + Help hub, Welcome simplification,
+      practice vault (test with users first).
 
 ## One-tap follow-ups
 
@@ -607,10 +830,12 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       in the background, vaults are funded from the faucet (`fund.sh`), mined with `ths mine`;
       `regtest_e2e`, `bridge_e2e` and `m0-e2e.sh` pass (faster: bridge 98 s → 40 s). Lost:
       coverage of coinbase receipts (`is_coinbase`), since ths mines to its own wallet
-- [ ] `ths stop` leaves a foreground `ths start` running (0.3.0): issue zcashlabs/thus-spoke-zakura#145,
-      fix PR #146 (2026-10-04). Follow up until merged; then `down.sh` could drop the SIGINT
-- [ ] Proposed `ths start --detach` for scripts/CI (thus-spoke-zakura#147, 2026-10-04): opt-in,
-      foreground stays the default (their #14). If accepted, send the PR; then `up.sh` becomes
+- [x] `ths stop` leaves a foreground `ths start` running (0.3.0): issue zcashlabs/thus-spoke-zakura#145,
+      fix PR #146 merged 2026-10-11, in ths v0.4.0; Zafe pins 0.4.0 since 2026-10-19 (NU7 at height 1 on regtest;
+      `regtest_e2e`, `bridge_e2e`, `m0-e2e.sh` pass). `down.sh` keeps the SIGINT as a fallback
+- [ ] Proposed `ths start --detach` for scripts/CI (thus-spoke-zakura#147, 2026-10-04; PR
+      https://github.com/zcashlabs/thus-spoke-zakura/pull/308 open, merged with v0.4.0 2026-10-19): opt-in,
+      foreground stays the default (their #14). Once released, `up.sh` becomes
       `ths start --detach` and `down.sh` `ths stop`
 - [ ] **ZIP 321 link security** (zodl-project#60, open since 2024, `I-SECURITY`): proposal
       posted 2026-10-04
@@ -876,8 +1101,17 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
   `onboarding/create/account_persona_generator.dart`)
 - *(idea)* Small mobile fixes: Android back-exit guard (`lib/src/core/navigation/mobile_exit_back_guard.dart`)
   and iOS number-pad Done bar (`lib/src/core/widgets/mobile/mobile_numeric_keyboard_toolbar.dart`)
-- *(idea)* Private transaction-detail lookups via PIR once available for Ironwood
-  (`lib/src/providers/enhance_pir_provider.dart`, `rust/src/wallet/sync_engine/enhancement/`)
+- *(deferred, checked 2026-10-14)* Private transaction-detail lookups via PIR
+  (`lib/src/providers/enhance_pir_provider.dart`, `rust/src/wallet/sync_engine/enhancement/`).
+  Ironwood Enhance PIR exists in Vizor (#601) and Vizor added transparent PIR (#971, #977; useless
+  to us: vaults hold only Ironwood). Not adopted because: it sits on the Zakura wallet-libraries
+  forks (`zakura-client-backend`/`-sqlite`), not our crates.io librustzcash pins (a stack move, after
+  NU7); it needs a third-party hosted service (`enhance-pir.valargroup.dev`, wallet-pir); Vizor's
+  own PRs still list release qualification as open. Our `sync::run` (backend 0.24) never looks up
+  a txid and the mempool watch avoids it, so nothing leaks today (not traced end to end); what we
+  lack is memos / recipient details on received and outgoing notes. Revisit when wallet-libraries
+  publishes releases or the Enhance client can be used alone, or if the vault needs those memos.
+  Details: `docs/vizor-reference.md` 12.6.
 - *(idea)* Design review tooling: Widgetbook galleries + headless PNG renders
   (`lib/widgetbook/`, `lib/figma_compare.dart`, `scripts/figma-compare.sh`)
 - *(idea)* iOS Keychain `first_unlock_this_device` for shares from day one (Vizor migrated to

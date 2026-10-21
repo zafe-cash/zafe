@@ -1,7 +1,7 @@
 import '../core/formatting/member_label.dart';
 import '../core/formatting/zec_amount.dart';
 import '../core/privacy/amount_display.dart';
-import '../features/proposals/proposal_status.dart' show proposalExpired;
+import '../features/proposals/proposal_status.dart' show needsMyAction;
 import '../rust/api/proposals.dart' as rust;
 import '../rust/api/received.dart' as rust;
 import '../rust/api/spends.dart' as rust;
@@ -80,9 +80,10 @@ List<VaultUpdate> vaultUpdates({
   List<rust.UnapprovedSpendInfo> unapprovedSpends = const [],
   String? me,
 }) {
+  // A name with the member's short key: names are chosen by the members themselves.
   String? nameOf(String keyHex) {
     final n = names[keyHex]?.trim();
-    return n == null || n.isEmpty ? null : n;
+    return n == null || n.isEmpty ? null : '$n (${shortKey(keyHex)})';
   }
 
   final out = <VaultUpdate>[];
@@ -133,8 +134,8 @@ List<VaultUpdate> vaultUpdates({
           proposalId: key,
           title: '$vaultName: a signer lost their phone',
           body:
-              '$who is moving to a new phone. Check the safety code with them, then '
-              'approve in Signers.',
+              '$who is moving to a new phone. Compare safety words with them in '
+              'Signers.',
         ),
       );
     }
@@ -263,17 +264,6 @@ SeenSnapshot snapshotOf(
   },
 };
 
-/// Payments waiting for this member: a vote, or (once every signature is in and nobody is
-/// auto-sending) a send.
+/// How many payments are waiting for this member ([needsMyAction]).
 int actionableCount(List<rust.ProposalInfo> proposals, {int? height}) =>
-    proposals
-        .where(
-          (p) =>
-              !proposalExpired(p, height) &&
-              (p.needsReapproval ||
-                  (p.stage == rust.ProposalStage.open &&
-                      p.myVote == rust.MyVote.none) ||
-                  (p.stage == rust.ProposalStage.approved &&
-                      !(p.ready && p.autoSend))),
-        )
-        .length;
+    proposals.where((p) => needsMyAction(p, height: height)).length;

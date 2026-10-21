@@ -12,8 +12,9 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tower::ServiceExt;
 use zafe_proto::{
     relay::{
-        decode_body, join_token_hash, AppendResult, CreateMailbox, InboxRead, InboxResponse, Join,
-        LogRead, LogResponse, MembersRead, MembersResponse, Remove, Seal, Signed,
+        decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxRead,
+        InboxResponse, Join, LogRead, LogResponse, MembersRead, MembersResponse, Remove,
+        RenewInvite, Seal, Signed, INVITE_TTL_SECS,
     },
     Chain, Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -374,6 +375,15 @@ async fn log_appends_must_extend_the_head() {
         AppendResult::Conflict { len: 2 }
     );
 
+    // A non-member who knows a member's key can't probe the log length: an entry signed
+    // by someone else, at a wrong index, is refused before any conflict is reported.
+    let mut probe =
+        LogEntry::create(&w.ids[3], &key, MAILBOX, 9, head, b"probe", &mut w.rng).unwrap();
+    probe.header.author = w.ids[1].public().sig_pk;
+    let (status, body) = call(&w.app, "/v1/log/append", probe.to_bytes().unwrap()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(decode_body::<AppendResult>(&body).is_err());
+
     // A member reads the log back and verifies the whole chain.
     let (_, body) = signed(
         &w.app,
@@ -462,6 +472,183 @@ async fn member_cap_and_creator_removal() {
     )
     .await;
     assert_eq!(joined.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_invite_expires_after_72_hours_unless_the_creator_renews_it() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let clock = Arc::new(AtomicU64::new(NOW));
+    let app = Relay::with_clock({
+        let clock = clock.clone();
+        Arc::new(move || clock.load(Ordering::SeqCst))
+    })
+    .router();
+    let mut rng = StdRng::seed_from_u64(9);
+    let ids: Vec<Identity> = (0..4).map(|_| Identity::generate(&mut rng)).collect();
+    let mut token = [0u8; 32];
+    rng.fill_bytes(&mut token);
+    let create = CreateMailbox {
+        mailbox: MAILBOX,
+        join_token_hash: join_token_hash(&token),
+        max_members: 4,
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/create", &ids[0], create).await.0,
+        StatusCode::OK
+    );
+    let join = || Join {
+        mailbox: MAILBOX,
+        join_token: token,
+    };
+    let renew = || RenewInvite { mailbox: MAILBOX };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[1], join()).await.0,
+        StatusCode::OK
+    );
+
+    // Just past 72 hours: a new member is turned away, one already in can rejoin.
+    clock.store(NOW + INVITE_TTL_SECS + 1, Ordering::SeqCst);
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[2], join()).await.0,
+        StatusCode::GONE
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[1], join()).await.0,
+        StatusCode::OK
+    );
+
+    // Only the creator renews; then the invite works again for 72 hours.
+    assert_eq!(
+        signed(&app, "/v1/mailbox/renew", &ids[1], renew()).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/renew", &ids[0], renew()).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/join", &ids[2], join()).await.0,
+        StatusCode::OK
+    );
+
+    // A locked setup's invite can't be renewed (nobody else can join anyway).
+    let members = ids[..3].iter().map(|i| i.public().sig_pk).collect();
+    let seal = Seal {
+        mailbox: MAILBOX,
+        members,
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/seal", &ids[0], seal).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&app, "/v1/mailbox/renew", &ids[0], renew()).await.0,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn the_creator_can_cancel_a_setup_before_it_is_sealed() {
+    let w = World::new(false).await;
+    let cancel = || CancelSetup { mailbox: MAILBOX };
+
+    // Not a member, not the creator: refused, and nothing is deleted.
+    for who in [1, 3] {
+        let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[who], cancel()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "identity {who}");
+    }
+    let members = |who: usize| {
+        let w = &w;
+        async move {
+            signed(
+                &w.app,
+                "/v1/mailbox/members",
+                &w.ids[who],
+                MembersRead {
+                    mailbox: MAILBOX,
+                    timestamp: NOW,
+                },
+            )
+            .await
+            .0
+        }
+    };
+    assert_eq!(members(1).await, StatusCode::OK);
+
+    // The creator cancels: the mailbox, its members and the invite are gone.
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(members(1).await, StatusCode::NOT_FOUND);
+    let join = Join {
+        mailbox: MAILBOX,
+        join_token: w.token,
+    };
+    let (status, _) = signed(&w.app, "/v1/mailbox/join", &w.ids[3], join).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the invite no longer works");
+    // A second cancel finds nothing.
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_sealed_setup_can_be_cancelled_until_the_vault_exists() {
+    // A locked setup whose keys were never made (a member never came back): the creator
+    // can still cancel it, nobody else can.
+    let mut w = World::new(true).await;
+    let cancel = || CancelSetup { mailbox: MAILBOX };
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[1], cancel()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Once the vault's first log entry exists, it can't be cancelled any more.
+    let key = LogKey::generate(0, &mut w.rng);
+    let first = LogEntry::create(
+        &w.ids[0],
+        &key,
+        MAILBOX,
+        0,
+        [0; 32],
+        b"vault created",
+        &mut w.rng,
+    )
+    .unwrap();
+    let (status, _) = call(&w.app, "/v1/log/append", first.to_bytes().unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/members",
+        &w.ids[1],
+        MembersRead {
+            mailbox: MAILBOX,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "the vault is untouched");
+}
+
+#[tokio::test]
+async fn the_creator_cancels_a_sealed_setup_with_no_keys() {
+    let w = World::new(true).await;
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/cancel",
+        &w.ids[0],
+        CancelSetup { mailbox: MAILBOX },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = signed(
+        &w.app,
+        "/v1/mailbox/members",
+        &w.ids[1],
+        MembersRead {
+            mailbox: MAILBOX,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "the setup is gone");
 }
 
 #[tokio::test]
@@ -749,4 +936,85 @@ async fn oversized_bodies_are_refused() {
     )
     .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// A seat recovery's safety values: the new phone (subject) leaves its commitment and
+/// secret, others one challenge each; the first of each stays; the relay hands back the
+/// signed values.
+#[tokio::test]
+async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
+    use zafe_proto::relay::{RecoveryPut, RecoveryRead, RecoveryValueKind as K, RecoveryValues};
+    let w = World::new(true).await;
+    let (new, cosigner) = (&w.ids[3], &w.ids[1]);
+    let subject = new.public().sig_pk;
+    let put = |kind, value: u8| RecoveryPut {
+        subject,
+        kind,
+        value: [value; 32],
+        timestamp: NOW,
+    };
+    let path = "/v1/recovery/put";
+    // Only the new phone commits and reveals; only others challenge.
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(K::Commit, 1)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Challenge, 1)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Commit, 1)).await.0,
+        StatusCode::OK
+    );
+    // A second commitment doesn't replace the first.
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Commit, 2)).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(K::Challenge, 3)).await.0,
+        StatusCode::OK
+    );
+
+    let (status, body) = signed(
+        &w.app,
+        "/v1/recovery/read",
+        cosigner,
+        RecoveryRead {
+            subject,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let values: Vec<RecoveryPut> = decode_body::<RecoveryValues>(&body)
+        .unwrap()
+        .values
+        .iter()
+        .map(|b| {
+            Signed::<RecoveryPut>::from_bytes(b)
+                .unwrap()
+                .verify()
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    assert_eq!(values, vec![put(K::Commit, 1), put(K::Challenge, 3)]);
+
+    // A stranger can't bury the real challenges under many of its own.
+    let mut rng = StdRng::seed_from_u64(9);
+    let mut refused = false;
+    for _ in 0..20 {
+        let stranger = Identity::generate(&mut rng);
+        if signed(&w.app, path, &stranger, put(K::Challenge, 4))
+            .await
+            .0
+            == StatusCode::FORBIDDEN
+        {
+            refused = true;
+            break;
+        }
+    }
+    assert!(refused, "challenges per recovering phone are capped");
 }

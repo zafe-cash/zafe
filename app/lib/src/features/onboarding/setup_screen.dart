@@ -1,29 +1,33 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/errors/zafe_error_copy.dart';
+import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/formatting/member_label.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/copy_button.dart';
+import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
-import '../../core/widgets/app_copy_feedback.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_tappable.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_provider.dart';
+import '../../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
+import '../../notifications/notification_primer.dart' show startWatchWithPrimer;
+import 'key_shards_art.dart';
 import 'onboarding_art.dart';
 
-/// Vault setup: invite, members joining, locking membership, comparing the safety
-/// number, and key generation (spec §7.2).
+/// Vault setup: invite, members joining, comparing the safety words, and key generation
+/// (spec §7.2). Every step also runs in background checks, so nobody has to keep this
+/// screen open: membership locks itself once full, and "They match" is the one tap.
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
 
@@ -33,16 +37,29 @@ class SetupScreen extends ConsumerStatefulWidget {
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
   Timer? _poll;
-  bool _compared = false;
-  bool _busy = false;
-  bool _creatingKeys = false;
+  bool _leaving = false;
+  bool _done = false;
+
+  /// The relay no longer has this setup: the creator cancelled it.
+  bool _gone = false;
   String? _error;
+
+  /// The keys exist: the shards join, then the backup prompt opens.
+  bool _keysReady = false;
 
   @override
   void initState() {
     super.initState();
     _refresh();
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    // Background checks and pushes carry the setup on while Zafe is closed, and say
+    // when it's time to compare words; the primer comes first, once.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(startWatchWithPrimer(context));
+      // The creator is looking at the invite: it gets another 3 days (a setup nobody
+      // returns to lets its invite lapse).
+      if (mounted) unawaited(ref.read(vaultProvider.notifier).renewInvite());
+    });
   }
 
   @override
@@ -51,54 +68,230 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
-  Future<void> _refresh() async {
-    if (_creatingKeys) return;
+  /// The poll's step running now: a poll skips while one runs (over Tor a step can take
+  /// longer than the poll interval). "They match" doesn't wait for it: two steps sending
+  /// at once is safe (the relay's out-of-order refusal is retried in Rust).
+  Future<void>? _step;
+
+  /// The "They match" step running now: polls skip while it runs too.
+  Future<void>? _tap;
+  DateTime? _lastPoll;
+
+  /// While the words are on screen waiting for "They match", nothing changes but a
+  /// cancelled setup: check less often.
+  static const _wordsPoll = Duration(seconds: 10);
+
+  Future<void> _refresh({String? confirmed}) async {
+    if (confirmed != null) {
+      final step = _runStep(confirmed: confirmed);
+      _tap = step;
+      try {
+        await step;
+      } finally {
+        if (identical(_tap, step)) _tap = null;
+      }
+      return;
+    }
+    if (_step != null || _tap != null) return;
+    final m = ref.read(vaultProvider).membership;
+    final waitingForTap =
+        m != null && m.sealed && m.safetyNumber != null && !m.started;
+    final last = _lastPoll;
+    if (waitingForTap &&
+        last != null &&
+        DateTime.now().difference(last) < _wordsPoll) {
+      return;
+    }
+    _lastPoll = DateTime.now();
+    final step = _runStep();
+    _step = step;
     try {
-      await ref.read(vaultProvider.notifier).refreshMembership();
-      if (mounted && _error != null) setState(() => _error = null);
+      await step;
+    } finally {
+      if (identical(_step, step)) _step = null;
+    }
+  }
+
+  Future<void> _runStep({String? confirmed}) async {
+    if (_leaving || _done) return;
+    try {
+      final p = await ref
+          .read(vaultProvider.notifier)
+          .setupStep(confirmed: confirmed);
+      if (p.material != null && mounted && !_done) {
+        // The vault exists: its key share now lives only on this phone. On the key
+        // screen the shards join first, then the backup prompt.
+        _done = true;
+        _poll?.cancel();
+        if (ref.read(vaultProvider).membership?.started ?? false) {
+          setState(() => _keysReady = true);
+        } else {
+          context.go('/backup-prompt');
+        }
+        return;
+      }
+      if (mounted && (_error != null || _gone)) {
+        setState(() {
+          _error = null;
+          _gone = false;
+        });
+      }
     } catch (e) {
-      if (mounted) {
+      if (!mounted || _leaving) return;
+      if (e is ZafeError && e.kind == ZafeErrorKind.vaultNotOnRelay) {
+        // The relay answered, and the setup isn't there any more.
+        setState(() {
+          _gone = true;
+          _error = null;
+        });
+      } else if (confirmed != null) {
+        rethrow;
+      } else {
         setState(() => _error = 'Can\'t reach the relay. Retrying...');
       }
     }
   }
 
-  Future<void> _seal() async {
-    setState(() => _busy = true);
-    try {
-      await ref.read(vaultProvider.notifier).seal();
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          'Couldn\'t lock membership. $e',
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
+  /// Backs out of the setup before membership is locked. The creator's setup is deleted
+  /// on the relay (the invite stops working) and the "New vault" form comes back filled
+  /// in; a joiner just leaves.
+  Future<void> _cancel({required bool creator, bool confirm = true}) async {
+    if (_leaving) return;
+    if (confirm) {
+      final go = await showAppMobileSheet<bool>(
+        context: context,
+        builder: (sheet) {
+          final colors = sheet.colors;
+          return MobileModalScaffold(
+            title: creator ? 'Cancel this setup?' : 'Leave this setup?',
+            onClose: () => Navigator.of(sheet).pop(false),
+            constrainBody: true,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    creator
+                        ? 'The invite stops working and those who joined see that you cancelled. You can set it up again.'
+                        : 'You\'ll need a new invite to join again.',
+                    style: AppTypography.bodyMedium.copyWith(
+                      color: colors.text.accent,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    expand: true,
+                    variant: AppButtonVariant.destructive,
+                    onPressed: () => Navigator.of(sheet).pop(true),
+                    child: Text(creator ? 'Cancel setup' : 'Leave'),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  AppButton(
+                    expand: true,
+                    variant: AppButtonVariant.ghost,
+                    onPressed: () => Navigator.of(sheet).pop(false),
+                    child: const Text('Keep waiting'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      if (go != true || !mounted) return;
+    }
+    setState(() => _leaving = true);
+    _poll?.cancel();
+    final notifier = ref.read(vaultProvider.notifier);
+    final result = await notifier.cancelSetup();
+    if (!mounted) return;
+    if (result.creator) {
+      // Back to "New vault", filled in. With other vaults on this device, the onboarding
+      // screens are shown the same way "Add vault" does.
+      if (ref.read(vaultProvider).hasVault) notifier.beginAddVault();
+      context.go('/create');
+    } else {
+      context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
     }
   }
 
-  Future<void> _createKeys(String safetyNumber) async {
-    setState(() => _creatingKeys = true);
-    _poll?.cancel();
-    try {
-      await ref.read(vaultProvider.notifier).createKeys(safetyNumber);
-      // Right after creation: the key share now exists only on this phone.
-      if (mounted) context.go('/backup-prompt');
-    } catch (e) {
-      if (mounted) {
-        setState(() => _creatingKeys = false);
-        showAppToast(
-          context,
-          'Key generation failed. $e',
-          iconName: AppIcons.warningCircle,
-          tone: AppToastTone.destructive,
+  /// After membership is locked: leaves the setup (a member never came back, the words
+  /// differ, or the group gave up). The creator's cancels it for everyone.
+  Future<void> _abandon() async {
+    if (_leaving) return;
+    final go = await showAppMobileSheet<bool>(
+      context: context,
+      builder: (sheet) {
+        final colors = sheet.colors;
+        return MobileModalScaffold(
+          title: 'Abandon this setup?',
+          onClose: () => Navigator.of(sheet).pop(false),
+          constrainBody: true,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'No keys or funds exist yet. Start over with a new invite.',
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: colors.text.accent,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  expand: true,
+                  variant: AppButtonVariant.destructive,
+                  onPressed: () => Navigator.of(sheet).pop(true),
+                  child: const Text('Abandon setup'),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                AppButton(
+                  expand: true,
+                  variant: AppButtonVariant.ghost,
+                  onPressed: () => Navigator.of(sheet).pop(false),
+                  child: const Text('Keep waiting'),
+                ),
+              ],
+            ),
+          ),
         );
-        _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
-      }
+      },
+    );
+    if (go != true || !mounted) return;
+    setState(() => _leaving = true);
+    _poll?.cancel();
+    await ref.read(vaultProvider.notifier).abandonSetup();
+    if (!mounted) return;
+    context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
+  }
+
+  /// "They match" was tapped: the key screen shows at once (the step takes 10-20 s over
+  /// Tor, and that screen is a wait anyway).
+  bool _confirming = false;
+
+  /// Why the last "They match" failed (kept until the next tap; polls don't clear it).
+  String? _tapError;
+
+  /// "They match": starts this member's part of key generation. A failure brings the
+  /// words back with the reason.
+  Future<void> _confirm(String words) async {
+    setState(() {
+      _confirming = true;
+      _tapError = null;
+    });
+    try {
+      await _refresh(confirmed: words);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _confirming = false;
+        _tapError = zafeErrorMessage(
+          e,
+          fallback: 'Couldn\'t start. Try again.',
+        );
+      });
     }
   }
 
@@ -109,73 +302,124 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     final membership = vault.membership;
     if (info == null) return const SizedBox.shrink();
 
-    final joined = membership?.members.length ?? 1;
-    final everyoneJoined = joined == info.members;
     final sealed = membership?.sealed ?? false;
     final isCreator = membership?.isCreator ?? false;
 
-    if (_creatingKeys) return const _CreatingKeys();
+    final started = membership?.started ?? false;
+    final words = membership?.safetyNumber;
 
-    Widget? bottom;
-    if (sealed) {
-      bottom = AppButton(
-        expand: true,
-        onPressed: _compared
-            ? () => _createKeys(membership!.safetyNumber)
-            : null,
-        leading: const AppIcon(AppIcons.key, size: 20),
-        child: const Text('Create vault keys'),
-      );
-    } else if (isCreator) {
-      bottom = AppButton(
-        expand: true,
-        onPressed: everyoneJoined && !_busy ? _seal : null,
-        leading: const AppIcon(AppIcons.lock, size: 20),
-        child: Text(
-          everyoneJoined ? 'Lock membership' : 'Waiting for members...',
-        ),
+    // After "They match": the key shards while the keys are made, here or in the
+    // background (Zafe can be closed).
+    if ((started && membership != null) || _keysReady || _confirming) {
+      return CreatingKeysScreen(
+        ready: _keysReady,
+        onReady: () {
+          if (mounted) context.go('/backup-prompt');
+        },
+        waiting: membership == null || membership.keygenWaitingFor.isEmpty
+            ? null
+            : waitingText(membership.keygenWaitingFor, me: _myKeyHex(vault)),
+        onAbandon: _leaving ? null : _abandon,
       );
     }
 
-    return ZafeScreen(
-      title: info.name,
-      showBack: false,
-      bottom: bottom,
-      children: [
-        if (!sealed && isCreator) ...[
-          _InviteCard(invite: vault.invite!, vaultName: info.name),
-          const SizedBox(height: AppSpacing.md),
-        ],
-        _MembersCard(
-          members: membership?.members ?? const [],
-          expected: info.members,
-          threshold: info.threshold,
-          myKeyHex: _myKeyHex(vault),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (_error != null)
-          Text(
-            _error!,
-            style: AppTypography.bodySmall.copyWith(
-              color: context.colors.text.warning,
+    Widget? bottom;
+    if (_gone && !sealed) {
+      bottom = AppButton(
+        expand: true,
+        onPressed: () => _cancel(creator: false, confirm: false),
+        child: const Text('Leave setup'),
+      );
+    } else if (sealed && words != null && !started) {
+      bottom = ActionButton(
+        label: 'They match',
+        icon: AppIcons.check,
+        errorFallback: 'Couldn\'t start. Try again.',
+        onPressed: () => _confirm(words),
+      );
+    }
+
+    return PopScope(
+      // Android's back button backs out of the setup too (it asks first); once
+      // membership is locked there is no way back.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !sealed && !_gone) _cancel(creator: isCreator);
+      },
+      child: ZafeScreen(
+        title: info.name,
+        showBack: false,
+        bottom: bottom,
+        children: [
+          if (_gone && !sealed) ...[
+            _Hint(
+              text: isCreator
+                  ? 'This setup is no longer on the relay.'
+                  : 'The creator cancelled this setup. Ask them for a new invite.',
             ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          if (!sealed && isCreator) ...[
+            _InviteCard(
+              invite: vault.invite!,
+              vaultName: info.name,
+              // Sharing it again gives it another 3 days.
+              onShare: () =>
+                  unawaited(ref.read(vaultProvider.notifier).renewInvite()),
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          _MembersCard(
+            members: membership?.members ?? const [],
+            expected: info.members,
+            threshold: info.threshold,
+            myKeyHex: _myKeyHex(vault),
+            waiting: !sealed
+                ? const []
+                : started
+                ? membership?.keygenWaitingFor ?? const []
+                : membership?.waitingFor ?? const [],
           ),
-        if (!sealed && !isCreator)
-          _Hint(
-            text: everyoneJoined
-                ? 'Everyone has joined. Waiting for the creator to lock membership.'
-                : 'Waiting for the other members to join with the invite.',
-          ),
-        if (sealed && membership != null) ...[
-          _SafetyNumberCard(number: membership.safetyNumber),
-          const SizedBox(height: AppSpacing.sm),
-          _ConfirmOption(
-            selected: _compared,
-            label: 'I compared this number with every member',
-            onTap: () => setState(() => _compared = !_compared),
-          ),
+          const SizedBox(height: AppSpacing.md),
+          if (_tapError ?? _error case final error?)
+            Text(
+              error,
+              style: AppTypography.bodySmall.copyWith(
+                color: context.colors.text.warning,
+              ),
+            ),
+          if (!sealed && !_gone)
+            _Hint(
+              text: 'You can close Zafe. It tells you when it\'s your turn.',
+            ),
+          if (sealed && membership != null && !started)
+            SetupSafetyWordsCard(
+              words: words,
+              waiting: membership.waitingFor.length,
+            ),
+          if (sealed) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: _leaving ? null : _abandon,
+              // Different words: nobody should make keys with this setup.
+              child: Text(
+                words != null ? 'They don\'t match' : 'Abandon setup',
+              ),
+            ),
+          ],
+          if (!sealed && !_gone) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: _leaving ? null : () => _cancel(creator: isCreator),
+              child: Text(isCreator ? 'Cancel setup' : 'Leave setup'),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -186,9 +430,14 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 }
 
 class _InviteCard extends StatelessWidget {
-  const _InviteCard({required this.invite, required this.vaultName});
+  const _InviteCard({
+    required this.invite,
+    required this.vaultName,
+    required this.onShare,
+  });
   final String invite;
   final String vaultName;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -209,9 +458,7 @@ class _InviteCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xxs),
           Text(
-            'Send it only to the people who will co-sign, over a channel you trust. Anyone '
-            'with it can take a seat until you lock membership, so check the member list '
-            'before you do.',
+            'Send it only to your co-signers, over a channel you trust. Anyone with it can join, for 3 days.',
             textAlign: TextAlign.center,
             style: AppTypography.bodySmall.copyWith(
               color: colors.text.secondary,
@@ -239,78 +486,34 @@ class _InviteCard extends StatelessWidget {
               Expanded(
                 child: AppButton(
                   variant: AppButtonVariant.secondary,
-                  onPressed: () => SharePlus.instance.share(
-                    ShareParams(
-                      subject: 'Zafe vault invite',
-                      text: 'Join "$vaultName" on Zafe: $link',
-                    ),
-                  ),
+                  onPressed: () {
+                    onShare();
+                    SharePlus.instance.share(
+                      ShareParams(
+                        subject: 'Zafe vault invite',
+                        text: 'Join "$vaultName" on Zafe: $link',
+                      ),
+                    );
+                  },
                   leading: const AppIcon(AppIcons.share, size: 20),
                   child: const Text('Share link'),
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
               Expanded(
-                child: AppButton(
+                child: CopyButton(
+                  label: 'Copy',
+                  text: link,
+                  sensitive: true,
                   variant: AppButtonVariant.secondary,
-                  onPressed: () => copyTextWithToast(
-                    context,
-                    text: link,
-                    toastMessage: 'Invite link copied',
-                  ),
-                  leading: const AppIcon(AppIcons.copy, size: 20),
-                  child: const Text('Copy'),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => shareInviteQrImage(link, vaultName),
-            leading: const AppIcon(AppIcons.qr, size: 20),
-            child: const Text('Share QR image'),
           ),
         ],
       ),
     );
   }
-}
-
-/// Shares the invite QR as a PNG (the screen itself blocks screenshots), for a co-signer
-/// to scan from another screen or pick with "Choose image" on Join. Same data as the
-/// link, so the same warning applies. Plain black squares on white with a quiet zone, so
-/// any scanner reads it, even shown on a dark background.
-Future<void> shareInviteQrImage(String link, String vaultName) async {
-  final qr = QrImage(
-    QrCode.fromData(data: link, errorCorrectLevel: QrErrorCorrectLevel.M),
-  );
-  final bytes = await qr.toImageAsBytes(
-    size: 1024,
-    decoration: const PrettyQrDecoration(
-      background: Color(0xFFFFFFFF),
-      quietZone: PrettyQrQuietZone.standard,
-    ),
-  );
-  if (bytes == null) return;
-  final safe = vaultName.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-');
-  final name = 'Zafe-invite-$safe.png';
-  final file = File('${(await getTemporaryDirectory()).path}/$name');
-  await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
-  await SharePlus.instance.share(
-    ShareParams(
-      files: [XFile(file.path, mimeType: 'image/png')],
-      fileNameOverrides: [name],
-      text:
-          'Zafe invite to "$vaultName". Scan it in Zafe (Join, then Scan QR code, or '
-          'Choose image). Only for the people who will co-sign.',
-    ),
-  );
-  // The share sheet has copied or sent it; don't leave the invite in the cache.
-  try {
-    await file.delete();
-  } catch (_) {}
 }
 
 class _MembersCard extends StatelessWidget {
@@ -319,12 +522,16 @@ class _MembersCard extends StatelessWidget {
     required this.expected,
     required this.threshold,
     required this.myKeyHex,
+    this.waiting = const [],
   });
 
   final List<String> members;
   final int expected;
   final int threshold;
   final String? myKeyHex;
+
+  /// Members the setup is waiting for (their phone hasn't done its part yet).
+  final List<String> waiting;
 
   @override
   Widget build(BuildContext context) {
@@ -389,6 +596,15 @@ class _MembersCard extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (waiting.contains(m)) ...[
+                    const Spacer(),
+                    Text(
+                      'Waiting',
+                      style: AppTypography.labelMedium.copyWith(
+                        color: colors.text.muted,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -415,26 +631,32 @@ class _MembersCard extends StatelessWidget {
                 ],
               ),
             ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            '$threshold signatures needed for each payment.',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-class _SafetyNumberCard extends StatelessWidget {
-  const _SafetyNumberCard({required this.number});
-  final String number;
+class SetupSafetyWordsCard extends StatelessWidget {
+  const SetupSafetyWordsCard({
+    super.key,
+    required this.words,
+    required this.waiting,
+  });
+
+  /// The four words, or `null` while members' parts of the check are still arriving.
+  final String? words;
+
+  /// How many members haven't sent their part yet.
+  final int waiting;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final words = this.words;
+    final muted = AppTypography.bodySmall.copyWith(
+      color: colors.text.darkCard.withValues(alpha: 0.7),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
       decoration: BoxDecoration(
@@ -454,7 +676,7 @@ class _SafetyNumberCard extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.xs),
               Text(
-                'Safety number',
+                'Safety words',
                 style: AppTypography.labelMedium.copyWith(
                   color: colors.text.darkCard,
                 ),
@@ -462,84 +684,39 @@ class _SafetyNumberCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          Text(
-            number,
-            style: AppTypography.headlineLarge.copyWith(
-              color: colors.text.darkCard,
+          if (words == null) ...[
+            AppIcon(AppIcons.loader, size: 24, color: colors.text.darkCard),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              waiting == 1
+                  ? 'Waiting for 1 member.'
+                  : 'Waiting for $waiting members.',
+              textAlign: TextAlign.center,
+              style: muted,
             ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Read it to each member over a call, or compare in person. Every member must see the same number. '
-            'If any member sees a different one, stop: someone may be impersonating a member.',
-            textAlign: TextAlign.center,
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.darkCard.withValues(alpha: 0.7),
+          ] else ...[
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final w in words.split(' '))
+                  Text(
+                    w,
+                    style: AppTypography.headlineLarge.copyWith(
+                      color: colors.text.darkCard,
+                    ),
+                  ),
+              ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ConfirmOption extends StatelessWidget {
-  const _ConfirmOption({
-    required this.selected,
-    required this.label,
-    required this.onTap,
-  });
-  final bool selected;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return AppTappable(
-      onTap: onTap,
-      child: Container(
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: colors.background.ground,
-          borderRadius: BorderRadius.circular(AppRadii.medium),
-          border: Border.all(
-            color: selected ? colors.border.strong : colors.border.subtle,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: AppTypography.bodyMediumStrong.copyWith(
-                  color: colors.text.accent,
-                ),
-              ),
-            ),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected
-                    ? colors.background.inverse
-                    : colors.background.neutralSubtleOpacity,
-              ),
-              alignment: Alignment.center,
-              child: selected
-                  ? AppIcon(
-                      AppIcons.check,
-                      size: 14,
-                      color: colors.icon.inverse,
-                    )
-                  : null,
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Compare them with every member on a call, in person or in a chat you trust. If anyone sees different words, stop.',
+              textAlign: TextAlign.center,
+              style: muted,
             ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -569,8 +746,35 @@ class _Hint extends StatelessWidget {
   }
 }
 
-class _CreatingKeys extends StatelessWidget {
-  const _CreatingKeys();
+/// Who key generation is waiting for (`missing`, key hex; this member left out).
+String waitingText(List<String> missing, {String? me}) {
+  final who = missing.where((k) => k != me).map(shortKey).toList();
+  final names = switch (who.length) {
+    0 => 'the other members',
+    1 => who.single,
+    _ => '${who.sublist(0, who.length - 1).join(', ')} and ${who.last}',
+  };
+  return 'Waiting for $names.';
+}
+
+/// The vault's keys being made (after this member confirmed the words): the key shards,
+/// who it waits for, and a way out if someone never comes back.
+class CreatingKeysScreen extends StatelessWidget {
+  const CreatingKeysScreen({
+    super.key,
+    this.waiting,
+    this.onAbandon,
+    this.ready = false,
+    this.onReady,
+  });
+
+  /// The keys exist: the shards join into one key, then [onReady].
+  final bool ready;
+  final VoidCallback? onReady;
+
+  /// "Waiting for ..." when other members haven't done their part yet.
+  final String? waiting;
+  final VoidCallback? onAbandon;
 
   @override
   Widget build(BuildContext context) {
@@ -580,35 +784,63 @@ class _CreatingKeys extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const OnboardingHero('key_shards'),
+          OnboardingHero(
+            'key_shards',
+            art: KeyShardsArt(assembled: ready, onAssembled: onReady),
+          ),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppIcon(AppIcons.loader, size: 24, color: colors.icon.accent),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Creating your vault keys...',
-                    style: TextStyle(
-                      fontFamily: 'Space Grotesk',
-                      fontSize: 24,
-                      height: 28 / 24,
-                      color: colors.text.accent,
+            // Scrolls on small phones with large text; otherwise sits at the bottom.
+            child: LayoutBuilder(
+              builder: (context, box) => SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: box.maxHeight - 2 * AppSpacing.sm,
+                  ),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppIcon(
+                          ready ? AppIcons.check : AppIcons.loader,
+                          size: 24,
+                          color: ready ? colors.icon.value : colors.icon.accent,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          ready
+                              ? 'Vault keys ready'
+                              : 'Creating your vault keys...',
+                          style: TextStyle(
+                            fontFamily: 'Space Grotesk',
+                            fontSize: 24,
+                            height: 28 / 24,
+                            color: colors.text.accent,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          ready
+                              ? 'Your share is on this phone.'
+                              : waiting == null
+                              ? 'You can close Zafe. It tells you when the vault is ready.'
+                              : '$waiting You can close Zafe. It tells you when the vault is ready.',
+                          style: AppTypography.bodyMedium.copyWith(
+                            color: colors.text.secondary,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        AppButton(
+                          expand: true,
+                          variant: AppButtonVariant.ghost,
+                          onPressed: ready ? null : onAbandon,
+                          child: const Text('Abandon setup'),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    'Keep Zafe open. Your share is being created together with the other members; '
-                    'the full key never exists anywhere.',
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: colors.text.secondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                ],
+                ),
               ),
             ),
           ),

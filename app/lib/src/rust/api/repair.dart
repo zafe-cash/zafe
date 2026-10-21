@@ -18,6 +18,19 @@ RecoveryCode recoveryCode({required List<int> seeds}) =>
 RecoveryCodeInfo parseRecoveryCode({required String code}) =>
     RustLib.instance.api.crateApiRepairParseRecoveryCode(code: code);
 
+/// Co-signer: one step of the safety check with the phone that showed `code` (poll it
+/// while the screen is open). `None` until the new phone has taken part; then the four
+/// words to compare with it on a call before approving.
+Future<String?> newPhoneWords({
+  required String relayUrl,
+  required List<int> seeds,
+  required String code,
+}) => RustLib.instance.api.crateApiRepairNewPhoneWords(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  code: code,
+);
+
 /// Approves moving the seat of `old_key_hex` (a signer who lost their phone) to the phone
 /// that showed `code`. Returns whether the seat has moved (this was the last approval
 /// needed); the share repair then starts on the helpers' next refresh.
@@ -27,12 +40,14 @@ Future<bool> approveSeatMove({
   required List<int> material,
   required String oldKeyHex,
   required String code,
+  required String words,
 }) => RustLib.instance.api.crateApiRepairApproveSeatMove(
   relayUrl: relayUrl,
   seeds: seeds,
   material: material,
   oldKeyHex: oldKeyHex,
   code: code,
+  words: words,
 );
 
 /// The new phone: checks whether its seat moved and the repaired key has arrived. On
@@ -45,44 +60,57 @@ Future<RecoveryProgress> checkRecovery({
   seeds: seeds,
 );
 
+/// The words a co-signer (`cosigner_key_hex`) sees for this new phone.
+class CosignerWords {
+  final String cosignerKeyHex;
+  final String words;
+
+  const CosignerWords({required this.cosignerKeyHex, required this.words});
+
+  @override
+  int get hashCode => cosignerKeyHex.hashCode ^ words.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CosignerWords &&
+          runtimeType == other.runtimeType &&
+          cosignerKeyHex == other.cosignerKeyHex &&
+          words == other.words;
+}
+
 class RecoveryCode {
   /// `zafe-recover-v1:...`: sent to a co-signer (text, link or QR code).
   final String code;
 
-  /// Eight digits both phones show ("1234 5678"), read out to check the code.
-  final String safetyCode;
-
-  const RecoveryCode({required this.code, required this.safetyCode});
+  const RecoveryCode({required this.code});
 
   @override
-  int get hashCode => code.hashCode ^ safetyCode.hashCode;
+  int get hashCode => code.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is RecoveryCode &&
           runtimeType == other.runtimeType &&
-          code == other.code &&
-          safetyCode == other.safetyCode;
+          code == other.code;
 }
 
 class RecoveryCodeInfo {
   /// The new phone's signing key (hex).
   final String keyHex;
-  final String safetyCode;
 
-  const RecoveryCodeInfo({required this.keyHex, required this.safetyCode});
+  const RecoveryCodeInfo({required this.keyHex});
 
   @override
-  int get hashCode => keyHex.hashCode ^ safetyCode.hashCode;
+  int get hashCode => keyHex.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is RecoveryCodeInfo &&
           runtimeType == other.runtimeType &&
-          keyHex == other.keyHex &&
-          safetyCode == other.safetyCode;
+          keyHex == other.keyHex;
 }
 
 class RecoveryProgress {
@@ -98,6 +126,9 @@ class RecoveryProgress {
   final Uint8List material;
   final String invite;
 
+  /// While waiting: the words each co-signer that started the safety check shows.
+  final List<CosignerWords> checks;
+
   const RecoveryProgress({
     required this.stage,
     required this.received,
@@ -106,6 +137,7 @@ class RecoveryProgress {
     required this.name,
     required this.material,
     required this.invite,
+    required this.checks,
   });
 
   @override
@@ -116,7 +148,8 @@ class RecoveryProgress {
       vaultId.hashCode ^
       name.hashCode ^
       material.hashCode ^
-      invite.hashCode;
+      invite.hashCode ^
+      checks.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -129,7 +162,8 @@ class RecoveryProgress {
           vaultId == other.vaultId &&
           name == other.name &&
           material == other.material &&
-          invite == other.invite;
+          invite == other.invite &&
+          checks == other.checks;
 }
 
 enum RecoveryStage {
