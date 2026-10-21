@@ -1220,6 +1220,9 @@ Learned while studying it:
   `vault_viewing_key(material)` derives the UFVK and refuses if it differs from the
   descriptor's `ufvk` (`Verification`).
 - Pushed-page titles are 24 px and left-aligned (room for ~20 characters); keep them short.
+- **An icon leading a row of text** goes in `core/widgets/line_icon.dart` `LineIcon(size:, line: <first line's
+  style>)`: it centres the icon on the first line (scaled with text size). A bare `AppIcon` in a
+  `CrossAxisAlignment.start` row sits low next to a 17 px title (2026-10-22, all ten cards moved).
 - **Copy and layout rules (user, 2026-10-16)**: minimal text: delete lines that restate the screen,
   show exact values (bridge `estimate_fee`, never "at least"), explanations only in help sheets.
   Check UI on a 360x640 phone at 1.0 and 2.0x text (`adb shell wm size 720x1280; wm density 320;

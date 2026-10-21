@@ -13,6 +13,7 @@ import '../../providers/vault_provider.dart';
 import '../settings/endpoint_sheet.dart';
 import 'onboarding_art.dart';
 import 'welcome_art.dart';
+import '../../core/widgets/line_icon.dart';
 
 /// Taps on the Welcome door (one Welcome screen exists at a time): each replays its
 /// unlock.
@@ -295,7 +296,11 @@ class _InfoCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(icon, size: 20, color: colors.text.darkCard),
+          LineIcon(
+            size: 20,
+            line: AppTypography.labelLarge,
+            icon: AppIcon(icon, size: 20, color: colors.text.darkCard),
+          ),
           const SizedBox(width: AppSpacing.s),
           Expanded(
             child: Column(

@@ -5,6 +5,7 @@ import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../providers/vault_provider.dart';
+import '../../core/widgets/line_icon.dart';
 
 /// What the vault's keys protect against and what they don't (spec §2.3, §12.1): the
 /// approval rule, full view access, losing too many keys, and quantum computers.
@@ -94,7 +95,11 @@ class _Point extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(icon, size: 22, color: colors.icon.accent),
+          LineIcon(
+            size: 22,
+            line: AppTypography.labelLarge,
+            icon: AppIcon(icon, size: 22, color: colors.icon.accent),
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(

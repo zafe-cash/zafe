@@ -11,6 +11,7 @@ import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../core/widgets/line_icon.dart';
 import '../../rust/api/vault.dart' as rust;
 
 /// The vault's viewing key (UFVK) for an auditor or accountant: copy or QR. Opened from
@@ -59,10 +60,14 @@ class ViewingKeyScreen extends ConsumerWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AppIcon(
-                AppIcons.warningCircle,
+              LineIcon(
                 size: 20,
-                color: colors.icon.accent,
+                line: AppTypography.bodySmall,
+                icon: AppIcon(
+                  AppIcons.warningCircle,
+                  size: 20,
+                  color: colors.icon.accent,
+                ),
               ),
               const SizedBox(width: AppSpacing.xs),
               Expanded(

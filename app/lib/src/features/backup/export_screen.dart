@@ -22,6 +22,7 @@ import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../core/widgets/line_icon.dart';
 import 'backup_prompt_screen.dart' show backupStatusProvider;
 import '../../rust/api/backup.dart' as rust;
 
@@ -317,7 +318,11 @@ class _Note extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(icon, size: 20, color: iconColor),
+          LineIcon(
+            size: 20,
+            line: AppTypography.bodySmall,
+            icon: AppIcon(icon, size: 20, color: iconColor),
+          ),
           const SizedBox(width: AppSpacing.s),
           Expanded(
             child: Text(

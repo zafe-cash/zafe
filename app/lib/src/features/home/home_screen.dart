@@ -39,6 +39,7 @@ import '../../providers/other_vaults_waiting_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/zec_price_provider.dart';
 import '../../services/app_update.dart';
+import '../../core/widgets/line_icon.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -921,18 +922,22 @@ class NoticeCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              warning
-                  ? AppIcon(
-                      AppIcons.warning,
-                      size: 20,
-                      color: colors.icon.warning,
-                      patina: colors.icon.warning,
-                    )
-                  : AppIcon(
-                      AppIcons.renew,
-                      size: 20,
-                      color: colors.icon.accent,
-                    ),
+              LineIcon(
+                size: 20,
+                line: AppTypography.labelLarge,
+                icon: warning
+                    ? AppIcon(
+                        AppIcons.warning,
+                        size: 20,
+                        color: colors.icon.warning,
+                        patina: colors.icon.warning,
+                      )
+                    : AppIcon(
+                        AppIcons.renew,
+                        size: 20,
+                        color: colors.icon.accent,
+                      ),
+              ),
               const SizedBox(width: AppSpacing.s),
               Expanded(
                 child: Column(

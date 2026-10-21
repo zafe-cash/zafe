@@ -20,6 +20,7 @@ import '../../providers/proposals_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
 import 'proposal_status.dart';
 import 'proposal_timeline.dart';
+import '../../core/widgets/line_icon.dart';
 
 // The parts of the proposal screen below the nav bar, apart from the action buttons.
 // Public so tool/screens/ can render them with fake data.
@@ -710,9 +711,10 @@ Future<void> showDeviceCheckSheet(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: AppIcon(
+          LineIcon(
+            size: 16,
+            line: AppTypography.bodyMedium,
+            icon: AppIcon(
               AppIcons.checkCircle,
               size: 16,
               color: colors.icon.value,

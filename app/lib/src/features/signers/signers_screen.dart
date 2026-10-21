@@ -16,6 +16,7 @@ import '../../providers/member_names_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../home/rename_sheet.dart';
+import '../../core/widgets/line_icon.dart';
 
 /// The vault's signers and its approval rule (a tab). Signer management, such as
 /// rotating a key, will live here.
@@ -180,6 +181,39 @@ Future<void> _takeOver(
   await ref.read(proposalsProvider.notifier).retryRepair(replacement, stalled);
 }
 
+/// The Signers tab's backup card text: what losing phones without a backup means for a
+/// vault of [signers] needing [threshold], with [backedUp] backups attested.
+@visibleForTesting
+String backupHealthText({
+  required int signers,
+  required int threshold,
+  required int backedUp,
+}) {
+  final missing = signers - backedUp;
+  final spare = signers - threshold;
+  final String body;
+  if (missing <= 0) {
+    body = 'Every signer has saved a backup of their key.';
+  } else if (missing <= spare) {
+    body =
+        '${missing == 1 ? '1 signer hasn\'t' : '$missing signers haven\'t'} saved '
+        'a backup yet. The vault keeps working if up to $spare '
+        '${spare == 1 ? 'signer loses their phone' : 'signers lose their phones'}, '
+        'but each loss without a backup uses up that margin.';
+  } else {
+    final who = missing == 1 ? '1 signer hasn\'t' : '$missing signers haven\'t';
+    // No spare seat (n-of-n): one lost phone without a backup is enough.
+    final loss = spare == 0
+        ? (missing == 1
+              ? 'If they lose their phone'
+              : 'If any of them loses their phone')
+        : 'If more than $spare of '
+              '${spare == 1 ? 'them loses their phone' : 'them lose their phones'}';
+    body = '$who saved a backup yet. $loss, the funds are lost for good.';
+  }
+  return body;
+}
+
 /// How many signers told the vault they have a backup, and what it means if they don't
 /// (spec §12.1–12.2).
 class BackupHealthCard extends StatelessWidget {
@@ -197,33 +231,25 @@ class BackupHealthCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final missing = signers - backedUp;
-    final spare = signers - threshold;
-    final ok = missing == 0;
-    final String body;
-    if (ok) {
-      body = 'Every signer has saved a backup of their key.';
-    } else if (missing <= spare) {
-      body =
-          '${missing == 1 ? '1 signer hasn\'t' : '$missing signers haven\'t'} saved '
-          'a backup yet. The vault keeps working if up to $spare '
-          '${spare == 1 ? 'signer loses their phone' : 'signers lose their phones'}, '
-          'but each loss without a backup uses up that margin.';
-    } else {
-      body =
-          '$missing signers haven\'t saved a backup yet. If more than $spare of '
-          '${spare == 1 ? 'them loses their phone' : 'them lose their phones'}, '
-          'the funds are lost for good.';
-    }
+    final ok = backedUp >= signers;
+    final body = backupHealthText(
+      signers: signers,
+      threshold: threshold,
+      backedUp: backedUp,
+    );
     return MobileSurfaceCard(
       cornerRadius: AppRadii.large,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(
-            ok ? AppIcons.checkCircle : AppIcons.warningCircle,
+          LineIcon(
             size: 22,
-            color: ok ? colors.icon.accent : colors.icon.warning,
+            line: AppTypography.labelLarge,
+            icon: AppIcon(
+              ok ? AppIcons.checkCircle : AppIcons.warningCircle,
+              size: 22,
+              color: ok ? colors.icon.accent : colors.icon.warning,
+            ),
           ),
           const SizedBox(width: AppSpacing.s),
           Expanded(
