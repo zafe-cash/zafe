@@ -615,6 +615,10 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).
       Dates: 2026-10-20 mainnet height decision; ~10-27 release candidate on testnet; ~10-28..31 tag `v…` then
       `mainnet-v…` on the same commit; announce on the site and X, message early users; 11-05 activation.
+      **Status 2026-10-22:** testnet dry runs passed on `v0.1.19`/`v0.1.21` (sends on NU7, one-tap, busy-vault
+      notification, pending receipt in the balance); `mainnet-v0.1.21` (code 3005, essential, priority 5) on Play's
+      internal track; 0.1.16 published in production. Left: Play update test 0.1.16 -> 0.1.21, `play-promote.yml`
+      (0.1.21, 100%) by ~10-28, heads-up copy (below).
 - [x] Mainnet push (2026-10-12): `relay-mainnet` had no `RELAY_FCM_SERVICE_ACCOUNT_JSON`, so `relay.zafe.cash` couldn't push
       (members would only get background-check notifications, up to ~15 min late). Key added from the same
       Firebase project (zafe-18c4d), relay redeployed (digest 85153e1b): log "FCM pushes enabled", a push reached the
@@ -622,6 +626,29 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [ ] Heads-up copy for early users (site FAQ/banner + release notes): "an update is required before Nov 5; funds are
       never at risk, sending pauses until you update".
 - [ ] Re-run the release-signed in-place update test for the NU7 release (v0.1.8 -> v0.1.10 passed on 2026-10-12).
+
+### Play Console suggestions on 0.1.16 (2026-10-22, for 0.1.22, after NU7)
+
+Recommendations from the release dashboard; none blocks a release. Each changes layout or the build, so each
+needs a device check.
+
+- [ ] **Edge-to-edge on every Android version**: targetSdk 36 makes Android 15+ edge to edge; older versions aren't.
+      Call `enableEdgeToEdge()` in `MainActivity`; check status/nav bar and keyboard insets on an Android 14 emulator
+      against an Android 16 phone.
+- [ ] **Deprecated system-bar APIs** (`Window.setStatusBarColor`, `setNavigationBarColor`,
+      `setNavigationBarDividerColor`, flagged at R8-renamed `G.y.h` and `...fluttersecurestorage.ciphers.e.t`): our
+      Kotlin doesn't call them; Flutter's engine does (`flutter.jar` PlatformPlugin), and we ask it to by setting bar
+      colours in `app_theme_host.dart` `androidSystemBarsStyleFor`. Stop setting colours (keep icon brightness) after
+      edge-to-edge; the warning likely stays until Flutter drops the calls.
+- [ ] **Large screens** (`screenOrientation="portrait"`): Android 16 ignores it on screens >= 600 dp with our
+      targetSdk, so tablets/foldables already get landscape and resizable windows. Drop the manifest lock, keep
+      portrait on phones from Dart (by shortest side), make screens survive wide/landscape windows, add tablet and
+      landscape sizes to `tool/screens/size_sweep_test.dart`. Phone-first: not a tablet layout.
+- [ ] **Optimized resource shrinking** (R8 itself is already on, with `proguard-android-optimize.txt` from Flutter's
+      Gradle plugin): AGP 8.11.1 -> latest 8.x and the optimized-resource-shrinking Gradle property (check the
+      exact name and minimum AGP in Google's docs first); compare APK size, run the phone tests.
+- [ ] **AGP 9**: wait. Flutter 3.41.6's tooling lists full Kotlin support only up to AGP 8.11.1
+      (`gradle_utils.dart` `maxKnownAgpVersionWithFullKotlinSupport`); AGP 9 changes Kotlin plugin handling.
 
 ### UX issues found while testing on a phone (2026-10-12, v0.1.10)
 
