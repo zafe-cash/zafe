@@ -1719,7 +1719,16 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   the Xcode project needs no edits. Background vault checks are a BGTaskScheduler periodic task
   `zafe-vault-check` (Info.plist `BGTaskSchedulerPermittedIdentifiers` + `fetch`); the system
   decides when it runs. The one-off "soon" check and in-app updates are Android only.
-- Not done on iOS: APNs push (the relay has no APNs sender; Firebase isn't configured, the app
+- `scripts/ios-install.sh` installs the CI's unsigned build from Linux with **xtool** (`xtool install`,
+  your Apple ID, USB); unverified on a phone (xtool lacks most entitlements/extensions; a free
+  Apple ID signature lasts 7 days). Repository variables used by the iOS build: `IOS_BUNDLE_ID`
+  (default `xyz.zafe.zafe`, must match the signing profile), `ZAFE_RELAY_URL`, `ZAFE_LINK_HOST`
+  (only passed when set: an empty define would replace the default).
+- iOS channels (`ZafeNative`): `payment_feedback`, `secure_screen`, `window_appearance`,
+  `system_settings`, `clipboard` (localOnly + 60 s expiry), `haptics`. `device_auth` is Android
+  only (iOS keeps `local_auth`). URL schemes `zafe`, `zafe-testnet`, `zcash`; iPhone portrait only.
+- Not done on iOS: export-compliance answer (`ITSAppUsesNonExemptEncryption`; Zafe has its own
+  E2E crypto, so this is the owner's call, not ours), App Store/TestFlight upload, APNs push (the relay has no APNs sender; Firebase isn't configured, the app
   falls back to background checks), Associated Domains / universal links (the entitlement breaks
   signing with a profile that lacks it), TestFlight upload, a launch smoke test in CI.
 

@@ -75,6 +75,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>zafe</string>
+				<string>zafe-testnet</string>
 			</array>
 		</dict>
 		<dict>

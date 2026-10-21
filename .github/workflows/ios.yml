@@ -66,12 +66,30 @@ jobs:
           channel: stable
           cache: true
 
+      # Same bundle id as the profile you sign with (repository variable IOS_BUNDLE_ID, default
+      # xyz.zafe.zafe; the Android testnet app uses xyz.zafe.zafe.testnet).
+      - name: Bundle id
+        env:
+          IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          id="${IOS_BUNDLE_ID:-xyz.zafe.zafe}"
+          case "$id" in *[!A-Za-z0-9.-]*|'') echo "::error::Bad IOS_BUNDLE_ID"; exit 1;; esac
+          sed -i '' -E "s/PRODUCT_BUNDLE_IDENTIFIER = xyz\.zafe\.zafe;/PRODUCT_BUNDLE_IDENTIFIER = $id;/" \
+            app/ios/Runner.xcodeproj/project.pbxproj
+          grep -n "PRODUCT_BUNDLE_IDENTIFIER" app/ios/Runner.xcodeproj/project.pbxproj | sort -u
+
       - name: Build
         working-directory: app
+        env:
+          ZAFE_RELAY_URL: ${{ vars.ZAFE_RELAY_URL }}
+          ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
         run: |
           flutter pub get
-          flutter build ios ${{ matrix.build_args }} \
-            --dart-define=ZAFE_NETWORK=test \
+          # An empty define would replace the build's default, so only pass what is set.
+          defines=(--dart-define=ZAFE_NETWORK=test)
+          [ -z "$ZAFE_RELAY_URL" ] || defines+=(--dart-define=ZAFE_RELAY_URL="$ZAFE_RELAY_URL")
+          [ -z "$ZAFE_LINK_HOST" ] || defines+=(--dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST")
+          flutter build ios ${{ matrix.build_args }} "${defines[@]}" \
             --build-name=0.0.0 --build-number=${{ github.run_number }}
 
       - name: Package the device build

@@ -48,8 +48,8 @@ enum ZafeBackup {
 }
 
 /// The app's own method channels, the iOS counterparts of MainActivity.kt:
-/// `xyz.zafe/payment_feedback`, `secure_screen`, `window_appearance`, `system_settings`
-/// and `haptics`.
+/// `xyz.zafe/payment_feedback`, `secure_screen`, `window_appearance`, `system_settings`,
+/// `clipboard` and `haptics`. (`device_auth` is Android only: iOS uses local_auth.)
 final class ZafeNative {
   static let shared = ZafeNative()
 
@@ -111,6 +111,30 @@ final class ZafeNative {
         return result(false)
       }
       UIApplication.shared.open(url) { opened in result(opened) }
+    }
+
+    // Secrets the app copies (invites, backup text, recovery codes, the viewing key): kept
+    // off Universal Clipboard (localOnly), expiring on their own and cleared again by the
+    // app if nothing else was copied since, like Android's sensitive-clip flag.
+    channel("xyz.zafe/clipboard", messenger) { call, result in
+      let text = (call.arguments as? [String: Any])?["text"] as? String ?? ""
+      switch call.method {
+      case "copySensitive":
+        UIPasteboard.general.setItems(
+          [["public.utf8-plain-text": text]],
+          options: [
+            .localOnly: true,
+            .expirationDate: Date().addingTimeInterval(60),
+          ])
+        result(nil)
+      case "clearIfUnchanged":
+        // Our own clip: reading it shows no paste prompt. Gone already (expired) is fine.
+        let current = UIPasteboard.general.string
+        if current == nil || current == text { UIPasteboard.general.items = [] }
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
     }
 
     channel("xyz.zafe/haptics", messenger) { call, result in
