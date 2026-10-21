@@ -117,7 +117,7 @@ updates AGENTS.md's layout and commands.
 - [ ] 9 (M) Physical split, part 2: `zafe-net`, `zafe-relay-client`,
       `zafe-wallet-sqlite`, `zafe-coordinator`, `zafe-backup`. SQLCipher only in the
       wallet crate.
-- [ ] 10 (S) Library crates on semver ranges (`orchard = "0.15"`, `pczt = "0.9"`, ...);
+- [ ] 10 (S) Library crates on semver ranges (`orchard = "0.16"`, `pczt = "0.10"`, ...);
       exact pins only in the app lockfile. rustdoc on every public item, `examples/`
       showing a host wallet driving one payment.
 
@@ -126,9 +126,9 @@ updates AGENTS.md's layout and commands.
 - [ ] `docs/protocol/`: a spec written so a second implementation can interoperate,
       covering every item in §5. Wire formats, signatures and AEADs, DKG ceremony order,
       signing requests, **vault-log replay rules** (these work like consensus),
-      verification rules, expiry, the safety number algorithm, backups.
+      verification rules, expiry, the safety words algorithm, backups.
 - [ ] Test vectors beyond ZIP 2005: envelope and log-entry encodings, request hashes,
-      safety numbers, and **log → state replay vectors** (a sequence of entries and the
+      safety words, and **log → state replay vectors** (a sequence of entries and the
       resulting `VaultState`), with a Python checker like the ZIP 2005 one.
 - [ ] Specify the frostd transport profile (interactive signing only; §4).
 - [ ] **Forum post** (*Shielded multisig coordination: a shared spec*). Invite Konclave
@@ -169,7 +169,7 @@ updates AGENTS.md's layout and commands.
       this is a conversation about how they'd ship it, not a cold PR.
 - [ ] Vizor: a `zakura` Cargo feature (renamed deps: zakura-orchard, zakura-pczt,
       zakura-reddsa, ff/group 0.14) plus a CI matrix entry, *only if* Chainapsis is
-      interested. First verify PCZT byte compatibility between pczt 0.9.3 and zakura-pczt.
+      interested. First verify PCZT byte compatibility between our pczt (0.10.0-pre.1) and zakura-pczt.
 - [ ] A CLI participant built on zcash-devtool's PCZT commands + `zafe-protocol` (a
       low-risk demo for Zallet/devtool users).
 - [ ] Rebuild the Zafe app's bridge purely on the public crates (the skin proves the stack).

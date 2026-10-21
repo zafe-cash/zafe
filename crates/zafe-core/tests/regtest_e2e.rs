@@ -263,7 +263,9 @@ async fn vault_pays_on_regtest() {
         }],
         consensus_branch_id: BranchId::for_height(&network, BlockHeight::from_u32(tip + 1)).into(),
         tip_height: tip,
-        max_expiry_delta: 8064 + 1 + 96 + zafe_core::vault::EXPIRY_ROUNDING_BLOCKS,
+        // Regtest runs NU7 from height 1: 25 s blocks, so the window counts 3x the blocks.
+        max_expiry_delta: 1 + zafe_core::wallet::block_scale(&network, tip + 1)
+            * (8064 + 96 + zafe_core::vault::EXPIRY_ROUNDING_BLOCKS),
     };
     let verified = verify_pczt(&pczt, &vault_fvk, &expected).expect("member verification");
     println!(

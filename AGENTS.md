@@ -278,7 +278,14 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   days, sent in its DKG round-1 message, `DKG_ROUND1` = 3 since the `sk` commitment); proposer sets expiry =
   `vault::expiry_height(target, window)` (rounded up to 144 blocks so it doesn't date the
   proposal); members accept window + 96 + 144 blocks. Never remove expiry: a
-  complete one-tap group stays sendable until it.
+  complete one-tap group stays sendable until it. **These counts are 75-second blocks**
+  (2026-10-21): from NU7 on (25 s blocks) `wallet::block_scale` = 3 multiplies the window,
+  the rounding and the slack (`vault::expiry_height_scaled`, `wallet::proposal_expiry`,
+  `node::expectations`, whose scale is taken at tip + 1 + slack so a member slightly behind
+  the upgrade accepts a proposer on it), so "7 days" stays 7 days. Before NU7 the rule is
+  unchanged (older apps agree); on testnet (NU7 since 4,465,026) a member on a build before
+  this change rejects new proposals as "expiry too far": members update together. Regtest
+  has NU7 at 1, so its windows are scaled too.
 - **Every format is versioned** (`zafe_proto::version`: one constant per format, the
   `Format` enum, `encode`/`decode` for postcard and `frame`/`unframe` for raw bytes; the
   tag is a leading little-endian `u16`). Decoders accept only the current version and fail
@@ -571,8 +578,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   are consts at the top of `zafe-cli/src/main.rs`. Never spell a path name inline.
 
 - Exact pins live in `Cargo.toml` (spec §4.4): `reddsa =0.5.2` (`frost` feature; 0.6 removed
-  FROST), `frost-core`/`frost-rerandomized` 3.0.0, `orchard =0.15.5` (no `unstable-frost`
-  needed), `pczt =0.9.3`, `zcash_client_backend =0.24.0`, `zcash_client_sqlite =0.22.0`.
+  FROST), `frost-core`/`frost-rerandomized` 3.0.0, `orchard =0.16.0` (no `unstable-frost`
+  needed) and the NU7 pre-release line (`pczt =0.10.0-pre.1`, `zcash_client_backend =0.25.0-pre.1`,
+  `zcash_client_sqlite =0.23.0-pre.1`; see "NU7 port" under Upstream status).
 - `zcash_client_backend/pczt` turns on `transparent-inputs`; `zcash_client_sqlite` must enable
   `transparent-inputs` **and** `serde` or it fails to compile.
 - `zcash_keys` feature `unstable-frost` gives `UnifiedFullViewingKey::from_orchard_fvk`.
@@ -602,7 +610,9 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   `tls-ring` + `tls-webpki-roots` (+ `zcash_client_backend/lightwalletd-tonic-tls-webpki-roots`).
   Why: no OpenSSL to cross-compile, ring builds with the NDK (aws-lc-rs needs cmake/NASM),
   and bundled roots behave the same on Android/iOS without platform-verifier plumbing
-  (trade-off: roots update with the crate, not the OS; no user-installed CAs). Keep only
+  (trade-off: roots update with the crate, not the OS; no user-installed CAs; rustls reads no OneCRL/CRLSets,
+  so a distrusted CA stays trusted until we bump `webpki-roots` and ship: 2026-10-21, the eMudhra key compromise,
+  1.0.9 → 1.0.10 dropped emSign ECC Root CA - G3; watch rustls/webpki-roots releases). Keep only
   one rustls provider in the tree (ring): with both, rustls can't pick a default.
   Gotcha: `tonic::Channel::from_shared("https://…")` does **not** turn TLS on
   ("Connecting to HTTPS without TLS enabled"); `wallet::connect` sets
@@ -742,7 +752,7 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   downloaded by the server, never from CI). No docker group for CI. Migrated
   2026-10-11 (old `deploy` user and `RELAY_SSH_KEY` gone, fallback removed). Change the wrapper by re-running bootstrap, not by deploying.
   Residual: one host/Docker daemon, root code from `main`; see `docs/audit-scope.md` §10.
-- **Hosted relay (mainnet, prepared 2026-10-07, not deployed)**: `relay.zafe.cash`, same
+- **Hosted relay (mainnet, prepared 2026-10-07, live since the mainnet beta)**: `relay.zafe.cash`, same
   VPS, compose profile `mainnet` (`relay-mainnet`, `backup-mainnet`, `litestream-mainnet`
   to S3-compatible storage, `restore-mainnet` for an empty volume), site block
   `vps/mainnet/relay.caddy` copied in by the mainnet workflow. `deploy.sh <testnet|mainnet>
@@ -1371,8 +1381,7 @@ Learned while studying it:
   `ActionButton` action). Rejecting doesn't. **Always required** (2026-10-16: the "Require
   unlock to approve" setting was removed; the prompt's reason text is the confirmation,
   e.g. "Approve this payment. It can't be undone."). Biometrics **or** device credential. No screen lock
-  (e.g. the emulator) → the action goes ahead, a one-time toast (`zafe_no_screen_lock_warned`)
-  and a permanent note in Settings; unknown errors fail closed. Background checks (push,
+  (e.g. the emulator) → the action goes ahead, with a permanent note in Settings; unknown errors fail closed. Background checks (push,
   WorkManager) answer signing requests and finish auto-sends **without** a prompt: they only
   act on approvals the owner already gave with an unlock. `local_auth` 3.x needs
   `MainActivity : FlutterFragmentActivity` (else `uiUnavailable` → every gated action is
@@ -1387,7 +1396,7 @@ Learned while studying it:
   behind it; `DeviceAuth.prompting` marks that so unlocking (or a `confirmUnlock`)
   doesn't lock the app again, and a cancelled prompt waits for a tap instead of
   re-prompting. No screen lock on the phone → the app unlocks (Settings warns). It is
-  separate from "Require unlock to approve" (per action). Background engines are
+  separate from the per-action unlock (`confirmUnlock`). Background engines are
   unaffected. **Recent apps**: `MainActivity` calls `setRecentsScreenshotEnabled(false)`
   (Android 13+; screenshots in the app still work) and below 13 sets `FLAG_SECURE` only
   between `onPause` and `onResume` (never clearing one a `SecureScreen` asked for:
@@ -1657,8 +1666,12 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   zcash_primitives 0.31.0-pre.1, zcash_protocol 0.11.0-pre.0, zcash_keys 0.17.0-pre.1, zcash_client_backend
   0.25.0-pre.1, zcash_client_sqlite 0.23.0-pre.1, zip321 0.10.0-pre.1, zcash_address 0.14.0-pre.1,
   incrementalmerkletree 0.9, shardtree 0.8. These carry the real NU7 branch id `0x77190AD9` and testnet height
-  4,465,026; **mainnet's NU7 height is still `None`** in them (a later pre-release will set it; if none carries
-  it by the release date, set it ourselves). Changes it forced: the Zcash APIs take `rand_core` 0.10 (a second
+  4,465,026; **mainnet's NU7 height is `None`** in them, so `wallet::ZafeNetwork::Main` supplies
+  `MAINNET_NU7_HEIGHT` = 3,543,405 (2026-10-21; agreed by the ZIP editors 2026-10-20, zips#1405, ~2026-11-05; the
+  crate's height wins once a release has one). Code that needs mainnet heights must take `ZafeNetwork`, never
+  `zcash_protocol::consensus::MAIN_NETWORK`. **No stable (non-pre) librustzcash release supports NU7 yet**
+  (checked 2026-10-21: newest are the 2026-10-14 pre.1/pre.2 crates); the last stable line builds NU6.3
+  transactions, so a mainnet build needs the pre-releases until a stable one ships. Changes it forced: the Zcash APIs take `rand_core` 0.10 (a second
   `rand10` for those calls only, `zafe_core::zrng`: stateless OS generator, `Clone` because the wallet migrator
   needs it; our own crypto stays on 0.6); `UnifiedFullViewingKey::encode` is fallible; `from_receivers` and
   `create_pczt_from_proposal` take extra args; `alpha` moves between pasta_curves 0.5 (reddsa/FROST) and 0.6
@@ -1674,8 +1687,8 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
   `node::propose` only, **not** by `check_server`, so an outdated app can still sync and show balances. (2) A
   broadcast rejected with "consensus branch id" in the node's message maps to the same error. (3)
   `wallet::proposal_expiry` cuts a proposal's expiry to the block before the NU7 activation height when that height
-  is known and falls inside the window (a transaction signed for the old rules can't be mined after the upgrade); with
-  no known height (mainnet, until a crate release or our own override has it) nothing changes. (4) The app turns
+  is known and falls inside the window (a transaction signed for the old rules can't be mined after the upgrade); on
+  mainnet that is `MAINNET_NU7_HEIGHT`. (4) The app turns
   blocks into time with 75 s blocks before NU7 and 25 s after (`blocksToSeconds`, bridge `nu7_activation_height`).
   A proposal that fails the device check (e.g. built for the old branch) can be cancelled by its author.
 - **Upstream gates cleared (2026-10-01, frost#1094, conradoplg)**: U1 (vaults derived per

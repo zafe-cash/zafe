@@ -267,7 +267,7 @@ pub fn setup_step(
                     }
                 };
                 options.creator_birthday_height = Some(birthday.max(2));
-                // 1152 blocks = 1 day.
+                // 1152 75-second blocks = 1 day (scaled for 25 s blocks after NU7).
                 options.creator_expiry_blocks = expiry_days.map(|d| d * 1152);
             } else {
                 // Joiners refuse a birthday ahead of the chain; best effort, as a server

@@ -602,15 +602,14 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       (CLI co-signer + phone) was broadcast and mined on NU7 testnet (txid 8cfb8247...). Live regtest suites
       (`regtest_e2e`, `bridge_e2e`) also pass on the new stack (ths 0.3.0 had no NU7; since 2026-10-19 ths 0.4.0 is
       pinned and `regtest_network` sets `nu7` at height 1). **Still open before a mainnet release:**
-      mainnet's NU7 height is `None` in the pre-releases (set it ourselves if no crate has it by ~Oct 27); merge the
+      ~~mainnet's NU7 height~~ (2026-10-21: set ourselves, `MAINNET_NU7_HEIGHT` = 3,543,405; no stable NU7 crates yet); merge the
       branch to `main`; the guard items below; a release-signed in-place update test on the mainnet app.
 - [x] A payment that fails the device check (e.g. built for the old network) can now be cancelled by its author, and the
       proposal page leaves the stale failed-send state and goes back after cancelling (found on the phone 2026-10-13).
 - [x] **NU7 guards (2026-10-13, in `main`; not released)**: propose-time server-branch check ("Update Zafe"),
       broadcast rejection mapped to the same error, expiry cut at a known NU7 height, 25 s-block time estimate, cancel for a
-      payment that fails the check. See AGENTS.md "NU7 guards". **Still to do for the release:** mainnet's NU7 height
-      (not in the crates yet; set it ourselves ~Oct 27 if needed, then the expiry cap and the time estimate
-      switch on by themselves), a release-signed in-place update test on the mainnet app, tag `v0.1.14` then
+      payment that fails the check. See AGENTS.md "NU7 guards". **Still to do for the release:** ~~mainnet's NU7 height~~
+      (done 2026-10-21: `MAINNET_NU7_HEIGHT` = 3,543,405, so the expiry cap and the time estimate are on), a release-signed in-place update test on the mainnet app, tag `v0.1.14` then
       `mainnet-v0.1.3` (same commit), the testnet site/scheme change, tell early users to update.
 - [ ] **NU7 migration (before 2026-11-05)** on a branch: librustzcash NU7 line, height-based branch selection, `verify`
       vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).

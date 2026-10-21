@@ -35,7 +35,7 @@ the result looks, **medium** = missed signal, **low** = polish.
 | 14 | Story section (the 3D payment) has no heading; crawlers see ten caption paragraphs under the hero's H1 | medium | Fixed in the redesign: `/showcase` has an H2 "How it works" |
 | 15 | LCP: on a GPU the hero text appears only after the ~1.8 s CSS intro (`.home .hero > *` starts at opacity 0); without a GPU the LCP is the lazy story still (`loading="lazy"` on an image in the first viewport). Lighthouse mobile: LCP 3.2 s, FCP 1.8 s, performance 91 | medium | Home fixed 2026-10-01: after the redesign the hero still faded in from opacity 0, so Lighthouse found no LCP at all (`NO_LCP`); the H1 is no longer faded (the closing veil reveals it), desktop performance 99, LCP 2.0 s. /showcase CLS 0.384 (the title card changed size when story.js chose world or stills) fixed to 0. **Open**: /showcase has no LCP (its title card fades in over the world, tuned in round 12a); its lazy hero still is on purpose, so world visitors never fetch it |
 | 16 | Contrast: `.chain-mini dt` (#7e8987 on #fdfefe, 3.57:1) | low | Fixed in the redesign (`--text-secondary` #55615F); Lighthouse accessibility 100 on both pages |
-| 17 | Live site still sends `max-age=0` for hashed bundles | low | Fixed in `537851b` (`_headers`), not deployed yet |
+| 17 | Live site still sends `max-age=0` for hashed bundles | low | Fixed in `537851b` (`_headers`); live since (checked 2026-10-21: `immutable`) |
 | 18 | No HTML 404 page (Vercel answers a plain-text 404, status correct) | low | Fixed 2026-10-01: `404.astro` (noindex), Vercel `handle: error` route in `vercel-output.sh` |
 | 19 | Heading text "Questions?" | low | Fine as is |
 | 20 | Link text | ok | "Get Zafe", "Source", "Spec", "Support": descriptive enough; all external links `rel="noopener noreferrer"` |
@@ -50,8 +50,7 @@ the result looks, **medium** = missed signal, **low** = polish.
 - SoftwareApplication/MobileApplication rich results need `aggregateRating` or `review`.
   We have neither and must not invent them, so no app rich result yet; the markup still
   describes the app. Add the Play Store URL to `sameAs` / `downloadUrl` when there is one.
-- Site name (WebSite `name`) is read only on the domain root, so it starts to matter once
-  the custom domain is live.
+- Site name (WebSite `name`) is read only on the domain root (`zafe.cash`, live).
 - `noindex` + robots.txt `Disallow` don't mix: a disallowed page can't be fetched, so its
   `noindex` is never seen and the bare URL can still be indexed from links.
 
@@ -71,7 +70,7 @@ data so it can't close the element, and `build.sh` checks every such block parse
 
 ## Open questions
 
-- Custom domain: `zafe.cash` (bought 2026-10-01, `site` changed). Still to do: verify it
-  in Google Search Console and submit the sitemap (verification by DNS TXT record keeps
-  the page free of extra meta tags); keep `zafe-pink.vercel.app` redirecting to it.
+- Custom domain: `zafe.cash` (bought 2026-10-01, `site` changed), registered in Google Search
+  Console and Bing Webmaster Tools by DNS TXT record; each production deploy submits the
+  sitemap's URLs to IndexNow (`indexnow.sh`). Keep `zafe-pink.vercel.app` redirecting to it.
 - Play Store listing: its URL goes into `downloadUrl` and `sameAs`.

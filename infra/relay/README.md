@@ -5,8 +5,8 @@ ciphertext and metadata only), so the host never holds anything that spends or
 decrypts funds, but it does see who talks to which mailbox and when: pick a host you
 trust with that metadata, and keep access logs off.
 
-The hosted testnet relay runs on a VPS through Path B, deployed by CI
-(`.github/workflows/relay-deploy.yml`). Two paths:
+The hosted relays (testnet and the mainnet beta) run on one VPS through Path B, deployed
+by CI (`.github/workflows/relay-deploy.yml`, `relay-mainnet.yml`). Two paths:
 
 | | Fly.io | VPS (Docker Compose + Caddy) |
 |---|---|---|

@@ -81,8 +81,8 @@ safety-critical sequencing itself.
 
 ### Dependency pins
 
-Library crates use **semver ranges** (`orchard = "0.15"`, `pczt = "0.9"`,
-`zcash_client_backend = "0.24"`). Exact pins stay in the app's lockfile.
+Library crates use **semver ranges** (`orchard = "0.16"`, `pczt = "0.10"`,
+`zcash_client_backend = "0.25"`; pre-releases need an explicit `-pre` requirement). Exact pins stay in the app's lockfile.
 
 ### Trait boundaries (sketch; derived from how node.rs uses each dependency)
 
@@ -234,7 +234,7 @@ persistence), so one server serves both.
 | VAULT_EVENT | Variant indices. **The replay rules work like consensus** (`VaultState::apply`, vault.rs:474-663): vote counting, rejection threshold n−t+1, author-only cancel, `NotesInUse`, `assign_commitments` order and caps, `ready_group`/`completed_by`, final votes, name rules, what gets ignored. Needs log → state test vectors |
 | DESCRIPTOR | Field order, hash personalization, signing message, member ordering, `member_identifier`, DKG transcript hash |
 | RELAY_API | Endpoints, `Signed<T>`, 300 s clock skew, status codes (403 vs 404 on `/v1/wait`, 426, 429, 507), limits |
-| INVITE, IDENTITY_SEEDS | Seed → Ed25519/X25519 derivation, fingerprint, and **the safety number algorithm** (users compare it across implementations). Consider adding an invite checksum |
+| INVITE, IDENTITY_SEEDS | Seed → Ed25519/X25519 derivation, fingerprint, and **the safety words algorithm** (users compare them across implementations). Consider adding an invite checksum |
 | DKG_ROUND1, SIGNING_REQUEST, SIGNATURE_SHARES | Message structs, ceremony order, request hash over the tagged bytes, deterministic signer choice, α = the PCZT's α |
 | BACKUP, VAULT_MATERIAL | Needed for cross-wallet restore (the backup objection ZCG raised) |
 | Unversioned | `pczt_hash` (must be the hash of the logged bytes, so parse → serialize must round-trip exactly), `commitments_hash`, the ZIP 2005 derivation (vectors exist), expiry rounding and the accepted window, the ZIP 317 exact-fee rule and the §9.3 check order, 512-byte memos |
@@ -243,9 +243,9 @@ persistence), so one server serves both.
 
 | Wallet | FFI | librustzcash vs ours | Licence | Fit |
 |---|---|---|---|---|
-| **Zodl Android** ([SDK](https://github.com/zodl-inc/zodl-android-wallet-sdk)) | Hand-written JNI cdylib (`backend-lib`) | **Identical lockfile** (orchard 0.15.5, pczt 0.9.3, zcb 0.24.0, zcs 0.22.0, frost 3.0.0, reddsa 0.5.2), tonic 0.14, arti 0.35 | **AGPL-3.0 + commercial** since 2026-08-24 (the MIT originals stay at `zcash/zcash-android-wallet-sdk`) | Best technical fit. It already has the Keystone flow: `importAccountByUfvk` with a null fingerprint gives `Spending { derivation: None }` (how we import), plus `createPcztFromProposal`, `redactPcztForSigner`, `addProofsToPczt` and `createTransactionFromPczt`. Our crates can link into their AGPL SDK; never copy their post-relicence code into ours. No public FROST plans |
+| **Zodl Android** ([SDK](https://github.com/zodl-inc/zodl-android-wallet-sdk)) | Hand-written JNI cdylib (`backend-lib`) | **Identical lockfile** on 2026-10-01 (orchard 0.15.5, pczt 0.9.3, zcb 0.24.0, zcs 0.22.0, frost 3.0.0, reddsa 0.5.2), tonic 0.14, arti 0.35; Zafe has since moved to the NU7 pre-releases (orchard 0.16, pczt 0.10.0-pre.1, zcb 0.25.0-pre.1, zcs 0.23.0-pre.1) | **AGPL-3.0 + commercial** since 2026-08-24 (the MIT originals stay at `zcash/zcash-android-wallet-sdk`) | Best technical fit. It already has the Keystone flow: `importAccountByUfvk` with a null fingerprint gives `Spending { derivation: None }` (how we import), plus `createPcztFromProposal`, `redactPcztForSigner`, `addProofsToPczt` and `createTransactionFromPczt`. Our crates can link into their AGPL SDK; never copy their post-relicence code into ours. No public FROST plans |
 | Zodl iOS ([SDK](https://github.com/zodl-inc/zodl-swift-wallet-sdk)) | cbindgen staticlib `libzcashlc` | Same, except orchard 0.15.4 | Same | Same flow (`zcashlc_*`) |
-| **Vizor** ([repo](https://github.com/chainapsis/vizor-wallet)) | Flutter + FRB 2.11.1, one crate | **Moved to the `zakura-*` fork** (zakura-orchard 2.0.0, zakura-pczt rc4, zakura-reddsa 2.0.0, ff/group 0.14) | Apache-2.0 | Same app shape as Zafe, but needs a second build of our crates against Zakura (a Cargo rename feature plus a CI matrix entry). PCZT byte compatibility between pczt 0.9.3 and zakura-pczt is **unverified** |
+| **Vizor** ([repo](https://github.com/chainapsis/vizor-wallet)) | Flutter + FRB 2.11.1, one crate | **Moved to the `zakura-*` fork** (zakura-orchard 2.0.0, zakura-pczt rc4, zakura-reddsa 2.0.0, ff/group 0.14) | Apache-2.0 | Same app shape as Zafe, but needs a second build of our crates against Zakura (a Cargo rename feature plus a CI matrix entry). PCZT byte compatibility between our pczt and zakura-pczt is **unverified** |
 | Zkool2 | Flutter + FRB 2.12 | ZSA git forks, frost **2.2**, its own sqlx DB, memo transport | MIT | Could take only the pure pieces (ZIP 2005 keys, verify), and only after moving to frost 3 |
 | Zallet / zcash-devtool | Rust CLI | Compatible under `^` ranges | MIT/Apache | Zallet's multisig is transparent ZIP 48 ([zallet#872](https://github.com/zcash/zallet/issues/872)). devtool has the PCZT commands a CLI participant needs: a low-risk place for `zafe-protocol` as a CLI signer |
 | Unstoppable, Edge | Old MIT Android SDK | — | — | Only via an SDK |

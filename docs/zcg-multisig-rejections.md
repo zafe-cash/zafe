@@ -116,7 +116,7 @@ developer. Of the four, this is the closest to Zafe.
 
 ### Concerns Zafe has not answered
 
-- **Demand and users.** Zafe has no users and no hosted relay, so there is no demand signal from DAOs or exchanges yet. This came up in every decision and is the biggest gap.
+- **Demand and users.** Zafe had no users and no hosted relay (the testnet and mainnet beta relays went live later in October), so there is no demand signal from DAOs or exchanges yet. This came up in every decision and is the biggest gap.
 - **Team and maintenance.** Paul's "one person … it really needs a team" applies to Zafe just as it did to #4.
 - **Audit.** None yet; it is the M2 gate. Zerodartz asked for "multiple auditors".
 - **One standard every wallet can use.** Zafe's `sk` agreement differs from the COCKTAIL-DKG draft (zips#895), and its relay format is Zafe's own. Hanh's Zenith concern, that it "would tie the users to their platform", applies. `docs/stack-plan.md` addresses this, but none of it has been done yet.
