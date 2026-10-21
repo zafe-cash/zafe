@@ -761,10 +761,11 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (manual, environment `relay-mainnet` with required reviewers): it promotes the digest
   testnet runs (record + `min_soak_hours`, build provenance verified); never build or
   deploy mainnet from a push. A compose variable without a default breaks the file even
-  when its profile is off: mainnet variables have defaults. Beta = label only, **no cap**
+  when its profile is off: mainnet variables have defaults. Beta = **no cap**
   (decided 2026-10-07: no relay vault-count limit, no per-vault fund limit; the per-IP
-  and per-key creation limits stay as anti-abuse): the app's `core/config/beta.dart`
-  (`ZAFE_BETA`, default on for mainnet builds).
+  and per-key creation limits stay as anti-abuse). The "not audited yet" caveat lives in
+  the README, the site and the GitHub release notes, not in the app (the in-app line on
+  Home and Receive and its `ZAFE_BETA` flag were removed 2026-10-22, the user's call).
   `kMainnetRelayUrl` = `https://relay.zafe.cash`. Steps only the user can do:
   `infra/relay/README.md` "Mainnet"; audit scope: `docs/audit-scope.md`.
 - **Public testnet lightwalletd**: `https://testnet.zec.rocks:443` (Ironwood-aware;

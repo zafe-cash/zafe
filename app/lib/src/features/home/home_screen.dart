@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/config/beta.dart';
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
 import '../../core/formatting/zec_amount.dart';
@@ -382,20 +381,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         body:
                             'You won\'t hear when a payment needs your approval',
                         onTap: () => enableNotifications(ref),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                    ],
-                    if (kIsBeta) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.xxs,
-                        ),
-                        child: Text(
-                          betaNote,
-                          style: AppTypography.bodySmall.copyWith(
-                            color: colors.text.muted,
-                          ),
-                        ),
                       ),
                       const SizedBox(height: AppSpacing.md),
                     ],

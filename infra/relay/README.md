@@ -228,8 +228,7 @@ curl https://relay.zafe.cash/health     # ok
 shred -u relay-testnet relay-testnet.pub relay-mainnet relay-mainnet.pub   # local copies
 ```
 
-The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; a mainnet build shows the beta
-label (`ZAFE_BETA`, `app/lib/src/core/config/beta.dart`); there is no cap.
+The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; there is no cap.
 Litestream with R2 uses the S3 API with `force-path-style: true` and region `auto`
 (`vps/litestream.yml`); that is R2's documented setup, but it has **not been run** against
 the bucket from here: after the first mainnet deploy check `docker compose logs
