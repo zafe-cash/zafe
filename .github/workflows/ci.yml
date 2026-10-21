@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # Text only: nothing here can break the build (release notes, docs, the site's own
+    # workflow checks infra/site).
+    paths-ignore: ['docs/**', '**/*.md', 'infra/site/**']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md', 'infra/site/**']
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,8 +19,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Which parts changed: the Rust job only for Rust, the Flutter job only for the app.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      flutter: ${{ steps.filter.outputs.flutter }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'app/rust/**'
+              - 'Cargo.*'
+              - 'rust-toolchain*'
+              - '.github/workflows/ci.yml'
+            flutter:
+              - 'app/**'
+              - '.github/workflows/ci.yml'
+
   rust:
     name: Rust (fmt, clippy, tests)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -25,21 +53,18 @@ jobs:
       # error]`. Line tables keep file:line in panics and backtraces.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_INCREMENTAL: 0
+    # No disk freeing: the runner starts with ~86 GB free and the build peaks at ~12 GB of
+    # target/ (2026-10-22; freeing ~30 GB of unused SDKs cost 105 s a run).
     steps:
-      # The image ships ~30 GB of SDKs we don't use; the Rust build needs the room.
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/share/powershell \
-            /usr/share/swift
-          sudo docker image prune --all --force > /dev/null
-          df -h /
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # Saved from main only: a cache saved on a pull request's ref serves only that PR and
+      # pushes main's out of the 10 GB per-repo limit.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Regtest (Docker), zcash-sign cross-check and bridge e2e tests are #[ignore]d:
@@ -65,6 +90,8 @@ jobs:
 
   flutter:
     name: Flutter (analyze, test)
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:

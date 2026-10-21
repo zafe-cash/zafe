@@ -96,8 +96,10 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT OR Apache-2.0
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Layers cached in the registry, not in Actions' cache (10 GB per repo, shared
+          # with the Rust caches, which it pushed out).
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
       - uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.IMAGE }}

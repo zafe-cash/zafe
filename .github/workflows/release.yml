@@ -85,11 +85,15 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build.
+      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build. Restored from
+      # the cache android-build.yml saves on main: a tag run can only read caches of its own
+      # tag or of main, so one saved here would never be read again (every release
+      # compiled the Rust from scratch, ~13 min).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> app/build/rust_lib_zafe/build'
-          key: android-release
+          shared-key: android-release
+          save-if: false
 
       - uses: subosito/flutter-action@v2
         with:
