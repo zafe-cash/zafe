@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -161,19 +162,28 @@ Future<void> _registerPush({bool askPermission = true}) async {
     });
   }
   if (askPermission) await messaging.requestPermission();
-  // Deprecated in firebase_messaging 17 for register()/onRegistered, which give a
-  // Firebase Installation ID for "direct-send" messaging, not the FCM registration token
-  // the relay sends to (FCM HTTP v1 `token`). Moving needs the relay to send to FIDs
-  // first (docs/tracker.md); until then these stay.
-  // ignore: deprecated_member_use
-  final token = await messaging.getToken();
-  if (token != null) await _registerToken(token);
-  // ignore: deprecated_member_use
-  messaging.onTokenRefresh.listen(_registerToken);
+  await _registerInstallation(messaging);
 }
 
-/// Registers the push token for every vault on this device (each with its own member
-/// identity) with the relay currently configured.
+/// FCM targets this app by its Firebase Installation ID (FID): FCM deprecated
+/// registration tokens (firebase_messaging 17, `register()`/`onRegistered`; the relay
+/// sends FIDs in FCM v1's `fid` field). `register()` fires [FirebaseMessaging.onRegistered]
+/// with the current FID every time it is called (also when already registered), and FCM
+/// fires it by itself when the FID is refreshed, so one listener sends it to the relay.
+/// Needs `firebase_messaging_installation_id_enabled` in the manifest; in that mode the
+/// old token calls throw.
+bool _listeningForRegistration = false;
+
+Future<void> _registerInstallation(FirebaseMessaging messaging) async {
+  if (!_listeningForRegistration) {
+    _listeningForRegistration = true;
+    messaging.onRegistered.listen((fid) => unawaited(_registerToken(fid)));
+  }
+  await messaging.register();
+}
+
+/// Registers this app's FCM installation ID for every vault on this device (each with its
+/// own member identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
   // Vaults still being set up too: their setup steps run in background checks.
@@ -184,7 +194,7 @@ Future<void> _registerToken(String token) async {
         relayUrl: relayUrl,
         seeds: v.identity!,
         vaultId: v.id,
-        platform: Platform.isIOS ? 'apns' : 'fcm',
+        platform: Platform.isIOS ? 'apns' : 'fcm-fid',
         token: token,
       );
     } catch (e) {
@@ -193,13 +203,12 @@ Future<void> _registerToken(String token) async {
   }
 }
 
-/// After the relay URL changed: register the push token with the new relay.
+/// After the relay URL changed or a vault was added: register this app's installation ID
+/// with the current relay for every vault (`register()` re-sends the current FID).
 Future<void> reregisterPush() async {
   try {
     if (Firebase.apps.isEmpty) return;
-    // ignore: deprecated_member_use, the relay's token, see _registerPush
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token != null) await _registerToken(token);
+    await _registerInstallation(FirebaseMessaging.instance);
   } catch (e) {
     debugPrint('push: re-register failed: ${describeError(e)}');
   }

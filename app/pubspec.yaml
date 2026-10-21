@@ -29,6 +29,11 @@ dependencies:
     path: rust_builder
   share_plus: ^13.0.0
   shared_preferences: ^2.5.3
+  # Pinned: 2.5.x calls its own Kotlin class over JNI (Pigeon JNI) and ships no R8 keep
+  # rules, so a minified release build strips it ("NoSuchMethodError ...
+  # SharedPreferencesApiRegistrar.getAll", every prefs call fails, the app hangs at start;
+  # seen 2026-10-22 on the Flutter 3.47 branch). 2.4.23 is what 0.1.21 ships.
+  shared_preferences_android: 2.4.23
   url_launcher: ^6.3.3
   workmanager: ^0.10.10
 
