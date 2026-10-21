@@ -186,6 +186,8 @@ Future<void> _registerInstallation(FirebaseMessaging messaging) async {
 /// own member identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
+  final platform = Platform.isIOS ? 'apns' : 'fcm-fid';
+  var registered = 0;
   // Vaults still being set up too: their setup steps run in background checks.
   for (final v in await ZafeSecureStore.instance.readAll()) {
     if (v.identity == null) continue;
@@ -194,13 +196,16 @@ Future<void> _registerToken(String token) async {
         relayUrl: relayUrl,
         seeds: v.identity!,
         vaultId: v.id,
-        platform: Platform.isIOS ? 'apns' : 'fcm-fid',
+        platform: platform,
         token: token,
       );
+      registered++;
     } catch (e) {
       debugPrint('push: register failed for ${v.id}: ${describeError(e)}');
     }
   }
+  // Which kind of target the relay accepted, and for how many vaults (never the ID).
+  debugPrint('push: registered $platform for $registered vault(s)');
 }
 
 /// After the relay URL changed or a vault was added: register this app's installation ID

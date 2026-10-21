@@ -632,10 +632,11 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [x] Flutter 3.47.7, plugin majors, AGP 9.1.1, FCM installation IDs; phone check on testnet passed
       (0.1.22-dev2: in-place update keeps vaults, FID push 6 s, one-tap send, vault setup, Welcome art).
 - [ ] **Before 0.1.22 ships on mainnet: promote the relay with `FcmFid`** (on `main` as 57876ab; testnet has it).
-- [ ] Not checked yet: Android 14 (edge-to-edge insets), the key-shard rays on a device (capture-protected:
-      look by eye), the in-app update from Play (only on the internal track), large screens.
+- [ ] Not checked yet: Android 14 (edge-to-edge insets), the key-shard rays (checked on the phone with a throwaway
+      app: 3.47 draws them evenly, 3.41 unevenly; the darker rays were the test renderer only), the in-app update from Play (only on the internal track), large screens.
 - [ ] Built-in Kotlin once firebase_core and workmanager_android stop applying KGP.
-- [ ] Optional: a debug log on the relay naming the FCM field used (`fid`/`token`), to confirm FID delivery.
+- [x] FID delivery confirmed: the app logs `push: registered fcm-fid for 9 vault(s)` (relay accepted the FID,
+      one target per member), and the push arrived in 6 s.
 
 ### Play Console suggestions on 0.1.16 (2026-10-22, for 0.1.22, after NU7)
 
