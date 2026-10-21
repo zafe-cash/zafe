@@ -47,7 +47,7 @@ String zafeErrorMessage(
     ZafeErrorKind.relayStorageFull =>
       'The relay\'s storage for this vault is full. Old messages expire after 30 days; if it keeps happening, ask the relay\'s operator for more space.',
     ZafeErrorKind.relayRolledBack =>
-      'The relay lost part of this vault\'s history, so Zafe ignores it. A member with the full history can restore it from Home.',
+      'The relay lost part of this vault\'s history, so Zafe ignores it. A member with the full history can restore it from the sync status on Home.',
     ZafeErrorKind.relayLostVault =>
       'The relay no longer has this vault. A member can restore it from the sync '
           'status on Home.',
@@ -59,14 +59,14 @@ String zafeErrorMessage(
       'The relay\'s members or approval rule don\'t match this vault, so Zafe ignores it. Your funds are safe. Agree on a new relay with the others.',
     ZafeErrorKind.tls =>
       'Couldn\'t connect securely to the ${_server(error.endpoint)}. '
-          'Check its address in Settings.',
+          'Check its address in server settings.',
     ZafeErrorKind.networkTimeout =>
       'The ${_server(error.endpoint)} didn\'t answer in time. Try again.',
     ZafeErrorKind.serverBehind =>
       'The Zcash server is behind this wallet. Wait a moment, or pick another '
-          'server in Settings.',
+          'one in server settings.',
     ZafeErrorKind.wrongNetwork =>
-      'The Zcash server is on another network. Pick another server in Settings.',
+      'The Zcash server is on another network. Pick another one in server settings.',
     ZafeErrorKind.walletDatabase =>
       'This phone couldn\'t read the vault\'s wallet data. Try again.',
     ZafeErrorKind.torConnecting =>
@@ -75,7 +75,7 @@ String zafeErrorMessage(
       'Tor couldn\'t connect, so nothing was sent. Try again, or turn off Tor in '
           'Settings.',
     ZafeErrorKind.vaultNotOnRelay =>
-      'This vault isn\'t on this relay. Check the relay address in Settings; all members must use the same one.',
+      'This vault isn\'t on this relay. Check the relay address in server settings; all members must use the same one.',
     ZafeErrorKind.other => fallback,
   };
 }

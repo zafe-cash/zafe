@@ -268,7 +268,7 @@ class RecoverBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Lost your phone and your backup? Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
+          'Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -391,7 +391,7 @@ class VaultCheckBody extends StatelessWidget {
       children: [
         Text(
           'Your key is back. Before saving "$name", ask a co-signer to read you the '
-          'end of the vault address (Settings, Vault address).',
+          'end of the vault address (Home, Receive).',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
