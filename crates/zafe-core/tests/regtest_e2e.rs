@@ -362,6 +362,35 @@ async fn vault_pays_on_regtest() {
     assert!(in_mempool, "broadcast transaction not seen in the mempool");
     assert!(!wallets[0].tx_mined(&txid).unwrap());
 
+    let recipient_ufvk = UnifiedFullViewingKey::from_orchard_fvk(recipient_fvk).unwrap();
+    let mut recipient_wallet = VaultWallet::create(
+        &dir.join("recipient.sqlite"),
+        &WalletKey::random(),
+        network,
+        "recipient",
+        &recipient_ufvk,
+        2,
+        &mut client,
+    )
+    .await
+    .unwrap();
+    recipient_wallet.sync(&mut client).await.unwrap();
+
+    // A payment still in the mempool, stored the way the app's mempool watch stores it:
+    // the balance counts it exactly once (the wallet summary already includes unmined
+    // notes; v0.1.20 added them again and showed twice the amount).
+    recipient_wallet.store_mempool_tx(&transaction).unwrap();
+    let pending = recipient_wallet.balance().unwrap();
+    println!("recipient balance while pending: {pending:?}");
+    assert_eq!(pending.total, amount, "a pending receipt counts once");
+    assert_eq!(
+        pending.ironwood_spendable, 0,
+        "not spendable before it's mined"
+    );
+    let listed = recipient_wallet.received_payments().unwrap();
+    assert_eq!(listed.len(), 1, "one receipt listed: {listed:?}");
+    assert_eq!(listed[0].mined_height, None, "listed as pending");
+
     chain.mine(2);
     wait_for_lightwalletd_height(&mut client, u64::from(tip) + 2).await;
 
@@ -381,18 +410,6 @@ async fn vault_pays_on_regtest() {
     assert!(!spend.nullifiers.is_empty(), "spent notes are listed");
     assert_eq!(spends.len(), 1, "no other spends: {spends:?}");
 
-    let recipient_ufvk = UnifiedFullViewingKey::from_orchard_fvk(recipient_fvk).unwrap();
-    let mut recipient_wallet = VaultWallet::create(
-        &dir.join("recipient.sqlite"),
-        &WalletKey::random(),
-        network,
-        "recipient",
-        &recipient_ufvk,
-        2,
-        &mut client,
-    )
-    .await
-    .unwrap();
     recipient_wallet.sync(&mut client).await.unwrap();
     let received = recipient_wallet.balance().unwrap();
     println!("recipient balance: {received:?}");
@@ -400,6 +417,7 @@ async fn vault_pays_on_regtest() {
         received.ironwood_total, amount,
         "recipient received the payment in Ironwood"
     );
+    assert_eq!(received.total, amount, "still counted once after mining");
 }
 
 fn tempdir() -> PathBuf {

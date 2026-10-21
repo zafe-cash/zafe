@@ -534,7 +534,8 @@ pub struct ReceivedPayment {
     pub txid: String,
     /// Sum of the vault's non-change outputs in the transaction.
     pub amount_zat: u64,
-    /// `None` while unmined (the wallet only learns of unmined transactions it created).
+    /// `None` while unmined: the vault's own sends, and receipts the mempool watch stored
+    /// (`store_mempool_tx`). The wallet summary already counts such notes (as pending).
     pub mined_height: Option<u32>,
     /// Unix seconds of the mining block, when the wallet has scanned it.
     pub block_time: Option<u32>,

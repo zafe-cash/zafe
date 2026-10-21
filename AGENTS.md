@@ -1738,6 +1738,29 @@ Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.
 - `scripts/app-harness.sh` keeps its state in `~/.cache/zafe-harness` (not `/tmp`, which
   a WSL restart wipes); after a restart run `scripts/app-harness.sh resume`.
 
+## Fixing a bug (learned 2026-10-22, the v0.1.20 double count)
+
+A pending receipt showed in activity but not in the balance. The diagnosis ("the wallet
+summary ignores unmined notes") came from our own code and a stale comment of ours, never
+from the library; every observation fit the real cause just as well (nothing recomputed the
+balance); the test checked the fix's helper, not the balance; a build was tagged before the
+fix was seen working. It shipped to testnet counting the payment twice. So:
+
+- **Two explanations before a fix**: write down at least two causes that fit what you saw,
+  and find the observation or experiment that tells them apart. An observation both fit
+  (here: the balance right after mining) confirms neither.
+- **A dependency's behaviour comes from its pinned source or a call to it**, never from a
+  function name, our comments or memory: `~/.cargo/registry/src/*/<crate>-<version>/`
+  (the exact version in `Cargo.lock`), `~/.pub-cache/hosted/pub.dev/<pkg>-<version>/`.
+  Quote the line (file:line) in the commit or here.
+- **Test the outcome a user sees, through the real dependency** (wallet balances: the live
+  `regtest_e2e`, which now checks a mempool receipt counts once), not the fix's own helper.
+  **Make the new test fail on the broken code first** (put the bug back, run, restore).
+- **See it work before tagging** a build that fixes something users see: on a phone, the
+  emulator or the harness.
+- When a comment turns out wrong, fix it in the same change: stale comments steer the
+  next diagnosis.
+
 ## User preferences
 
 - Research primary sources (repos, ZIPs, issues) before asking the user or relying on memory;
