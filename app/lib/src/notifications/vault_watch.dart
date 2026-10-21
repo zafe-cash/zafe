@@ -30,6 +30,7 @@ import '../rust/api/tor.dart';
 import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
 import '../providers/setup_step.dart';
+import 'check_lock.dart';
 import 'vault_updates.dart';
 import '../core/storage/wallet_key.dart';
 
@@ -277,29 +278,18 @@ Future<void> _ensureRust() async {
 /// left to the app so nothing on screen is also announced.
 Future<void> checkVaultAndNotify({String? skipVaultId}) async {
   await installBackgroundCrashLog();
-  // One check at a time: the periodic task, the one-off after backgrounding and a push can
-  // fire together (seen on the emulator); a lock older than 5 minutes is stale.
-  final lock = File(
-    '${(await getApplicationSupportDirectory()).path}/notifications/check.lock',
+  // One check at a time (the periodic task, the one-off after backgrounding and a push can
+  // fire together, seen on the emulator); one that arrives meanwhile makes it run again.
+  final dir = Directory(
+    '${(await getApplicationSupportDirectory()).path}/notifications',
   );
-  try {
-    await lock.parent.create(recursive: true);
-    if (await lock.exists() &&
-        DateTime.now().difference(await lock.lastModified()) <
-            const Duration(minutes: 5)) {
-      return;
-    }
-    await lock.writeAsString('${DateTime.now()}');
-  } catch (_) {}
-  try {
-    await _check(skipVaultId);
-  } catch (e, st) {
-    await _logBackgroundError('check', e, st);
-  } finally {
+  await CheckLock(dir).run(skipVaultId, (skip) async {
     try {
-      await lock.delete();
-    } catch (_) {}
-  }
+      await _check(skip);
+    } catch (e, st) {
+      await _logBackgroundError('check', e, st);
+    }
+  });
 }
 
 /// Background engines are separate isolates with their own memory: install the scrubbed

@@ -1475,6 +1475,10 @@ Learned while studying it:
   last-seen snapshot (`<appSupport>/notifications/seen.json`, a file because prefs caches
   per isolate) and shows local notifications; the app records the snapshot on every
   refresh so nothing seen in-app is re-announced. Tapping opens `/proposal/:id`.
+  One check at a time (`notifications/check_lock.dart`, files shared across isolates): a check
+  that finds one running leaves `check.again` and the running one repeats (at most 4 runs).
+  Before 2026-10-22 it was dropped: a proposal pushed seconds after another vault's activity
+  got no notification or switcher dot until the 15-minute task (seen in the 0.1.18 dry run).
 - **Notification icon**: `res/drawable/ic_notification.xml`, a vector of the icon's Seam mark
   written by `scripts/brand/brand.py` (`write_notification_icon`); Android uses only
   its alpha, so a full-colour launcher icon shows as a filled square. Used by
