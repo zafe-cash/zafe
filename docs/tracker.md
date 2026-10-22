@@ -655,15 +655,14 @@ needs a device check.
       Kotlin doesn't call them; Flutter's engine does (`flutter.jar` PlatformPlugin), and we ask it to by setting bar
       colours in `app_theme_host.dart` `androidSystemBarsStyleFor`. Stop setting colours (keep icon brightness) after
       edge-to-edge; the warning likely stays until Flutter drops the calls.
-- [ ] **Large screens** (`screenOrientation="portrait"`): Android 16 ignores it on screens >= 600 dp with our
-      targetSdk, so tablets/foldables already get landscape and resizable windows. Drop the manifest lock, keep
-      portrait on phones from Dart (by shortest side), make screens survive wide/landscape windows, add tablet and
-      landscape sizes to `tool/screens/size_sweep_test.dart`. Phone-first: not a tablet layout.
-      Emulator check 2026-10-22 (Android 14, 1600x2560 at 320 dpi, sw 800 dp): portrait works, content stretched
-      to full width (cap it, ~560 dp centred). Landscape with both locks removed (what Android 16 tablets and
-      foldables get): Welcome's art fills the first screen, the text scrolls over the fixed art and "I'm already
-      in a vault" sits on it unreadably. The Dart lock (`main.dart` `setPreferredOrientations`) also has to go
-      for landscape; Android 16 ignores it on large screens anyway.
+- [x] **Large screens** (done 2026-10-22): no manifest lock; `OrientationPolicy` (Dart) keeps phones portrait and lets
+      displays with a shortest side >= 600 dp rotate (re-checked on every resize, fold and unfold); iOS lists landscape
+      for iPhone too (a foldable iPhone's inner screen) and every orientation on iPad, no `UIRequiresFullScreen`.
+      Pages sit in a 560 dp `AppColumn` clear of hinges and half-opened folds; Welcome puts its art beside the content
+      in landscape; short windows scroll. `tool/screens/size_sweep_test.dart` covers tablets, foldables (inner, cover,
+      hinge, tabletop), split screen and landscape. Seen on a Pixel Fold emulator (API 34): unfold, rotate, fold
+      (portrait lock), half-opened. Before: the app was letterboxed on the unfolded screen. Not seen: real Fold/Flip
+      hardware, Android 16 (ignores the lock anyway), iOS (never built), iPhone fold APIs (iOS 27.1 SDK).
 - [x] **Optimized resource shrinking** (`flutter-3.47`: AGP 9 default; APK 66.0 MB vs 65.6 MB, newer plugins) (R8 itself is already on, with `proguard-android-optimize.txt` from Flutter's
       Gradle plugin): AGP 8.11.1 -> latest 8.x and the optimized-resource-shrinking Gradle property (check the
       exact name and minimum AGP in Google's docs first); compare APK size, run the phone tests.

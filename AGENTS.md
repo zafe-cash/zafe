@@ -895,9 +895,43 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   font_scale 1.0). A debug build records every overflow in `files/diagnostics/crashes.log`
   (`adb shell run-as xyz.zafe.zafe cat ...`), which also covers capture-protected screens.
   Rules learned: `AppButton` labels shrink to fit a bounded width; `MobileListRow` puts the
-  value under the label at text scale >= 1.5; sheets with prose use `constrainBody: true`
+  value under the label at text scale >= 1.5 (or when the row is too narrow); sheets with prose use `constrainBody: true`
   and a scrolling body; full-screen layouts with spacers use LayoutBuilder +
   SingleChildScrollView + ConstrainedBox(minHeight) + IntrinsicHeight (Welcome).
+- **Large screens, foldables, landscape** (2026-10-22): phones stay portrait, nothing else does.
+  *Orientation*: no `screenOrientation` in the manifest (Android 16 ignores it at sw600 with targetSdk 36 anyway;
+  on Android 14 it letterboxed the app on an unfolded Fold); iOS Info.plist lists landscape for iPhone too (a
+  foldable iPhone's inner screen must rotate) and all four on iPad, no `UIRequiresFullScreen` (deprecated in
+  iPadOS 26; resizable apps must take every window). `core/platform/orientation_policy.dart` asks for portrait
+  unless max(display, window) shortest side >= 600 dp, again on every `didChangeMetrics` (Android keeps the
+  activity through folds: `configChanges`). Android's `Display` is `computeMaximumWindowMetrics`, refreshed on each
+  configuration change (`FlutterView.onConfigurationChanged` → `ViewUtils.calculateMaximumDisplayMetrics`); iOS reads
+  `UIScreen.mainScreen.nativeBounds` once at start (`FlutterEngine.mm updateDisplays`), hence the window in the max.
+  `DisplayFeature.bounds` are logical pixels (the engine divides, `hooks.dart _decodeDisplayFeatures`).
+  *Layout*: every router page is wrapped in `AppColumn` (`core/layout/app_column.dart`, via `page()` in `app.dart`,
+  the vault shell, the lock screen): at most `kMaxContentWidth` (560) wide, centred, on the start side of a hinge or a
+  half-opened fold (`DisplayFeatureSubScreen`'s rule, so sheets open over it), clipped like a screen edge, with
+  `MediaQuery` rewritten to the column (size, insets, features). Same widget tree at every size (resizing keeps
+  state); a phone gets the window unchanged. Sheets cap at 560 (`constraints` on both sheet routes). Welcome lays out
+  wide windows itself: art beside the content when width >= 600 and >= 1.2 x height, else art on top **scrolling
+  with** the content (a fixed art under scrolling content put buttons on the picture). `OnboardingHero.sizeIn`
+  caps art at 0.66 of the window height (never binding on phones), and art narrower than the window fades at its
+  sides (`SideFade`). `isLargeWindow` (view shortest side >= 600) centres Welcome and the key screen's content
+  instead of pinning it to the bottom. Short windows: `ZafeScreen`'s CTA scrolls with the body below 360 dp
+  (measured without the keyboard, so phones keep it above the keyboard; a `GlobalKey` keeps a busy button's
+  state), `MobileModalScaffold` bodies and the plain sheets scroll, the progress/Sent screen scrolls (clip off for
+  the coins), `MobileListRow` stacks when the label leaves the value < 40 px, the scanner puts the camera beside its
+  controls (short + wide) or scrolls (small), its frame is 70% of the shorter side, Receive's QR shrinks below 324.
+  Checks: `flutter test tool/screens/size_sweep_test.dart` (phones, flip/fold cover, tablet both ways, split halves,
+  fold inner both ways, a foldable iPhone's outer/inner sizes, landscape, a Surface Duo hinge, book and tabletop
+  folds; fails on overflow, a button that can't be scrolled into view, a button on the hero art, text across a
+  hinge) and `test/large_screens_test.dart`. Emulator: a `pixel_fold` AVD from the API 34 image (`avdmanager create
+  avd -d pixel_fold`) has real fold states: `adb emu fold` / `unfold`, `adb shell cmd device_state state 1`
+  (half-opened, reports the fold to Flutter). Its folded screen captures black with `screencap`; use `adb emu
+  screenrecord screenshot <dir>` (always the 2208x1840 frame: rescale to the display's aspect). Two displays: pass
+  `screencap -d <id>` (`dumpsys SurfaceFlinger --display-id`). A phone-size `wm size` on it letterboxes instead of
+  rotating (the device ignores orientation requests). The IME inset animates in steps (636 → 841 px): wait before
+  judging what the keyboard covers.
 - **Screen previews without a device**: `flutter test tool/screens/home_render_test.dart`
   (vault card, Home buttons, notice card, activity rows, tab bar → `home_{dark,light}.png`)
   and `flutter test tool/screens/proposal_render_test.dart`
