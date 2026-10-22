@@ -42,12 +42,11 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Edge to edge on every Android version, not only 15+ (where targetSdk 35+ forces
         // it): one layout everywhere, Flutter's padding handles the bars (Play's
-        // recommendation, 2026-10-22). The status bar is transparent. The navigation bar gets
-        // the window colour: on Android 14 and older Flutter doesn't draw under it, and a
-        // transparent bar showed a black band (Android 15+ ignores the colour). Light/dark
-        // follow the app's theme (uiMode is set from it, see setBrightness); keep the values
-        // equal to @color/zafe_window (values, values-night). Icon contrast: Dart,
-        // androidSystemBarsStyleFor.
+        // recommendation, 2026-10-22). Both bars are transparent from Android 10 (auto()
+        // ignores the colours there). Below that the nav bar takes the window colour per
+        // theme (Android 7 always the dark one: no dark icons); keep the values equal to
+        // @color/zafe_window (values, values-night). Once Flutter runs, Dart sets the bars
+        // (androidSystemBarsStyleFor): a transparent nav bar on 8+, icons per theme.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(WINDOW_LIGHT, WINDOW_DARK),

@@ -622,10 +622,15 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
   (it re-fires with the current FID); it registers `platform: "fcm-fid"` (`PushPlatform::FcmFid`, appended);
   the relay sends it in v1's `fid` field. One target per member: an FID replaces the old token. **A relay
   without `FcmFid` rejects it, so promote the relay before an app that registers FIDs ships.**
-- **System bars (2026-10-22)**: `MainActivity` calls `enableEdgeToEdge` with a transparent status bar and a
-  nav bar in the window colour per theme (`SystemBarStyle.auto`); Dart sets no bar colours (those APIs are
-  deprecated on 15+). Android 15+ ignores the nav colour. The Android 14 emulator shows a black band behind the
-  nav bar even with the old Dart colour, likely emulator compositing; check on a real Android 14 phone.
+- **System bars (2026-10-22)**: `MainActivity` calls `enableEdgeToEdge` (`SystemBarStyle.auto`: both bars
+  transparent on Android 10+, the window colour below). **`MaterialApp` calls `SystemChrome.setSystemUIOverlayStyle(
+  SystemUiOverlayStyle.dark/.light)` on every build** (flutter `material/app.dart:1012`), and both carry
+  `systemNavigationBarColor: 0xFF000000` (`services/system_chrome.dart:316-330`); the engine applies it below
+  API 35 (`PlatformPlugin.java:571-578`). That was the black band behind the gesture bar on Android 14 (any
+  Flutter app, 0.1.21 too); a one-off `SystemChrome` call from above `MaterialApp` loses to it. So the app's
+  style is an `AnnotatedRegion<SystemUiOverlayStyle>` (`app_theme_host.dart`), which `RenderView` sends after
+  each frame's build, with a transparent nav colour; test: `android_system_bars_test.dart`. Android 15+ ignores
+  bar colours.
 - **TLS (clients)**: rustls + **ring** + **webpki-roots** (bundled Mozilla roots)
   everywhere: reqwest `rustls-tls` (relay client when direct, relay's FCM client; over
   Tor the relay client uses `zcash_client_backend`'s hyper + tokio-rustls) and tonic

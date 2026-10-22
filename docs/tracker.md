@@ -633,9 +633,10 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       (0.1.22-dev2: in-place update keeps vaults, FID push 6 s, one-tap send, vault setup, Welcome art).
 - [ ] **Before 0.1.22 ships on mainnet: promote the relay with `FcmFid`** (on `main` as 57876ab; testnet has it).
 - [x] Android 14 emulator (2026-10-22): top and keyboard insets right. The black band behind the gesture bar
-      is not from this branch: released 0.1.21 shows the same band there, and setting the window's nav colour
-      (even red) doesn't change it; Settings on that emulator and our app on Android 15 draw light there. Still
-      worth a look on a real Android 14 phone. Checked: the key-shard rays (checked on the phone with a throwaway
+      (also in 0.1.21 and a fresh `flutter create` app) was `MaterialApp` sending `SystemUiOverlayStyle.dark`
+      (black nav colour) on every build, after our own style; Android 15+ ignores the colour. Fixed: our style
+      is an `AnnotatedRegion` with a transparent nav colour; light/dark checked on Android 14 and 15 emulators.
+      Not seen on a real Android 14 phone. Checked: the key-shard rays (checked on the phone with a throwaway
       app: 3.47 draws them evenly, 3.41 unevenly; the darker rays were the test renderer only), the in-app update from Play (only on the internal track); large screens: see below.
 - [ ] Built-in Kotlin once firebase_core and workmanager_android stop applying KGP.
 - [x] FID delivery confirmed: the app logs `push: registered fcm-fid for 9 vault(s)` (relay accepted the FID,
@@ -649,7 +650,7 @@ needs a device check.
 - [x] **Edge-to-edge on every Android version** (`flutter-3.47`; not yet checked on Android 14): targetSdk 36 makes Android 15+ edge to edge; older versions aren't.
       Call `enableEdgeToEdge()` in `MainActivity`; check status/nav bar and keyboard insets on an Android 14 emulator
       against an Android 16 phone.
-- [x] **Deprecated system-bar APIs** (`flutter-3.47`: no bar colours from our side) (`Window.setStatusBarColor`, `setNavigationBarColor`,
+- [x] **Deprecated system-bar APIs** (`flutter-3.47`; we set only a transparent nav colour, which `MaterialApp`'s black one forces) (`Window.setStatusBarColor`, `setNavigationBarColor`,
       `setNavigationBarDividerColor`, flagged at R8-renamed `G.y.h` and `...fluttersecurestorage.ciphers.e.t`): our
       Kotlin doesn't call them; Flutter's engine does (`flutter.jar` PlatformPlugin), and we ask it to by setting bar
       colours in `app_theme_host.dart` `androidSystemBarsStyleFor`. Stop setting colours (keep icon brightness) after
