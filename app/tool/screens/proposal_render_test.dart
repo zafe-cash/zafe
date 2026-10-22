@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/core/config/network_config.dart';
 import 'package:zafe/src/core/layout/mobile/zafe_screen.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/app_button.dart';
@@ -236,28 +237,26 @@ final _scenarios = <String, (String, List<Widget>)>{
         onFullAddress: () {},
       ),
       const SizedBox(height: AppSpacing.lg),
-      const MobileSurfaceCard(
+      MobileSurfaceCard(
         cornerRadius: AppRadii.large,
         child: Column(
           children: [
-            DetailRow(label: 'Message', value: 'Grant: Q4 audit milestone'),
-            DetailDivider(),
-            DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
-            DetailDivider(),
-            DetailRow(label: 'Network fee', value: 'At least 0.0001 TAZ'),
+            const DetailRow(
+              label: 'Message',
+              value: 'Grant: Q4 audit milestone',
+            ),
+            const DetailDivider(),
+            const DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
+            const DetailDivider(),
+            DetailRow(
+              label: 'Network fee',
+              value: '0.00015 $kZcashDefaultCurrencyTicker',
+              onHelp: () {},
+            ),
           ],
         ),
       ),
-      const SizedBox(height: AppSpacing.sm),
-      Builder(
-        builder: (context) => Text(
-          'Nothing is sent yet. Each signer checks this payment on their own device and '
-          'approves with one tap; 2 approvals complete it.',
-          style: AppTypography.bodySmall.copyWith(
-            color: context.colors.text.secondary,
-          ),
-        ),
-      ),
+      const SizedBox(height: AppSpacing.lg),
       _actions('Propose payment', icon: AppIcons.plane, secondary: 'Cancel'),
     ],
   ),

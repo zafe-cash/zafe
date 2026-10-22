@@ -1001,7 +1001,7 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
    of the 3D world (.lp-teaser) is the door to /showcase. */
 
 /* A phone: the app's render in a rounded frame. Light screens get a light edge, dark
-   ones a dark edge. Tall renders (2400 px) are cut at the phone's height. */
+   ones a dark edge. Tall renders are cut at the phone's height. */
 .lp-phone {
   display: block;
   width: 100%;

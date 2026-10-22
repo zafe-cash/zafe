@@ -21,12 +21,12 @@ const NAMES = {
 
 const NEEDS_YOU = 'Ops fund: payment needs your approval';
 const SENT = 'Ops fund: payment sent';
-const SENT_BODY = '12.50 TAZ, approved by Bob and you.';
+const SENT_BODY = '12.50 ZEC, approved by Bob and you.';
 
 // Where things are on the renders, as fractions of the viewport (W x H).
 export const SPOT = {
   newPayment: [0.265, 0.366],
-  propose: [0.5, 0.787],
+  propose: [0.5, 0.758],
   approve: [0.5, 0.834], // on the approve screens once scrolled to the bottom
   banner: [0.5, 0.075],
   slot: [0.5, 0.127], // the sending screen's coin slot
@@ -291,7 +291,7 @@ export function drawMe(g, img, s, time) {
     slotCoins(g, time, clamp01((s.bPush - 0.5) * 2) * (1 - 0.6 * s.bDone));
     status(g, time, clamp01((s.bPush - 0.5) * 2), s.bDone);
   }
-  banner(g, s.banner, NEEDS_YOU, 'Bob proposed 12.50 TAZ.');
+  banner(g, s.banner, NEEDS_YOU, 'Bob proposed 12.50 ZEC.');
   banner(g, s.sentBanner * (1 - s.bDone), SENT, SENT_BODY);
   tap(g, SPOT.banner, s.tapB1, false);
   tap(g, SPOT.approve, s.tapB2, false);
@@ -301,7 +301,7 @@ export function drawMe(g, img, s, time) {
 export function drawCara(g, img, s) {
   g.clearRect(0, 0, W, H);
   drawFull(g, img.meHome);
-  banner(g, s.banner, NEEDS_YOU, 'Bob proposed 12.50 TAZ.');
+  banner(g, s.banner, NEEDS_YOU, 'Bob proposed 12.50 ZEC.');
   banner(g, s.sentBanner, SENT, SENT_BODY);
   if (s.caraDim > 0) {
     g.fillStyle = `rgba(9,14,14,${0.45 * s.caraDim})`;
