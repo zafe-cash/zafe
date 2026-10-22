@@ -632,9 +632,11 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [x] Flutter 3.47.7, plugin majors, AGP 9.1.1, FCM installation IDs; phone check on testnet passed
       (0.1.22-dev2: in-place update keeps vaults, FID push 6 s, one-tap send, vault setup, Welcome art).
 - [ ] **Before 0.1.22 ships on mainnet: promote the relay with `FcmFid`** (on `main` as 57876ab; testnet has it).
-- [ ] Android 14: emulator shows the top and keyboard insets right; a black nav-bar band there is unconfirmed
-      on a real phone. Not checked yet: the key-shard rays (checked on the phone with a throwaway
-      app: 3.47 draws them evenly, 3.41 unevenly; the darker rays were the test renderer only), the in-app update from Play (only on the internal track), large screens.
+- [x] Android 14 emulator (2026-10-22): top and keyboard insets right. The black band behind the gesture bar
+      is not from this branch: released 0.1.21 shows the same band there, and setting the window's nav colour
+      (even red) doesn't change it; Settings on that emulator and our app on Android 15 draw light there. Still
+      worth a look on a real Android 14 phone. Checked: the key-shard rays (checked on the phone with a throwaway
+      app: 3.47 draws them evenly, 3.41 unevenly; the darker rays were the test renderer only), the in-app update from Play (only on the internal track); large screens: see below.
 - [ ] Built-in Kotlin once firebase_core and workmanager_android stop applying KGP.
 - [x] FID delivery confirmed: the app logs `push: registered fcm-fid for 9 vault(s)` (relay accepted the FID,
       one target per member), and the push arrived in 6 s.
@@ -656,6 +658,11 @@ needs a device check.
       targetSdk, so tablets/foldables already get landscape and resizable windows. Drop the manifest lock, keep
       portrait on phones from Dart (by shortest side), make screens survive wide/landscape windows, add tablet and
       landscape sizes to `tool/screens/size_sweep_test.dart`. Phone-first: not a tablet layout.
+      Emulator check 2026-10-22 (Android 14, 1600x2560 at 320 dpi, sw 800 dp): portrait works, content stretched
+      to full width (cap it, ~560 dp centred). Landscape with both locks removed (what Android 16 tablets and
+      foldables get): Welcome's art fills the first screen, the text scrolls over the fixed art and "I'm already
+      in a vault" sits on it unreadably. The Dart lock (`main.dart` `setPreferredOrientations`) also has to go
+      for landscape; Android 16 ignores it on large screens anyway.
 - [x] **Optimized resource shrinking** (`flutter-3.47`: AGP 9 default; APK 66.0 MB vs 65.6 MB, newer plugins) (R8 itself is already on, with `proguard-android-optimize.txt` from Flutter's
       Gradle plugin): AGP 8.11.1 -> latest 8.x and the optimized-resource-shrinking Gradle property (check the
       exact name and minimum AGP in Google's docs first); compare APK size, run the phone tests.
