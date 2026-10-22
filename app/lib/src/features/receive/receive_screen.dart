@@ -29,19 +29,27 @@ class ReceiveScreen extends ConsumerWidget {
       children: [
         const SizedBox(height: AppSpacing.md),
         Center(
-          child: Container(
-            width: 292,
-            height: 308,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-            decoration: BoxDecoration(
-              color: colors.background.darkCard,
-              borderRadius: BorderRadius.circular(AppRadii.xLarge),
-              border: Border.all(color: colors.border.subtleOpacity),
-            ),
-            child: PrettyQrView.data(
-              data: address,
-              decoration: PrettyQrDecoration(
-                shape: DotQrShape(color: colors.text.darkCard),
+          // 292 x 308, narrower only when the window is (a flip phone's cover screen).
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 292),
+            child: AspectRatio(
+              aspectRatio: 292 / 308,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                decoration: BoxDecoration(
+                  color: colors.background.darkCard,
+                  borderRadius: BorderRadius.circular(AppRadii.xLarge),
+                  border: Border.all(color: colors.border.subtleOpacity),
+                ),
+                child: PrettyQrView.data(
+                  data: address,
+                  decoration: PrettyQrDecoration(
+                    shape: DotQrShape(color: colors.text.darkCard),
+                  ),
+                ),
               ),
             ),
           ),

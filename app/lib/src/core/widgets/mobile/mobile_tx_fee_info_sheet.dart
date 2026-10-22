@@ -19,38 +19,41 @@ Future<void> showMobileTxFeeInfoSheet(
     context: context,
     builder: (sheetContext) {
       final colors = sheetContext.colors;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.sm,
-          AppSpacing.base,
-          AppSpacing.sm,
-          AppSpacing.base,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              title,
-              style: AppTypography.headlineSmall.copyWith(
-                color: colors.text.accent,
+      return SingleChildScrollView(
+        // Scrolls once the sheet runs out of height (a short window).
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.sm,
+            AppSpacing.base,
+            AppSpacing.sm,
+            AppSpacing.base,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                style: AppTypography.headlineSmall.copyWith(
+                  color: colors.text.accent,
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              description,
-              style: AppTypography.bodyMedium.copyWith(
-                color: colors.text.primary,
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                description,
+                style: AppTypography.bodyMedium.copyWith(
+                  color: colors.text.primary,
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppButton(
-              variant: AppButtonVariant.secondary,
-              expand: true,
-              onPressed: () => Navigator.of(sheetContext).pop(),
-              child: const Text('Close'),
-            ),
-          ],
+              const SizedBox(height: AppSpacing.md),
+              AppButton(
+                variant: AppButtonVariant.secondary,
+                expand: true,
+                onPressed: () => Navigator.of(sheetContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
         ),
       );
     },

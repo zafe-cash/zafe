@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../layout/mobile/mobile_top_nav.dart' show kMobileTopNavHeight;
+import '../../layout/app_column.dart';
 import '../../theme/app_theme.dart';
 import '../app_button.dart';
 import '../app_icon.dart';
@@ -98,7 +99,16 @@ class MobileTransactionProgressScreen extends StatelessWidget {
         body: Stack(
           fit: StackFit.expand,
           children: [
-            if (background != null) Positioned.fill(child: background!),
+            if (background != null)
+              Positioned.fill(
+                child:
+                    narrowerThanWindow(
+                      context,
+                      MediaQuery.sizeOf(context).width,
+                    )
+                    ? SideFade(child: background!)
+                    : background!,
+              ),
             SafeArea(
               child: Column(
                 children: [
@@ -106,141 +116,167 @@ class MobileTransactionProgressScreen extends StatelessWidget {
                   // content while the transaction is in flight.
                   const SizedBox(height: kMobileTopNavHeight),
                   Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                        vertical: AppSpacing.s,
-                      ),
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            MobileTransactionProgressBadge(
-                              phase: phase,
-                              badgeKey: statusBadgeKey,
-                              progressIconKey: progressIconKey,
-                              successIconKey: successIconKey,
-                              failureIconKey: failureIconKey,
-                              successRippleKey: successRippleKey,
-                              successEffect: successEffect,
+                    // Centred when it fits; scrolls in a short window (landscape, a
+                    // flip phone's cover screen) or with large text.
+                    child: LayoutBuilder(
+                      builder: (context, box) => SingleChildScrollView(
+                        // The success effect flies far past the badge.
+                        clipBehavior: Clip.none,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: box.maxHeight),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: AppSpacing.s,
                             ),
-                            const SizedBox(height: AppSpacing.xl),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.md,
-                              ),
-                              // The new words arrive just after the badge has
-                              // changed, rising a little; the old ones leave first.
-                              // The words' height can change (two lines to one):
-                              // the block keeps its tallest height so the badge,
-                              // the moment's focal point, never moves.
-                              child: _KeepTallest(
-                                child: AnimatedSwitcher(
-                                  layoutBuilder: (current, previous) => Stack(
-                                    alignment: Alignment.topCenter,
-                                    children: [...previous, ?current],
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  MobileTransactionProgressBadge(
+                                    phase: phase,
+                                    badgeKey: statusBadgeKey,
+                                    progressIconKey: progressIconKey,
+                                    successIconKey: successIconKey,
+                                    failureIconKey: failureIconKey,
+                                    successRippleKey: successRippleKey,
+                                    successEffect: successEffect,
                                   ),
-                                  duration: const Duration(milliseconds: 420),
-                                  transitionBuilder: (child, animation) {
-                                    final a = CurvedAnimation(
-                                      parent: animation,
-                                      // Leaving words use the first half (the
-                                      // animation runs backwards for them), new
-                                      // ones the second: never both at once.
-                                      curve: const Interval(
-                                        0.5,
-                                        1,
-                                        curve: Curves.easeOutCubic,
-                                      ),
-                                    );
-                                    return FadeTransition(
-                                      opacity: a,
-                                      child: SlideTransition(
-                                        position: Tween(
-                                          begin: const Offset(0, 0.12),
-                                          end: Offset.zero,
-                                        ).animate(a),
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-                                  child: Column(
-                                    key: ValueKey(phase),
-                                    children: [
-                                      Text(
-                                        title,
-                                        key: titleKey,
-                                        textAlign: TextAlign.center,
-                                        style: AppTypography.displayLarge
-                                            .copyWith(color: titleColor),
-                                      ),
-                                      const SizedBox(height: AppSpacing.s),
-                                      LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final requestedWidth = bodyMaxWidth;
-                                          final maxWidth =
-                                              requestedWidth == null
-                                              ? constraints.maxWidth
-                                              : math.min(
-                                                  requestedWidth,
-                                                  constraints.maxWidth,
-                                                );
-                                          return ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth: maxWidth,
+                                  const SizedBox(height: AppSpacing.xl),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.md,
+                                    ),
+                                    // The new words arrive just after the badge has
+                                    // changed, rising a little; the old ones leave first.
+                                    // The words' height can change (two lines to one):
+                                    // the block keeps its tallest height so the badge,
+                                    // the moment's focal point, never moves.
+                                    child: _KeepTallest(
+                                      child: AnimatedSwitcher(
+                                        layoutBuilder: (current, previous) =>
+                                            Stack(
+                                              alignment: Alignment.topCenter,
+                                              children: [...previous, ?current],
                                             ),
-                                            child: Text(
-                                              body,
-                                              key: bodyKey,
-                                              textAlign: TextAlign.center,
-                                              style: AppTypography
-                                                  .bodyMediumStrong
-                                                  .copyWith(
-                                                    color: colors.text.primary,
-                                                  ),
+                                        duration: const Duration(
+                                          milliseconds: 420,
+                                        ),
+                                        transitionBuilder: (child, animation) {
+                                          final a = CurvedAnimation(
+                                            parent: animation,
+                                            // Leaving words use the first half (the
+                                            // animation runs backwards for them), new
+                                            // ones the second: never both at once.
+                                            curve: const Interval(
+                                              0.5,
+                                              1,
+                                              curve: Curves.easeOutCubic,
+                                            ),
+                                          );
+                                          return FadeTransition(
+                                            opacity: a,
+                                            child: SlideTransition(
+                                              position: Tween(
+                                                begin: const Offset(0, 0.12),
+                                                end: Offset.zero,
+                                              ).animate(a),
+                                              child: child,
                                             ),
                                           );
                                         },
+                                        child: Column(
+                                          key: ValueKey(phase),
+                                          children: [
+                                            Text(
+                                              title,
+                                              key: titleKey,
+                                              textAlign: TextAlign.center,
+                                              style: AppTypography.displayLarge
+                                                  .copyWith(color: titleColor),
+                                            ),
+                                            const SizedBox(
+                                              height: AppSpacing.s,
+                                            ),
+                                            LayoutBuilder(
+                                              builder: (context, constraints) {
+                                                final requestedWidth =
+                                                    bodyMaxWidth;
+                                                final maxWidth =
+                                                    requestedWidth == null
+                                                    ? constraints.maxWidth
+                                                    : math.min(
+                                                        requestedWidth,
+                                                        constraints.maxWidth,
+                                                      );
+                                                return ConstrainedBox(
+                                                  constraints: BoxConstraints(
+                                                    maxWidth: maxWidth,
+                                                  ),
+                                                  child: Text(
+                                                    body,
+                                                    key: bodyKey,
+                                                    textAlign: TextAlign.center,
+                                                    style: AppTypography
+                                                        .bodyMediumStrong
+                                                        .copyWith(
+                                                          color: colors
+                                                              .text
+                                                              .primary,
+                                                        ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                ),
+                                  const SizedBox(height: AppSpacing.xl),
+                                  SizedBox(
+                                    width: _statusButtonWidth,
+                                    child: showPrimary || showSecondary
+                                        ? Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              if (showPrimary)
+                                                AppButton(
+                                                  key: primaryActionKey,
+                                                  onPressed: onPrimaryAction,
+                                                  expand: true,
+                                                  constrainContent: true,
+                                                  child: Text(
+                                                    primaryActionLabel!,
+                                                  ),
+                                                ),
+                                              if (showPrimary && showSecondary)
+                                                const SizedBox(
+                                                  height: AppSpacing.s,
+                                                ),
+                                              if (showSecondary)
+                                                AppButton(
+                                                  key: secondaryActionKey,
+                                                  onPressed: onSecondaryAction,
+                                                  expand: true,
+                                                  constrainContent: true,
+                                                  variant:
+                                                      AppButtonVariant.ghost,
+                                                  child: Text(
+                                                    secondaryActionLabel!,
+                                                  ),
+                                                ),
+                                            ],
+                                          )
+                                        : const SizedBox(
+                                            height: AppButtonSizing.largeHeight,
+                                          ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: AppSpacing.xl),
-                            SizedBox(
-                              width: _statusButtonWidth,
-                              child: showPrimary || showSecondary
-                                  ? Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        if (showPrimary)
-                                          AppButton(
-                                            key: primaryActionKey,
-                                            onPressed: onPrimaryAction,
-                                            expand: true,
-                                            constrainContent: true,
-                                            child: Text(primaryActionLabel!),
-                                          ),
-                                        if (showPrimary && showSecondary)
-                                          const SizedBox(height: AppSpacing.s),
-                                        if (showSecondary)
-                                          AppButton(
-                                            key: secondaryActionKey,
-                                            onPressed: onSecondaryAction,
-                                            expand: true,
-                                            constrainContent: true,
-                                            variant: AppButtonVariant.ghost,
-                                            child: Text(secondaryActionLabel!),
-                                          ),
-                                      ],
-                                    )
-                                  : const SizedBox(
-                                      height: AppButtonSizing.largeHeight,
-                                    ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     ),

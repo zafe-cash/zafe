@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/device_lock_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../layout/app_column.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_icon.dart';
@@ -197,43 +198,55 @@ class LockScreen extends StatelessWidget {
     final colors = context.colors;
     return Material(
       color: colors.background.window,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              Center(child: _LockTile(colors: colors)),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                'Zafe is locked',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: 'Space Grotesk',
-                  fontSize: 28,
-                  height: 1.2,
-                  color: colors.text.accent,
-                ),
-              ),
-              if (message != null) ...[
-                const SizedBox(height: AppSpacing.s),
-                Text(
-                  message!,
-                  textAlign: TextAlign.center,
-                  style: AppTypography.bodyMedium.copyWith(
-                    color: colors.text.destructive,
+      // Phone-width in a wide window, clear of a hinge; scrolls in a short one.
+      child: AppColumn(
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, box) => SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: box.maxHeight),
+                child: IntrinsicHeight(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Spacer(),
+                        Center(child: _LockTile(colors: colors)),
+                        const SizedBox(height: AppSpacing.md),
+                        Text(
+                          'Zafe is locked',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Space Grotesk',
+                            fontSize: 28,
+                            height: 1.2,
+                            color: colors.text.accent,
+                          ),
+                        ),
+                        if (message != null) ...[
+                          const SizedBox(height: AppSpacing.s),
+                          Text(
+                            message!,
+                            textAlign: TextAlign.center,
+                            style: AppTypography.bodyMedium.copyWith(
+                              color: colors.text.destructive,
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        AppButton(
+                          expand: true,
+                          leading: const AppIcon(AppIcons.unlock, size: 20),
+                          onPressed: busy ? null : onUnlock,
+                          child: const Text('Unlock'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ],
-              const Spacer(),
-              AppButton(
-                expand: true,
-                leading: const AppIcon(AppIcons.unlock, size: 20),
-                onPressed: busy ? null : onUnlock,
-                child: const Text('Unlock'),
               ),
-            ],
+            ),
           ),
         ),
       ),

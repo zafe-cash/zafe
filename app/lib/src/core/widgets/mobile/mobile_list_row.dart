@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 import '../../theme/app_theme.dart';
@@ -73,6 +75,46 @@ class MobileListRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (value == null || _stacked(context)) {
+      return _row(context, stacked: value != null);
+    }
+    // Also stacked when the label leaves the value no room (a narrow window, e.g. a
+    // flip phone's cover screen): measured, so rows that fit keep their one line.
+    return LayoutBuilder(
+      builder: (context, box) =>
+          _row(context, stacked: !_fitsOneLine(context, box.maxWidth)),
+    );
+  }
+
+  bool _fitsOneLine(BuildContext context, double width) {
+    double measure(String text, TextStyle style) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textScaler: MediaQuery.textScalerOf(context),
+        textDirection: Directionality.of(context),
+        maxLines: 1,
+      )..layout();
+      final w = painter.width;
+      painter.dispose();
+      return w;
+    }
+
+    final labelWidth = measure(label, textStyle ?? AppTypography.bodyMedium);
+    final valueWidth = measure(
+      value!,
+      valueTextStyle ?? AppTypography.bodyMedium,
+    );
+    // Room for the leading widget, the badge and the chevron or trailing widget is
+    // estimated; the value may ellipsize down to 40.
+    final extras =
+        (leading == null ? 0 : 36) +
+        (labelBadge == null ? 0 : 28) +
+        (trailing != null || showChevron ? 32 : 0);
+    return labelWidth + AppSpacing.xs + math.min(valueWidth, 40) + extras <=
+        width;
+  }
+
+  Widget _row(BuildContext context, {required bool stacked}) {
     final colors = context.colors;
     final labelColor =
         this.labelColor ??
@@ -100,7 +142,7 @@ class MobileListRow extends StatelessWidget {
           // Zafe: at large system text sizes there's no room for both on one
           // line (the label would push the row off screen): the value goes under
           // the label instead.
-          if (value != null && _stacked(context))
+          if (value != null && stacked)
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

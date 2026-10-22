@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/theme/app_theme.dart';
+import 'onboarding_art.dart';
 
 /// The Welcome door's wheel centre and key ring: `WELCOME_WHEEL` and the scene's `ring`
 /// in scripts/illustrations/scenes.py.
@@ -255,17 +256,21 @@ class WelcomeDoorTap extends StatelessWidget {
     top: 0,
     left: 0,
     right: 0,
-    child: AspectRatio(
-      aspectRatio: 1080 / 1240,
-      child: Align(
-        alignment: Alignment(0, 560 / 1240 * 2 - 1),
-        child: FractionallySizedBox(
-          widthFactor: 790 / 1080,
-          heightFactor: 790 / 1240,
-          child: ExcludeSemantics(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: onTap,
+    child: Align(
+      alignment: Alignment.topCenter,
+      child: SizedBox.fromSize(
+        // Over the hero's art, wherever it sits.
+        size: OnboardingHero.sizeIn(MediaQuery.sizeOf(context)),
+        child: Align(
+          alignment: Alignment(0, 560 / 1240 * 2 - 1),
+          child: FractionallySizedBox(
+            widthFactor: 790 / 1080,
+            heightFactor: 790 / 1240,
+            child: ExcludeSemantics(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: onTap,
+              ),
             ),
           ),
         ),
