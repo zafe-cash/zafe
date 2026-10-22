@@ -169,25 +169,20 @@ abstract final class _AndroidSystemBars {
   }
 }
 
-/// Overlay style for the resolved app theme brightness — both system
-/// bars take the theme's `background.window` (the scaffold background
-/// used across the mobile shell, onboarding, and unlock screens) with
-/// matching icon contrast. `statusBarBrightness` is the iOS-side field
-/// and stays unset; this style only ever applies on Android.
+/// Overlay style for the resolved app theme brightness: icon contrast only. The bars
+/// are transparent (`MainActivity` turns edge-to-edge on for every Android version), so
+/// the app's own background shows behind them. No bar colours: Android 15 ignores them
+/// and Flutter sets them through `Window.setStatusBarColor` / `setNavigationBarColor`,
+/// which Play flags as deprecated. `statusBarBrightness` is the iOS-side field and
+/// stays unset; this style only ever applies on Android.
 @visibleForTesting
 SystemUiOverlayStyle androidSystemBarsStyleFor(Brightness brightness) {
-  final window = brightness == Brightness.dark
-      ? AppColors.dark.background.window
-      : AppColors.light.background.window;
   final icons = brightness == Brightness.dark
       ? Brightness.light
       : Brightness.dark;
   return SystemUiOverlayStyle(
-    statusBarColor: window,
     statusBarIconBrightness: icons,
     systemStatusBarContrastEnforced: false,
-    systemNavigationBarColor: window,
-    systemNavigationBarDividerColor: window,
     systemNavigationBarIconBrightness: icons,
     systemNavigationBarContrastEnforced: false,
   );

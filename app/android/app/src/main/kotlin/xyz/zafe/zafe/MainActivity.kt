@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -16,6 +17,8 @@ import android.os.PersistableBundle
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager.Authenticators
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -37,6 +40,18 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingUnlock: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Edge to edge on every Android version, not only 15+ (where targetSdk 35+ forces
+        // it): one layout everywhere, Flutter's padding handles the bars (Play's
+        // recommendation, 2026-10-22). The status bar is transparent. The navigation bar gets
+        // the window colour: on Android 14 and older Flutter doesn't draw under it, and a
+        // transparent bar showed a black band (Android 15+ ignores the colour). Light/dark
+        // follow the app's theme (uiMode is set from it, see setBrightness); keep the values
+        // equal to @color/zafe_window (values, values-night). Icon contrast: Dart,
+        // androidSystemBarsStyleFor.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(WINDOW_LIGHT, WINDOW_DARK),
+        )
         super.onCreate(savedInstanceState)
         // Taps that arrive while another app draws over this one (an overlay trying to
         // trick the owner into approving) are dropped.
@@ -333,5 +348,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     private companion object {
         const val UNLOCK_REQUEST = 0x2afe
+
+        // @color/zafe_window in light and dark (background.window in the app's theme).
+        const val WINDOW_LIGHT = 0xFFF1F5F5.toInt()
+        const val WINDOW_DARK = 0xFF080B0B.toInt()
     }
 }

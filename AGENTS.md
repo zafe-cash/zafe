@@ -604,6 +604,28 @@ scripts/            m0-e2e.sh, android-bench.sh, check_zip2005_vectors.py
 - `zcash_primitives` `non-standard-fees` is a **dev-dependency only** (tests model an
   overpaying proposer).
 - `cargo build -p a -p b --examples` builds only examples — build bins separately.
+- **Android build on Flutter 3.47 (2026-10-22)**: AGP 9.1.1, Gradle 9.3.1, Kotlin Gradle plugin 2.4.0, set up
+  as Flutter 3.47's own template (`android.newDsl=false`, `android.builtInKotlin=false`: Flutter applies
+  `kotlin-android`; the app's Gradle file has `kotlin { compilerOptions }`, no `kotlinOptions`). Built-in
+  Kotlin waits for **firebase_core** and **workmanager_android**, which still apply KGP (Flutter warns that a
+  future version will refuse them). Optimized resource shrinking is AGP 9's default. Gradle 9 removed
+  `Project.exec()`: our cargokit copy (`rust_builder/cargokit/gradle/plugin.gradle`) runs through an injected
+  `ExecOperations` (upstream cargokit has no fix). The Rust plugin module (`rust_builder/android/build.gradle`)
+  compiles against SDK 36 / min 24 / Java 17: AGP 9 refuses androidx dependencies that need SDK 34+.
+  **`shared_preferences_android` is pinned to 2.4.23**: 2.5.x calls its own Kotlin over JNI with no R8 keep
+  rules, so a minified release fails every prefs call (`NoSuchMethodError ... SharedPreferencesApiRegistrar`)
+  and the app hangs at start; release builds catch this, `flutter test` doesn't. `permission_handler` stays on
+  12 (13 needs compileSdk 37; we only call `openAppSettings()`).
+- **FCM targets are installation IDs (2026-10-22)**: FCM deprecated registration tokens (v1 `token`: "Use fid
+  instead"). The manifest sets `firebase_messaging_installation_id_enabled` (in this mode `getToken()` throws);
+  the app listens to `onRegistered` and calls `register()` at start, on a relay change and after a new vault
+  (it re-fires with the current FID); it registers `platform: "fcm-fid"` (`PushPlatform::FcmFid`, appended);
+  the relay sends it in v1's `fid` field. One target per member: an FID replaces the old token. **A relay
+  without `FcmFid` rejects it, so promote the relay before an app that registers FIDs ships.**
+- **System bars (2026-10-22)**: `MainActivity` calls `enableEdgeToEdge` with a transparent status bar and a
+  nav bar in the window colour per theme (`SystemBarStyle.auto`); Dart sets no bar colours (those APIs are
+  deprecated on 15+). Android 15+ ignores the nav colour. The Android 14 emulator shows a black band behind the
+  nav bar even with the old Dart colour, likely emulator compositing; check on a real Android 14 phone.
 - **TLS (clients)**: rustls + **ring** + **webpki-roots** (bundled Mozilla roots)
   everywhere: reqwest `rustls-tls` (relay client when direct, relay's FCM client; over
   Tor the relay client uses `zcash_client_backend`'s hyper + tokio-rustls) and tonic
@@ -976,7 +998,7 @@ that Zafe **not look like a copy**. Zafe's visual identity, keep it when resynci
   because no build passed the flag).
 
 What still follows Vizor:
-Flutter (pinned **3.41.6** via fvm) + `flutter_rust_bridge` **2.11.1** + Rust core; Riverpod
+Flutter (pinned **3.47.7** via fvm since 2026-10-22, was 3.41.6) + `flutter_rust_bridge` **2.11.1** + Rust core; Riverpod
 + go_router; `flutter_secure_storage`; design tokens with Desktop/Mobile sets selected at
 build time by a `--dart-define` form-factor flag; sentence-case copy; Rust API surface
 limited to primitives/flat structs (complex types stay behind it); bootstrap snapshot before

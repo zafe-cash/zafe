@@ -627,15 +627,27 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       never at risk, sending pauses until you update".
 - [ ] Re-run the release-signed in-place update test for the NU7 release (v0.1.8 -> v0.1.10 passed on 2026-10-12).
 
+### Flutter 3.47 branch (`flutter-3.47`, 2026-10-22, for 0.1.22 after NU7)
+
+- [x] Flutter 3.47.7, plugin majors, AGP 9.1.1, FCM installation IDs; phone check on testnet passed
+      (0.1.22-dev2: in-place update keeps vaults, FID push 6 s, one-tap send, vault setup, Welcome art).
+- [ ] **Before 0.1.22 ships on mainnet: promote the relay with `FcmFid`** (on `main` as 57876ab; testnet has it).
+- [ ] Android 14: emulator shows the top and keyboard insets right; a black nav-bar band there is unconfirmed
+      on a real phone. Not checked yet: the key-shard rays (checked on the phone with a throwaway
+      app: 3.47 draws them evenly, 3.41 unevenly; the darker rays were the test renderer only), the in-app update from Play (only on the internal track), large screens.
+- [ ] Built-in Kotlin once firebase_core and workmanager_android stop applying KGP.
+- [x] FID delivery confirmed: the app logs `push: registered fcm-fid for 9 vault(s)` (relay accepted the FID,
+      one target per member), and the push arrived in 6 s.
+
 ### Play Console suggestions on 0.1.16 (2026-10-22, for 0.1.22, after NU7)
 
 Recommendations from the release dashboard; none blocks a release. Each changes layout or the build, so each
 needs a device check.
 
-- [ ] **Edge-to-edge on every Android version**: targetSdk 36 makes Android 15+ edge to edge; older versions aren't.
+- [x] **Edge-to-edge on every Android version** (`flutter-3.47`; not yet checked on Android 14): targetSdk 36 makes Android 15+ edge to edge; older versions aren't.
       Call `enableEdgeToEdge()` in `MainActivity`; check status/nav bar and keyboard insets on an Android 14 emulator
       against an Android 16 phone.
-- [ ] **Deprecated system-bar APIs** (`Window.setStatusBarColor`, `setNavigationBarColor`,
+- [x] **Deprecated system-bar APIs** (`flutter-3.47`: no bar colours from our side) (`Window.setStatusBarColor`, `setNavigationBarColor`,
       `setNavigationBarDividerColor`, flagged at R8-renamed `G.y.h` and `...fluttersecurestorage.ciphers.e.t`): our
       Kotlin doesn't call them; Flutter's engine does (`flutter.jar` PlatformPlugin), and we ask it to by setting bar
       colours in `app_theme_host.dart` `androidSystemBarsStyleFor`. Stop setting colours (keep icon brightness) after
@@ -644,10 +656,10 @@ needs a device check.
       targetSdk, so tablets/foldables already get landscape and resizable windows. Drop the manifest lock, keep
       portrait on phones from Dart (by shortest side), make screens survive wide/landscape windows, add tablet and
       landscape sizes to `tool/screens/size_sweep_test.dart`. Phone-first: not a tablet layout.
-- [ ] **Optimized resource shrinking** (R8 itself is already on, with `proguard-android-optimize.txt` from Flutter's
+- [x] **Optimized resource shrinking** (`flutter-3.47`: AGP 9 default; APK 66.0 MB vs 65.6 MB, newer plugins) (R8 itself is already on, with `proguard-android-optimize.txt` from Flutter's
       Gradle plugin): AGP 8.11.1 -> latest 8.x and the optimized-resource-shrinking Gradle property (check the
       exact name and minimum AGP in Google's docs first); compare APK size, run the phone tests.
-- [ ] **AGP 9**: wait. Flutter 3.41.6's tooling lists full Kotlin support only up to AGP 8.11.1
+- [x] **AGP 9** (`flutter-3.47`: AGP 9.1.1 with Flutter 3.47.7; built-in Kotlin still off, see AGENTS.md). Was: wait. Flutter 3.41.6's tooling lists full Kotlin support only up to AGP 8.11.1
       (`gradle_utils.dart` `maxKnownAgpVersionWithFullKotlinSupport`); AGP 9 changes Kotlin plugin handling.
 
 ### UX issues found while testing on a phone (2026-10-12, v0.1.10)
