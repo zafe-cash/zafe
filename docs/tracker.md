@@ -197,8 +197,8 @@ Open
         screen, pieces lock, it ripples up into the nav logo); much shorter copy
   - [x] Round 13 (2026-10-22): home rebuilt around one payment on several phones
         (`docs/site.md`), `/download`, `/support`, iPhone email waitlist (Vercel function +
-        private Blob). Open: create and connect the private Blob store in Vercel (README
-        "The iPhone waitlist"); double opt-in for the waitlist *(idea)*; send the launch
+        private Blob). Store `zafe-waitlist` connected 2026-10-23 (production only; a live
+        test signup stored and was deleted). Open: double opt-in *(idea)*; send the launch
         email and delete the store when iOS ships
   - [x] Illustrated section loops (2026-10-23, `docs/site.md` §6): the home page's films are
         replaced by four loops (sign, sent, setup, live), wide and tall, each a Blender scene
