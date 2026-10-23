@@ -1,5 +1,5 @@
-# "Start a vault together": the background for the app's key-making screen
-# (film/src/LoopCard.tsx). Looking down at a round table in the same room's light: three
+# "One key, never in one place": the background for the keys card
+# (film/src/Loop.tsx). Looking down at a round table in the same room's light: three
 # seats (a mug and the same four safety words on each person's card), and a strongbox right
 # of the card. Its lid closes while the phones make the key; three keys, one per signer,
 # slide into its three locks and turn together at "Vault keys ready" (the app's frame 62).

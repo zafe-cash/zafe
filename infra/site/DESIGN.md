@@ -269,7 +269,7 @@ A centred column, everything text-aligned centre on the home page. The hero fill
 
 The band (sage) spans the full width; its paper tab hangs into it from the hero, centred, with 28px inverted fillets either side so the paper seems to flow down into it. The first story step sits in the band (160px down, 124px on phones), so the first screen ends on the tab. The other steps follow on paper, 160px apart (112px under 600px). Each step: H2, the line 16px below, then the loop 48px below (32px on phones) in a column up to 100rem with 24px gutters (12px on phones). Loops are 16:9; on phones (700px and below) and portrait tablets (portrait, up to 1100px) they switch to a 9:16 cut, never taller than 88svh.
 
-"Made to live with" ends with a feature list 64px below its loop: icon-and-line items in three columns (70rem), two at 1100px, one under 700px. The close ("Get Zafe", one line, Google Play and iPhone side by side) sits 152px down; the FAQ (44rem, centred heading) 160px below that; 72px to the footer.
+"Quiet until it needs you" ends with a feature list 64px below its loop: icon-and-line items in three columns (70rem), two at 1100px, one under 700px. The close ("Get Zafe", one line, Google Play and iPhone side by side) sits 152px down; the FAQ (44rem, centred heading) 160px below that; 72px to the footer.
 
 /download and /privacy are a single 44rem reading column, /support 46rem centred; options 72px apart. Under 600px install buttons go full width and the waitlist row stacks.
 
@@ -311,7 +311,7 @@ A paper tab hanging from the hero into the sage band: two 48px icon buttons (Goo
 A figure: the video in a paper frame (32px, loop-frame shadow), poster first, `preload=metadata` except the first. A paper grain (20%, multiply) lies over the frame, masked off the card by a per-loop SVG mask. A 40px round pause button sits bottom-right (white 85%, ink glyph), hidden until `loops.js` runs. On phones and portrait tablets the tall cut, its still and its mask swap in. With `prefers-reduced-motion: reduce` the video and button are hidden and a still (WebP, with alt text) shows. The moment's beats are an `ol` for screen readers. An optional caption (15px, secondary) sits 20px below.
 
 ### Feature List
-"Made to live with": plain lines, each led by the app's Patina two-tone icon (22px, secondary ink), no tiles, no borders.
+The feature list: plain lines, each led by the app's Patina two-tone icon (22px, secondary ink), no tiles, no borders.
 
 ### Inputs / Fields
 - **Style:** the iPhone waitlist: white field, 1px hairline, 12px corners, 52px tall, 16px padding, verdigris caret. A plain form posting to `/api/waitlist`; no script.

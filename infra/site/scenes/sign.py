@@ -1,4 +1,4 @@
-# "You sign what you see": the background for the request card (film/src/LoopSign.tsx).
+# "Your phone checks every payment": the background for the request card (film/src/Loop.tsx).
 # A desk in a room in shade; light comes through a window up-left and lands on the wall and
 # the payment slip. The card floats in the middle; the darkest accents sit at its edges (the
 # stamp on the right, the magnifier over the slip at bottom-left), the corners stay quiet.

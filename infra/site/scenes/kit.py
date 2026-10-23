@@ -19,7 +19,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 FPS = 30
-LOOP = 126  # matches the card's loop in film/src/LoopSign.tsx
+LOOP = 126  # the request card's loop (film/src/Root.tsx); scenes with other cards set their own
 INK = "#1E2B2A"
 WARM = "#FFF2D8"  # the key light's tint on light bands and highlights
 T_MID, T_LIGHT = 0.1, 0.8  # luminance thresholds between the three bands

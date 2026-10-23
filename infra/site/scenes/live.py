@@ -1,4 +1,4 @@
-# "Made to live with": the background for the vault's home screen (film/src/LoopCard.tsx).
+# "Quiet until it needs you": the background for the vault card (film/src/Loop.tsx).
 # The same room at dusk: the lamp is the light, the window shows the evening, binders for
 # the books on a shelf. Nothing is happening, which is the point: a cat sleeps by the card,
 # steam leaves the mug, a few stars come and go.

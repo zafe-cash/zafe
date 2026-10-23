@@ -1,4 +1,4 @@
-# "It sends itself": the background for the app's Sent screen (film/src/LoopCard.tsx).
+# "Two of three approve. It's sent.": the background for the send card (film/src/Loop.tsx).
 # The same room. Right of the card, a brass pneumatic tube comes down the wall to a mouth
 # over a tray; the window's light lands on it. The sealed payment waits in a capsule in the
 # tray. While the card says "Sending…" the capsule lifts, turns upright and rises to the

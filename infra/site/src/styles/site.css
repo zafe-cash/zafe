@@ -1155,7 +1155,7 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   .hc-frame .hc-still { display: block; }
 }
 
-/* Made to live with: shipped features, plain lines with the app's icons. */
+/* The features under the last loop: shipped features, plain lines with the app's icons. */
 .hc-live { max-width: 56rem; margin: 0 auto; padding: 64px 24px 0; text-align: center; }
 .hc-live ul { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 32px; text-align: left; }
 .hc-live li { display: flex; align-items: center; gap: 12px; font-size: 17px; }

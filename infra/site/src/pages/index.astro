@@ -1,8 +1,9 @@
 ---
 // Home page (direction: .impeccable/surfaces/src-pages-index-astro.md). One centred column:
 // the headline and the two ways to install, then the story in four illustrated loops (one
-// room; each scene moves with the app's own card, infra/site/scenes + film): you sign what
-// you see, it sends itself, start a vault together, made to live with; the close, questions.
+// room; each scene moves with the app's own card, infra/site/scenes + film): your phone
+// checks every payment; two of three approve, it's sent; one key, never in one place;
+// quiet until it needs you (then the features); the close, questions.
 // The only script is loops.js (pause buttons, no play off screen); with reduced motion each
 // loop is a still. Every claim is shipped (docs/tracker.md); the link under the sending loop
 // is the real testnet payment from the 2026-09-30 dry run.
@@ -109,32 +110,32 @@ const jsonLd = {
       <IphoneButton id="ios-tab" icon />
     </div>
     <section id="how" class="hc-step" aria-labelledby="sign-title">
-      <h2 id="sign-title">You sign what you see</h2>
-      <p>Your phone checks the real transaction before you approve.</p>
+      <h2 id="sign-title">Your phone checks every payment</h2>
+      <p>Maya asks to send 12.50 ZEC. Before you approve, it confirms the recipient, the amount and the fee.</p>
       <Loop
         name="sign"
         eager
         alt="Maya’s request for 12.50 ZEC on a desk, approved; a wax stamp seals the envelope"
-        text={['Maya proposes 12.50 ZEC.', 'Your phone checks the real transaction, and you approve it.']}
+        text={['Maya asks to send 12.50 ZEC.', 'Your phone checks the real transaction, and you approve it.']}
       />
     </section>
     </div>
 
     <section class="hc-step" aria-labelledby="sent-title">
-      <h2 id="sent-title">It sends itself</h2>
-      <p>Once enough of you approve, it goes out on its own.</p>
+      <h2 id="sent-title">Two of three approve. It&rsquo;s sent.</h2>
+      <p>No one gathers signatures. The chain sees an ordinary payment, not who approved it.</p>
       <Loop
         name="sent"
         alt="“Sent!” beside a brass pneumatic tube that has just taken the sealed payment"
-        text={['Two of three approve, and it sends itself.', 'The chain sees an ordinary payment: recipient and amount encrypted, approvers hidden.']}
+        text={['Two of three approve, and the payment is sent.', 'The chain sees an ordinary payment: recipient and amount encrypted, approvers hidden.']}
       >
         <figcaption>Sample data. <a href="https://testnet.zecblock.com/tx/e6ccd6b707e8ee7ed8b261855272dba317495afa6659e393d3f1691e9eef0237" target="_blank" rel="noopener noreferrer">See a real Zafe payment on the chain</a></figcaption>
       </Loop>
     </section>
 
     <section id="setup" class="hc-step" aria-labelledby="setup-title">
-      <h2 id="setup-title">Start a vault together</h2>
-      <p>Everyone joins from their own phone, whenever they can.</p>
+      <h2 id="setup-title">One key, never in one place</h2>
+      <p>You set up the vault on your phones together. Each keeps a share; no one ever holds all of it.</p>
       <Loop
         name="setup"
         alt="Three keys turned in a strongbox on a round table, beside “Vault keys ready”"
@@ -143,7 +144,8 @@ const jsonLd = {
     </section>
 
     <section class="hc-step" aria-labelledby="live-title">
-      <h2 id="live-title">Made to live with</h2>
+      <h2 id="live-title">Quiet until it needs you</h2>
+      <p>You get a notification when a payment is waiting for you.</p>
       <Loop
         name="live"
         alt="The vault’s balance with a request from Maya waiting, at a desk in the evening, a cat asleep"
