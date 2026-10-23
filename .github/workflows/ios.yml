@@ -83,12 +83,24 @@ jobs:
         env:
           ZAFE_RELAY_URL: ${{ vars.ZAFE_RELAY_URL }}
           ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+          # Firebase iOS app identifiers (GoogleService-Info.plist values; not secrets). Push
+          # stays off without them. Needs the APNs key uploaded in the Firebase console.
+          ZAFE_FIREBASE_IOS_API_KEY: ${{ vars.ZAFE_FIREBASE_IOS_API_KEY }}
+          ZAFE_FIREBASE_IOS_APP_ID: ${{ vars.ZAFE_FIREBASE_IOS_APP_ID }}
+          ZAFE_FIREBASE_IOS_SENDER_ID: ${{ vars.ZAFE_FIREBASE_IOS_SENDER_ID }}
+          ZAFE_FIREBASE_IOS_PROJECT_ID: ${{ vars.ZAFE_FIREBASE_IOS_PROJECT_ID }}
+          IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
         run: |
           flutter pub get
           # An empty define would replace the build's default, so only pass what is set.
           defines=(--dart-define=ZAFE_NETWORK=test)
           [ -z "$ZAFE_RELAY_URL" ] || defines+=(--dart-define=ZAFE_RELAY_URL="$ZAFE_RELAY_URL")
           [ -z "$ZAFE_LINK_HOST" ] || defines+=(--dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST")
+          for name in API_KEY APP_ID SENDER_ID PROJECT_ID; do
+            var="ZAFE_FIREBASE_IOS_$name"
+            [ -z "${!var}" ] || defines+=(--dart-define="$var=${!var}")
+          done
+          defines+=(--dart-define=ZAFE_FIREBASE_IOS_BUNDLE_ID="${IOS_BUNDLE_ID:-xyz.zafe.zafe}")
           flutter build ios ${{ matrix.build_args }} "${defines[@]}" \
             --build-name=0.0.0 --build-number=${{ github.run_number }}
 
@@ -123,6 +135,7 @@ jobs:
       CERT_P12: ${{ secrets.IOS_CERT_P12_BASE64 }}
       CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
       PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
+      ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
     steps:
       - name: Check secrets
         id: check
@@ -164,6 +177,20 @@ jobs:
           bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
           case "$appid" in *."$bundle") ;; *) echo "::error::Profile $appid does not match bundle id $bundle"; exit 1;; esac
           /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$RUNNER_TEMP/profile.plist" > "$RUNNER_TEMP/entitlements.plist"
+          # Universal links: a profile with the Associated Domains capability lists "*"; the app
+          # must name its domain itself. Without the capability the app has no universal links
+          # (zafe:// links still work).
+          if /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains' "$RUNNER_TEMP/entitlements.plist" > /dev/null 2>&1; then
+            if [ -n "$ZAFE_LINK_HOST" ]; then
+              /usr/libexec/PlistBuddy -c 'Delete :com.apple.developer.associated-domains' "$RUNNER_TEMP/entitlements.plist"
+              /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.associated-domains array' "$RUNNER_TEMP/entitlements.plist"
+              /usr/libexec/PlistBuddy -c "Add :com.apple.developer.associated-domains:0 string applinks:$ZAFE_LINK_HOST" "$RUNNER_TEMP/entitlements.plist"
+            else
+              /usr/libexec/PlistBuddy -c 'Delete :com.apple.developer.associated-domains' "$RUNNER_TEMP/entitlements.plist"
+              echo "::warning::Profile has Associated Domains but ZAFE_LINK_HOST is not set; no universal links"
+            fi
+          fi
+          echo "Entitlements:"; /usr/libexec/PlistBuddy -c 'Print' "$RUNNER_TEMP/entitlements.plist" | sed -E 's/(team-identifier|application-identifier) = .*/\1 = (hidden)/'
           cp "$RUNNER_TEMP/profile.mobileprovision" "$app/embedded.mobileprovision"
 
           # Nested code first, then the app itself.

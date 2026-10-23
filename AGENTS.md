@@ -381,11 +381,26 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - iOS channels (`ZafeNative`): `payment_feedback`, `secure_screen`, `window_appearance`,
   `system_settings`, `clipboard` (localOnly + 60 s expiry), `haptics`. `device_auth` is Android
   only (iOS keeps `local_auth`). URL schemes `zafe`, `zafe-testnet`, `zcash`; orientations follow main (large screens rotate).
-- Not done on iOS: export-compliance answer (`ITSAppUsesNonExemptEncryption`; Zafe has its own
-  E2E crypto, so this is the owner's call, not ours), App Store/TestFlight upload, APNs push (the
-  relay has no APNs sender; Firebase isn't configured, the app falls back to background checks),
-  Associated Domains / universal links (the entitlement breaks signing with a profile that lacks
-  it), a launch smoke test in CI.
+- **iOS push (2026-10-23, untested end to end)**: iOS goes through FCM like Android (FCM forwards to
+  APNs, so the relay needs no APNs key or sender): the app registers its Firebase installation ID
+  (`fcm-fid`), `FcmNotifier::message` carries an `apns` block (silent background push,
+  `content-available`, priority 5, no alert), `UIBackgroundModes` has `remote-notification`, and
+  `firebaseBackgroundHandler` runs the vault check. Firebase is initialised from dart-defines, not a
+  plist (`notifications/ios_firebase_options.dart`; repository variables `ZAFE_FIREBASE_IOS_API_KEY`,
+  `_APP_ID`, `_SENDER_ID`, `_PROJECT_ID`, values from `GoogleService-Info.plist`, not secrets; push is off
+  without them). Steps only the owner can do: add an iOS app to Firebase project `zafe-18c4d` with the
+  bundle id, upload an APNs auth key (.p8) there, enable Push Notifications on the App ID and regenerate
+  the provisioning profile (the sign job copies `aps-environment` from the profile). Silent pushes are
+  throttled by iOS and not delivered to a force-quit app, so timeliness is best effort; the next step
+  for reliability is a visible alert push plus a Notification Service Extension (not built).
+- **iOS universal links (2026-10-23, untested)**: the site already builds the
+  `apple-app-site-association` file from the variable `ZAFE_IOS_APP_IDS` (`<TeamID>.<bundle id>`, comma
+  separated; `site.yml`). The app side is an entitlement, added by the sign job when the profile has the
+  Associated Domains capability: it sets `applinks:$ZAFE_LINK_HOST` (a profile lists `*`). Needs the
+  capability on the App ID and a regenerated profile. Without it `zafe://` links still work. `app_links`
+  delivers the link; invites stay in the URL fragment.
+- Not done on iOS: export-compliance answer (`ITSAppUsesNonExemptEncryption`; Zafe has its own E2E
+  crypto, so this is the owner's call, not ours), App Store/TestFlight upload, a launch smoke test in CI.
 
 ## Machine hygiene
 

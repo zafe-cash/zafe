@@ -32,6 +32,7 @@ import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
 import '../providers/setup_step.dart';
 import 'check_lock.dart';
+import 'ios_firebase_options.dart';
 import 'vault_updates.dart';
 import '../core/storage/wallet_key.dart';
 
@@ -151,7 +152,18 @@ bool _listeningInForeground = false;
 
 Future<void> _registerPush({bool askPermission = true}) async {
   try {
-    await Firebase.initializeApp();
+    // iOS has no google-services.json: the Firebase identifiers come from the build
+    // (dart-defines, see ios_firebase_options.dart); without them push stays off.
+    if (Platform.isIOS) {
+      final options = iosFirebaseOptions();
+      if (options == null) {
+        debugPrint('push: no iOS Firebase options; relying on background checks');
+        return;
+      }
+      await Firebase.initializeApp(options: options);
+    } else {
+      await Firebase.initializeApp();
+    }
   } catch (_) {
     debugPrint('push: Firebase not configured; relying on background checks');
     return;
@@ -193,7 +205,8 @@ Future<void> _registerInstallation(FirebaseMessaging messaging) async {
 /// own member identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
-  final platform = Platform.isIOS ? 'apns' : 'fcm-fid';
+  // iOS is reached through FCM too (FCM forwards to APNs; the relay adds the apns block).
+  const platform = 'fcm-fid';
   var registered = 0;
   // Vaults still being set up too: their setup steps run in background checks.
   for (final v in await ZafeSecureStore.instance.readAll()) {
