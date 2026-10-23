@@ -281,49 +281,6 @@ html.world-off .world { visibility: hidden; }
 }
 html.world-on .home .faq { background: var(--window); max-width: none; padding-left: max(16px, calc((100vw - var(--width)) / 2)); padding-right: max(16px, calc((100vw - var(--width)) / 2)); }
 
-/* Feature islands: one card per island over the world (data-island); without the world,
-   the cards simply stack. */
-.islands-pin { max-width: var(--width); margin: 0 auto; padding: 120px 16px 40px; display: grid; gap: 20px; }
-.islands-head h2 { font-size: clamp(36px, 4.4vw, 56px); line-height: 1.04; margin: 16px 0 0; }
-html.world-on .islands-head {
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(12px);
-  border-radius: 28px;
-  padding: 26px 32px 30px;
-  box-shadow: 0 30px 60px -36px rgba(0, 40, 38, 0.45), 0 0 0 1px rgba(9, 14, 14, 0.05);
-}
-.island-card {
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(12px);
-  border-radius: 28px;
-  padding: 30px 32px 28px;
-  box-shadow: 0 30px 60px -36px rgba(0, 40, 38, 0.45), 0 0 0 1px rgba(9, 14, 14, 0.05);
-}
-.island-card h3 { font-size: 30px; line-height: 1.1; margin: 0 0 12px; }
-.island-card > p { color: var(--text-secondary); }
-.island-card .ticks { color: var(--text-secondary); margin-top: 22px; }
-.island-card .ticks .icon { color: var(--brand); }
-.chain-mini { margin: 20px 0 0; font-family: var(--mono); font-size: 13px; }
-.chain-mini div { display: grid; grid-template-columns: 6em 1fr; padding: 7px 0; border-top: 1px solid var(--line); }
-.chain-mini dt { color: var(--text-secondary); }
-.chain-mini dd { margin: 0; }
-html.world-on .islands { height: 520vh; }
-html.world-on .islands-pin { position: sticky; top: 0; height: 100vh; max-width: none; padding: 0; display: block; }
-html.world-on .islands-head, html.world-on .island-card {
-  position: absolute;
-  left: max(40px, calc((100vw - 76rem) / 2 + 40px));
-  top: 50%;
-  width: min(430px, 90vw);
-  opacity: 0;
-  transform: translateY(-46%);
-  transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
-  pointer-events: none;
-}
-html.world-on .islands[data-island="0"] .islands-head,
-html.world-on .islands[data-island="1"] .i1,
-html.world-on .islands[data-island="2"] .i2,
-html.world-on .islands[data-island="3"] .i3 { opacity: 1; transform: translateY(-50%); pointer-events: auto; }
-
 /* The call to action over the world seen from above. */
 .cta-pin { display: grid; place-items: center; padding: 120px 16px; }
 .cta-card {
@@ -340,13 +297,6 @@ html.world-on .cta-world { height: 220vh; }
 html.world-on .cta-pin { position: sticky; top: 0; height: 100vh; padding: 0 16px 6vh; place-items: end center; }
 
 @media (max-width: 760px) {
-  html.world-on .islands-head, html.world-on .island-card { left: 12px; right: 12px; width: auto; top: auto; bottom: 20px; transform: translateY(8%); }
-  html.world-on .islands[data-island="0"] .islands-head,
-  html.world-on .islands[data-island="1"] .i1,
-  html.world-on .islands[data-island="2"] .i2,
-  html.world-on .islands[data-island="3"] .i3 { transform: none; }
-  .island-card { padding: 22px 22px 20px; }
-  .island-card h3 { font-size: 24px; }
   .cta-card { padding: 32px 24px 36px; }
 }
 
@@ -360,7 +310,7 @@ html.lenis, html.lenis body { height: auto; }
    world: a still of the ending. */
 .story { position: relative; }
 .story-pin { position: relative; height: 100vh; min-height: 620px; overflow: hidden; }
-html.world-on .story { height: 1100vh; }
+html.world-on .story { height: 1140vh; }
 html.world-on .story-pin { position: sticky; top: 0; }
 
 .story-captions {
@@ -391,7 +341,7 @@ html.world-on .story-pin { position: sticky; top: 0; }
 .story[data-beat="0"] .k0, .story[data-beat="1"] .k1, .story[data-beat="2"] .k2,
 .story[data-beat="3"] .k3, .story[data-beat="4"] .k4, .story[data-beat="5"] .k5,
 .story[data-beat="6"] .k6, .story[data-beat="7"] .k7, .story[data-beat="8"] .k8,
-.story[data-beat="9"] .k9 {
+.story[data-beat="9"] .k9, .story[data-beat="10"] .k10 {
   opacity: 1;
   transform: none;
 }
@@ -830,41 +780,20 @@ html.world-on .story-pin { position: sticky; top: 0; }
   .pill, .nav-side a::after { transition: none; }
 }
 
-/* Custom cursor (src/scripts/ui.js), fine pointers only: a dot exactly on the pointer
-   and a trailing ring. Links swell the ring; on a "Get Zafe" pill the ring wraps it and
-   the dot steps aside. The system pointer is hidden only once ours draws. */
-html.cursor-on, html.cursor-on * { cursor: none !important; }
-.cursor { position: fixed; inset: 0 auto auto 0; z-index: 60; pointer-events: none; opacity: 0; transition: opacity 0.3s ease; }
-.cursor.on { opacity: 1; }
-.cursor-dot, .cursor-ring { position: absolute; left: 0; top: 0; }
-.cursor-dot::before {
-  content: '';
-  position: absolute;
-  left: -5px;
-  top: -5px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #0E1313;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
-  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+/* Pointer (fine pointers): a tilted dart (scenes/cursor.py) the OS draws itself, so it
+   never lags behind a busy page as a script-drawn cursor does; ink, teal over anything
+   clickable. Text fields keep the text cursor. */
+@media (pointer: fine) {
+  html {
+    cursor: url(/assets/ui/cursor.png) 3 2, auto;
+    cursor: image-set(url(/assets/ui/cursor.png) 1x, url(/assets/ui/cursor@2x.png) 2x) 3 2, auto;
+  }
+  a, button, summary, label, [role="button"], .pill, .qa summary {
+    cursor: url(/assets/ui/cursor-link.png) 3 2, pointer;
+    cursor: image-set(url(/assets/ui/cursor-link.png) 1x, url(/assets/ui/cursor-link@2x.png) 2x) 3 2, pointer;
+  }
+  input, textarea, select { cursor: text; }
 }
-.ring-shape {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(0, 115, 108, 0.55);
-  transform: translate(-50%, -50%);
-  transition: width 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
-}
-.cursor.link .ring-shape { width: 62px; height: 62px; background: rgba(81, 221, 210, 0.2); border-color: rgba(0, 115, 108, 0.25); }
-.cursor.link .cursor-dot::before { transform: scale(0.6); }
-.cursor.down .ring-shape { transform: translate(-50%, -50%) scale(0.82); }
-.cursor.full .ring-shape { border-color: rgba(0, 115, 108, 0.5); background: transparent; }
-.cursor.full .cursor-dot::before { transform: scale(0); }
 
 /* Words rising from a mask (ui.js splits headings into .w > .wi). */
 .w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: 0.08em; margin-bottom: -0.08em; }
@@ -892,12 +821,37 @@ html.cursor-on, html.cursor-on * { cursor: none !important; }
 .th-col { display: flex; flex-direction: column; transition: transform 0.7s cubic-bezier(0.6, -0.2, 0.2, 1.3); }
 .th-col span { height: 1em; }
 .th-label { max-width: 7em; padding-bottom: 0.5em; font-size: 14px; color: var(--text-secondary); }
-html.world-on .story[data-beat="4"] .threshold, html.world-on .story[data-beat="5"] .threshold,
-html.world-on .story[data-beat="6"] .threshold { opacity: 1; transform: none; }
-.story[data-beat="4"] .th-col, .story[data-beat="5"] .th-col { transform: translateY(-1em); }
-.story[data-beat="6"] .th-col, .story[data-beat="7"] .th-col, .story[data-beat="8"] .th-col, .story[data-beat="9"] .th-col { transform: translateY(-2em); }
+html.world-on .story:is([data-beat="4"], [data-beat="5"], [data-beat="6"], [data-beat="7"]) .threshold { opacity: 1; transform: none; }
+.story:is([data-beat="4"], [data-beat="5"], [data-beat="6"]) .th-col { transform: translateY(-1em); }
+.story:is([data-beat="7"], [data-beat="8"], [data-beat="9"], [data-beat="10"]) .th-col { transform: translateY(-2em); }
 .th-col span { display: block; }
 @media (max-width: 760px) { .threshold { top: 84px; left: 12px; padding: 10px 16px 8px 14px; } .th-label { font-size: 12px; } }
+
+/* What the chain sees, at "Sent": the real testnet payment, where the counter was and
+   in its style. */
+.chain-card {
+  position: absolute;
+  left: max(16px, calc((100vw - 76rem) / 2 + 40px));
+  top: 104px;
+  width: min(300px, calc(100vw - 32px));
+  padding: 16px 22px 14px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 24px 48px -30px rgba(0, 40, 38, 0.45), 0 0 0 1px rgba(9, 14, 14, 0.05);
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
+html.world-on .story[data-beat="10"] .chain-card { opacity: 1; transform: none; }
+.chain-title { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+.chain-mini { margin: 0; font-family: var(--mono); font-size: 13px; }
+.chain-mini div { display: grid; grid-template-columns: 6em 1fr; padding: 7px 0; border-top: 1px solid var(--line); }
+.chain-mini dt { color: var(--text-secondary); }
+.chain-mini dd { margin: 0; }
+.chain-note { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
+@media (max-width: 760px) { .chain-card { top: 84px; left: 12px; padding: 12px 16px 10px; } }
 
 /* Capture mode for stills.sh (/?still): only the world. */
 html.still-capture .home .nav,
@@ -911,7 +865,7 @@ html.still-page .home .nav-side { visibility: hidden !important; }
    decides; html.stills shows them. Lazy images that stay hidden are never fetched. */
 .still { display: none; }
 :is(html:not(.js), html.stills) .still { display: block; }
-:is(html:not(.js), html.stills) :is(.story-captions, .threshold) { display: none; }
+:is(html:not(.js), html.stills) :is(.story-captions, .threshold, .chain-card) { display: none; }
 
 .hero-still { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; min-height: 560px; }
 /* The hero still is also the poster while the world loads (seconds on a phone: three.js,
@@ -971,31 +925,14 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   box-shadow: 0 16px 34px -16px rgba(0, 0, 0, 0.55);
 }
 
-:is(html:not(.js), html.stills) .islands-pin { grid-template-columns: repeat(3, 1fr); align-items: start; }
-:is(html:not(.js), html.stills) .islands-head { grid-column: 1 / -1; text-align: center; margin-bottom: 12px; }
-.island-still {
-  width: calc(100% + 64px);
-  max-width: none;
-  height: auto;
-  aspect-ratio: 900 / 598;
-  object-fit: cover;
-  margin: -30px -32px 22px;
-  border-radius: 28px 28px 0 0;
-  background: #EEF2F1;
-}
-
 :is(html:not(.js), html.stills) .cta-pin { position: relative; min-height: min(100vh, 860px); place-items: end center; padding: 120px 16px 8vh; }
 .cta-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; }
 .cta-card { position: relative; }
 
-@media (max-width: 900px) {
-  :is(html:not(.js), html.stills) .islands-pin { grid-template-columns: 1fr; }
-}
 @media (max-width: 760px) {
   .story-beats { gap: 48px; }
   .story-beats img { border-radius: 20px; }
   .story-beats p { font-size: 14px; padding: 12px 18px; margin-top: -22px; }
-  .island-still { width: calc(100% + 44px); margin: -22px -22px 18px; }
 }
 
 /* Home page (index.astro, body.home.landing): one centred column. The headline and the two
@@ -1301,8 +1238,7 @@ html.world-on .showcase .world { animation: fade 1.4s ease both; }
   z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 16px 40px;
   max-width: 76rem;
   margin: 0 auto;
   padding: 28px 40px calc(36px + env(safe-area-inset-bottom, 0px));
@@ -1312,14 +1248,28 @@ html.world-on .showcase .world { animation: fade 1.4s ease both; }
 .foot-slim a { color: var(--text-secondary); text-decoration: none; }
 .foot-slim a:hover { color: var(--text); }
 .foot-slim-home { display: inline-flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 600; font-size: 16px; color: var(--text) !important; }
+.foot-slim-links { display: flex; flex-wrap: wrap; gap: 4px 24px; }
+.foot-slim-links a { display: inline-flex; align-items: center; min-height: 44px; }
+.foot-slim .foot-slim-note { margin: 0 0 0 auto; } /* beats .home p */
+.foot-slim .foot-social { display: flex; gap: 0; align-items: center; list-style: none; padding: 0; margin: -12px -12px -12px -16px; }
 html.world-on .foot-slim { background: var(--window); max-width: none; padding-left: max(40px, calc((100vw - 76rem) / 2 + 40px)); padding-right: max(40px, calc((100vw - 76rem) / 2 + 40px)); }
 
 @media (max-width: 760px) {
   .nav-light { padding: 16px 20px 24px; }
   .showcase .hero { justify-content: center; padding: 70px 20px 34vh; }
   .scroll-cue { display: none; }
-  .foot-slim { padding: 24px 20px 28px; }
-  .foot-slim p { display: none; }
+  .foot-slim {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "home social" "links links" "note note";
+    gap: 12px 16px;
+    padding: 24px 20px 28px;
+  }
+  html.world-on .foot-slim { padding-left: 20px; padding-right: 20px; }
+  .foot-slim-home { grid-area: home; }
+  .foot-slim .foot-social { grid-area: social; margin: -12px -12px -12px 0; }
+  .foot-slim-links { grid-area: links; gap: 0 20px; }
+  .foot-slim .foot-slim-note { grid-area: note; margin: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .showcase .nav-logo, .showcase .nav-side, html.world-on .showcase .world { animation: none; }

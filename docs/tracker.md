@@ -203,8 +203,13 @@ Open
   - [x] Illustrated section loops (2026-10-23, `docs/site.md` §6): the home page's films are
         replaced by four loops (sign, sent, setup, live), wide and tall, each a Blender scene
         moving with an app-rendered card; pause buttons, reduced-motion stills, grain masked off
-        the cards. Local only until the user has reviewed it. Optional: an illustrator for
-        painted texture maps and a paint-over
+        the cards. Shipped 2026-10-23. Optional: an illustrator for painted texture maps and
+        a paint-over
+  - [x] Showcase round 14 (2026-10-23, `docs/site.md`, perf in `docs/app-notes.md`): one
+        story (islands cut, their points folded in), always 3D (no static fallback), smooth on
+        an Intel UHD laptop (82 fps, measured in the user's Chrome), current app screens, OS-drawn
+        cursor, slim footer with links and socials. Open: two ~42 ms hitches were at the old
+        island switches (re-measure after the cut)
   - *(idea)* Show a second real payment (with a memo) once one is made; add a changelog
         or "last updated" to the site
   - [x] Domain: **zafe.cash** (Spaceship, registered 2026-10-01, expires 2027-10-01;

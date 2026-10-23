@@ -3,6 +3,22 @@
 The landing page (`infra/site/src/pages/index.astro`) follows this brief. Keep it current
 when the page changes.
 
+## Round 14 (2026-10-23): the showcase, one story, smooth on a laptop
+
+- **Islands cut, folded into the story** (user: "cut the islands and fold them into the
+  story"): they were a detour to abstract props after "Sent", repeated the home page, and
+  held the last hitches. *Checked on every phone*: a scan line and Recipient / Amount /
+  Fee badges on your phone while the request is open (own caption, 4 timeline units);
+  *Private all the way*: "Everyone in the vault is notified, end-to-end encrypted.";
+  *Invisible on-chain*: at "Sent" a card with the real testnet record where the
+  approvals counter was. The camera goes from "Sent" straight up to "Your turn". Captions
+  now start with their moment (the door, sending, sent each lagged a beat).
+- **No static fallback for the 3D** (user: the showcase's purpose is the 3D): only no
+  WebGL or a failed module shows stills; island stills are gone from `stills.sh`.
+- **Smoothness work, measured in the user's Chrome**: details in `docs/app-notes.md`
+  (screens on the GPU, baked shadows, resolution-first quality levels, warm-up).
+- **Cursor**: OS-drawn dart (see the cursor entry below).
+
 ## Round 13 (2026-10-22): one payment, several phones (impeccable + tasteskill)
 
 Critique first (impeccable dual review + tasteskill inspector, 22/36): the page was the
@@ -196,15 +212,12 @@ sizes, headers, renderer settings, rAF rate in headless Chrome).
 - **The call to action looks down on the vault**; a big Z lights in the floor around it
   and the card sits low so the mark reads above it. The world pauses only while the FAQ
   or footer covers the whole screen.
-- **Custom cursor** (src/scripts/ui.js): the user didn't like a companion next to the
-  system pointer ("the mouse is still the plain old pointer"), so on fine pointers
-  without reduced motion the system pointer is replaced (`cursor: none`, added only once
-  ours draws): a dark dot exactly on the pointer (white halo, readable on teal) and a
-  trailing teal ring (a "Scroll" label that followed it over the scenes was removed at the
-  user's request). Links swell the ring into a
-  soft teal disc; on a "Get Zafe" pill the ring wraps it, the pill leans toward the
-  pointer and the dot steps aside (the Seam-mark dot sat on the label). Touch devices
-  keep their native behaviour. `?pointer=fine` forces it on for headless checks.
+- **Cursor** (site.css, art from `scenes/cursor.py`): a tilted ink dart with a white edge,
+  teal over anything clickable, drawn by the OS through CSS `cursor: image-set(...)`. It
+  replaced a script-drawn dot and trailing ring (2026-10-23) because that cursor moved at
+  the page's frame rate and stuttered whenever the 3D took a slow frame; the user had
+  earlier ruled out the plain system pointer. A "Get Zafe" pill still leans toward the
+  pointer (ui.js). Touch devices keep their native behaviour.
 - **Text**: headings rise word by word from a mask; two "unshield" scrambles only (the
   proposal caption, the encrypted chain fields); an approvals counter (0, 1, 2 "of 2
   approvals") rolls as the shards seat. Custom splitter, not SplitText: no plugin, and

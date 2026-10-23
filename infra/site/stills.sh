@@ -58,12 +58,6 @@ shoot still 1440 900 1 \
   beat_4 .story 0.74 \
   beat_5 .story 0.93 \
   above .cta-world 1
-# Wider still for the islands, which the world frames to the right of their card: the
-# whole island fits, and the crop keeps that side.
-shoot still 1920 900 1 \
-  island_1 .islands 0.24 \
-  island_2 .islands 0.56 \
-  island_3 .islands 0.88
 # Tall: the hero on phones.
 shoot still 390 844 2 hero_tall .hero 0
 # The social image: the home page's hero (headline and the app's screens) after the
@@ -91,9 +85,6 @@ save('hero_wide')
 save('hero_tall')
 for i in range(1, 6):
     save(f'beat_{i}', width=1200)
-# Islands are framed to the right of their card in the world: keep that side.
-for i in range(1, 4):
-    save(f'island_{i}', crop=(0.38, 0.06, 1, 0.94), width=900)
 save('above', width=1440)
 Image.open(f'{raw}/og.png').convert('RGB').save(og, optimize=True)
 print('og', Image.open(og).size)

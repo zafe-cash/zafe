@@ -24,20 +24,17 @@ OUT = os.path.join(ROOT, "infra", "site", "public", "assets")
 # (output name, source under app/build without the _light/_dark suffix, crop box). Screen
 # renders are 780 px wide (390 logical at 2x); boxes are in those pixels.
 PHONE = (0, 0, 780, 1688)  # a phone viewport: 390 x 844 at 2x
-# Taller than the phone: the story scrolls them to the bottom, where the Approve button
-# must sit at SPOT.approve (story-screens.js), 280 px above the crop's end.
-BOB_APPROVE = (0, 0, 780, 1870)
-ME_REVIEW = (0, 0, 780, 1936)
 
 CROPS = [
     # The scroll story: Bob's phone in dark mode, yours in light (proposal_render_test's
-    # story_* scenarios and home_render_test with HOME_NOTICE=0).
+    # story_* scenarios and home_render_test with HOME_NOTICE=0). Proposing is Bob's
+    # approval, so he goes from the review straight to his proposal, waiting; you get the
+    # request with Approve pinned at the bottom (SPOT.approve in story-screens.js).
     ("story_bob_home", "screen_preview/home", PHONE, "dark"),
     ("story_bob_propose", "screen_preview/story_bob_propose", PHONE, "dark"),
-    ("story_bob_approve", "screen_preview/story_bob_approve", BOB_APPROVE, "dark"),
     ("story_bob_approved", "screen_preview/story_bob_approved", PHONE, "dark"),
     ("story_me_home", "screen_preview/home", PHONE, "light"),
-    ("story_me_review", "screen_preview/proposal_review", ME_REVIEW, "light"),
+    ("story_me_request", "screen_preview/story_me_request", PHONE, "light"),
     ("story_me_sent", "screen_preview/story_me_sent", PHONE, "light"),
     # The sending screen (sending_render_test): the story's finale.
     ("story_me_sending", "screen_preview/sending_progress", PHONE, "light"),

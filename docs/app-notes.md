@@ -878,6 +878,28 @@ Learned while studying it:
   on Android draws edge to edge) and footers pad `env(safe-area-inset-bottom)`; the 3D
   world starts phones at dpr 2 + MSAA 2 and stops adapting when a drop doesn't speed
   frames up (a 30 fps cap, not the GPU).
+  **Showcase performance** (2026-10-23, measured in the user's Chrome on an Intel UHD laptop,
+  1278x918 at dpr 1.25, 165 Hz, with a benchmark page that scrolls the page per variant):
+  the showcase is the 3D, so it never falls back to stills (only without WebGL or if the
+  module fails); a software renderer starts at the lowest level, reduced motion cuts.
+  What it cost and what replaced it:
+  - Phone screens were 2D canvases re-uploaded (780x1688, mipmapped) on every change:
+    80-100 ms hitches all through each transition. Now `screen-shader.js` composites the
+    app renders (uploaded once) and draws pushes, sheet, banners, taps, spinner and coins.
+  - Live VSM shadows cost ~12 ms a frame: now baked at load (`bakeShadows`, a top-down
+    lit render with shadows divided by one without; `ShadowMaterial` as an override shaded
+    caster tops wrongly). Moving things cast nothing; phones/envelope get painted blobs.
+  - Post-processing at the screen's dpr was the last big cost (18 vs 12 ms at dpr 1, where
+    it matched no post at all). 8-bit buffers, fewer bloom levels and removing the frosted
+    `backdrop-filter` cards changed nothing. Levels keep post down to dpr 1.
+  - adapt(): median of ~1 s windows, target 17.5 ms, skips levels that cost the same on
+    this screen; a frame cap is only assumed after two drops in a row don't help (one
+    unhelpful MSAA drop once pinned the laptop at the top level at 24 fps).
+  - Shaders compile (`compileAsync`, incl. the gold key material) and all textures upload
+    at load; first use mid-scroll was an 80-100 ms hitch. Scroll scrub is direct (Lenis and
+    the camera damping are the only smoothing); cover checks use cached ScrollTriggers.
+  Headless Windows Chrome paces WebGL at ~27 fps and pauses covered windows: judge in a
+  real window. Frame times quantize to vsync multiples (6.06 ms at 165 Hz).
   **Testing desktop-only CSS** (`(hover: hover) and (pointer: fine)`: the Google Play QR):
   headless Chrome reports neither, so a plain agent-browser run only sees the phone path. Use
   agent-browser >= 0.39 with `--session mouse --args

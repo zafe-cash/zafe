@@ -21,7 +21,8 @@ import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { EffectComposer, RenderPass, EffectPass, BloomEffect, NoiseEffect, VignetteEffect, BlendFunction } from 'postprocessing';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { W, H, SPOT, loadScreens, makeCanvas, drawBob, drawMe, drawCara, drawMark } from './story-screens.js';
+import { W, H, SPOT, loadScreens, banners } from './story-screens.js';
+import { MODE, bg, screenMaterial, screenTexture } from './screen-shader.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -37,11 +38,12 @@ const S = {
   pulse: 0, // the floor pulse from Bob to the others
   shardA: 0, shardB: 0, fuse: 0, insert: 0, open: 0,
   coins: 0, stream: 0, closeDoor: 0,
-  i1: 0, i2: 0, i3: 0, fpulse: 0, ctaZ: 0, // feature islands and the call to action
-  aPush1: 0, aPush2: 0, aPush3: 0, aScroll: 0,
-  tapA1: 0, tapA2: 0, tapA3: 0, tapB1: 0, tapB2: 0,
+  check: 0, // your phone's checks: 0..1 the scan and badges appear, 1..2 they go
+  ctaZ: 0, // the call to action
+  aPush1: 0, aPush2: 0,
+  tapA1: 0, tapA2: 0, tapB1: 0, tapB2: 0,
   banner: 0, sentBanner: 0, caraDim: 0,
-  bSheet: 0, bScroll: 0, bPush: 0, bDone: 0,
+  bSheet: 0, bPush: 0, bDone: 0,
 };
 
 // ---------------------------------------------------------------------------- helpers
@@ -148,31 +150,81 @@ function zBars(segments, material) {
 
 // ---------------------------------------------------------------------------- scene
 
-export async function start({ canvas, story, hero, features, cta, covers, screens, forceWorld = false, still = false, showStills = () => {} }) {
+export async function start({ canvas, story, hero, cta, covers, screens, still = false, software = false, cuts = false }) {
   // story.js starts fetching the screens while this module downloads.
   const images = await (screens ?? loadScreens());
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
+  // Reading a program's info log waits for its compile to finish; skip it outside checks.
+  renderer.debug.checkShaderErrors = still || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  // The screens and banners go to the GPU now, once (screen-shader.js).
+  const shots = Object.fromEntries(Object.entries(images).map(([k, img]) => [k, screenTexture(img, renderer)]));
+  const bannerCanvases = banners();
+  const bannerTex = { needsYou: screenTexture(bannerCanvases.needsYou, renderer), sent: screenTexture(bannerCanvases.sent, renderer) };
   const mobile = window.matchMedia('(max-width: 760px)').matches;
   // Quality levels, best first. The page starts at the device's level and steps down
   // (never back up, so it can't flicker) while frames are slow; see adapt().
   const dpr = window.devicePixelRatio || 1;
+  // Resolution is the main lever: on an Intel UHD laptop (dpr 1.25, 165 Hz) the full look
+  // ran at 18 ms at its own dpr and 12 ms at dpr 1, as fast as without post-processing.
+  // So the look (bloom, noise, vignette) stays down to dpr 1; only the last levels drop it.
   const LEVELS = [
-    { dpr: Math.min(dpr, 2), msaa: 4 },
-    { dpr: Math.min(dpr, 2), msaa: 2 }, // phones start here: sharp on 3x screens
-    { dpr: Math.min(dpr, 1.5), msaa: 2 },
-    { dpr: Math.min(dpr, 1.5), msaa: 0 },
-    { dpr: 1, msaa: 0 },
-    { dpr: 0.75, msaa: 0 },
+    { dpr: Math.min(dpr, 2), msaa: 4, post: true },
+    { dpr: Math.min(dpr, 2), msaa: 2, post: true }, // phones start here: sharp on 3x screens
+    { dpr: Math.min(dpr, 1.5), msaa: 2, post: true },
+    { dpr: Math.min(dpr, 1.5), msaa: 0, post: true },
+    { dpr: Math.min(dpr, 1), msaa: 0, post: true },
+    { dpr: Math.min(dpr, 1), msaa: 0, post: false },
+    { dpr: 0.75, msaa: 0, post: false },
   ];
-  let level = still || !mobile ? 0 : 1;
+  // What a level costs relative to another (pixels, MSAA samples, post), so a drop skips
+  // levels that are the same here (on a dpr 1.25 screen, dpr 2 and 1.5 are both 1.25).
+  const weight = (l) => LEVELS[l].dpr ** 2 * Math.max(1, LEVELS[l].msaa) * (LEVELS[l].post ? 1.6 : 1);
+  const cheaper = (l) => {
+    let n = l + 1;
+    while (n < LEVELS.length - 1 && weight(n) > 0.8 * weight(l)) n++;
+    return Math.min(n, LEVELS.length - 1);
+  };
+  // Start where the window can afford it: the best level whose render (pixels times MSAA
+  // samples) fits a budget, so a large or high-dpr laptop window doesn't open on 4x MSAA
+  // at dpr 2 (24M samples a frame on a 1500x1000 window) and stutter while it adapts.
+  const BUDGET = 9e6; // samples per frame
+  const cost = (l) => window.innerWidth * window.innerHeight * LEVELS[l].dpr ** 2 * Math.max(1, LEVELS[l].msaa);
+  let level = still ? 0 : mobile ? 1 : 0;
+  while (!still && level < 3 && cost(level) > BUDGET) level++;
+  if (software) level = LEVELS.length - 1; // no GPU: the cheapest look from the start
+  // The level this device settled on last time (same GPU and screen density, a similar
+  // window, within a week), so a return visit starts there instead of stepping down again:
+  // each step reallocates the buffers, a visible hitch. A per-viewer convenience in local
+  // storage (never sent anywhere); without storage it adapts as on a first visit.
+  const LEVEL_KEY = 'zafe-world-level';
+  const gl = renderer.getContext();
+  const gpuInfo = gl.getExtension('WEBGL_debug_renderer_info');
+  const device = `${gpuInfo ? gl.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL) : ''}|${dpr}`;
+  const area = () => window.innerWidth * window.innerHeight;
+  const remember = () => {
+    try {
+      localStorage.setItem(LEVEL_KEY, JSON.stringify({ device, area: area(), level, at: Date.now() }));
+    } catch {}
+  };
+  if (!still && !software) {
+    try {
+      const v = JSON.parse(localStorage.getItem(LEVEL_KEY));
+      const recent = Date.now() - v.at < 7 * 864e5;
+      if (v.device === device && recent && Math.abs(v.area / area() - 1) < 0.25 && v.level >= 0 && v.level < LEVELS.length) level = v.level;
+    } catch {}
+  }
   canvas.dataset.quality = String(level);
   let settleUntil = performance.now() + 2000; // adapt() ignores frames until then
   renderer.setPixelRatio(LEVELS[level].dpr);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
+  // Shadows are rendered once, at load, and baked into a texture (bakeShadows below); after
+  // that the shadow map is off. Things that move (the phones) get painted
+  // contact shadows (blob()).
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.VSMShadowMap;
+  renderer.shadowMap.autoUpdate = false;
 
   const scene = new THREE.Scene();
   const PAPER = new THREE.Color('#F1F5F5');
@@ -186,7 +238,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   const key = new THREE.DirectionalLight('#FFF3E2', 2.6);
   key.position.set(-6, 12, 8);
   key.castShadow = true;
-  key.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048);
+  key.shadow.mapSize.setScalar(2048);
   key.shadow.camera.left = -9;
   key.shadow.camera.right = 9;
   key.shadow.camera.top = 9;
@@ -254,7 +306,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   );
   recess.position.z = -0.3;
   inside.add(recess);
-  const stackMat = new THREE.MeshPhysicalMaterial({ color: '#F3BA3C', metalness: 1, roughness: 0.25, emissive: '#A5750F', emissiveIntensity: 0.5 });
+  const stackMat = new THREE.MeshStandardMaterial({ color: '#F3BA3C', metalness: 1, roughness: 0.25, emissive: '#A5750F', emissiveIntensity: 0.5 });
   for (let i = 0; i < 7; i++) {
     const n = 3 + ((i * 5) % 6);
     const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.028 * n, 32), stackMat);
@@ -313,7 +365,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
 
   // ---------------------------------------------------------------- key shards
   const shardMat = () =>
-    new THREE.MeshPhysicalMaterial({ color: '#51DDD2', emissive: new THREE.Color('#51DDD2'), emissiveIntensity: 1.8, roughness: 0.25, clearcoat: 1, metalness: 0.1 });
+    new THREE.MeshStandardMaterial({ color: '#51DDD2', emissive: new THREE.Color('#51DDD2'), emissiveIntensity: 1.8, roughness: 0.25, metalness: 0.1 });
   const MID = [50, 50];
   const halfA = [[Z[0], Z[1]], [Z[1], MID]]; // top bar + upper diagonal
   const halfB = [[MID, Z[2]], [Z[2], Z[3]]]; // lower diagonal + bottom bar
@@ -323,7 +375,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     cara: zBars(halfB, shardMat()),
   };
   for (const sh of Object.values(shards)) scene.add(sh);
-  const goldKey = new THREE.MeshPhysicalMaterial({ color: '#F3BA3C', metalness: 1, roughness: 0.22, emissive: new THREE.Color('#F3BA3C'), emissiveIntensity: 0, clearcoat: 1 });
+  const goldKey = new THREE.MeshStandardMaterial({ color: '#F3BA3C', metalness: 1, roughness: 0.22, emissive: new THREE.Color('#F3BA3C'), emissiveIntensity: 0 });
 
   // ---------------------------------------------------------------- phones
   const SCREEN_W = 0.96;
@@ -332,7 +384,32 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   const BODY_H = SCREEN_H + 0.1;
   const PHONE_DEPTH = 0.1;
   const PEDESTAL_H = 0.3;
-  function makePhone(frameColor, lampColor, lampIntensity) {
+  // Painted light and shade, the way lightweight 3D sites fake them: a soft radial blob
+  // on the surface below a thing, instead of a real light (evaluated for every pixel) or a
+  // shadow re-rendered every frame. `shade` darkens (contact shadow), otherwise it glows.
+  function blob(color, size, opacity, shade = false) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, shade ? 'rgba(255,255,255,0)' : 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(size[0], size[1]),
+      new THREE.MeshBasicMaterial({
+        map: t, transparent: true, opacity, depthWrite: false, toneMapped: false,
+        blending: shade ? THREE.NormalBlending : THREE.AdditiveBlending,
+      }),
+    );
+    m.rotation.x = -Math.PI / 2;
+    return m;
+  }
+
+  function makePhone(frameColor, lampColor, lampIntensity, screenBg) {
     const root = new THREE.Group();
     const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.78, PEDESTAL_H, 48), clay('#CFD9D7'));
     pedestal.position.y = PEDESTAL_H / 2;
@@ -343,27 +420,41 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     root.add(phone);
     const body = new THREE.Mesh(
       new RoundedBoxGeometry(BODY_W, BODY_H, PHONE_DEPTH, 8, 0.14),
-      new THREE.MeshPhysicalMaterial({ color: frameColor, metalness: 0.7, roughness: 0.32, clearcoat: 0.8 }),
+      new THREE.MeshStandardMaterial({ color: frameColor, metalness: 0.7, roughness: 0.3 }),
     );
-    body.castShadow = true;
     phone.add(body);
-    const c = makeCanvas();
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const screenMat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    // It turns and floats every frame: a contact shadow on the pedestal rather than a cast
+    // shadow, so the shadow map doesn't have to be redrawn while the camera moves.
+    const contact = blob('rgba(40,60,58,0.5)', [BODY_W * 1.1, 0.5], 1, true);
+    contact.position.y = PEDESTAL_H + 0.003;
+    root.add(contact);
+    const screenMat = screenMaterial(shots.meHome);
+    screenMat.uniforms.uBg.value.copy(bg(screenBg));
     const screen = new THREE.Mesh(roundedPlane(SCREEN_W, SCREEN_H, 0.11), screenMat);
     screen.position.z = PHONE_DEPTH / 2 + 0.002;
     phone.add(screen);
-    const lamp = new THREE.PointLight(lampColor, lampIntensity, 5, 2);
-    lamp.position.set(0.6, 2.6, 1.2);
-    root.add(lamp);
+    // The phone's lamp as a pool of light on the floor around its pedestal (was a point light).
+    if (lampIntensity > 0) {
+      const pool = blob(lampColor, [3.4, 3.4], Math.min(0.5, lampIntensity * 0.08));
+      pool.position.set(0.3, 0.004, 0.5);
+      root.add(pool);
+    }
     scene.add(root);
-    return { root, phone, canvas: c, g: c.getContext('2d'), tex, screenMat, key: '' };
+    return { root, phone, u: screenMat.uniforms };
   }
-  const bob = makePhone('#2B3131', '#FFB36B', 5);
-  const me = makePhone('#D5DCDB', '#D8ECFF', 3);
-  const cara = makePhone('#C8B79A', '#FFFFFF', 0);
+  const bob = makePhone('#2B3131', '#FFB36B', 5, '#080B0B');
+  const me = makePhone('#D5DCDB', '#D8ECFF', 3, '#F1F5F5');
+  const cara = makePhone('#C8B79A', '#FFFFFF', 0, '#F1F5F5');
+  bob.u.uDarkUi.value = 1;
+  bob.u.uMode.value = MODE.push;
+  bob.u.uBan1.value = bannerTex.sent;
+  me.u.uBan1.value = bannerTex.needsYou;
+  me.u.uBan2.value = bannerTex.sent;
+  me.u.uC.value = shots.meDone;
+  cara.u.uA.value = shots.meHome;
+  cara.u.uBan1.value = bannerTex.needsYou;
+  cara.u.uBan2.value = bannerTex.sent;
+  const BOB_SCREENS = [shots.bobHome, shots.bobPropose, shots.bobApproved];
   const PHONES = {
     bob: new THREE.Vector3(-3.4, 0, 1.2),
     me: new THREE.Vector3(3.4, 0, 1.2),
@@ -406,7 +497,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   // ---------------------------------------------------------------- coins and the stream
   const coinGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.025, 40);
   const COINS = 18;
-  const coins = new THREE.InstancedMesh(coinGeo, new THREE.MeshPhysicalMaterial({ color: '#F3BA3C', metalness: 1, roughness: 0.2, emissive: '#6B4A00', emissiveIntensity: 0.4 }), COINS);
+  const coins = new THREE.InstancedMesh(coinGeo, new THREE.MeshStandardMaterial({ color: '#F3BA3C', metalness: 1, roughness: 0.2, emissive: '#6B4A00', emissiveIntensity: 0.4 }), COINS);
   coins.castShadow = true;
   scene.add(coins);
   const STREAM = 44;
@@ -414,16 +505,10 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   scene.add(stream);
   const tmp = new THREE.Object3D();
 
-  // ---------------------------------------------------------------- feature islands
-  const ISLANDS = [new THREE.Vector3(14, 0, 0.6), new THREE.Vector3(23.5, 0, -1.4), new THREE.Vector3(33, 0, 0.6)];
-  const islandBase = (pos, w, d) => {
-    const base = new THREE.Mesh(new RoundedBoxGeometry(w, 0.32, d, 4, 0.1), clay('#CFD9D7'));
-    base.position.copy(pos).setY(0.16);
-    base.castShadow = base.receiveShadow = true;
-    scene.add(base);
-    return base;
-  };
-  // A label in a white pill with a teal check (the island's badges).
+  // ---------------------------------------------------------------- your phone's checks
+  // While the payment request is open on your phone, a scan line runs down its screen and
+  // what it checked appears beside it.
+  // A label in a white pill with a teal check (what your phone checked).
   function badge(text) {
     const c = document.createElement('canvas');
     c.width = 512;
@@ -452,106 +537,18 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, toneMapped: false }));
-    sp.scale.set(1.6, 0.4, 1);
+    sp.scale.set(0.96, 0.24, 1);
     scene.add(sp);
     return sp;
   }
 
-  // 1. Checked on every phone: the review screen, a scan beam, three badges.
-  islandBase(ISLANDS[0], 3.4, 2.2);
-  const checker = makePhone('#D5DCDB', '#D8ECFF', 2);
-  checker.root.position.copy(ISLANDS[0]).setY(0.32);
-  checker.g.drawImage(images.meReview, 0, -(images.meReview.height - H) * (W / images.meReview.width) * 0.86, W, (images.meReview.height * W) / images.meReview.width);
-  checker.tex.needsUpdate = true;
   const beam = new THREE.Mesh(
     new THREE.PlaneGeometry(SCREEN_W, 0.12),
     new THREE.MeshBasicMaterial({ color: new THREE.Color('#51DDD2').multiplyScalar(2), transparent: true, opacity: 0, toneMapped: false, depthWrite: false, blending: THREE.AdditiveBlending }),
   );
   beam.position.z = PHONE_DEPTH / 2 + 0.01;
-  checker.phone.add(beam);
+  me.phone.add(beam);
   const badges = ['Recipient', 'Amount', 'Fee'].map(badge);
-
-  // 2. Invisible on-chain: a chain of glassy blocks of identical tokens; a gold coin joins.
-  islandBase(ISLANDS[1], 7.4, 1.8);
-  const blockMat = new THREE.MeshPhysicalMaterial({ color: '#7FCFC6', roughness: 0.1, clearcoat: 1, transparent: true, opacity: 0.32, depthWrite: false });
-  const tokenMat = clay('#9FB0AD', { roughness: 0.45, metalness: 0.4 });
-  const BLOCKS = 6;
-  const blockX = (i) => ISLANDS[1].x - 2.75 + i * 1.1;
-  for (let i = 0; i < BLOCKS; i++) {
-    const block = new THREE.Mesh(new RoundedBoxGeometry(0.86, 0.86, 0.86, 4, 0.12), blockMat);
-    block.position.set(blockX(i), 0.32 + 0.45, ISLANDS[1].z);
-    scene.add(block);
-    for (let j = 0; j < 3; j++) {
-      const tok = new THREE.Mesh(coinGeo, tokenMat);
-      tok.position.set(blockX(i) - 0.2 + j * 0.2, 0.32 + 0.3 + j * 0.12, ISLANDS[1].z + (j - 1) * 0.12);
-      tok.rotation.set(Math.PI / 2 + j, 0.3 * j, 0);
-      scene.add(tok);
-    }
-    if (i < BLOCKS - 1) {
-      const link = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 12), clay('#B9C7C4'));
-      link.rotation.z = Math.PI / 2;
-      link.position.set(blockX(i) + 0.55, 0.77, ISLANDS[1].z);
-      scene.add(link);
-    }
-  }
-  const traveller = new THREE.Mesh(coinGeo, coins.material);
-  traveller.scale.setScalar(2.2);
-  scene.add(traveller);
-
-  // 3. Private all the way: a tunnel of arches a packet passes through; a sealed backup.
-  islandBase(ISLANDS[2], 4.6, 2.6);
-  const archMats = [];
-  const arches = [0, 1, 2, 3].map((i) => {
-    const m = clay(['#004A46', '#00736C', '#2FA79E', '#51DDD2'][i], { roughness: 0.5, emissive: new THREE.Color('#51DDD2'), emissiveIntensity: 0 });
-    archMats.push(m);
-    const arch = new THREE.Mesh(new THREE.TorusGeometry(1.0 - i * 0.06, 0.11, 16, 48, Math.PI), m);
-    arch.rotation.y = Math.PI / 2;
-    arch.position.set(ISLANDS[2].x - 1.3 + i * 0.75, 0.32, ISLANDS[2].z - 0.2);
-    arch.castShadow = true;
-    scene.add(arch);
-    return arch;
-  });
-  const packet = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.4, 0.4, 3, 0.08), new THREE.MeshBasicMaterial({ color: new THREE.Color('#51DDD2').multiplyScalar(2.5), toneMapped: false }));
-  scene.add(packet);
-  const envelope = new THREE.Group();
-  const envBody = new THREE.Mesh(new RoundedBoxGeometry(1.1, 0.72, 0.06, 2, 0.03), clay('#FFFFFF', { roughness: 0.7 }));
-  const flapShape = new THREE.Shape();
-  flapShape.moveTo(-0.55, 0.36);
-  flapShape.lineTo(0.55, 0.36);
-  flapShape.lineTo(0, -0.05);
-  flapShape.closePath();
-  const flap = new THREE.Mesh(new THREE.ShapeGeometry(flapShape), clay('#EEF2F1', { side: THREE.DoubleSide }));
-  flap.position.z = 0.035;
-  const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.04, 32), coins.material);
-  seal.rotation.x = Math.PI / 2;
-  seal.position.set(0, -0.02, 0.06);
-  envelope.add(envBody, flap, seal);
-  envelope.position.set(ISLANDS[2].x + 1.6, 0.32 + 0.5, ISLANDS[2].z + 0.6);
-  envelope.rotation.set(-0.2, -0.5, 0.08);
-  envelope.traverse((m) => m.isMesh && (m.castShadow = true));
-  scene.add(envelope);
-
-  // Floor channels from the vault on to the islands, and a pulse that runs ahead.
-  const islandPath = new THREE.CurvePath();
-  {
-    const pts = [
-      new THREE.Vector3(2.4, 0.012, -0.2),
-      new THREE.Vector3(8, 0.012, -0.2),
-      new THREE.Vector3(ISLANDS[0].x - 1.8, 0.012, ISLANDS[0].z + 1.4),
-      new THREE.Vector3(ISLANDS[1].x - 4, 0.012, ISLANDS[1].z + 1.2),
-      new THREE.Vector3(ISLANDS[1].x + 4, 0.012, ISLANDS[1].z + 1.2),
-      new THREE.Vector3(ISLANDS[2].x - 2.4, 0.012, ISLANDS[2].z + 1.6),
-    ];
-    for (let i = 0; i < pts.length - 1; i++) islandPath.add(new THREE.LineCurve3(pts[i], pts[i + 1]));
-  }
-  {
-    const groove = new THREE.Mesh(new THREE.TubeGeometry(islandPath, 160, 0.07, 6, false), channelMat);
-    groove.scale.y = 0.25;
-    groove.receiveShadow = true;
-    scene.add(groove);
-  }
-  const islandPulse = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), pulseMat);
-  scene.add(islandPulse);
 
   // The big Z in the floor around the vault, lit for the call to action (read from above).
   const bigZ = new THREE.CurvePath();
@@ -579,34 +576,127 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     iso(doorCentre.clone(), 17, 0.25, 0.35), // 2 alone: the lock
     iso(bobFace.clone(), 9.5, -0.62, 0.2), // 3 Bob proposes
     iso(new THREE.Vector3(0, 0.8, 0.4), 26, 0.3, 0.75), // 4 the pulse, from above
-    iso(bobFace.clone(), 9.8, -0.5, 0.24), // 5 Bob approves
+    // 5 on the way down to the lock (proposing was Bob's approval: nothing more on his phone)
+    iso(doorCentre.clone().add(new THREE.Vector3(0, 0.3, 0.6)), 19, 0.12, 0.48),
     iso(doorCentre.clone(), 13, -0.1, 0.25), // 6 his shard seats
     iso(meFace.clone(), 9.5, 0.72, 0.2), // 7 you approve
     iso(doorCentre.clone(), 12, 0.18, 0.22), // 8 yours seats: the key fuses
     iso(doorCentre.clone(), 7.5, 0.12, 0.1), // 9 the door opens: in close
     iso(meFace.clone(), 10.5, 0.78, 0.28), // 10 sending
     iso(new THREE.Vector3(0, 1.1, 0), 30), // 11 sent: back to the diorama
-    iso(ISLANDS[0].clone().setY(1.3).add(new THREE.Vector3(0.6, 0, 0)), 13.5, 0.38, 0.26), // 12 island: checked
-    iso(ISLANDS[1].clone().setY(0.8), 14.5, 0.3, 0.34), // 13 island: on-chain
-    iso(ISLANDS[2].clone().setY(0.9), 13, 0.45, 0.3), // 14 island: private
-    [new THREE.Vector3(0.8, 44, 12), new THREE.Vector3(0, 0, 0.6)], // 15 from above: the Seam
+    [new THREE.Vector3(0.8, 44, 12), new THREE.Vector3(0, 0, 0.6)], // 12 from above: the Seam
   ];
   // Portrait screens: the wide shots pull back so the side phones stay in frame.
   let camPos = null;
   let camTarget = null;
   function buildCamera(portrait) {
     // Portrait pulls the wide shots back just enough for the diorama to fit the width
-    // (1.55 left it at half the screen on phones, 1.3 cut the edge phones), and the islands (12-14) further, as
-    // their cards sit below them.
-    const pos = CAM.map(([p, t], i) => {
-      const d = p.distanceTo(t);
-      return portrait && (d > 14 || (i >= 12 && i <= 14)) ? t.clone().add(p.clone().sub(t).multiplyScalar(i >= 12 && i <= 14 ? 1.7 : 1.42)) : p;
-    });
+    // (1.55 left it at half the screen on phones, 1.3 cut the edge phones).
+    const pos = CAM.map(([p, t]) => (portrait && p.distanceTo(t) > 14 ? t.clone().add(p.clone().sub(t).multiplyScalar(1.42)) : p));
     camPos = new THREE.CatmullRomCurve3(pos, false, 'centripetal');
     camTarget = new THREE.CatmullRomCurve3(CAM.map((c) => c[1]), false, 'centripetal');
   }
   buildCamera(false);
   const cur = { pos: CAM[0][0].clone(), target: CAM[0][1].clone(), frameY: S.frameY, frameX: S.frameX };
+
+  // ---------------------------------------------------------------- baked shadows
+  // The way light WebGL sites do it: the key light and everything resting on the floor are
+  // still, so their shadows are rendered once, from above, into a texture, and the
+  // receivers (floor, plinth, pedestals, channels) darken by it. No
+  // shadow map is drawn or sampled per frame (live VSM shadows cost ~12 ms a frame on an
+  // Intel UHD laptop). Moving things (key shards, coins) cast nothing. The light's shadow
+  // camera only reaches the vault (+-9 units), so the bake covers +-BAKE_R around it.
+  const BAKE_R = 13;
+  function bakeShadows() {
+    const size = mobile ? 1024 : 2048;
+    const target = new THREE.WebGLRenderTarget(size, size);
+    const top = new THREE.OrthographicCamera(-BAKE_R, BAKE_R, BAKE_R, -BAKE_R, 1, 100);
+    top.position.set(0, 50, 0);
+    top.up.set(0, 0, -1); // image up is -z: v = (BAKE_R - z) / 2 BAKE_R
+    top.lookAt(0, 0, 0);
+    const moving = new Set([shards.bob, shards.me, coins]);
+    const isMoving = (o) => {
+      for (let p = o; p; p = p.parent) if (moving.has(p)) return true;
+      return false;
+    };
+    const hidden = [];
+    const receivers = [];
+    scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const keep = (o.castShadow || o.receiveShadow) && !isMoving(o);
+      if (!keep && o.visible) {
+        o.visible = false;
+        hidden.push(o);
+      }
+      if (o.receiveShadow && o !== doorFrame) receivers.push(o);
+    });
+    // The view from above, lit, with shadows and without: their ratio is how much light
+    // each spot keeps in shade (the paper's texture and the ambient light cancel out).
+    // Half-float, so light brighter than white isn't clipped before the division; no fog.
+    const views = [0, 1].map(() => new THREE.WebGLRenderTarget(size, size, { type: THREE.HalfFloatType }));
+    const background = scene.background;
+    const fog = scene.fog;
+    scene.background = null;
+    scene.fog = null;
+    renderer.shadowMap.needsUpdate = true;
+    renderer.setRenderTarget(views[0]);
+    renderer.render(scene, top);
+    key.castShadow = false; // the same view, unshadowed
+    renderer.setRenderTarget(views[1]);
+    renderer.render(scene, top);
+    const ratio = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.ShaderMaterial({
+        uniforms: { uLit: { value: views[0].texture }, uFull: { value: views[1].texture } },
+        vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+        fragmentShader: `uniform sampler2D uLit, uFull; varying vec2 vUv;
+          void main() {
+            vec3 w = vec3(0.2126, 0.7152, 0.0722);
+            float full = dot(texture2D(uFull, vUv).rgb, w);
+            float lit = full > 1e-4 ? dot(texture2D(uLit, vUv).rgb, w) / full : 1.0;
+            gl_FragColor = vec4(vec3(clamp(lit, 0.0, 1.0)), 1.0);
+          }`,
+      }),
+    );
+    renderer.setRenderTarget(target);
+    renderer.render(ratio, top);
+    renderer.setRenderTarget(null);
+    scene.background = background;
+    scene.fog = fog;
+    for (const o of hidden) o.visible = true;
+    for (const v of views) v.dispose();
+    ratio.geometry.dispose();
+    ratio.material.dispose();
+    // No shadow map from here on.
+    renderer.shadowMap.enabled = false;
+    key.shadow.dispose();
+    const bake = { uBake: { value: target.texture }, uBakeR: { value: BAKE_R } };
+    const patched = new Set();
+    for (const o of receivers) {
+      const m = o.material;
+      if (patched.has(m)) continue;
+      patched.add(m);
+      m.onBeforeCompile = (sh) => {
+        Object.assign(sh.uniforms, bake);
+        sh.vertexShader = 'uniform float uBakeR;\nvarying vec2 vBakeUv;\n' + sh.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n{ vec4 bw = modelMatrix * vec4(transformed, 1.0); vBakeUv = vec2(bw.x + uBakeR, uBakeR - bw.z) / (2.0 * uBakeR); }',
+        );
+        sh.fragmentShader = 'uniform sampler2D uBake;\nvarying vec2 vBakeUv;\n' + sh.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          `{
+            vec2 b = vBakeUv;
+            float inside = step(0.0, b.x) * step(b.x, 1.0) * step(0.0, b.y) * step(b.y, 1.0);
+            outgoingLight *= mix(1.0, texture2D(uBake, clamp(b, 0.0, 1.0)).r, inside);
+          }
+          #include <opaque_fragment>`,
+        );
+      };
+      m.customProgramCacheKey = () => 'baked-shadow';
+      m.needsUpdate = true;
+    }
+  }
+  bakeShadows();
 
   // ---------------------------------------------------------------- post
   const composer = new EffectComposer(renderer, { multisampling: LEVELS[level].msaa, frameBufferType: THREE.HalfFloatType });
@@ -677,20 +767,21 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     shard.scale.setScalar(Math.max(0.0001, s));
   }
 
-  function screenKey(obj) {
-    return Object.values(obj).map((v) => (typeof v === 'number' ? v.toFixed(3) : v)).join('|');
-  }
-
-  // Adaptive quality: average frame time over ~1 s windows; a slow window (under ~45
-  // fps) drops one level. Ignores frames for 2 s after start or a resize (shader
-  // compilation, texture uploads) and 1 s after the world or the tab was hidden. Still
-  // under ~20 fps at the lowest level: give up and show the stills (giveUp).
-  // A drop that doesn't make frames faster means the browser caps the frame rate
-  // (battery saver, 30 fps phones), not the GPU: go back up and stop adapting, or a
-  // capped fast phone would sink to the blurriest level for nothing.
+  // Adaptive quality: the median frame time over ~1 s windows (one hitch, such as a shader
+  // compiling after a drop or a texture upload, doesn't count); a window under ~57 fps
+  // drops to the next cheaper level (TARGET_MS; a 60 Hz screen's 16.7 ms stays). Ignores frames for 2 s after start or a resize and 1 s after a
+  // drop, or after the world or the tab was hidden. It never gives up: the showcase is the
+  // 3D, so at worst it stays at the lowest level.
+  // Two drops in a row that don't make frames faster mean the browser or the screen caps
+  // the frame rate (battery saver, 30 fps phones, a 50 Hz screen), not the GPU: go back to
+  // where it started and stop adapting, or a capped fast device would sink to the
+  // blurriest level for nothing. One unhelpful drop isn't enough: on an Intel UHD laptop
+  // fewer MSAA samples changed nothing but a lower resolution did. Very slow windows
+  // (under ~30 fps) drop two steps.
   let winMs = 0;
-  let winFrames = 0;
-  let dropped = null; // { from, avg } of the last drop, until the next window judges it
+  let winTimes = [];
+  const TARGET_MS = 17.5;
+  let dropped = null; // { from, avg, misses }: since the last drop that made frames faster
   let capped = false;
   document.addEventListener('visibilitychange', () => {
     settleUntil = performance.now() + 1000;
@@ -699,35 +790,31 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     if (still) return; // capture mode keeps the best quality however slow
     if (now < settleUntil) {
       winMs = 0;
-      winFrames = 0;
+      winTimes = [];
       return;
     }
     winMs += Math.min(ms, 1000);
-    winFrames++;
+    winTimes.push(ms);
     if (winMs < 1000) return;
-    const avg = winMs / winFrames;
+    winTimes.sort((a, b) => a - b);
+    const avg = winTimes[winTimes.length >> 1]; // the median frame
     winMs = 0;
-    winFrames = 0;
-    if (capped) {
-      if (avg > 50 && !forceWorld) giveUp();
-      return;
-    }
+    winTimes = [];
+    if (capped) return;
     if (dropped) {
-      const { from, avg: before } = dropped;
-      dropped = null;
-      if (avg > before * 0.85 && avg <= 50) {
-        capped = true;
-        setLevel(from, now);
-        return;
+      if (avg > dropped.avg * 0.9) {
+        if (++dropped.misses >= 2) {
+          capped = true;
+          setLevel(dropped.from, now);
+          return;
+        }
+      } else {
+        dropped = null;
       }
     }
-    if (avg <= 22) return;
-    if (level === LEVELS.length - 1) {
-      if (avg > 50 && !forceWorld) giveUp();
-      return;
-    }
-    dropped = { from: level, avg };
-    setLevel(level + 1, now);
+    if (avg <= TARGET_MS || level === LEVELS.length - 1) return;
+    if (!dropped) dropped = { from: level, avg, misses: 0 };
+    setLevel(avg > 33 ? cheaper(cheaper(level)) : cheaper(level), now);
   }
 
   function setLevel(next, now) {
@@ -735,14 +822,10 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     renderer.setPixelRatio(LEVELS[level].dpr);
     composer.multisampling = LEVELS[level].msaa;
     composer.setSize(window.innerWidth, window.innerHeight);
-    if (level >= 3 && key.shadow.mapSize.x > 1024) {
-      // Soft (VSM) shadows hide the lower resolution; three rebuilds the map.
-      key.shadow.mapSize.set(1024, 1024);
-      key.shadow.map?.dispose();
-      key.shadow.map = null;
-    }
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
     canvas.dataset.quality = String(level); // for perf checks
     settleUntil = now + 1000;
+    remember();
   }
 
   function frame() {
@@ -750,7 +833,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     const now = performance.now();
     adapt(now, now - last);
     const dt = Math.min(0.05, (now - last) / 1000);
-    const camDt = still ? 1 : dt; // capture mode: the camera lands at once
+    const camDt = still || cuts ? 1 : dt; // capture mode, reduced motion: the camera lands at once
     last = now;
     const time = (now - t0) / 1000;
 
@@ -782,7 +865,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     scene.fog.far = scene.fog.near + 30;
 
     // Phones face the camera (yaw only), float a little.
-    for (const [i, p] of [bob, me, cara, checker].entries()) {
+    for (const [i, p] of [bob, me, cara].entries()) {
       p.root.getWorldPosition(vC);
       const yaw = Math.atan2(camera.position.x - vC.x, camera.position.z - vC.z);
       p.phone.rotation.y = damp(p.phone.rotation.y, yaw, 4, dt);
@@ -792,30 +875,43 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
     bob.root.updateMatrixWorld(true);
     me.root.updateMatrixWorld(true);
     cara.root.updateMatrixWorld(true);
-    checker.root.updateMatrixWorld(true);
 
-    // Screens: redraw only when their inputs change (yours while sending: every frame).
-    const bobState = { a: S.aPush1, b: S.aPush2, c: S.aPush3, d: S.aScroll, e: S.tapA1, f: S.tapA2, g: S.tapA3, h: S.sentBanner };
-    const kb = screenKey(bobState);
-    if (kb !== bob.key) {
-      drawBob(bob.g, images, S);
-      bob.tex.needsUpdate = true;
-      bob.key = kb;
+    // Screens: only uniforms change (screen-shader.js), nothing is uploaded.
+    {
+      // Bob: Home, review with "Propose payment", his proposal awaiting one more approval.
+      const k = Math.min(1.999, S.aPush1 + S.aPush2);
+      const i = Math.floor(k);
+      const u = bob.u;
+      u.uA.value = BOB_SCREENS[i];
+      u.uB.value = BOB_SCREENS[i + 1];
+      u.uT.value = S.aPush1 + S.aPush2 >= 2 ? 1 : k - i;
+      u.uBan1B.value = S.sentBanner;
+      u.uTap1.value.set(SPOT.newPayment[0], SPOT.newPayment[1], S.tapA1, 0);
+      u.uTap2.value.set(SPOT.propose[0], SPOT.propose[1], S.tapA2, 0);
     }
-    const sending = S.bPush > 0.5;
-    const meState = { a: S.banner, b: S.tapB1, c: S.bSheet, d: S.bScroll, e: S.tapB2, f: S.bPush, g: S.bDone, h: S.sentBanner, t: sending ? time.toFixed(2) : 0 };
-    const km = screenKey(meState);
-    if (km !== me.key) {
-      drawMe(me.g, images, S, time);
-      me.tex.needsUpdate = true;
-      me.key = km;
+    {
+      // You: Home, the banner, the payment request sheet, sending, sent.
+      const u = me.u;
+      const pushing = S.bPush > 0;
+      u.uMode.value = pushing ? MODE.push : MODE.sheet;
+      u.uA.value = pushing ? shots.meRequest : shots.meHome;
+      u.uB.value = pushing ? shots.meSending : shots.meRequest;
+      u.uT.value = pushing ? S.bPush : S.bSheet;
+      u.uCmix.value = pushing ? S.bDone : 0;
+      const sending = clamp01((S.bPush - 0.5) * 2);
+      u.uSending.value = sending;
+      u.uCoins.value = sending * (1 - 0.6 * S.bDone);
+      u.uDone.value = S.bPush > 0.5 ? S.bDone : 0;
+      u.uTime.value = time;
+      u.uBan1B.value = S.banner;
+      u.uBan2B.value = S.sentBanner * (1 - S.bDone);
+      u.uTap1.value.set(SPOT.banner[0], SPOT.banner[1], S.tapB1, 0);
+      u.uTap2.value.set(SPOT.approve[0], SPOT.approve[1], S.tapB2, 0);
     }
-    const kc = screenKey({ a: S.banner, b: S.sentBanner, c: S.caraDim });
-    if (kc !== cara.key) {
-      drawCara(cara.g, images, S);
-      cara.tex.needsUpdate = true;
-      cara.key = kc;
-    }
+    // Cara: Home with the same banners. She isn't needed this time.
+    cara.u.uBan1B.value = S.banner;
+    cara.u.uBan2B.value = S.sentBanner;
+    cara.u.uDim.value = S.caraDim;
 
     // Vault: the leak, the ghost Z, the door opening along the Z and closing again.
     const open = smooth(clamp01(S.open)) * (1 - smooth(clamp01(S.closeDoor)));
@@ -886,44 +982,29 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
       stream.instanceMatrix.needsUpdate = true;
     }
 
-    // Islands (time-based loops, faded in by their state).
-    const i1 = smooth(clamp01(S.i1));
-    beam.material.opacity = 0.7 * i1;
+    // Your phone's checks: the scan line while the request is open, then the badges, which
+    // stay until you've approved.
+    const ck = clamp01(S.check);
+    beam.material.opacity = 0.7 * Math.sin(Math.PI * ck);
+    beam.visible = ck > 0 && ck < 1;
     beam.position.y = (0.5 - ((time * 0.35) % 1)) * SCREEN_H;
+    const gone = smooth(clamp01(S.check - 1));
     badges.forEach((b, i) => {
-      const k = smooth(clamp01(S.i1 * 3 - i * 0.6));
-      checker.phone.localToWorld(vA.set(1.45, 0.55 - i * 0.55, 0.25));
+      const k = smooth(clamp01(ck * 3 - i * 0.6)) * (1 - gone);
+      // Beside the phone; in portrait (no room beside it) over the empty middle of its
+      // screen, between Details and Approve, overhanging its right edge.
+      if (portrait) me.phone.localToWorld(vA.set(0.45, -0.1 - i * 0.19, 0.25));
+      else me.phone.localToWorld(vA.set(0.95, 0.42 - i * 0.34, 0.25));
       b.position.copy(vA);
       b.position.y += Math.sin(time * 1.3 + i) * 0.04;
-      b.scale.set(1.6 * k, 0.4 * k, 1);
+      const size = portrait ? 0.8 : 1;
+      b.scale.set(0.96 * size * k, 0.24 * size * k, 1);
       b.visible = k > 0.01;
     });
-    const i2 = clamp01(S.i2);
-    traveller.visible = i2 > 0.02;
-    if (traveller.visible) {
-      const k = (time * 0.18) % 1;
-      const x = blockX(-0.6) + k * (blockX(BLOCKS - 0.4) - blockX(-0.6));
-      traveller.position.set(x, 0.32 + 1.0 + Math.sin(k * Math.PI * 6) * 0.05, ISLANDS[1].z);
-      traveller.rotation.set(Math.PI / 2, time * 2, 0);
-      const inside = x > blockX(1.5);
-      traveller.material = inside ? tokenMat : coins.material;
-      traveller.scale.setScalar((inside ? 1 : 2.2) * (0.4 + 0.6 * i2));
-    }
-    const i3 = clamp01(S.i3);
-    packet.visible = i3 > 0.02;
-    const pk = (time * 0.22) % 1;
-    packet.position.set(arches[0].position.x - 0.8 + pk * 3.9, 0.32 + 0.5, arches[0].position.z);
-    packet.rotation.set(time, time * 1.3, 0);
-    arches.forEach((a, i) => {
-      archMats[i].emissiveIntensity = i3 * 1.4 * Math.max(0, 1 - Math.abs(packet.position.x - a.position.x) * 1.6);
-    });
-    envelope.position.y = 0.32 + 0.5 + Math.sin(time * 1.1) * 0.05;
-    const fp = clamp01(S.fpulse);
-    islandPulse.visible = fp > 0.001 && fp < 0.999;
-    if (islandPulse.visible) islandPath.getPointAt(fp, islandPulse.position);
     bigZMat.opacity = clamp01(S.ctaZ) * (0.75 + 0.25 * Math.sin(time * 2));
 
-    composer.render(dt);
+    if (LEVELS[level].post) composer.render(dt);
+    else renderer.render(scene, camera); // the lowest levels draw straight to the screen
   }
 
   // ---------------------------------------------------------------- the timeline
@@ -932,7 +1013,7 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
 
   const tl = gsap.timeline({
     defaults: { ease: 'power2.inOut' },
-    scrollTrigger: { trigger: story, start: 'top bottom', end: 'bottom bottom', scrub: 1 },
+    scrollTrigger: { trigger: story, start: 'top bottom', end: 'bottom bottom', scrub: true },
   });
   const at = (vars, pos, duration = 3, ease) => tl.to(S, { ...vars, duration, ...(ease ? { ease } : {}) }, pos);
   // Beats (timeline units; captions switch at BEATS below).
@@ -948,30 +1029,30 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   at({ cam: 4 }, 32, 5); // from above: the pulse
   at({ pulse: 1 }, 33, 5, 'power1.inOut');
   at({ banner: 1 }, 37, 2, 'back.out(1.4)');
-  at({ cam: 5 }, 38, 4); // back to Bob: he approves his own proposal
-  at({ aScroll: 1 }, 41, 3);
-  at({ tapA3: 1 }, 44, 2, 'none');
-  at({ aPush3: 1 }, 45.5, 2.5);
+  at({ cam: 5 }, 38, 4); // down toward the lock: his share is already on its way
   at({ shardA: 1, cam: 6 }, 46, 6); // his shard seats; watch it at the door
   at({ cam: 7 }, 53, 6); // you
   at({ tapB1: 1 }, 59, 2, 'none');
   at({ banner: 0 }, 60.5, 1.5);
   at({ bSheet: 1 }, 60.5, 3, 'power3.out');
-  at({ bScroll: 1 }, 64, 3);
-  at({ tapB2: 1 }, 67.5, 2, 'none');
-  at({ caraDim: 1 }, 69, 3);
-  at({ cam: 8 }, 69, 5); // your shard seats: 2 of 3
-  at({ shardB: 1 }, 69.5, 5);
-  at({ fuse: 1 }, 75, 3, 'none'); // the key, gold
-  at({ insert: 1 }, 77, 2);
-  at({ cam: 9, open: 1 }, 79, 6, 'power3.inOut'); // the door splits; dive
-  at({ cam: 10 }, 86, 6); // your phone
-  at({ bPush: 1 }, 86, 3);
-  at({ coins: 1 }, 86, 8, 'none');
-  at({ bDone: 1, sentBanner: 1 }, 95, 3);
-  at({ cam: 11, stream: 1, closeDoor: 1 }, 98, 8);
+  at({ check: 1 }, 63.5, 4, 'none'); // your phone checks it: scan, then the badges
+  at({ tapB2: 1 }, 71.5, 2, 'none');
+  at({ caraDim: 1 }, 73, 3);
+  at({ check: 2 }, 73, 2); // approved: the badges go
+  at({ cam: 8 }, 73, 5); // your shard seats: 2 of 3
+  at({ shardB: 1 }, 73.5, 5);
+  at({ fuse: 1 }, 79, 3, 'none'); // the key, gold
+  at({ insert: 1 }, 81, 2);
+  at({ cam: 9, open: 1 }, 83, 6, 'power3.inOut'); // the door splits; dive
+  at({ cam: 10 }, 90, 6); // your phone
+  at({ bPush: 1 }, 90, 3);
+  at({ coins: 1 }, 90, 8, 'none');
+  at({ bDone: 1, sentBanner: 1 }, 99, 3);
+  at({ cam: 11, stream: 1, closeDoor: 1 }, 102, 8);
 
-  const BEATS = [0, 9, 17, 32, 46, 53, 75, 86, 95, 104];
+  // Captions: shares, the lock, Bob, notified, his share, your checks, you approve, the key,
+  // the vault opens, sending, sent (each where its moment starts).
+  const BEATS = [0, 9, 17, 32, 46, 58, 69, 79, 83, 90, 99];
   let beat = -1;
   tl.eventCallback('onUpdate', () => {
     const t = tl.time();
@@ -984,69 +1065,45 @@ export async function start({ canvas, story, hero, features, cta, covers, screen
   });
   story.dataset.beat = '0';
 
-  // Features: on to the islands, the cards follow data-island.
-  // One timeline from the islands through the call to action, so a single scrub writes
-  // the camera (two scrubbed triggers on the same props race after a fast scroll).
-  const ft = gsap.timeline({
+  // The call to action: from the sent payment up above the vault; the floor Z lights;
+  // then a hold. Its own scrubbed section (220vh): 10.8 units of move, 3.6 of hold.
+  const ct = gsap.timeline({
     defaults: { ease: 'power2.inOut', immediateRender: false },
-    scrollTrigger: { trigger: features, start: 'top bottom', endTrigger: cta, end: 'bottom bottom', scrub: 1 },
+    scrollTrigger: { trigger: cta, start: 'top bottom', end: 'bottom bottom', scrub: true },
   });
-  ft.fromTo(S, { cam: 11, frameX: 0, portraitY: 0 }, { cam: 12, frameX: 0.2, portraitY: -0.5, duration: 6 }, 0);
-  ft.fromTo(S, { fpulse: 0 }, { fpulse: 0.36, duration: 6 }, 0);
-  ft.fromTo(S, { i1: 0 }, { i1: 1, duration: 4 }, 4);
-  ft.fromTo(S, { cam: 12 }, { cam: 13, duration: 6 }, 12);
-  ft.fromTo(S, { fpulse: 0.36 }, { fpulse: 0.7, duration: 6 }, 12);
-  ft.fromTo(S, { i2: 0 }, { i2: 1, duration: 4 }, 15);
-  ft.fromTo(S, { cam: 13 }, { cam: 14, duration: 6 }, 23);
-  ft.fromTo(S, { fpulse: 0.7 }, { fpulse: 1, duration: 6 }, 23);
-  ft.fromTo(S, { i3: 0 }, { i3: 1, duration: 4 }, 26);
-  ft.to({}, { duration: 4 }, 30);
-  const ISL = [0, 6, 17, 28];
-  let island = -1;
-  ft.eventCallback('onUpdate', () => {
-    const t = ft.time();
-    let n = 0;
-    for (let i = 0; i < ISL.length; i++) if (t >= ISL[i]) n = i;
-    if (n !== island) {
-      island = n;
-      features.dataset.island = String(n);
-    }
-  });
+  ct.fromTo(S, { cam: 11, frameY: 0.02, portraitY: 0, ctaZ: 0 }, { cam: 12, frameX: 0, frameY: -0.1, portraitY: -0.06, ctaZ: 1, duration: 10.8 }, 0);
+  ct.to({}, { duration: 3.6 }, 10.8);
 
-  // The call to action: up above the vault; the floor Z lights. Islands take 34 units
-  // over 520vh, so the CTA's 220vh is 14.4: the move, then a hold.
-  ft.fromTo(S, { cam: 14, frameX: 0.2, frameY: 0.02, portraitY: -0.5, ctaZ: 0 }, { cam: 15, frameX: 0, frameY: -0.1, portraitY: -0.06, ctaZ: 1, duration: 10.8 }, 34);
-  ft.to({}, { duration: 3.6 }, 44.8);
-
-  // Render unless an opaque section (FAQ, footer) covers the whole screen.
-  const covered = () =>
-    covers.some((el) => {
-      const r = el.getBoundingClientRect();
-      return r.top <= 0 && r.bottom >= window.innerHeight;
-    });
+  // Render unless an opaque section (FAQ, footer) covers the whole screen: from its top at
+  // the top of the screen to its bottom at the bottom. ScrollTrigger caches the positions
+  // (recomputed on resize), so this reads no layout per frame.
+  const coverTriggers = covers.map((el) => ScrollTrigger.create({ trigger: el, start: 'top top', end: 'bottom bottom' }));
+  const covered = () => coverTriggers.some((t) => t.isActive);
   const loop = () => {
     const was = running;
     running = !covered();
     if (running && !was) settleUntil = performance.now() + 1000;
     frame();
   };
+  // Warm up: compile every material now (hidden ones too, and the gold the key shards turn
+  // into mid-story), off the main thread where the browser can, so nothing compiles while
+  // the page scrolls (a first-use compile was an 80-100 ms hitch on an Intel UHD laptop).
+  const warm = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.01), goldKey);
+  warm.visible = false;
+  scene.add(warm);
+  await renderer.compileAsync(scene, camera);
+  scene.remove(warm);
+  warm.geometry.dispose();
+  // And every texture goes to the GPU now, not when its object first appears (a sprite's
+  // first draw was a 55 ms hitch).
+  scene.traverse((o) => {
+    for (const m of [o.material].flat()) {
+      if (m) for (const v of Object.values(m)) if (v?.isTexture) renderer.initTexture(v);
+    }
+  });
   gsap.ticker.add(loop);
   document.documentElement.classList.add('world-on');
   ScrollTrigger.refresh();
 
-  // Too slow even at the lowest quality: stop, free the GPU, and fall back to the
-  // stills layout (the same one as without WebGL).
-  function giveUp() {
-    gsap.ticker.remove(loop);
-    for (const t of [tl, ft]) {
-      t.scrollTrigger?.kill();
-      t.kill();
-    }
-    composer.dispose();
-    renderer.dispose();
-    showStills();
-    canvas.dataset.quality = 'off';
-    ScrollTrigger.refresh();
-  }
   return { S, hero };
 }

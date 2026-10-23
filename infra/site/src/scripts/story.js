@@ -1,8 +1,8 @@
 // Page motion. One loop: Lenis (smooth scroll) is advanced by GSAP's ticker and tells
 // ScrollTrigger about every scroll, so the 3D world (world.js) and the page never drift
-// apart. The world starts right away (it's behind the hero), only where it can run
-// (WebGL on a GPU, no reduced-motion preference); otherwise the story section shows its
-// stills. world.js also gives up and shows them if frames stay slow at its lowest quality.
+// apart. The showcase is the 3D, so the world runs wherever WebGL exists: on a software
+// renderer at its lowest quality, with reduced motion as cuts between beats instead of
+// camera flights. Only a browser without WebGL (or a failed load) gets the stills.
 import Lenis from 'lenis';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -21,8 +21,8 @@ if (!reduced) {
   gsap.ticker.lagSmoothing(0);
 }
 
-// ?world=always keeps the world on where it would be skipped (headless checks render
-// WebGL in software). ?still is the capture mode for the fallback stills (stills.sh):
+// ?world=always runs a software renderer at full quality, as on a GPU (headless checks
+// render WebGL in software). ?still is the capture mode for the fallback stills (stills.sh):
 // the world at full quality, the camera landing at once, the page's text hidden
 // (?still=page keeps it, for the social image).
 const params = new URLSearchParams(location.search);
@@ -30,27 +30,25 @@ const still = params.has('still');
 const forceWorld = still || params.get('world') === 'always';
 if (still) document.documentElement.classList.add(params.get('still') === 'page' ? 'still-page' : 'still-capture');
 
-// WebGL on a GPU. A software renderer (no GPU, or hardware acceleration off) takes
-// seconds per frame here and freezes scrolling, so those visitors get the stills.
-function hasGpuWebGL() {
+// 'gpu', 'software' (no GPU, or hardware acceleration off: the world starts at its lowest
+// quality) or '' (no WebGL at all: the stills).
+function webgl() {
   try {
     const c = document.createElement('canvas');
     const gl = c.getContext('webgl2') || c.getContext('webgl');
-    if (!gl) return false;
-    if (forceWorld) return true;
+    if (!gl) return '';
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : '';
     gl.getExtension('WEBGL_lose_context')?.loseContext();
-    return !/swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+    return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name) && !forceWorld ? 'software' : 'gpu';
   } catch {
-    return false;
+    return '';
   }
 }
 
 const canvas = document.querySelector('canvas.world');
 const story = document.querySelector('.story');
 const hero = document.querySelector('.hero');
-const features = document.querySelector('.islands');
 const cta = document.querySelector('.cta-world');
 const covers = [...document.querySelectorAll('.faq, .foot')];
 // html.stills shows the fallback (rendered stills of the world); boot.js hides it on
@@ -59,11 +57,12 @@ const showStills = () => {
   document.documentElement.classList.remove('world-on');
   document.documentElement.classList.add('stills');
 };
-if (canvas && story && features && cta && !reduced && hasGpuWebGL()) {
+const gl = canvas && story && cta ? webgl() : '';
+if (gl) {
   // Fetch the app screens in parallel with the world's module, not after it.
   const screens = loadScreens();
   import('./world.js')
-    .then((m) => m.start({ canvas, story, hero, features, cta, covers, screens, forceWorld, still, showStills }))
+    .then((m) => m.start({ canvas, story, hero, cta, covers, screens, still, software: gl === 'software', cuts: reduced }))
     .catch((err) => {
       showStills();
       console.warn('world:', err);

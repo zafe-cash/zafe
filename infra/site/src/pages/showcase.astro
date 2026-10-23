@@ -1,13 +1,13 @@
 ---
 // Showcase: one payment through a 2-of-3 vault, played by scrolling through a 3D world
-// (src/scripts/world.js): the phones hold key shards, they fuse, the vault opens, the
-// payment goes. Then the features as islands and the call to action from above. Kept off
-// the home page on purpose (a multisig product's home should be calm); without a GPU,
-// with reduced motion or without JavaScript it shows stills of the same world
-// (stills.sh). Copy: short, every claim shipped; the chain card is the real testnet
+// (src/scripts/world.js): the phones hold key shards, Bob proposes (the vault is notified,
+// end-to-end encrypted), your phone checks the payment, you approve, the shards fuse, the
+// vault opens, the payment goes; then the call to action from above. The features live in
+// the story where they happen (no detour). Kept off the home page on purpose (a multisig
+// product's home should be calm); without WebGL or JavaScript it shows stills of the same
+// world (stills.sh). Copy: short, every claim shipped; the chain card is the real testnet
 // payment from the 2026-09-30 dry run.
 import Base from '../layouts/Base.astro';
-import Icon from '../components/Icon.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import { getLabel, getUrl } from '../config';
@@ -44,7 +44,7 @@ import { getLabel, getUrl } from '../config';
     <!-- The story: scrolling through this section plays one payment in the 3D world
          behind the page (src/scripts/world.js). Without the world: five rendered beats
          with their captions (.story-beats). -->
-    <section class="story" data-beat="9" aria-label="How a shared payment works: each phone holds a share of the key; Bob proposes, you approve, the two shares make the key, the vault opens and the payment is sent">
+    <section class="story" data-beat="10" aria-label="How a shared payment works: each phone holds a share of the key; Bob proposes, your phone checks the payment and you approve, the two shares make the key, the vault opens and the payment is sent">
       <div class="story-pin">
         <h2 class="story-title">How it works</h2>
         <ol class="still story-beats">
@@ -58,7 +58,7 @@ import { getLabel, getUrl } from '../config';
           </li>
           <li>
             <img src="/assets/stills/beat_3.webp" width="1200" height="750" alt="" loading="lazy" decoding="async" />
-            <p>You approve with one tap.</p>
+            <p>Your phone checks it. You approve with one tap.</p>
           </li>
           <li>
             <img src="/assets/stills/beat_4.webp" width="1200" height="750" alt="" loading="lazy" decoding="async" />
@@ -74,61 +74,28 @@ import { getLabel, getUrl } from '../config';
           <p class="cap k0">Every phone holds a share of the key.</p>
           <p class="cap k1">One share can&rsquo;t open anything.</p>
           <p class="cap k2">Bob proposes a payment.</p>
-          <p class="cap k3">Everyone in the vault is notified.</p>
-          <p class="cap k4">Bob approves. His share goes in.</p>
-          <p class="cap k5">You approve with one tap.</p>
-          <p class="cap k6">Two shares make the key. It never exists on any phone.</p>
-          <p class="cap k7">The vault opens.</p>
-          <p class="cap k8">Sending&hellip;</p>
-          <p class="cap k9">Sent. On-chain, it looks like any payment.</p>
+          <p class="cap k3">Everyone in the vault is notified, end-to-end encrypted.</p>
+          <p class="cap k4">Proposing was his approval. His share goes in.</p>
+          <p class="cap k5">Your phone checks the recipient, amount and fee.</p>
+          <p class="cap k6">You approve with one tap.</p>
+          <p class="cap k7">Two shares make the key. It never exists on any phone.</p>
+          <p class="cap k8">The vault opens.</p>
+          <p class="cap k9">Sending&hellip;</p>
+          <p class="cap k10">Sent. On-chain, it looks like any payment.</p>
         </div>
-      </div>
-    </section>
-
-    <!-- Features: the camera travels on to three islands in the same world (world.js);
-         one card per island, following data-island. -->
-    <section id="features" class="islands" data-island="0" aria-label="Features">
-      <div class="islands-pin">
-        <header class="islands-head">
-          <p class="tag">Behind it</p>
-          <h2>What you<br />didn&rsquo;t see</h2>
-        </header>
-        <article class="island-card i1">
-          <img class="still island-still" src="/assets/stills/island_1.webp" width="900" height="598" alt="" loading="lazy" decoding="async" />
-          <h3>Checked on every phone</h3>
-          <p>Your phone checks each payment against the vault&rsquo;s own keys. If anything&rsquo;s off, it won&rsquo;t sign.</p>
-          <ul class="ticks">
-            <li><Icon name="check" />Recipients</li>
-            <li><Icon name="edit" />Amounts and memos</li>
-            <li><Icon name="wallet" />Change</li>
-            <li><Icon name="time" />Fee</li>
-          </ul>
-        </article>
-        <article class="island-card i2">
-          <img class="still island-still" src="/assets/stills/island_2.webp" width="900" height="598" alt="" loading="lazy" decoding="async" />
-          <h3>Invisible on-chain</h3>
-          <p>The phones sign together as one. To the chain it&rsquo;s an ordinary shielded payment, like this real one from our testnet trial.</p>
+        <!-- What the chain sees at the end: the real payment from the testnet trial. -->
+        <div class="chain-card" aria-hidden="true">
+          <p class="chain-title">What the chain sees</p>
           <dl class="chain-mini">
             <div><dt>tx</dt><dd>e6ccd6b7&hellip;9eef0237</dd></div>
             <div><dt>block</dt><dd>4,422,289</dd></div>
             <div><dt>amount</dt><dd>encrypted</dd></div>
             <div><dt>to</dt><dd>encrypted</dd></div>
           </dl>
-        </article>
-        <article class="island-card i3">
-          <img class="still island-still" src="/assets/stills/island_3.webp" width="900" height="598" alt="" loading="lazy" decoding="async" />
-          <h3>Private all the way</h3>
-          <p>Tor for every connection. Encrypted backups. Viewing keys for auditors.</p>
-          <ul class="ticks">
-            <li><Icon name="tor" />Tor</li>
-            <li><Icon name="lock" />Backups</li>
-            <li><Icon name="eye" />Viewing keys</li>
-            <li><Icon name="unlock" />Unlock to sign</li>
-          </ul>
-        </article>
+          <p class="chain-note">A real payment from our testnet trial.</p>
+        </div>
       </div>
     </section>
-
 
     <!-- The call to action over the world seen from above (world.js). -->
     <section class="cta-world" aria-label="Get Zafe">
