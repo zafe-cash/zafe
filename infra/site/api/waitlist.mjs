@@ -4,8 +4,11 @@
 // once. vercel-output.sh bundles this file into a Vercel function (Build Output API, Node).
 //
 // Storage: a private Vercel Blob store connected to the project. The function authenticates
-// with the request's OIDC token (store id in BLOB_STORE_ID) or, failing that, with
-// BLOB_READ_WRITE_TOKEN. Nothing else is kept: no IP address, no user agent.
+// with the request's OIDC token when the store id is in BLOB_STORE_ID, otherwise with
+// BLOB_READ_WRITE_TOKEN (what `vercel blob create-store` sets). @vercel/blob 2.8.1 throws if
+// an OIDC token is passed without a store id instead of falling back to the token
+// (dist/chunk-GPSPCQKX.js:192-195), so pass it only with BLOB_STORE_ID.
+// Nothing else is kept: no IP address, no user agent.
 import { createHash } from 'node:crypto';
 import { put } from '@vercel/blob';
 
@@ -70,7 +73,7 @@ export default async function handler(req, res) {
   if (email.length > 254 || !EMAIL.test(email)) return redirect(res, '/waitlist-error');
 
   const id = createHash('sha256').update(email).digest('hex');
-  const oidcToken = req.headers['x-vercel-oidc-token'];
+  const oidcToken = process.env.BLOB_STORE_ID ? req.headers['x-vercel-oidc-token'] : undefined;
   try {
     await put(`waitlist/${id}.json`, JSON.stringify({ email, joined: new Date().toISOString() }), {
       access: 'private',

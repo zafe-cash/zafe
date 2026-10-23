@@ -126,10 +126,10 @@ Try the Vercel output locally: `./build.sh && ./vercel-output.sh`, then read
 bundles it with `@vercel/blob` into `.vercel/output/functions/api/waitlist.func`
 (Node 22), served at `POST /api/waitlist`. It stores each address as a private blob
 `waitlist/<sha256 of the address>.json` and redirects to `/waitlist` or `/waitlist-error`.
-One-time setup: in the Vercel project, Storage → Create → Blob, **private** access, and
-connect it to the project (that sets `BLOB_STORE_ID`; the function authenticates with the
-request's OIDC token, or `BLOB_READ_WRITE_TOKEN` if you add one). Without a store every
-signup lands on `/waitlist-error`. To read the list: `vercel blob list --prefix waitlist/`
+Set up (done 2026-10-23): a private store `zafe-waitlist` (iad1), connected to production
+only with `vercel blob create-store zafe-waitlist --access private --environment production
+--yes`, which sets `BLOB_READ_WRITE_TOKEN`; the function uses it (or OIDC when
+`BLOB_STORE_ID` is set). Without a store every signup lands on `/waitlist-error`. To read the list: `vercel blob list --prefix waitlist/`
 (or the dashboard), then delete the store after the launch email, as the privacy policy
 promises.
 
