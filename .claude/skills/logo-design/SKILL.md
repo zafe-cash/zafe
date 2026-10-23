@@ -63,7 +63,7 @@ concept × style matrix, test bench with concept/style pickers, recommendation).
 desktop and phone width before reporting (overflowing mock status bars and clipped chips
 were caught this way). Record the chosen geometry (exact numbers) and the decision in
 docs/brand.md; the implementation goes into `scripts/brand/brand.py` +
-`scripts/brand/icons.sh` (see AGENTS.md "App icon and splash").
+`scripts/brand/icons.sh` (see `docs/app-notes.md` "App icon and splash").
 Before recommending a dynamic element, check what landed in the app meanwhile (Zafe's
 per-vault picture emblems replaced the "2/3" avatar during this study; the N-of-M ring was
 deferred rather than overwriting it).

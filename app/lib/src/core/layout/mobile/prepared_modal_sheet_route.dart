@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app_column.dart';
+
 /// Lays out the sheet at its final position without painting, then runs the
 /// normal Material entrance after its initial corners are ready.
 class PreparedModalSheetRoute<T> extends ModalBottomSheetRoute<T> {
@@ -16,6 +18,7 @@ class PreparedModalSheetRoute<T> extends ModalBottomSheetRoute<T> {
          useSafeArea: true,
          backgroundColor: Colors.transparent,
          elevation: 0,
+         constraints: const BoxConstraints(maxWidth: kMaxContentWidth),
        );
 
   bool _waiting = true;

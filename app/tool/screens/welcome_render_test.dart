@@ -1,4 +1,5 @@
-// Renders the welcome screen (with and without a relay) and its Server settings sheet,
+// Renders the welcome screen (with and without a relay), its Server settings sheet and
+// the "already in a vault" sheet,
 // in both themes, to PNGs for review without a device. Not part of `flutter test`; run it
 // explicitly (from app/):
 //
@@ -69,10 +70,11 @@ void main() {
     tester.view.physicalSize = const Size(390 * 3, 844 * 3);
     addTearDown(tester.view.reset);
 
-    for (final (name, endpoints, sheet) in [
-      ('relay', _configured, false),
-      ('norelay', _unset, false),
-      ('sheet', _unset, true),
+    for (final (name, endpoints, tap) in [
+      ('relay', _configured, null),
+      ('norelay', _unset, null),
+      ('sheet', _unset, 'Server settings'),
+      ('already', _configured, "I'm already in a vault"),
     ]) {
       for (final (theme, data) in [
         ('dark', AppThemeData.dark),
@@ -98,9 +100,7 @@ void main() {
             ),
           ),
         );
-        if (sheet) {
-          await tester.tap(find.bySemanticsLabel('Server settings'));
-        }
+        if (tap != null) await tester.tap(find.bySemanticsLabel(tap));
         for (var i = 0; i < 8; i++) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 50)),

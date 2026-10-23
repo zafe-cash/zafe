@@ -901,45 +901,48 @@ class _CsvErrorsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Couldn\'t import this file',
-            style: AppTypography.bodyLarge.copyWith(
-              color: colors.text.accent,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Nothing was added. Fix these rows and try again. Format: address,amount,memo (amount in ZEC, memo optional).',
-            style: AppTypography.bodySmall.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
-          for (final e in errors)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
-              child: Text(
-                e,
-                style: AppTypography.labelLarge.copyWith(
-                  color: colors.text.destructive,
-                ),
+    return SingleChildScrollView(
+      // Scrolls once the sheet runs out of height (a short window).
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Couldn\'t import this file',
+              style: AppTypography.bodyLarge.copyWith(
+                color: colors.text.accent,
+                fontWeight: FontWeight.w600,
               ),
             ),
-          const SizedBox(height: AppSpacing.md),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.secondary,
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Nothing was added. Fix these rows and try again. Format: address,amount,memo (amount in $kZcashDefaultCurrencyTicker, memo optional).',
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.secondary,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.s),
+            for (final e in errors)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
+                child: Text(
+                  e,
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.destructive,
+                  ),
+                ),
+              ),
+            const SizedBox(height: AppSpacing.md),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.secondary,
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -967,89 +970,95 @@ class _MemoSheetState extends State<_MemoSheet> {
     final colors = context.colors;
     final len = rust.memoLength(memo: _text.text);
     final tooLong = len > 512;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        24,
-        16,
-        16 + MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Message',
-                  style: AppTypography.bodyLarge.copyWith(
-                    color: colors.text.accent,
-                    fontWeight: FontWeight.w600,
+    return SingleChildScrollView(
+      // Scrolls once the sheet runs out of height (a short window).
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          24,
+          16,
+          16 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Message',
+                    style: AppTypography.bodyLarge.copyWith(
+                      color: colors.text.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  '$len/512',
+                  style: AppTypography.labelMedium.copyWith(
+                    color: tooLong
+                        ? colors.text.destructive
+                        : colors.text.muted,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.s),
+            Container(
+              height: 148,
+              padding: const EdgeInsets.all(AppSpacing.s),
+              decoration: BoxDecoration(
+                color: colors.background.ground,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TextField(
+                controller: _text,
+                autofocus: true,
+                maxLines: null,
+                expands: true,
+                onChanged: (_) => setState(() {}),
+                style: AppTypography.bodyMedium.copyWith(
+                  color: colors.text.primary,
+                ),
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  isCollapsed: true,
+                  hintText:
+                      'Only the recipient and this vault\'s signers can read this',
+                  hintStyle: AppTypography.bodyMedium.copyWith(
+                    color: colors.text.disabled,
                   ),
                 ),
               ),
-              Text(
-                '$len/512',
-                style: AppTypography.labelMedium.copyWith(
-                  color: tooLong ? colors.text.destructive : colors.text.muted,
+            ),
+            if (tooLong)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Text(
+                  'Message is too long',
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.destructive,
+                  ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.s),
-          Container(
-            height: 148,
-            padding: const EdgeInsets.all(AppSpacing.s),
-            decoration: BoxDecoration(
-              color: colors.background.ground,
-              borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: AppSpacing.md),
+            AppButton(
+              expand: true,
+              onPressed: tooLong
+                  ? null
+                  : () => Navigator.of(context).pop(_text.text.trim()),
+              child: const Text('Save message'),
             ),
-            child: TextField(
-              controller: _text,
-              autofocus: true,
-              maxLines: null,
-              expands: true,
-              onChanged: (_) => setState(() {}),
-              style: AppTypography.bodyMedium.copyWith(
-                color: colors.text.primary,
-              ),
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                isCollapsed: true,
-                hintText: 'Only the recipient can read this',
-                hintStyle: AppTypography.bodyMedium.copyWith(
-                  color: colors.text.disabled,
-                ),
-              ),
+            const SizedBox(height: AppSpacing.xs),
+            AppButton(
+              expand: true,
+              variant: AppButtonVariant.ghost,
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
             ),
-          ),
-          if (tooLong)
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(
-                'Message is too long',
-                style: AppTypography.labelLarge.copyWith(
-                  color: colors.text.destructive,
-                ),
-              ),
-            ),
-          const SizedBox(height: AppSpacing.md),
-          AppButton(
-            expand: true,
-            onPressed: tooLong
-                ? null
-                : () => Navigator.of(context).pop(_text.text.trim()),
-            child: const Text('Save message'),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

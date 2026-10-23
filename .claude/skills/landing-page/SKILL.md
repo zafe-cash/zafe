@@ -7,7 +7,7 @@ description: Design, build and ship the product's landing page (or redesign it) 
 
 How Zafe's site (`infra/site/`, Astro) went from a plain page to "the Seam Vault", a 3D
 world behind a scroll story (docs/site.md has every decision round). Read `docs/site.md`,
-`docs/brand.md` and the website notes in `AGENTS.md` first; the user's standing taste is
+`docs/brand.md` and the website notes in `docs/app-notes.md` first; the user's standing taste is
 in memory (Vizor-like layout, light only, few words, logo motion).
 
 **Where motion goes** (the user's call, round eleven): the home page `/` stays calm, like
@@ -144,7 +144,7 @@ limit you were given, and say what you'd do next.
 ## 6. Record and ship
 
 - Add a decision round at the top of `docs/site.md` (the feedback quoted, what changed,
-  what's next) and update `AGENTS.md` website notes when you learn a gotcha.
+  what's next) and update the website notes in `docs/app-notes.md` when you learn a gotcha.
 - Work in a worktree; commit and push the branch (a PR's `site.yml` run deploys a Vercel
   preview). **When done, push to main and clean up, always** (the user's standing rule):
   merge/push to main once the site build is OK (no need to wait for Rust/Flutter CI),

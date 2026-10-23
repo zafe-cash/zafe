@@ -33,7 +33,7 @@ class _DiagnosticsSheetState extends State<DiagnosticsSheet> {
   CrashLog? get _log => widget.log ?? CrashLog.instance;
 
   Future<String> _load() async =>
-      await _log?.report(network: kZafeNetwork) ?? 'No log on this device.';
+      await _log?.report(network: kZafeNetwork) ?? 'No log on this phone.';
 
   Future<void> _clear() async {
     await _log?.clear();
@@ -70,7 +70,7 @@ class _DiagnosticsSheetState extends State<DiagnosticsSheet> {
                 constraints: const BoxConstraints(maxHeight: 260),
                 child: SingleChildScrollView(
                   child: SelectableText(
-                    text ?? 'Loading…',
+                    text ?? 'Loading...',
                     style: AppTypography.codeSmall.copyWith(
                       color: colors.text.secondary,
                     ),

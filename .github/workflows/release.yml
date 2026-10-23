@@ -85,15 +85,19 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build.
+      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build. Restored from
+      # the cache android-build.yml saves on main: a tag run can only read caches of its own
+      # tag or of main, so one saved here would never be read again (every release
+      # compiled the Rust from scratch, ~13 min).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> app/build/rust_lib_zafe/build'
-          key: android-release
+          shared-key: android-release
+          save-if: false
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.6
+          flutter-version: 3.47.7
           channel: stable
           cache: true
 
@@ -165,10 +169,8 @@ jobs:
             echo "0.125 TAZ per request, one payout per IP address every 24 hours. More in the"
             echo "[Zcash testnet guide](https://zcash.readthedocs.io/en/latest/rtd_pages/testnet_guide.html)."
             echo
-            echo "**Known issue: sending is blocked on testnet.** The testnet moved to the NU7 network upgrade on"
-            echo "2026-10-04 and this build doesn't support NU7 yet, so the network rejects payments (nothing is sent,"
-            echo "funds don't move). Creating a vault, receiving, proposing and approving work. Mainnet is not affected"
-            echo "until NU7 activates there (targeted 2026-11-05); Zafe will update before then."
+            echo "**Update every member of a vault together.** Since NU7 (testnet, 2026-10-04) payment expiry is"
+            echo "counted in 25-second blocks; a member on an older build rejects new payments as \"expiry too far\"."
             echo
             echo "Relay: \`$ZAFE_RELAY_URL\` · size $size"
             echo

@@ -1,7 +1,7 @@
 # Response headers for Cloudflare Pages and Netlify; vercel-output.sh copies the "/*" block
 # and the "/assets/..." blocks for Vercel (other hosts: see README.md).
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
@@ -14,6 +14,9 @@
   Cache-Control: public, max-age=604800, stale-while-revalidate=86400
 
 /assets/screens/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/assets/motion/*
   Cache-Control: public, max-age=604800, stale-while-revalidate=86400
 
 /.well-known/assetlinks.json

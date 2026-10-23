@@ -1828,11 +1828,15 @@ pub fn expectations<P: Parameters>(
         consensus_branch_id: BranchId::for_height(network, BlockHeight::from_u32(tip_height + 1))
             .into(),
         tip_height,
-        // The proposer sets expiry = its target height (tip + 1) + the vault's window.
-        max_expiry_delta: proposal_expiry_blocks
-            + 1
+        // The proposer sets expiry = its target height (tip + 1) + the vault's window, in
+        // blocks scaled for the block time at its target. Its tip may be up to the slack
+        // ahead of ours, so a proposer already on NU7 is allowed the scaled window.
+        max_expiry_delta: 1 + crate::wallet::block_scale(
+            network,
+            tip_height + 1 + crate::vault::EXPIRY_TIP_SLACK_BLOCKS,
+        ) * (proposal_expiry_blocks
             + crate::vault::EXPIRY_TIP_SLACK_BLOCKS
-            + crate::vault::EXPIRY_ROUNDING_BLOCKS,
+            + crate::vault::EXPIRY_ROUNDING_BLOCKS),
     })
 }
 

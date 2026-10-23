@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -16,6 +17,8 @@ import android.os.PersistableBundle
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager.Authenticators
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -37,6 +40,17 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingUnlock: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Edge to edge on every Android version, not only 15+ (where targetSdk 35+ forces
+        // it): one layout everywhere, Flutter's padding handles the bars (Play's
+        // recommendation, 2026-10-22). Both bars are transparent from Android 10 (auto()
+        // ignores the colours there). Below that the nav bar takes the window colour per
+        // theme (Android 7 always the dark one: no dark icons); keep the values equal to
+        // @color/zafe_window (values, values-night). Once Flutter runs, Dart sets the bars
+        // (androidSystemBarsStyleFor): a transparent nav bar on 8+, icons per theme.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(WINDOW_LIGHT, WINDOW_DARK),
+        )
         super.onCreate(savedInstanceState)
         // Taps that arrive while another app draws over this one (an overlay trying to
         // trick the owner into approving) are dropped.
@@ -333,5 +347,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     private companion object {
         const val UNLOCK_REQUEST = 0x2afe
+
+        // @color/zafe_window in light and dark (background.window in the app's theme).
+        const val WINDOW_LIGHT = 0xFFF1F5F5.toInt()
+        const val WINDOW_DARK = 0xFF080B0B.toInt()
     }
 }

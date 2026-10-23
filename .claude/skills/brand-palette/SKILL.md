@@ -79,4 +79,4 @@ width (no horizontal scroll) too.
 ## 8. Hand-off
 
 Write the research, tokens and decisions to `docs/brand.md` (sources, unverified marks,
-what was deferred), and update AGENTS.md's palette notes when the app changes.
+what was deferred), and update the palette notes in `docs/app-notes.md` when the app changes.

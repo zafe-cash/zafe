@@ -249,7 +249,9 @@ class EmblemPainter extends CustomPainter {
     );
     c.restore();
     c.drawCircle(const Offset(50, 50), 15, Paint()..color = s.color);
-    c.drawCircle(const Offset(78, 26), 6, a);
+    // The moon at the lower-left end of the ring: the top-right corner is where the
+    // "something waits" badge sits, and a moon there read as a second dot.
+    c.drawCircle(const Offset(22, 74), 6, a);
   }
 
   @override

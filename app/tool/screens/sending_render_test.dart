@@ -35,21 +35,20 @@ Future<void> _loadFonts() async {
   }
 }
 
-// The in-progress phase is shown without its action: the app's label ('Keep sending in
-// background') wraps inside the button at this width.
+// As SendingScreen shows them: while sending, a "Back to Home" link; once sent, no buttons.
 final _phases =
     <String, (MobileTransactionProgressPhase, String, String, String?)>{
       'sending_progress': (
         MobileTransactionProgressPhase.inProgress,
         'Sending...',
-        'Building the private transaction and submitting it to the network...',
-        null,
+        'Building the transaction and submitting it...',
+        'Back to Home',
       ),
       'sending_sent': (
         MobileTransactionProgressPhase.succeeded,
         'Sent!',
-        'It will confirm on-chain shortly. Track it in Activity.',
-        'Done',
+        'It confirms on-chain shortly.', // as SendingScreen says it
+        null,
       ),
     };
 
@@ -87,8 +86,8 @@ void main() {
                     background: SentArt(
                       sent: phase == MobileTransactionProgressPhase.succeeded,
                     ),
-                    primaryActionLabel: action,
-                    onPrimaryAction: action == null ? null : () {},
+                    secondaryActionLabel: action,
+                    onSecondaryAction: action == null ? null : () {},
                   ),
                 ),
               ),

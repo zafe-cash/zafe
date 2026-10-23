@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/layout/app_column.dart';
 import 'core/security/app_lock_gate.dart';
 import 'core/theme/app_theme_host.dart';
 import 'core/theme/material_theme.dart';
@@ -57,7 +58,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ? '/setup'
       : '/welcome';
 
-  Page<void> page(Widget child) => CupertinoPage(child: child);
+  // Every page is a phone-width column in wide windows, clear of a hinge (Welcome lays
+  // out wide windows itself).
+  Page<void> page(Widget child) =>
+      CupertinoPage(child: AppColumn(child: child));
 
   late final GoRouter router;
   // Tapped notifications open their payment (also the one that launched the app),
@@ -241,7 +245,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/welcome',
-        pageBuilder: (_, _) => page(const WelcomeScreen()),
+        pageBuilder: (_, _) => const CupertinoPage(child: WelcomeScreen()),
       ),
       GoRoute(
         path: '/create',
@@ -277,7 +281,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       // The vault's tabs; everything else is pushed over the tab bar.
       StatefulShellRoute.indexedStack(
-        builder: (_, _, shell) => VaultShell(shell: shell),
+        builder: (_, _, shell) => AppColumn(child: VaultShell(shell: shell)),
         branches: [
           for (final (path, screen) in const [
             ('/home', HomeScreen()),

@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/core/config/network_config.dart';
 import 'package:zafe/src/core/layout/mobile/zafe_screen.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/app_button.dart';
@@ -224,8 +225,8 @@ final _scenarios = <String, (String, List<Widget>)>{
       ),
     ],
   ),
-  // The website's story (infra/site): Bob proposes and approves on his phone (shown
-  // in dark), you approve on yours (shown in light) and it's sent.
+  // The website's story (infra/site /showcase): Bob proposes on his phone (shown in dark;
+  // proposing is his approval), you approve the request on yours (light) and it's sent.
   'story_bob_propose': (
     'Review',
     [
@@ -236,48 +237,32 @@ final _scenarios = <String, (String, List<Widget>)>{
         onFullAddress: () {},
       ),
       const SizedBox(height: AppSpacing.lg),
-      const MobileSurfaceCard(
+      MobileSurfaceCard(
         cornerRadius: AppRadii.large,
         child: Column(
           children: [
-            DetailRow(label: 'Message', value: 'Grant: Q4 audit milestone'),
-            DetailDivider(),
-            DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
-            DetailDivider(),
-            DetailRow(label: 'Network fee', value: 'At least 0.0001 TAZ'),
+            const DetailRow(
+              label: 'Message',
+              value: 'Grant: Q4 audit milestone',
+            ),
+            const DetailDivider(),
+            const DetailRow(label: 'Approvals needed', value: '2 of 3 signers'),
+            const DetailDivider(),
+            DetailRow(
+              label: 'Network fee',
+              value: '0.00015 $kZcashDefaultCurrencyTicker',
+              onHelp: () {},
+            ),
           ],
         ),
       ),
-      const SizedBox(height: AppSpacing.sm),
-      Builder(
-        builder: (context) => Text(
-          'Nothing is sent yet. Each signer checks this payment on their own device and '
-          'approves with one tap; 2 approvals complete it.',
-          style: AppTypography.bodySmall.copyWith(
-            color: context.colors.text.secondary,
-          ),
-        ),
-      ),
+      const SizedBox(height: AppSpacing.lg),
       _actions('Propose payment', icon: AppIcons.plane, secondary: 'Cancel'),
     ],
   ),
-  'story_bob_approve': (
-    'Your payment',
-    [
-      ProposalBody(
-        proposal: _proposal(mine: true),
-        members: _members,
-        me: _bob,
-      ),
-      _actions(
-        'Approve and sign',
-        note:
-            'Approving signs the payment on this device. It can\'t be withdrawn afterwards.',
-      ),
-    ],
-  ),
+  // Proposing is Bob's approval (one fingerprint): he lands on his proposal, waiting.
   'story_bob_approved': (
-    'Your payment',
+    'Awaiting votes',
     [
       ProposalBody(
         proposal: _proposal(
@@ -287,6 +272,7 @@ final _scenarios = <String, (String, List<Widget>)>{
         ),
         members: _members,
         me: _bob,
+        names: const {_me: 'You', _cara: 'Cara'},
       ),
     ],
   ),
@@ -308,7 +294,84 @@ final _scenarios = <String, (String, List<Widget>)>{
   ),
 };
 
+// Your phone: the request as the app shows it to a member who hasn't voted (ProposalScreen's
+// request view), with Approve and Decline pinned to the bottom. Rendered at a phone's height.
+Widget _request() => ZafeScreen(
+  title: 'Payment request',
+  bottom: Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      AppButton(
+        expand: true,
+        leading: const AppIcon(AppIcons.check, size: 20),
+        onPressed: () {},
+        child: const Text('Approve'),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      AppButton(
+        expand: true,
+        variant: AppButtonVariant.ghost,
+        onPressed: () {},
+        child: const Text('Decline'),
+      ),
+    ],
+  ),
+  children: [
+    PaymentRequestView(
+      proposal: _proposal(approvals: [_bob]),
+      members: _members,
+      me: _me,
+      names: const {_bob: 'Bob', _cara: 'Cara'},
+    ),
+  ],
+);
+
 void main() {
+  testWidgets('render the story request screen', (tester) async {
+    await tester.runAsync(_loadFonts);
+    final out = Directory(
+      Platform.environment['SCREEN_PREVIEW_OUT'] ?? 'build/screen_preview',
+    )..createSync(recursive: true);
+    tester.view.devicePixelRatio = 3;
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    addTearDown(tester.view.reset);
+    for (final (theme, data) in [
+      ('dark', AppThemeData.dark),
+      ('light', AppThemeData.light),
+    ]) {
+      final boundary = GlobalKey();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            proposalReviewProvider.overrideWith((ref, id) async => _review),
+          ],
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            home: RepaintBoundary(
+              key: boundary,
+              child: AppTheme(data: data, child: _request()),
+            ),
+          ),
+        ),
+      );
+      for (var i = 0; i < 5; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      final render =
+          boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final bytes = await tester.runAsync(() async {
+        final image = await render.toImage(pixelRatio: 2);
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        return data!.buffer.asUint8List();
+      });
+      File('${out.path}/story_me_request_$theme.png').writeAsBytesSync(bytes!);
+    }
+  });
+
   testWidgets('render proposal screens', (tester) async {
     await tester.runAsync(_loadFonts);
     final out = Directory(

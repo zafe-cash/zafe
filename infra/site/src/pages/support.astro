@@ -1,0 +1,53 @@
+---
+// /support: how to reach us first, then the fixes for what goes wrong most, written out
+// (nothing to expand). Every step names a real screen or button in the app (labels checked
+// against app/lib). Mail to any @zafe.cash address is forwarded by Cloudflare Email Routing.
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { sourceUrl } from '../config';
+
+const fixes = [
+  { q: 'The safety words don’t match', a: 'Stop: someone may be in the middle. Tap “They don’t match” and start again, sharing the invite over a channel you trust.' },
+  { q: 'A payment is waiting', a: 'It needs enough members to approve. Notifications can be late, so ask them. If it expires, propose it again.' },
+  { q: 'Someone lost their phone', a: 'They restore their backup. Without one, the others open Signers, tap “Replace a lost phone” and compare safety words with the new phone.' },
+  { q: 'Zafe says to update', a: 'Update from Google Play, or install the newest APK. Everyone in the vault should update.' },
+  { q: 'Sync fails', a: 'Check your connection, or turn Tor off and on. Tap the status at the top of Home to see what failed.' },
+];
+---
+
+<Base
+  title="Support · Zafe"
+  description="Get help with Zafe: write to us, report a bug, or fix the common problems yourself."
+  bodyClass="home landing sp-page"
+>
+  <Nav links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
+
+  <main class="sp">
+    <h1>How can we help?</h1>
+
+    <ul class="sp-contact">
+      <li>
+        <a href="mailto:support@zafe.cash"><strong>Email us</strong><span>support@zafe.cash</span></a>
+      </li>
+      <li>
+        <a href={`${sourceUrl}/issues`} target="_blank" rel="noopener noreferrer"><strong>Report a bug</strong><span>GitHub issues, in public</span></a>
+      </li>
+      <li>
+        <a href="mailto:security@zafe.cash"><strong>Security issue</strong><span>security@zafe.cash</span></a>
+      </li>
+    </ul>
+    <p class="sp-note">Attach the diagnostic report from Settings &rsaquo; Privacy. Addresses, amounts and keys are removed from it. Never send your backup words: we&rsquo;ll never ask for them.</p>
+
+    <section class="sp-fixes" aria-labelledby="fixes-title">
+      <h2 id="fixes-title">Quick fixes</h2>
+      <dl>
+        {fixes.map((f) => (
+          <div><dt>{f.q}</dt><dd>{f.a}</dd></div>
+        ))}
+      </dl>
+    </section>
+  </main>
+
+  <Footer />
+</Base>

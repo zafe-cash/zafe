@@ -24,6 +24,7 @@ import '../../rust/api/proposals.dart' as rust;
 import '../../rust/api/vault.dart' as rust_vault;
 import '../vaults/vault_emblem.dart';
 import 'payment_link.dart';
+import '../../core/widgets/line_icon.dart';
 import 'send_screen.dart' show SendPrefill, kMaxRecipients;
 
 /// A vault the request could be paid from.
@@ -400,11 +401,15 @@ class _Callout extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(
-            AppIcons.warning,
+          LineIcon(
             size: 20,
-            color: colors.icon.warning,
-            patina: colors.icon.warning,
+            line: AppTypography.labelLarge,
+            icon: AppIcon(
+              AppIcons.warning,
+              size: 20,
+              color: colors.icon.warning,
+              patina: colors.icon.warning,
+            ),
           ),
           const SizedBox(width: AppSpacing.s),
           Expanded(

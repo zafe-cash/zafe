@@ -18,6 +18,7 @@ import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../core/widgets/line_icon.dart';
 import '../../rust/api/repair.dart' as rust;
 import '../../rust/api/vault.dart' as rust_vault;
 
@@ -268,7 +269,7 @@ class RecoverBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Lost your phone and your backup? Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
+          'Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -335,10 +336,14 @@ class RecoverBody extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppIcon(
-              error != null ? AppIcons.warningCircle : AppIcons.time,
+            LineIcon(
               size: 20,
-              color: error != null ? colors.icon.warning : colors.icon.accent,
+              line: AppTypography.bodySmall,
+              icon: AppIcon(
+                error != null ? AppIcons.warningCircle : AppIcons.time,
+                size: 20,
+                color: error != null ? colors.icon.warning : colors.icon.accent,
+              ),
             ),
             const SizedBox(width: AppSpacing.xs),
             Expanded(
@@ -391,7 +396,7 @@ class VaultCheckBody extends StatelessWidget {
       children: [
         Text(
           'Your key is back. Before saving "$name", ask a co-signer to read you the '
-          'end of the vault address (Settings, Vault address).',
+          'end of the vault address (Home, Receive).',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),

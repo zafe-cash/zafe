@@ -41,7 +41,7 @@ Future<void> showEndpointSheet(
   if (changed == true) {
     if (kind == EndpointKind.relay) unawaited(reregisterPush());
     // Pick up the new server right away.
-    await ref.read(proposalsProvider.notifier).refresh();
+    await ref.read(proposalsProvider.notifier).refreshFresh();
     await ref.read(vaultProvider.notifier).sync();
   }
 }
@@ -158,7 +158,7 @@ Future<String?> tryEndpoint(EndpointKind kind, String url) async {
       _ =>
         kind == EndpointKind.relay
             ? 'This doesn\'t look like a Zafe relay.'
-            : 'This doesn\'t look like a lightwalletd server.',
+            : 'This doesn\'t look like a Zcash server.',
     };
   }
 }

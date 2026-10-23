@@ -400,6 +400,18 @@ pub fn check_server_tip(server_tip: u32, known_height: Option<u32>) -> Result<()
     Ok(())
 }
 
+/// How many blocks at `height` last as long as one 75-second block: 3 from NU7 on (ZIP 218,
+/// 25-second blocks), else 1. Vault expiry windows (descriptor) and the expiry constants in
+/// [`crate::vault`] count 75-second blocks, so "7 days" stays 7 days after the upgrade.
+pub fn block_scale<P: Parameters>(params: &P, height: u32) -> u32 {
+    use zcash_protocol::consensus::NetworkUpgrade;
+    if params.is_nu_active(NetworkUpgrade::Nu7, BlockHeight::from_u32(height)) {
+        3
+    } else {
+        1
+    }
+}
+
 /// The expiry height of a proposal targeting `target`: [`crate::vault::expiry_height`], but
 /// never past the block before the next network upgrade whose height is known. A
 /// transaction built (and signed) for the rules before an upgrade can't be mined after it,
@@ -407,7 +419,7 @@ pub fn check_server_tip(server_tip: u32, known_height: Option<u32>) -> Result<()
 /// rules instead. Without a known upgrade ahead, nothing changes.
 pub fn proposal_expiry<P: Parameters>(params: &P, target: u32, window: u32) -> u32 {
     use zcash_protocol::consensus::NetworkUpgrade;
-    let expiry = crate::vault::expiry_height(target, window);
+    let expiry = crate::vault::expiry_height_scaled(target, window, block_scale(params, target));
     match params.activation_height(NetworkUpgrade::Nu7).map(u32::from) {
         Some(nu7) if target < nu7 && expiry >= nu7 => nu7 - 1,
         _ => expiry,
@@ -522,7 +534,8 @@ pub struct ReceivedPayment {
     pub txid: String,
     /// Sum of the vault's non-change outputs in the transaction.
     pub amount_zat: u64,
-    /// `None` while unmined (the wallet only learns of unmined transactions it created).
+    /// `None` while unmined: the vault's own sends, and receipts the mempool watch stored
+    /// (`store_mempool_tx`). The wallet summary already counts such notes (as pending).
     pub mined_height: Option<u32>,
     /// Unix seconds of the mining block, when the wallet has scanned it.
     pub block_time: Option<u32>,
@@ -1403,6 +1416,11 @@ impl BlockCache for MemBlockCache {
     }
 }
 
+/// Mainnet's NU7 activation height, agreed by the ZIP editors on 2026-10-20 (zips#1405, ZIP 259;
+/// about 2026-11-05). The librustzcash pre-releases we pin don't have it yet, so `ZafeNetwork::Main`
+/// supplies it; once a crate release carries a height, the crate's wins.
+pub const MAINNET_NU7_HEIGHT: u32 = 3_543_405;
+
 /// The networks Zafe runs on, selectable at runtime (e.g. from the app's settings).
 #[derive(Clone, Copy, Debug)]
 pub enum ZafeNetwork {
@@ -1446,7 +1464,12 @@ impl Parameters for ZafeNetwork {
         nu: zcash_protocol::consensus::NetworkUpgrade,
     ) -> Option<BlockHeight> {
         match self {
-            Self::Main => zcash_protocol::consensus::MainNetwork.activation_height(nu),
+            Self::Main => zcash_protocol::consensus::MainNetwork
+                .activation_height(nu)
+                .or_else(|| {
+                    (nu == zcash_protocol::consensus::NetworkUpgrade::Nu7)
+                        .then(|| BlockHeight::from_u32(MAINNET_NU7_HEIGHT))
+                }),
             Self::Test => zcash_protocol::consensus::TestNetwork.activation_height(nu),
             Self::Regtest(n) => n.activation_height(nu),
         }
@@ -1480,6 +1503,27 @@ mod tests {
         assert!(check_branch("nonsense", 10, &before_nu7).is_ok());
     }
 
+    /// Mainnet builds NU7 transactions from the agreed height on, NU6.3 ones before it.
+    #[test]
+    fn mainnet_knows_the_nu7_height() {
+        use zcash_protocol::consensus::{BranchId, NetworkUpgrade};
+        let main = ZafeNetwork::Main;
+        assert_eq!(
+            main.activation_height(NetworkUpgrade::Nu7),
+            Some(BlockHeight::from_u32(MAINNET_NU7_HEIGHT))
+        );
+        let at = |h| BranchId::for_height(&main, BlockHeight::from_u32(h));
+        assert_eq!(at(MAINNET_NU7_HEIGHT - 1), BranchId::Nu6_3);
+        assert_eq!(at(MAINNET_NU7_HEIGHT), BranchId::Nu7);
+        assert!(check_branch("37a5165b", MAINNET_NU7_HEIGHT - 1, &main).is_ok());
+        assert!(check_branch("77190ad9", MAINNET_NU7_HEIGHT, &main).is_ok());
+        // A proposal whose window crosses the upgrade expires the block before it.
+        assert_eq!(
+            proposal_expiry(&main, MAINNET_NU7_HEIGHT - 500, 1_152),
+            MAINNET_NU7_HEIGHT - 1
+        );
+    }
+
     /// A proposal built under the rules before a known upgrade expires before it.
     #[test]
     fn a_proposal_does_not_outlive_a_known_network_upgrade() {
@@ -1489,20 +1533,54 @@ mod tests {
         };
         // 1,500 + 1,152 rounds up to 2,592, past the upgrade: cut to the block before it.
         assert_eq!(proposal_expiry(&ahead, 1_500, 1_152), 1_999);
-        // Already on the new rules, or the window ends before it: unchanged.
+        // Already on the new rules: the window and rounding count 25 s blocks (x3).
         assert_eq!(
             proposal_expiry(&ahead, 2_500, 1_152),
-            crate::vault::expiry_height(2_500, 1_152)
+            crate::vault::expiry_height_scaled(2_500, 1_152, 3)
         );
+        // The window ends before the upgrade: unchanged.
         assert_eq!(
             proposal_expiry(&ahead, 100, 1_152),
             crate::vault::expiry_height(100, 1_152)
         );
-        // No upgrade ahead (height unknown): unchanged.
+        // No upgrade known: unchanged.
+        let unknown = LocalNetwork {
+            nu7: None,
+            ..regtest_network()
+        };
         assert_eq!(
-            proposal_expiry(&regtest_network(), 1_500, 1_152),
+            proposal_expiry(&unknown, 1_500, 1_152),
             crate::vault::expiry_height(1_500, 1_152)
         );
+    }
+
+    /// Expiry windows keep their duration across NU7's 75 s -> 25 s block time.
+    #[test]
+    fn expiry_windows_keep_their_duration_after_nu7() {
+        let main = ZafeNetwork::Main;
+        let week = crate::vault::DEFAULT_PROPOSAL_EXPIRY_BLOCKS;
+        assert_eq!(block_scale(&main, MAINNET_NU7_HEIGHT - 1), 1);
+        assert_eq!(block_scale(&main, MAINNET_NU7_HEIGHT), 3);
+        // Before: 8,064 blocks of 75 s. After: 24,192 blocks of 25 s. Both a week.
+        let before = proposal_expiry(&main, 3_000_001, week);
+        assert!((3_000_001 + week..3_000_001 + week + 144).contains(&before));
+        let target = MAINNET_NU7_HEIGHT + 10;
+        let after = proposal_expiry(&main, target, week);
+        assert!((target + 3 * week..target + 3 * week + 3 * 144).contains(&after));
+        assert_eq!(after % (3 * 144), 0);
+
+        // A member accepts the proposer's scaled expiry, also from a tip a little behind
+        // the upgrade, and still refuses one past the scaled window.
+        let check = |tip: u32, expiry: u32| {
+            let e = crate::node::expectations(&main, &[], tip, week).unwrap();
+            expiry > tip && expiry - tip <= e.max_expiry_delta
+        };
+        assert!(check(target - 1, after));
+        assert!(check(MAINNET_NU7_HEIGHT - 50, after));
+        assert!(!check(target - 1, after + 3 * 144 + 3 * 96 + 1));
+        // Before NU7 the rule is what older apps check.
+        let e = crate::node::expectations(&main, &[], 3_000_000, week).unwrap();
+        assert_eq!(e.max_expiry_delta, week + 1 + 96 + 144);
     }
 
     #[test]

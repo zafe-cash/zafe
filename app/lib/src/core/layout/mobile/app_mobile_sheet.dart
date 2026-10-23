@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/app_modal_shape.dart';
+import '../app_column.dart';
 import 'mobile_modal_corners.dart';
 import 'prepared_modal_sheet_route.dart';
 
@@ -99,6 +100,8 @@ Future<T?> showAppMobileSheet<T>({
     // itself is transparent with no default elevation shadow or shape.
     backgroundColor: const Color(0x00000000),
     elevation: 0,
+    // As wide as a page's column in a wide window.
+    constraints: const BoxConstraints(maxWidth: kMaxContentWidth),
     barrierColor: colors.background.neutralScrim,
     builder: (sheetContext) => wrapSheet(
       Builder(
@@ -382,7 +385,13 @@ class MobileModalScaffold extends StatelessWidget {
                 ),
                 SizedBox(height: bodyGap),
               ],
-              if (constrainBody) Flexible(child: child) else child,
+              // A body that doesn't scroll by itself scrolls once the sheet runs out
+              // of height (a short window: landscape, a flip phone's cover screen).
+              Flexible(
+                child: constrainBody
+                    ? child
+                    : SingleChildScrollView(child: child),
+              ),
             ],
           ),
         ),

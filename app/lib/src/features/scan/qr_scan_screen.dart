@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -203,6 +204,91 @@ class _QrScanScreenState extends State<QrScanScreen>
     if (sawCode && !_rejected) setState(() => _rejected = true);
   }
 
+  /// Keeps the camera view (and its state) when the layout below changes shape.
+  final _cameraKey = GlobalKey();
+
+  /// The camera above the prompt and the button; beside them in a short, wide window
+  /// (landscape); scrolling under a camera of fixed height in a small one (a flip
+  /// phone's cover screen).
+  Widget _layout(BuildContext context, BoxConstraints box) {
+    final colors = context.colors;
+    final camera = KeyedSubtree(
+      key: _cameraKey,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.xLarge),
+        child: ColoredBox(
+          color: const Color(0xFF0C0C0C),
+          child: MobileScanner(
+            controller: _controller,
+            onDetect: _onDetect,
+            errorBuilder: (context, error) =>
+                _ScannerError(error: error, onRetry: _start),
+            overlayBuilder: (_, _) => const _Frame(),
+          ),
+        ),
+      ),
+    );
+    final controls = [
+      Text(
+        _noCodeInImage
+            ? 'No QR code found in that image. Choose a clearer one.'
+            : _rejected
+            ? widget.rejected
+            : widget.prompt,
+        textAlign: TextAlign.center,
+        style: AppTypography.bodyMedium.copyWith(
+          color: _rejected || _noCodeInImage
+              ? colors.text.destructive
+              : colors.text.secondary,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      AppButton(
+        expand: true,
+        variant: AppButtonVariant.secondary,
+        leading: const AppIcon(AppIcons.importWallet, size: 20),
+        onPressed: _chooseImage,
+        child: const Text('Choose image'),
+      ),
+    ];
+    if (box.maxHeight >= 400) {
+      return Column(
+        children: [
+          Expanded(child: camera),
+          const SizedBox(height: AppSpacing.md),
+          ...controls,
+        ],
+      );
+    }
+    if (box.maxWidth >= 480) {
+      return Row(
+        children: [
+          Expanded(child: camera),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Center(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: controls,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          SizedBox(height: math.max(200, box.maxHeight * 0.75), child: camera),
+          const SizedBox(height: AppSpacing.md),
+          ...controls,
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -219,47 +305,7 @@ class _QrScanScreenState extends State<QrScanScreen>
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(AppRadii.xLarge),
-                        child: ColoredBox(
-                          color: const Color(0xFF0C0C0C),
-                          child: MobileScanner(
-                            controller: _controller,
-                            onDetect: _onDetect,
-                            errorBuilder: (context, error) =>
-                                _ScannerError(error: error, onRetry: _start),
-                            overlayBuilder: (_, _) => const _Frame(),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      _noCodeInImage
-                          ? 'No QR code found in that image. Choose a clearer one.'
-                          : _rejected
-                          ? widget.rejected
-                          : widget.prompt,
-                      textAlign: TextAlign.center,
-                      style: AppTypography.bodyMedium.copyWith(
-                        color: _rejected || _noCodeInImage
-                            ? colors.text.destructive
-                            : colors.text.secondary,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    AppButton(
-                      expand: true,
-                      variant: AppButtonVariant.secondary,
-                      leading: const AppIcon(AppIcons.importWallet, size: 20),
-                      onPressed: _chooseImage,
-                      child: const Text('Choose image'),
-                    ),
-                  ],
-                ),
+                child: LayoutBuilder(builder: _layout),
               ),
             ),
           ],
@@ -275,11 +321,11 @@ class _Frame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: FractionallySizedBox(
-        widthFactor: 0.7,
-        child: AspectRatio(
-          aspectRatio: 1,
+    // 70% of the view's shorter side: its width on a phone, its height in a wide one.
+    return LayoutBuilder(
+      builder: (context, box) => Center(
+        child: SizedBox.square(
+          dimension: box.biggest.shortestSide * 0.7,
           child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.large),
@@ -354,8 +400,8 @@ class _ScannerError extends StatelessWidget {
             const SizedBox(height: AppSpacing.xxs),
             Text(
               denied
-                  ? 'Allow camera access in your phone\'s settings, or go back and paste the invite.'
-                  : 'Try again, or go back and paste the invite instead.',
+                  ? 'Allow camera access in your phone\'s settings, or go back and paste it instead.'
+                  : 'Try again, or go back and paste it instead.',
               textAlign: TextAlign.center,
               style: AppTypography.bodySmall.copyWith(
                 color: light.withValues(alpha: 0.75),

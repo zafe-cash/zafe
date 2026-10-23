@@ -168,6 +168,8 @@ pub struct MemberInfo {
 }
 
 /// Default proposal lifetime: 7 days at the 75-second block target (1152 blocks per day).
+/// Every expiry block count here and in the descriptor counts 75-second blocks, also after
+/// NU7: heights from NU7 on scale them by 3 (`wallet::block_scale`).
 pub const DEFAULT_PROPOSAL_EXPIRY_BLOCKS: u32 = 7 * 1152;
 
 /// Extra blocks a member accepts beyond the vault's expiry window, because the member's
@@ -188,7 +190,15 @@ pub const MAX_PROPOSAL_EXPIRY_BLOCKS: u32 = 30 * 1152;
 /// The expiry height for a transaction targeting `target` in a vault with `window`:
 /// `target + window`, rounded up to [`EXPIRY_ROUNDING_BLOCKS`].
 pub fn expiry_height(target: u32, window: u32) -> u32 {
-    (target + window).div_ceil(EXPIRY_ROUNDING_BLOCKS) * EXPIRY_ROUNDING_BLOCKS
+    expiry_height_scaled(target, window, 1)
+}
+
+/// [`expiry_height`] with every block count (the window and the rounding) multiplied by
+/// `scale`: the windows and constants here count 75-second blocks, so from NU7 on (25 s
+/// blocks, ZIP 218) they are scaled by 3 to keep their durations (`wallet::block_scale`).
+pub fn expiry_height_scaled(target: u32, window: u32, scale: u32) -> u32 {
+    let rounding = EXPIRY_ROUNDING_BLOCKS * scale;
+    (target + window * scale).div_ceil(rounding) * rounding
 }
 
 /// What every member signs at the end of vault creation (spec §7.3).

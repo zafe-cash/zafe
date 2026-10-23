@@ -30,7 +30,7 @@ class TorSettingRow extends ConsumerWidget {
   /// Picks up the new route right away instead of at the next poll.
   Future<void> _refreshVault(WidgetRef ref) async {
     if (ref.read(torProvider).failed) return;
-    await ref.read(proposalsProvider.notifier).refresh();
+    await ref.read(proposalsProvider.notifier).refreshFresh();
     await ref.read(vaultProvider.notifier).sync(force: true);
   }
 

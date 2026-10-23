@@ -104,7 +104,8 @@ when the move ships; stored `KeyPackage`s stay readable.
 
 reddsa 0.6.0/0.6.1 (2026-09-25) dropped the FROST ciphersuites; frost#963 (move them to the
 `frost` repo) is open and `frost` has no redpallas crate. Zafe stays on reddsa 0.5.2 +
-frost-core 3.0.0 (orchard 0.15.5 uses reddsa 0.5). **Ask:** security fixes for 0.5.x until
+frost-core 3.0.0 (orchard 0.15.5 used reddsa 0.5; since the NU7 move Zafe pins orchard 0.16,
+which uses reddsa 0.6 without FROST, so the tree has both). **Ask:** security fixes for 0.5.x until
 the move, and will it keep the frost-core 3.x `KeyPackage` serialization?
 
 ---
@@ -181,7 +182,7 @@ The **Zakura node itself supports NU6.3 on regtest**. Started with `"NU5"`, `"NU
 
 **Zafe's workaround until then:** run `zakuracore/zakura:1.4.0` and the `ths` lightwalletd image directly with our own NU6.3 config (`infra/regtest/`).
 
-**Resolved (2026-10-02):** our PR #124 merged and shipped in `ths` v0.3.0 (Zakura 1.6.0, NU6.1-6.3 at height 1, Ironwood wallet). Since 2026-10-04 `infra/regtest/` runs `ths` itself (`ths start`, faucet, `ths mine`); our own Zakura config is gone.
+**Resolved (2026-10-02):** our PR #124 merged and shipped in `ths` v0.3.0 (Zakura 1.6.0, NU6.1-6.3 at height 1, Ironwood wallet). Since 2026-10-04 `infra/regtest/` runs `ths` itself (`ths start`, faucet, `ths mine`); our own Zakura config is gone. Zafe now pins `ths` 0.4.0 (NU5 to NU7 at height 1).
 
 **Filed (2026-10-04):** issue [#145](https://github.com/zcashlabs/thus-spoke-zakura/issues/145), fix in PR [#146](https://github.com/zcashlabs/thus-spoke-zakura/pull/146). In 0.3.0, `ths --name X stop` from another shell deletes the environment but leaves the foreground `ths start` launcher running (it only exits on a signal). `infra/regtest/down.sh` sends SIGINT instead. **Resolved:** merged 2026-10-11, shipped in v0.4.0 (Zafe pins it since 2026-10-19).
 

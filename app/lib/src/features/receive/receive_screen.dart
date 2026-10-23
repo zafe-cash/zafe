@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../core/config/beta.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/copy_button.dart';
@@ -30,19 +29,27 @@ class ReceiveScreen extends ConsumerWidget {
       children: [
         const SizedBox(height: AppSpacing.md),
         Center(
-          child: Container(
-            width: 292,
-            height: 308,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-            decoration: BoxDecoration(
-              color: colors.background.darkCard,
-              borderRadius: BorderRadius.circular(AppRadii.xLarge),
-              border: Border.all(color: colors.border.subtleOpacity),
-            ),
-            child: PrettyQrView.data(
-              data: address,
-              decoration: PrettyQrDecoration(
-                shape: DotQrShape(color: colors.text.darkCard),
+          // 292 x 308, narrower only when the window is (a flip phone's cover screen).
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 292),
+            child: AspectRatio(
+              aspectRatio: 292 / 308,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                decoration: BoxDecoration(
+                  color: colors.background.darkCard,
+                  borderRadius: BorderRadius.circular(AppRadii.xLarge),
+                  border: Border.all(color: colors.border.subtleOpacity),
+                ),
+                child: PrettyQrView.data(
+                  data: address,
+                  decoration: PrettyQrDecoration(
+                    shape: DotQrShape(color: colors.text.darkCard),
+                  ),
+                ),
               ),
             ),
           ),
@@ -67,18 +74,6 @@ class ReceiveScreen extends ConsumerWidget {
           ),
         ),
 
-        if (kIsBeta) ...[
-          const SizedBox(height: AppSpacing.xs),
-          Center(
-            child: Text(
-              betaNote,
-              textAlign: TextAlign.center,
-              style: AppTypography.bodySmall.copyWith(
-                color: colors.text.warning,
-              ),
-            ),
-          ),
-        ],
         const SizedBox(height: AppSpacing.base),
         AppButton(
           expand: true,

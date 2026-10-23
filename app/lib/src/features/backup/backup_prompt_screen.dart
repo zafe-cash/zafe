@@ -64,8 +64,8 @@ class BackupPromptScreen extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpacing.s),
         Text(
-          'Your key share exists only on this phone. Lose it without a backup and your '
-          'seat is gone.',
+          'Your key share exists only on this phone. With a backup, you can restore it '
+          'yourself if the phone is lost.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),

@@ -10,6 +10,7 @@ import '../../core/errors/zafe_error_copy.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/formatting/member_label.dart';
+import '../../core/layout/app_column.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/action_button.dart';
@@ -779,6 +780,7 @@ class CreatingKeysScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final large = isLargeWindow(context);
     return Scaffold(
       backgroundColor: colors.background.window,
       body: Stack(
@@ -799,9 +801,20 @@ class CreatingKeysScreen extends StatelessWidget {
                   ),
                   child: IntrinsicHeight(
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                      // At the bottom on a phone; right under the art in a large window.
+                      mainAxisAlignment: large
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.end,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (large)
+                          SizedBox(
+                            height:
+                                OnboardingHero.sizeIn(
+                                  MediaQuery.sizeOf(context),
+                                ).height *
+                                0.7,
+                          ),
                         AppIcon(
                           ready ? AppIcons.check : AppIcons.loader,
                           size: 24,

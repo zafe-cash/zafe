@@ -5,8 +5,8 @@ ciphertext and metadata only), so the host never holds anything that spends or
 decrypts funds, but it does see who talks to which mailbox and when: pick a host you
 trust with that metadata, and keep access logs off.
 
-The hosted testnet relay runs on a VPS through Path B, deployed by CI
-(`.github/workflows/relay-deploy.yml`). Two paths:
+The hosted relays (testnet and the mainnet beta) run on one VPS through Path B, deployed
+by CI (`.github/workflows/relay-deploy.yml`, `relay-mainnet.yml`). Two paths:
 
 | | Fly.io | VPS (Docker Compose + Caddy) |
 |---|---|---|
@@ -228,8 +228,7 @@ curl https://relay.zafe.cash/health     # ok
 shred -u relay-testnet relay-testnet.pub relay-mainnet relay-mainnet.pub   # local copies
 ```
 
-The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; a mainnet build shows the beta
-label (`ZAFE_BETA`, `app/lib/src/core/config/beta.dart`); there is no cap.
+The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; there is no cap.
 Litestream with R2 uses the S3 API with `force-path-style: true` and region `auto`
 (`vps/litestream.yml`); that is R2's documented setup, but it has **not been run** against
 the bucket from here: after the first mainnet deploy check `docker compose logs

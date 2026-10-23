@@ -14,3 +14,9 @@ __pycache__/
 
 # Agent worktrees
 /.claude/worktrees/
+
+# Design tool working files (screenshots, caches with local paths, live sessions)
+infra/site/.impeccable/hook.cache.json
+infra/site/.impeccable/live/
+infra/site/.impeccable/questions/
+infra/site/.impeccable/review/

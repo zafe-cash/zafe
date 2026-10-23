@@ -46,7 +46,7 @@ Last updated: 2026-10-15 (security audit + one-tap/race fixes; onboarding design
         light vault card, notification tint. Only render tests were run.
   - [x] Token names by role (2026-10-01): `value*`, `destructive*`, `darkCard`,
         `RosePrimitives`; unused gold leftovers deleted; `material_theme.dart` builds the
-        Material `ColorScheme` from `AppColors` (AGENTS.md "Palette").
+        Material `ColorScheme` from `AppColors` (`docs/app-notes.md` "Palette").
   - *(idea)* N-of-M ring emblem for the avatar (logo study); Quorum Z splash animation.
 
 0. [x] **Proposals expire after ~50 min.** Fixed: vault descriptor `proposal_expiry_blocks` (default 7 days), proposer sets it, members accept it plus ~2 h tip slack; `bridge_e2e` lets 300 blocks pass before approving. PCZTs are built with the library default expiry
@@ -75,7 +75,7 @@ Last updated: 2026-10-15 (security audit + one-tap/race fixes; onboarding design
    60 s background checks, which skip the run if Tor isn't up); dormant in the
    background. Home shows "Connecting to Tor…" / "Tor couldn't connect"; typed errors
    end to end. Relay client: reqwest stays for direct, Tor requests use
-   `zcash_client_backend`'s HTTP-over-Tor (see AGENTS.md "Tor"). Live test passed
+   `zcash_client_backend`'s HTTP-over-Tor (see `docs/app-notes.md` "Tor"). Live test passed
    (bootstrap ~14 s, testnet lightwalletd through Tor). FCM stays direct (content-free).
    Cost: the arm64 Rust library grows 24.7 → 34.7 MB stripped (+4 MB compressed).
    Still to check **on a device**: bootstrap on the phone (cold and warm), fs-mistrust
@@ -195,6 +195,21 @@ Open
         ghost-wordmark footer) in Zafe's type, colours and art (`docs/site.md`)
   - [x] Third round (2026-10-01): light only; CSS logo intro (the tile fills the
         screen, pieces lock, it ripples up into the nav logo); much shorter copy
+  - [x] Round 13 (2026-10-22): home rebuilt around one payment on several phones
+        (`docs/site.md`), `/download`, `/support`, iPhone email waitlist (Vercel function +
+        private Blob). Store `zafe-waitlist` connected 2026-10-23 (production only; a live
+        test signup stored and was deleted). Open: double opt-in *(idea)*; send the launch
+        email and delete the store when iOS ships
+  - [x] Illustrated section loops (2026-10-23, `docs/site.md` §6): the home page's films are
+        replaced by four loops (sign, sent, setup, live), wide and tall, each a Blender scene
+        moving with an app-rendered card; pause buttons, reduced-motion stills, grain masked off
+        the cards. Shipped 2026-10-23. Optional: an illustrator for painted texture maps and
+        a paint-over
+  - [x] Showcase round 14 (2026-10-23, `docs/site.md`, perf in `docs/app-notes.md`): one
+        story (islands cut, their points folded in), always 3D (no static fallback), smooth on
+        an Intel UHD laptop (82 fps, measured in the user's Chrome), current app screens, OS-drawn
+        cursor, slim footer with links and socials. Open: two ~42 ms hitches were at the old
+        island switches (re-measure after the cut)
   - *(idea)* Show a second real payment (with a memo) once one is made; add a changelog
         or "last updated" to the site
   - [x] Domain: **zafe.cash** (Spaceship, registered 2026-10-01, expires 2027-10-01;
@@ -381,7 +396,7 @@ Open
       Settings → Name. Open: carry it in backups; a vault-wide rename would need a new
       signed log event (`VAULT_EVENT` bump, gated on every member updating) *(idea)*
 - [x] Relay forgets handled deliveries (2026-10-01): `/v1/inbox/ack`, sent by
-      `node::respond` (see AGENTS.md "Inbox acknowledgement"); tested in the relay's
+      `node::respond` (see AGENTS.md "Inbox ack"); tested in the relay's
       `quotas` tests and `node_keygen` (keygen messages gone after the first respond).
       Not yet: the log is never pruned (old commitment batches could be compacted);
       entry headers still show the author key to the relay *(idea)*
@@ -516,7 +531,7 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       them when the spec is next revised
 - [x] Zcash server list + failover (2026-10-06): public lightwalletd presets per network
       with latency in Settings, custom URL, automatic failover between listed servers
-      (AGENTS.md "Zcash server list"). Not done: switching back to the chosen server when
+      (`docs/app-notes.md` "Zcash server list"). Not done: switching back to the chosen server when
       it recovers, failover in background checks
 - [ ] Relay URL per vault: the invite carries the vault's relay URL and the app stores it
       with the vault (today one relay setting per network for the whole app), so vaults on
@@ -602,20 +617,23 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
       (CLI co-signer + phone) was broadcast and mined on NU7 testnet (txid 8cfb8247...). Live regtest suites
       (`regtest_e2e`, `bridge_e2e`) also pass on the new stack (ths 0.3.0 had no NU7; since 2026-10-19 ths 0.4.0 is
       pinned and `regtest_network` sets `nu7` at height 1). **Still open before a mainnet release:**
-      mainnet's NU7 height is `None` in the pre-releases (set it ourselves if no crate has it by ~Oct 27); merge the
+      ~~mainnet's NU7 height~~ (2026-10-21: set ourselves, `MAINNET_NU7_HEIGHT` = 3,543,405; no stable NU7 crates yet); merge the
       branch to `main`; the guard items below; a release-signed in-place update test on the mainnet app.
 - [x] A payment that fails the device check (e.g. built for the old network) can now be cancelled by its author, and the
       proposal page leaves the stale failed-send state and goes back after cancelling (found on the phone 2026-10-13).
 - [x] **NU7 guards (2026-10-13, in `main`; not released)**: propose-time server-branch check ("Update Zafe"),
       broadcast rejection mapped to the same error, expiry cut at a known NU7 height, 25 s-block time estimate, cancel for a
-      payment that fails the check. See AGENTS.md "NU7 guards". **Still to do for the release:** mainnet's NU7 height
-      (not in the crates yet; set it ourselves ~Oct 27 if needed, then the expiry cap and the time estimate
-      switch on by themselves), a release-signed in-place update test on the mainnet app, tag `v0.1.14` then
+      payment that fails the check. See AGENTS.md "Upstream status" (NU7). **Still to do for the release:** ~~mainnet's NU7 height~~
+      (done 2026-10-21: `MAINNET_NU7_HEIGHT` = 3,543,405, so the expiry cap and the time estimate are on), a release-signed in-place update test on the mainnet app, tag `v0.1.14` then
       `mainnet-v0.1.3` (same commit), the testnet site/scheme change, tell early users to update.
 - [ ] **NU7 migration (before 2026-11-05)** on a branch: librustzcash NU7 line, height-based branch selection, `verify`
       vs NU7 fee/tx rules, regtest (`ths` NU7) + bridge e2e, testnet send on a phone (testnet is on NU7 already).
       Dates: 2026-10-20 mainnet height decision; ~10-27 release candidate on testnet; ~10-28..31 tag `v…` then
       `mainnet-v…` on the same commit; announce on the site and X, message early users; 11-05 activation.
+      **Status 2026-10-22:** testnet dry runs passed on `v0.1.19`/`v0.1.21` (sends on NU7, one-tap, busy-vault
+      notification, pending receipt in the balance); `mainnet-v0.1.21` (code 3005, essential, priority 5) on Play's
+      internal track; 0.1.16 published in production. Left: Play update test 0.1.16 -> 0.1.21, `play-promote.yml`
+      (0.1.21, 100%) by ~10-28, heads-up copy (below).
 - [x] Mainnet push (2026-10-12): `relay-mainnet` had no `RELAY_FCM_SERVICE_ACCOUNT_JSON`, so `relay.zafe.cash` couldn't push
       (members would only get background-check notifications, up to ~15 min late). Key added from the same
       Firebase project (zafe-18c4d), relay redeployed (digest 85153e1b): log "FCM pushes enabled", a push reached the
@@ -623,6 +641,48 @@ Ordered; tick as done. Details in the M2 section above and `infra/relay/README.m
 - [ ] Heads-up copy for early users (site FAQ/banner + release notes): "an update is required before Nov 5; funds are
       never at risk, sending pauses until you update".
 - [ ] Re-run the release-signed in-place update test for the NU7 release (v0.1.8 -> v0.1.10 passed on 2026-10-12).
+
+### Flutter 3.47 branch (`flutter-3.47`, 2026-10-22, for 0.1.22 after NU7)
+
+- [x] Flutter 3.47.7, plugin majors, AGP 9.1.1, FCM installation IDs; phone check on testnet passed
+      (0.1.22-dev2: in-place update keeps vaults, FID push 6 s, one-tap send, vault setup, Welcome art).
+- [ ] **Before 0.1.22 ships on mainnet: promote the relay with `FcmFid`** (on `main` as 57876ab; testnet has it).
+- [x] Android 14 emulator (2026-10-22): top and keyboard insets right. The black band behind the gesture bar
+      (also in 0.1.21 and a fresh `flutter create` app) was `MaterialApp` sending `SystemUiOverlayStyle.dark`
+      (black nav colour) on every build, after our own style; Android 15+ ignores the colour. Fixed: our style
+      is an `AnnotatedRegion` with a transparent nav colour; light/dark checked on Android 14 and 15 emulators.
+      Not seen on a real Android 14 phone. Checked: the key-shard rays (checked on the phone with a throwaway
+      app: 3.47 draws them evenly, 3.41 unevenly; the darker rays were the test renderer only), the in-app update from Play (only on the internal track); large screens: see below.
+- [ ] Built-in Kotlin once firebase_core and workmanager_android stop applying KGP.
+- [x] FID delivery confirmed: the app logs `push: registered fcm-fid for 9 vault(s)` (relay accepted the FID,
+      one target per member), and the push arrived in 6 s.
+
+### Play Console suggestions on 0.1.16 (2026-10-22, for 0.1.22, after NU7)
+
+Recommendations from the release dashboard; none blocks a release. Each changes layout or the build, so each
+needs a device check.
+
+- [x] **Edge-to-edge on every Android version** (`flutter-3.47`; not yet checked on Android 14): targetSdk 36 makes Android 15+ edge to edge; older versions aren't.
+      Call `enableEdgeToEdge()` in `MainActivity`; check status/nav bar and keyboard insets on an Android 14 emulator
+      against an Android 16 phone.
+- [x] **Deprecated system-bar APIs** (`flutter-3.47`; we set only a transparent nav colour, which `MaterialApp`'s black one forces) (`Window.setStatusBarColor`, `setNavigationBarColor`,
+      `setNavigationBarDividerColor`, flagged at R8-renamed `G.y.h` and `...fluttersecurestorage.ciphers.e.t`): our
+      Kotlin doesn't call them; Flutter's engine does (`flutter.jar` PlatformPlugin), and we ask it to by setting bar
+      colours in `app_theme_host.dart` `androidSystemBarsStyleFor`. Stop setting colours (keep icon brightness) after
+      edge-to-edge; the warning likely stays until Flutter drops the calls.
+- [x] **Large screens** (done 2026-10-22): no manifest lock; `OrientationPolicy` (Dart) keeps phones portrait and lets
+      displays with a shortest side >= 600 dp rotate (re-checked on every resize, fold and unfold); iOS lists landscape
+      for iPhone too (a foldable iPhone's inner screen) and every orientation on iPad, no `UIRequiresFullScreen`.
+      Pages sit in a 560 dp `AppColumn` clear of hinges and half-opened folds; Welcome puts its art beside the content
+      in landscape; short windows scroll. `tool/screens/size_sweep_test.dart` covers tablets, foldables (inner, cover,
+      hinge, tabletop), split screen and landscape. Seen on a Pixel Fold emulator (API 34): unfold, rotate, fold
+      (portrait lock), half-opened. Before: the app was letterboxed on the unfolded screen. Not seen: real Fold/Flip
+      hardware, Android 16 (ignores the lock anyway), iOS (never built), iPhone fold APIs (iOS 27.1 SDK).
+- [x] **Optimized resource shrinking** (`flutter-3.47`: AGP 9 default; APK 66.0 MB vs 65.6 MB, newer plugins) (R8 itself is already on, with `proguard-android-optimize.txt` from Flutter's
+      Gradle plugin): AGP 8.11.1 -> latest 8.x and the optimized-resource-shrinking Gradle property (check the
+      exact name and minimum AGP in Google's docs first); compare APK size, run the phone tests.
+- [x] **AGP 9** (`flutter-3.47`: AGP 9.1.1 with Flutter 3.47.7; built-in Kotlin still off, see `docs/app-notes.md`). Was: wait. Flutter 3.41.6's tooling lists full Kotlin support only up to AGP 8.11.1
+      (`gradle_utils.dart` `maxKnownAgpVersionWithFullKotlinSupport`); AGP 9 changes Kotlin plugin handling.
 
 ### UX issues found while testing on a phone (2026-10-12, v0.1.10)
 
@@ -769,8 +829,10 @@ check. Fixed in the same change unless open:
 - [x] P1: recall check (2026-10-16): the backup passphrase is always 12 generated words, and the member
       types three of them back before export. Readiness card and the Receive interstitial: dropped (more
       cards and nags than they're worth; the backup card and signer dots cover it).
-- [ ] P2: guided test payment, one-time tips + Help hub, Welcome simplification,
-      practice vault (test with users first).
+- [x] P2: Welcome simplification (2026-10-21): "Restore from backup" and "Recover without a backup"
+      are one "I'm already in a vault" button; its sheet asks "Do you have your backup?" (Yes → `/restore`,
+      No → `/recover`). Test: `test/welcome_server_settings_test.dart`.
+- [ ] P2: guided test payment, one-time tips + Help hub, practice vault (test with users first).
 
 ## One-tap follow-ups
 
@@ -1039,7 +1101,7 @@ check. Fixed in the same change unless open:
   payment request screen (warning, unverified label/message, vault picker, explicit
   "I know who sent this" tick, then Send prefilled), link held until unlock and dropped
   after 10 min; app-wide lock at launch and after a background delay (Settings → Lock
-  app). AGENTS.md "App lock" / "Payment links". Done the same day: content hidden in
+  app). `docs/app-notes.md` "App lock" / "Payment links". Done the same day: content hidden in
   the recent-apps view, and a cheap funds check per vault on the request page.
   Follow-ups: iOS untested (never built); exact fee via a build-without-logging
   precheck (idea below); (done 2026-10-07: a 404 "unknown mailbox" is

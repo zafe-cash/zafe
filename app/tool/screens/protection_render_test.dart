@@ -53,6 +53,8 @@ Widget _backups(Set<String> backedUp) {
         signers: members.length,
         threshold: 2,
         backedUp: members.where(backedUp.contains).length,
+        // This phone ("You") has no backup: the card offers one.
+        onBackUp: backedUp.contains(_me) ? null : () {},
       ),
       const SizedBox(height: AppSpacing.md),
       MobileSurfaceCard(

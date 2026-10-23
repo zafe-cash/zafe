@@ -1,0 +1,34 @@
+---
+// One section loop (infra/site/film): an illustrated scene moving with one app card. The video
+// switches to the tall cut on phones and portrait tablets; with reduced motion a still shows instead. The moment
+// is repeated as text for screen readers. The pause button (WCAG 2.2.2) appears only when
+// /assets/js/loops.js runs. The paper grain is a page layer masked off the card
+// (.loop-<name> in site.css; the masks come from film/export.sh).
+interface Props {
+  name: 'sign' | 'sent' | 'setup' | 'live';
+  alt: string;
+  text: string[];
+  eager?: boolean;
+}
+const { name, alt, text, eager = false } = Astro.props;
+const id = `${name}-text`;
+---
+
+<figure class={`hc-loop loop-${name}`} data-loop>
+  <div class="hc-frame">
+    <video autoplay muted loop playsinline preload={eager ? 'auto' : 'metadata'} poster={`/assets/motion/${name}.webp`} aria-describedby={id} width="1600" height="900">
+      <source media="(max-width: 700px), (orientation: portrait) and (max-width: 1100px)" src={`/assets/motion/${name}-tall.mp4`} type="video/mp4" />
+      <source src={`/assets/motion/${name}.mp4`} type="video/mp4" />
+    </video>
+    <picture class="hc-still">
+      <source media="(max-width: 700px), (orientation: portrait) and (max-width: 1100px)" srcset={`/assets/motion/${name}-tall-still.webp`} width="720" height="1280" />
+      <img src={`/assets/motion/${name}-still.webp`} width="1600" height="900" alt={alt} loading={eager ? 'eager' : 'lazy'} />
+    </picture>
+    <button class="loop-toggle" type="button" aria-pressed="false" aria-label="Pause animation" hidden>
+      <svg class="pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor" /><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor" /></svg>
+      <svg class="play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11a1 1 0 0 0 1.5.86l9-5.5a1 1 0 0 0 0-1.72l-9-5.5A1 1 0 0 0 4 2.5Z" fill="currentColor" /></svg>
+    </button>
+  </div>
+  <ol id={id} class="sr">{text.map((t) => <li>{t}</li>)}</ol>
+  <slot />
+</figure>

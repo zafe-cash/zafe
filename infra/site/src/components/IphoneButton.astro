@@ -1,0 +1,21 @@
+---
+// "iPhone waitlist" beside Google Play: opens the waitlist form right there, in the
+// browser's own popover (no JavaScript: `popovertarget`), instead of sending people to
+// the bottom of the page.
+import BrandIcon from './BrandIcon.astro';
+import Waitlist from './Waitlist.astro';
+
+interface Props {
+  id: string;
+  /** Icon only (the platform tab under the hero). */
+  icon?: boolean;
+}
+const { id, icon = false } = Astro.props;
+---
+
+<button class={icon ? 'tab-icon' : 'hx-alt'} type="button" popovertarget={id} aria-label={icon ? 'Zafe for iPhone: join the waitlist' : undefined}><BrandIcon name="appstore" />{!icon && <span>iPhone waitlist</span>}</button>
+<div class="play-pop ios-pop" id={id} popover>
+  <p class="play-pop-title">Zafe for iPhone is coming</p>
+  <Waitlist id={`${id}-form`} />
+  <p class="play-pop-links"><button type="button" popovertarget={id} popovertargetaction="hide">Close</button></p>
+</div>

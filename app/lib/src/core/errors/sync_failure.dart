@@ -86,7 +86,7 @@ class SyncFailure {
     SyncFailureKind.relayForked => 'Relay not trusted',
     SyncFailureKind.logCopyInvalid => 'History damaged',
     SyncFailureKind.relayMembership => 'Relay not trusted',
-    SyncFailureKind.torConnecting => 'Connecting to Tor…',
+    SyncFailureKind.torConnecting => 'Connecting to Tor...',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
   };

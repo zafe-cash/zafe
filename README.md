@@ -10,7 +10,7 @@ chain, a Zafe vault looks exactly like a single-user wallet: no owners, no thres
 nothing that says "multisig".
 
 > **Status: mainnet beta (Android), not externally audited.** Only use money you can afford
-> to lose. Download: [`mainnet-v0.1.0`](https://github.com/zafe-cash/zafe/releases/tag/mainnet-v0.1.0)
+> to lose. Download: [`mainnet-v0.1.16`](https://github.com/zafe-cash/zafe/releases/tag/mainnet-v0.1.16)
 > (relay `relay.zafe.cash`); testnet builds (`v0.1.x`) are also on Releases. The Zcash
 > Foundation has answered our key-derivation and signing questions (see
 > [`upstream-asks.md`](upstream-asks.md)); an external audit is still to come.
@@ -20,9 +20,9 @@ Website: <https://zafe.cash> (the 3D walkthrough is at
 
 ## How it works
 
-- **Vault keys**: all members run a FROST DKG on their phones, confirm a safety number
+- **Vault keys**: all members run a FROST DKG on their phones, compare four safety words
   out of band, and sign the vault descriptor. Keys follow ZIP 2005 (quantum-recoverable
-  derivation) for the Ironwood pool (NU6.3).
+  derivation) for the Ironwood pool (NU6.3, and NU7 from its activation).
 - **No blind signing**: before approving and again before signing, every member's app
   rebuilds and checks the transaction itself: recipients, amounts, memos, change, fee
   and sighash.
@@ -60,8 +60,9 @@ crates/zafe-relay   the blind relay (axum + SQLite), push notifications (FCM)
 crates/zafe-cli     `zafe`, a headless member used for tests and scripting
 app/                Flutter app (Android today; iOS not yet built) with a Rust bridge
                     (flutter_rust_bridge) in app/rust
-infra/regtest       Zakura + lightwalletd regtest with NU6.3 active (Docker)
-infra/relay         relay Dockerfile and deploy recipes (Fly.io or a VPS); not deployed yet
+infra/regtest       regtest through `ths` (Zakura + lightwalletd, NU7 at height 1; Docker)
+infra/relay         relay Dockerfile and deploy recipes (Fly.io or a VPS); the hosted relays
+                    (testnet.relay.zafe.cash, relay.zafe.cash) are deployed by CI
 infra/site          the website (Astro, static, strict CSP): home, /showcase, /join
 scripts/            end-to-end scripts, benchmarks, brand and illustration generators
 docs/               tracker (what's next), releasing, brand, website and SEO decisions,

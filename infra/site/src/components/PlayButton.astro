@@ -1,0 +1,36 @@
+---
+// Every link to Google Play on the site. On a phone it opens the Play listing. With a mouse
+// (a computer), it opens a QR code of the same link to scan with the phone, in the browser's
+// own popover (no JavaScript: `popovertarget`). The QR is drawn at build time; presentation
+// attributes only, so the CSP holds. Default content: "Get it on Google Play"; `icon` is the
+// glyph alone; other content (the hero badge, the footer link) comes in the slot, with `class`.
+import QRCode from 'qrcode';
+import BrandIcon from './BrandIcon.astro';
+import { playUrl } from '../config';
+
+interface Props {
+  id: string;
+  /** Icon only (the platform tab under the hero). */
+  icon?: boolean;
+  /** Replaces the button styling (with slot content). */
+  class?: string;
+}
+const { id, icon = false, class: className } = Astro.props;
+const cls = className ?? (icon ? 'tab-icon' : 'hx-play');
+const content = Astro.slots.has('default') ? await Astro.slots.render('default') : null;
+const label = icon ? 'Get Zafe on Google Play' : undefined;
+const qr = (await QRCode.toString(playUrl, {
+  type: 'svg',
+  margin: 0,
+  errorCorrectionLevel: 'M',
+  color: { dark: '#090E0E', light: '#FFFFFF' },
+})).replace('<svg ', '<svg class="play-qr-code" role="img" aria-label="QR code for Zafe on Google Play" ');
+---
+
+<a class={`${cls} play-direct`} href={playUrl} target="_blank" rel="noopener noreferrer" aria-label={label}>{content ? <Fragment set:html={content} /> : <><BrandIcon name="googleplay" />{!icon && <span>Get it on Google Play</span>}</>}</a>
+<button class={`${cls} play-open`} type="button" popovertarget={id} aria-label={label}>{content ? <Fragment set:html={content} /> : <><BrandIcon name="googleplay" />{!icon && <span>Get it on Google Play</span>}</>}</button>
+<div class="play-pop" id={id} popover>
+  <Fragment set:html={qr} />
+  <p class="play-pop-title">Scan with your phone</p>
+  <p class="play-pop-links"><a href={playUrl} target="_blank" rel="noopener noreferrer">Open Google Play</a><button type="button" popovertarget={id} popovertargetaction="hide">Close</button></p>
+</div>

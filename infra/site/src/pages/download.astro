@@ -1,0 +1,73 @@
+---
+// /download: every way to install, and what to do next. Google Play first (it updates by
+// itself); the APK with how to check it's ours (the release's .sha256 file and the signing
+// certificate, which is the same for every release); the testnet build; the iPhone waitlist.
+import Base from '../layouts/Base.astro';
+import PlayButton from '../components/PlayButton.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import Waitlist from '../components/Waitlist.astro';
+import { apkCertSha256, apkUrl, apkVersion, downloadUrl, playUrl, testnetUrl } from '../config';
+---
+
+<Base
+  title="Download Zafe for Android"
+  description="Install Zafe from Google Play or as an APK, check the file is ours, and set up a vault with your co-signers."
+  bodyClass="home landing dl-page"
+>
+  <Nav links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
+
+  <main class="dl">
+    <h1>Get Zafe</h1>
+    <p class="dl-lead">Beta, not yet audited. Start small.</p>
+
+    <section class="dl-option dl-play" aria-labelledby="play-title">
+      <h2 id="play-title">Google Play</h2>
+      <p>Updates itself.</p>
+      <PlayButton id="play-dl" />
+    </section>
+
+    {apkUrl && (
+      <section class="dl-option" aria-labelledby="apk-title">
+        <h2 id="apk-title">APK from GitHub</h2>
+        <p>Android 7+, arm64, version {apkVersion}.</p>
+        <div class="hx-actions">
+          <a class="hx-link" href={apkUrl}>Download the APK</a>
+          <a class="hx-link" href={downloadUrl} target="_blank" rel="noopener noreferrer">Release notes</a>
+        </div>
+        <p class="dl-note">Open it on your phone and allow the install when Android asks.</p>
+        <details class="dl-verify">
+          <summary>Check the file is ours</summary>
+          <p>With the release&rsquo;s <code>.sha256</code> file:</p>
+          <pre><code>sha256sum -c zafe-{apkVersion}-mainnet-arm64.apk.sha256</code></pre>
+          <p>Signing certificate (the same for every release):</p>
+          <pre><code>{apkCertSha256}</code></pre>
+                  </details>
+      </section>
+    )}
+
+    {testnetUrl && (
+      <section class="dl-option" aria-labelledby="test-title">
+        <h2 id="test-title">Try it on testnet first</h2>
+        <p>Test coins with no value. Installs next to the main app.</p>
+        <a class="hx-link" href={testnetUrl} target="_blank" rel="noopener noreferrer">Get the testnet build</a>
+      </section>
+    )}
+
+    <section class="dl-option" aria-labelledby="ios-title">
+      <h2 id="ios-title">iPhone</h2>
+      <Waitlist id="iphone-dl" />
+    </section>
+
+    <section class="dl-next" aria-labelledby="next-title">
+      <h2 id="next-title">Then</h2>
+      <ol>
+        <li>One of you creates a vault and shares the invite.</li>
+        <li>Everyone compares the four safety words.</li>
+        <li>Back up your key when Zafe asks.</li>
+      </ol>
+    </section>
+  </main>
+
+  <Footer />
+</Base>

@@ -23,7 +23,9 @@ impl From<backup::BackupError> for ZafeError {
         let message = match e {
             WeakPassphrase(hint) => format!("Passphrase too weak: {hint}"),
             NotABackup => "This isn't a Zafe vault backup".into(),
-            WrongPassphraseOrDamaged => "Wrong passphrase, or the backup is damaged".into(),
+            WrongPassphraseOrDamaged => {
+                "These words don't open this backup, or it is damaged".into()
+            }
             UnsupportedVersion(v) if v.is_newer() => {
                 "This backup needs a newer version of Zafe".into()
             }

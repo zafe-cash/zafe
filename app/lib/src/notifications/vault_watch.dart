@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -30,6 +31,7 @@ import '../rust/api/tor.dart';
 import '../rust/api/vault.dart' as rust_vault;
 import '../rust/frb_generated.dart';
 import '../providers/setup_step.dart';
+import 'check_lock.dart';
 import 'vault_updates.dart';
 import '../core/storage/wallet_key.dart';
 
@@ -167,15 +169,32 @@ Future<void> _registerPush({bool askPermission = true}) async {
     });
   }
   if (askPermission) await messaging.requestPermission();
-  final token = await messaging.getToken();
-  if (token != null) await _registerToken(token);
-  messaging.onTokenRefresh.listen(_registerToken);
+  await _registerInstallation(messaging);
 }
 
-/// Registers the push token for every vault on this device (each with its own member
-/// identity) with the relay currently configured.
+/// FCM targets this app by its Firebase Installation ID (FID): FCM deprecated
+/// registration tokens (firebase_messaging 17, `register()`/`onRegistered`; the relay
+/// sends FIDs in FCM v1's `fid` field). `register()` fires [FirebaseMessaging.onRegistered]
+/// with the current FID every time it is called (also when already registered), and FCM
+/// fires it by itself when the FID is refreshed, so one listener sends it to the relay.
+/// Needs `firebase_messaging_installation_id_enabled` in the manifest; in that mode the
+/// old token calls throw.
+bool _listeningForRegistration = false;
+
+Future<void> _registerInstallation(FirebaseMessaging messaging) async {
+  if (!_listeningForRegistration) {
+    _listeningForRegistration = true;
+    messaging.onRegistered.listen((fid) => unawaited(_registerToken(fid)));
+  }
+  await messaging.register();
+}
+
+/// Registers this app's FCM installation ID for every vault on this device (each with its
+/// own member identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
+  final platform = Platform.isIOS ? 'apns' : 'fcm-fid';
+  var registered = 0;
   // Vaults still being set up too: their setup steps run in background checks.
   for (final v in await ZafeSecureStore.instance.readAll()) {
     if (v.identity == null) continue;
@@ -184,21 +203,24 @@ Future<void> _registerToken(String token) async {
         relayUrl: relayUrl,
         seeds: v.identity!,
         vaultId: v.id,
-        platform: Platform.isIOS ? 'apns' : 'fcm',
+        platform: platform,
         token: token,
       );
+      registered++;
     } catch (e) {
       debugPrint('push: register failed for ${v.id}: ${describeError(e)}');
     }
   }
+  // Which kind of target the relay accepted, and for how many vaults (never the ID).
+  debugPrint('push: registered $platform for $registered vault(s)');
 }
 
-/// After the relay URL changed: register the push token with the new relay.
+/// After the relay URL changed or a vault was added: register this app's installation ID
+/// with the current relay for every vault (`register()` re-sends the current FID).
 Future<void> reregisterPush() async {
   try {
     if (Firebase.apps.isEmpty) return;
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token != null) await _registerToken(token);
+    await _registerInstallation(FirebaseMessaging.instance);
   } catch (e) {
     debugPrint('push: re-register failed: ${describeError(e)}');
   }
@@ -284,29 +306,18 @@ Future<void> _ensureRust() async {
 /// left to the app so nothing on screen is also announced.
 Future<void> checkVaultAndNotify({String? skipVaultId}) async {
   await installBackgroundCrashLog();
-  // One check at a time: the periodic task, the one-off after backgrounding and a push can
-  // fire together (seen on the emulator); a lock older than 5 minutes is stale.
-  final lock = File(
-    '${(await getApplicationSupportDirectory()).path}/notifications/check.lock',
+  // One check at a time (the periodic task, the one-off after backgrounding and a push can
+  // fire together, seen on the emulator); one that arrives meanwhile makes it run again.
+  final dir = Directory(
+    '${(await getApplicationSupportDirectory()).path}/notifications',
   );
-  try {
-    await lock.parent.create(recursive: true);
-    if (await lock.exists() &&
-        DateTime.now().difference(await lock.lastModified()) <
-            const Duration(minutes: 5)) {
-      return;
-    }
-    await lock.writeAsString('${DateTime.now()}');
-  } catch (_) {}
-  try {
-    await _check(skipVaultId);
-  } catch (e, st) {
-    await _logBackgroundError('check', e, st);
-  } finally {
+  await CheckLock(dir).run(skipVaultId, (skip) async {
     try {
-      await lock.delete();
-    } catch (_) {}
-  }
+      await _check(skip);
+    } catch (e, st) {
+      await _logBackgroundError('check', e, st);
+    }
+  });
 }
 
 /// Background engines are separate isolates with their own memory: install the scrubbed

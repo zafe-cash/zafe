@@ -328,6 +328,52 @@ async fn deliveries_push_to_registered_recipients_only() {
     );
 }
 
+/// An app moving to FCM installation IDs re-registers: the FID replaces its old token
+/// (one target per member), so it is pushed once, as `FcmFid` (sent in FCM's `fid` field).
+#[tokio::test]
+async fn an_installation_id_replaces_the_old_token() {
+    let now = Arc::new(AtomicU64::new(T0));
+    let recorder = Arc::new(Recorder::default());
+    let app = Relay::with_clock(clock(&now))
+        .with_notifier(recorder.clone())
+        .router();
+    let mut rng = StdRng::seed_from_u64(4);
+    let ids: Vec<Identity> = (0..2).map(|_| Identity::generate(&mut rng)).collect();
+    populate(&app, &ids, &mut rng).await;
+    for (platform, token) in [
+        (PushPlatform::Fcm, "old-token"),
+        (PushPlatform::FcmFid, "fid-1"),
+    ] {
+        let req = RegisterPush {
+            mailbox: MAILBOX,
+            platform,
+            token: token.into(),
+        };
+        assert_eq!(
+            signed(&app, "/v1/push/register", &ids[1], req).await.0,
+            StatusCode::OK
+        );
+    }
+    let env = Envelope::sealed(
+        &ids[0],
+        ids[1].public(),
+        MAILBOX,
+        2,
+        Kind::SigningRequest,
+        b"secret",
+        &mut rng,
+    )
+    .unwrap();
+    assert_eq!(
+        call(&app, "/v1/envelope", env.to_bytes().unwrap()).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        *recorder.0.lock().unwrap(),
+        vec![(PushPlatform::FcmFid, "fid-1".to_owned())]
+    );
+}
+
 #[tokio::test]
 async fn log_appends_push_every_other_member() {
     let now = Arc::new(AtomicU64::new(T0));

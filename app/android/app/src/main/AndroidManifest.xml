@@ -22,6 +22,11 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/zafe_notification" />
+        <!-- FCM targets this app by its Firebase Installation ID (FirebaseMessaging.register(),
+             onRegistered): FCM deprecated registration tokens. In this mode getToken() throws. -->
+        <meta-data
+            android:name="firebase_messaging_installation_id_enabled"
+            android:value="true" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="vault_activity" />
@@ -29,7 +34,6 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:screenOrientation="portrait"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"

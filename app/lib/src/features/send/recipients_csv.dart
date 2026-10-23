@@ -65,7 +65,7 @@ RecipientsImport parseRecipientsCsv(
     if (amountText.isEmpty) {
       problems.add('amount missing');
     } else if (amount == null) {
-      problems.add('"$amountText" isn\'t a ZEC amount (up to 8 decimals)');
+      problems.add('"$amountText" isn\'t a valid amount (up to 8 decimals)');
     } else if (amount <= BigInt.zero) {
       problems.add('amount must be more than 0');
     }

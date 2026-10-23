@@ -1,6 +1,7 @@
-// Renders Home's parts (vault card, buttons, notice card, activity rows, tab bar) with
-// fake data, in both themes, to PNGs for review without a device. HomeScreen itself
-// needs the Rust bridge, so this pumps its public pieces. Not part of `flutter test`;
+// Renders Home's parts (top bar, vault card, buttons, notice card, recent activity, tab
+// bar) with fake data, in both themes, to PNGs for review without a device. HomeScreen
+// itself needs the Rust bridge, so this pumps its public pieces, laid out as HomeScreen
+// does. Nothing waits on this member (payments that do are "Needs you" cards, not rows). Not part of `flutter test`;
 // run it explicitly (from app/):
 //
 //   flutter test tool/screens/home_render_test.dart
@@ -16,6 +17,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/layout/mobile/app_mobile_tab_bar.dart';
+import 'package:zafe/src/core/layout/mobile/mobile_top_nav.dart';
+import 'package:zafe/src/features/vaults/vault_emblem.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/app_button.dart';
 import 'package:zafe/src/core/widgets/app_icon.dart';
@@ -27,6 +30,8 @@ import 'package:zafe/src/rust/api/received.dart' as rust;
 
 const _me = 'a3f09c41d2e87b5566c0de19f4a2b7c8e1d0937a6b5c4d3e2f1a0b9c8d7e6f50';
 const _bob = '5e17b2c9a4d86f3310ab77e2c4d9f1086b3a2c5d7e9f0a1b2c3d4e5f6a7b8c9d';
+const _vaultId =
+    '7b2e9c41d0a8f3e6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2';
 const _addr =
     'u1k3v8m2q9x7h5f4d6s8a0p2o4i6u8y0t2r4e6w8q0z9x7c5v3b1n2m4l6k8j0h2g4f6d8s0a';
 
@@ -88,9 +93,15 @@ Widget _home() => Builder(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const SizedBox(height: 40), // the status bar
+          const MobileTopNav.account(
+            accountName: 'Ops fund',
+            syncLabel: 'Synced',
+            avatar: VaultEmblem(vaultId: _vaultId),
+          ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 56, 16, 16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               children: [
                 BalanceCard(
                   totalZat: BigInt.from(4237485000),
@@ -135,19 +146,32 @@ Widget _home() => Builder(
                   ),
                 ],
                 const SizedBox(height: AppSpacing.md),
-                Text(
-                  'Recent activity',
-                  style: AppTypography.labelLarge.copyWith(
-                    color: colors.text.accent,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Recent activity',
+                        style: AppTypography.labelLarge.copyWith(
+                          color: colors.text.accent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      'See all',
+                      style: AppTypography.labelLarge.copyWith(
+                        color: colors.button.ghost.label,
+                      ),
+                    ),
+                    AppIcon(
+                      AppIcons.chevronForward,
+                      size: 16,
+                      color: colors.button.ghost.label,
+                    ),
+                  ],
                 ),
                 const SizedBox(height: AppSpacing.md),
                 for (final row in <Widget>[
-                  ProposalRow(
-                    proposal: _proposal('p1', 125000000, approvals: [_bob]),
-                    onTap: () {},
-                  ),
                   ReceivedRow(
                     received: rust.ReceivedInfo(
                       txid: 'aa',
@@ -164,6 +188,7 @@ Widget _home() => Builder(
                     proposal: _proposal(
                       'p2',
                       300000000,
+                      stage: rust.ProposalStage.sent,
                       approvals: [_bob, _me],
                       myVote: rust.MyVote.approved,
                     ),
@@ -224,6 +249,9 @@ void main() {
         ProviderScope(
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
+            scrollBehavior: const MaterialScrollBehavior().copyWith(
+              scrollbars: false,
+            ),
             home: RepaintBoundary(
               key: boundary,
               child: AppTheme(data: data, child: _home()),

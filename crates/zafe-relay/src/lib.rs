@@ -1285,10 +1285,10 @@ fn push_tokens<'a>(
             })
             .optional()?
         {
-            let platform = if platform == "apns" {
-                PushPlatform::Apns
-            } else {
-                PushPlatform::Fcm
+            let platform = match platform.as_str() {
+                "apns" => PushPlatform::Apns,
+                "fcm-fid" => PushPlatform::FcmFid,
+                _ => PushPlatform::Fcm,
             };
             out.push((platform, token));
         }

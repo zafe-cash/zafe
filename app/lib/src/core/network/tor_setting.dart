@@ -70,7 +70,7 @@ class TorSetting {
           TorConnection.connected => 'Connected',
           TorConnection.failed => 'Failed',
           // Enabled but the runtime hasn't started yet counts as connecting.
-          TorConnection.connecting || TorConnection.off => 'Connecting…',
+          TorConnection.connecting || TorConnection.off => 'Connecting...',
         };
 
   /// What the setting does in its current state, for the Tor sheet.
@@ -92,7 +92,7 @@ class TorSetting {
     return switch (connection) {
       TorConnection.connected => null,
       TorConnection.failed => 'Tor couldn\'t connect',
-      _ => 'Connecting to Tor…',
+      _ => 'Connecting to Tor...',
     };
   }
 }

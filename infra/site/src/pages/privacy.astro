@@ -6,7 +6,7 @@ import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 
-const updated = '16 October 2026';
+const updated = '22 October 2026';
 ---
 
 <Base
@@ -14,7 +14,7 @@ const updated = '16 October 2026';
   description="What Zafe keeps on your phone, what leaves it, and who can see what."
   bodyClass="legal-page"
 >
-  <Nav light links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
+  <Nav links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
   <main class="legal">
     <h1>Privacy policy</h1>
     <p class="legal-date">Last updated {updated}</p>
@@ -104,11 +104,19 @@ const updated = '16 October 2026';
       <li>Fingerprint or screen-lock checks are done by your phone; Zafe never sees them.</li>
     </ul>
 
+    <h2 id="waitlist">The iPhone waitlist</h2>
+    <p>
+      If you join the iPhone waitlist on this website, we store your email address and the
+      time you joined, in a private store at Vercel, which hosts the website. We use it only
+      to send you one email when Zafe is out for iPhone, then we delete the list. To have
+      your address deleted sooner, write to the address below.
+    </p>
+
     <h2>What we don't do</h2>
     <p>
-      No analytics, crash reporting, advertising or tracking libraries. We don't sell or
-      share data, and we have no account of yours to delete: removing a vault from the app
-      deletes its data from your phone.
+      No analytics, crash reporting, advertising or tracking libraries, in the app or on the
+      website. We don't sell or share data, and the app has no account of yours to delete:
+      removing a vault from the app deletes its data from your phone.
     </p>
 
     <h2>Children</h2>

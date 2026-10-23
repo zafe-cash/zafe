@@ -49,13 +49,13 @@ of the approval flow (nothing may brick funds, nothing may stop members from spe
 | One or fewer than t malicious members | read everything (they hold `sk`); propose anything; refuse to approve; try to confuse others with odd logs or messages | spend; make another member sign a transaction that fails that member's own check; reuse another member's nonce |
 | The proposer or the leader (a member) | choose the PCZT and `alpha`; choose who completes a signing round | change payees, amounts, memos, fee, change destination, or the sighash another member signs; learn more than the signature shares |
 | t or more colluding or compromised members | spend, bypass rules | (inherent: spec §13.1; detected after the fact by the unapproved-spend alert) |
-| A compromised phone | use that member's share while unlocked or whenever the app can sign without a prompt (background auto-send finishes only approvals the owner already gave) | read the share from backups (`allowBackup=false`, nonces never in backups); sign without the unlock gate when "Require unlock to approve" is on |
+| A compromised phone | use that member's share while unlocked or whenever the app can sign without a prompt (background auto-send finishes only approvals the owner already gave) | read the share from backups (`allowBackup=false`, nonces never in backups); sign without the unlock gate (an unlock is always required to approve, propose or send) |
 | A removed member who kept an old share | sign at the old threshold (spec §10.4.4; fixable only by migrating) | (detected by the unapproved-spend alert) |
 | A quantum adversary (future) | break discrete log: with one member's `qsk` recover spend authority to a vault (spec §2.3, ZIP 2005) | (accepted; not fixable inside ZIP 2005) |
 | Malware or another app on the phone | read app-private storage on a rooted device | (out of scope beyond OS sandboxing, SQLCipher, secure storage) |
 
-Explicit trust assumptions: members compare the safety number out of band during setup;
-OS secure storage and RNG work; upstream crypto crates are correct (§6); GitHub Actions
+Explicit trust assumptions: members compare the safety words (4 BIP-39 words from a
+commit-then-reveal exchange) out of band during setup; OS secure storage and RNG work; upstream crypto crates are correct (§6); GitHub Actions
 and the Docker host are trusted to deploy the relay (the relay is blind, so this is a
 privacy and availability risk, not custody).
 
@@ -68,7 +68,7 @@ the code that enforces each and the test that should catch a regression.
    exactly as ZIP 2005 § 4.2.3 with `use_qsk = true`. Never frost-tools'
    `from_sk_ak_incompatible_with_quantum_recoverability`. `keys.rs`; `zip2005_vectors`,
    `keygen::members_agree_on_vault_keys`.
-2. **DKG integrity.** Safety number confirmed first; round-1 echo hashes equal across
+2. **DKG integrity.** Safety words confirmed first; round-1 echo hashes equal across
    members; each `sk` contribution committed in round 1 and revealed after (`Round1Msg.
    sk_commitment`); a mismatch aborts; round-2 packages and contributions HPKE-sealed;
    every member signs the descriptor. `keygen::{equivocating_relay_is_detected_by_echo,
@@ -115,7 +115,8 @@ the code that enforces each and the test that should catch a regression.
 12. **Versioned formats.** Every persisted or wire format has a tag; decoders accept only
     what they know and fail with `UnsupportedVersion` (never garbage); version bumps and
     their gates are recorded in `AGENTS.md`.
-13. **Wallet DB encrypted** with a per-vault raw key held in secure storage; the open path
+13. **Wallet DB encrypted** with a per-vault raw key derived from the identity seeds and
+    vault id (`WalletKey::derive`, nothing stored); the open path
     refuses to run if SQLCipher isn't linked; a wrong key resyncs, never opens plain.
 14. **Backups never contain nonces or the wallet key**; the KDF floor is 64 MiB / 3 passes.
 15. **Relay authentication.** Every state-changing or reading route verifies a signature,
@@ -185,9 +186,12 @@ under load; iOS untested.
 ## 6. Pinned dependencies and upstream status
 
 Exact pins are in `Cargo.toml` (spec §4.4): `reddsa =0.5.2` (`frost`), `frost-core` /
-`frost-rerandomized` 3.0.0, `orchard =0.15.5`, `pczt =0.9.3`, `zcash_client_backend
-=0.24.0`, `zcash_client_sqlite =0.22.0`, SQLCipher through `bundled-sqlcipher-vendored-
-openssl`, rustls + ring + webpki-roots, arti 0.35 (Tor). Flutter 3.41.6,
+`frost-rerandomized` 3.0.0, and the librustzcash NU7 pre-release line: `orchard =0.16.0`,
+`pczt =0.10.0-pre.1`, `zcash_primitives =0.31.0-pre.1`, `zcash_protocol =0.11.0-pre.0`,
+`zcash_client_backend =0.25.0-pre.1`, `zcash_client_sqlite =0.23.0-pre.1` (mainnet's NU7
+height 3,543,405 is set by Zafe, `wallet::MAINNET_NU7_HEIGHT`, because no release has it yet);
+SQLCipher through `bundled-sqlcipher-vendored-openssl`, rustls + ring + webpki-roots
+(1.0.10), arti 0.35 (Tor). Flutter 3.41.6,
 `flutter_rust_bridge` 2.11.1.
 
 Upstream gates: U1 (ZIP 2005 derivation with our own `sk` agreement), U3 (redpallas moves
@@ -322,8 +326,8 @@ page vs fork) and atomic cache writes.
   check with the other members first.
 - **Image pinning.** Litestream and Caddy are pinned by digest in `infra/relay/vps/compose.yml`.
 - **Separate deploy access for testnet and mainnet (closes the section 9 "same SSH key" finding;
-  files prepared 2026-10-07, active once the operator runs the migration in
-  `infra/relay/README.md`).** Each network has its own unix user and SSH key; the key is pinned
+  files prepared 2026-10-07, active since the migration on 2026-10-11).** Each network has its
+  own unix user and SSH key; the key is pinned
   to `sudo -n /usr/local/sbin/zafe-deploy <network>` (`restrict`, forced command, no shell, no
   `docker` group). The mainnet key exists only as a `relay-mainnet` environment secret (reviewer
   gate), the testnet job cannot read it and the server would not let the testnet key act on

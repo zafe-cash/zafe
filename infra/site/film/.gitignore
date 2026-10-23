@@ -1,0 +1,6 @@
+node_modules
+dist
+out
+# the app's cards and the rendered scenes, copied in by prepare.sh
+public/frames/
+public/gen/

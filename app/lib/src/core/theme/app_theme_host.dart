@@ -119,75 +119,45 @@ class _NativeAppearanceSyncState extends State<_NativeAppearanceSync> {
   Widget build(BuildContext context) => widget.child;
 }
 
-/// Keeps the Android system bars — the status bar and the navigation
-/// bar (3-button / gesture) — on the app's themed `background.window`
-/// color with matching icon contrast.
-///
-/// Two OS regimes share this one overlay style:
-/// * API <= 34: the bar colors paint directly.
-/// * Android 15+ with targetSdk 35+: the OS enforces edge-to-edge and
-///   ignores the colors — the transparent bars show the scaffold's
-///   `background.window` instead, and disabling contrast enforcement
-///   stops the OS from laying its own scrim over them. Only the icon
-///   brightness needs setting.
-class _AndroidSystemBarsSync extends StatefulWidget {
+/// Keeps the Android system bars transparent with icons that contrast with
+/// the app's theme. An [AnnotatedRegion] rather than a one-off
+/// `SystemChrome` call: `MaterialApp` sends `SystemUiOverlayStyle.dark` or
+/// `.light` on every build, whose black `systemNavigationBarColor` painted a
+/// black band behind the navigation bar on Android 14 and older (Android 15+
+/// ignores the colour). The region is read after each frame's build, so its
+/// style is the one sent.
+class _AndroidSystemBarsSync extends StatelessWidget {
   const _AndroidSystemBarsSync({required this.brightness, required this.child});
 
   final Brightness brightness;
   final Widget child;
 
   @override
-  State<_AndroidSystemBarsSync> createState() => _AndroidSystemBarsSyncState();
-}
-
-class _AndroidSystemBarsSyncState extends State<_AndroidSystemBarsSync> {
-  @override
-  void initState() {
-    super.initState();
-    _AndroidSystemBars.sync(widget.brightness);
-  }
-
-  @override
-  void didUpdateWidget(covariant _AndroidSystemBarsSync oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.brightness == widget.brightness) return;
-    _AndroidSystemBars.sync(widget.brightness);
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
-}
-
-abstract final class _AndroidSystemBars {
-  static Brightness? _lastBrightness;
-
-  static void sync(Brightness brightness) {
-    if (kIsWeb || !Platform.isAndroid) return;
-    if (_lastBrightness == brightness) return;
-    _lastBrightness = brightness;
-    SystemChrome.setSystemUIOverlayStyle(androidSystemBarsStyleFor(brightness));
+  Widget build(BuildContext context) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return child;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: androidSystemBarsStyleFor(brightness),
+      child: child,
+    );
   }
 }
 
-/// Overlay style for the resolved app theme brightness — both system
-/// bars take the theme's `background.window` (the scaffold background
-/// used across the mobile shell, onboarding, and unlock screens) with
-/// matching icon contrast. `statusBarBrightness` is the iOS-side field
-/// and stays unset; this style only ever applies on Android.
+/// Overlay style for the resolved app theme brightness. The bars are
+/// transparent (`MainActivity` turns edge-to-edge on for every Android
+/// version), so the app's own background shows behind them, and contrast
+/// enforcement is off so the OS lays no scrim over them. The transparent
+/// navigation colour overrides `MaterialApp`'s black one; Flutter applies it
+/// below Android 15 only. `statusBarBrightness` is the iOS-side field and
+/// stays unset; this style only ever applies on Android.
 @visibleForTesting
 SystemUiOverlayStyle androidSystemBarsStyleFor(Brightness brightness) {
-  final window = brightness == Brightness.dark
-      ? AppColors.dark.background.window
-      : AppColors.light.background.window;
   final icons = brightness == Brightness.dark
       ? Brightness.light
       : Brightness.dark;
   return SystemUiOverlayStyle(
-    statusBarColor: window,
     statusBarIconBrightness: icons,
     systemStatusBarContrastEnforced: false,
-    systemNavigationBarColor: window,
-    systemNavigationBarDividerColor: window,
+    systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: icons,
     systemNavigationBarContrastEnforced: false,
   );

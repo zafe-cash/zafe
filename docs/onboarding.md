@@ -1,8 +1,10 @@
 # Onboarding: research, process and design
 
 Written 2026-10-15. Research, the study of Vizor's and Zodl's first-run flows, and a
-proposed design for Zafe's onboarding. Nothing here is built yet except the error-copy fix
-noted in §7. Track the work in `docs/tracker.md` ("Onboarding").
+proposed design for Zafe's onboarding. Since written (2026-10-15/16), the P0 and P1 items
+were built (safety words, async setup, invite expiry, name in setup, generated backup words
+with a recall check, ...); some ideas here were dropped. `docs/tracker.md` ("Onboarding")
+has what was built and what was dropped; it wins where this doc disagrees.
 
 Sources used:
 - A web research pass (NN/g, Apple HIG, Material, Monzo, Mercury, Ramp, Fordefi, Safe,

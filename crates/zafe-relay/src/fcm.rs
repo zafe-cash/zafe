@@ -154,10 +154,16 @@ impl FcmNotifier {
     }
 
     /// The FCM message: data only, no vault information, high priority, one collapse key.
-    pub fn message(device_token: &str) -> serde_json::Value {
+    /// An installation ID goes in `fid`, an older registration token in `token`.
+    pub fn message(platform: PushPlatform, target: &str) -> serde_json::Value {
+        let field = if platform == PushPlatform::FcmFid {
+            "fid"
+        } else {
+            "token"
+        };
         serde_json::json!({
             "message": {
-                "token": device_token,
+                field: target,
                 "data": { "t": "vault" },
                 "android": { "priority": "high", "collapse_key": "zafe" }
             }
@@ -167,7 +173,7 @@ impl FcmNotifier {
 
 impl Notifier for FcmNotifier {
     fn notify(&self, platform: PushPlatform, token: &str) {
-        if platform != PushPlatform::Fcm {
+        if !matches!(platform, PushPlatform::Fcm | PushPlatform::FcmFid) {
             tracing::debug!(
                 platform = platform.as_str(),
                 "push: no sender for platform yet"
@@ -179,7 +185,7 @@ impl Notifier for FcmNotifier {
             "{}/v1/projects/{}/messages:send",
             self.fcm_base, account.project_id
         );
-        let body = Self::message(token);
+        let body = Self::message(platform, token);
         let (device_token, on_unregistered) = (token.to_owned(), self.on_unregistered.clone());
         self.runtime.spawn(async move {
             let result = async {
@@ -218,4 +224,21 @@ fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_installation_id_goes_in_fid_and_a_token_in_token() {
+        let fid = FcmNotifier::message(PushPlatform::FcmFid, "f1");
+        assert_eq!(fid["message"]["fid"], "f1");
+        assert!(fid["message"].get("token").is_none());
+        let token = FcmNotifier::message(PushPlatform::Fcm, "t1");
+        assert_eq!(token["message"]["token"], "t1");
+        assert!(token["message"].get("fid").is_none());
+        // No vault information either way.
+        assert_eq!(fid["message"]["data"], serde_json::json!({ "t": "vault" }));
+    }
 }

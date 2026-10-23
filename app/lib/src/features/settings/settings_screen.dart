@@ -24,6 +24,7 @@ import 'diagnostics_sheet.dart';
 import 'tor_setting_row.dart';
 import '../../core/widgets/app_segmented.dart';
 import '../../core/widgets/app_switch.dart';
+import '../../core/widgets/line_icon.dart';
 
 const _rowHeight = 44.0;
 
@@ -300,11 +301,15 @@ class _NoScreenLockNoteState extends ConsumerState<_NoScreenLockNote> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(
-            AppIcons.warning,
+          LineIcon(
             size: 16,
-            color: colors.icon.warning,
-            patina: colors.icon.warning,
+            line: AppTypography.bodySmall,
+            icon: AppIcon(
+              AppIcons.warning,
+              size: 16,
+              color: colors.icon.warning,
+              patina: colors.icon.warning,
+            ),
           ),
           const SizedBox(width: AppSpacing.xs),
           Expanded(

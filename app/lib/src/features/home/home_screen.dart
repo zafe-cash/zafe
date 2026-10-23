@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/config/beta.dart';
 import '../../core/config/network_config.dart';
 import '../../core/feedback/app_haptics.dart';
 import '../../core/formatting/zec_amount.dart';
@@ -39,6 +38,7 @@ import '../../providers/other_vaults_waiting_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/zec_price_provider.dart';
 import '../../services/app_update.dart';
+import '../../core/widgets/line_icon.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -325,6 +325,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     const AppNoticeCards(gap: AppSpacing.md),
                     // Once the vault holds money, a missing backup outranks every
                     // other notice (a lost phone could cost the group its funds).
+                    // An empty vault leaves it to the Signers tab's backup card.
                     if (needsBackup && funded) ...[
                       NoticeCard(
                         title: 'Back up this vault',
@@ -381,28 +382,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         body:
                             'You won\'t hear when a payment needs your approval',
                         onTap: () => enableNotifications(ref),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                    ],
-                    if (kIsBeta) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.xxs,
-                        ),
-                        child: Text(
-                          betaNote,
-                          style: AppTypography.bodySmall.copyWith(
-                            color: colors.text.muted,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                    ],
-                    if (needsBackup && !funded) ...[
-                      NoticeCard(
-                        title: 'Back up this vault',
-                        body: 'Your key share lives only on this phone',
-                        onTap: () => context.push('/export'),
                       ),
                       const SizedBox(height: AppSpacing.md),
                     ],
@@ -818,7 +797,7 @@ class _Payments extends StatelessWidget {
                   children: [
                     Text(
                       proposals.loaded
-                          ? 'No activity, yet...'
+                          ? 'No activity yet'
                           : 'Loading activity...',
                       style: AppTypography.headlineSmall.copyWith(
                         color: colors.text.accent,
@@ -921,18 +900,22 @@ class NoticeCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              warning
-                  ? AppIcon(
-                      AppIcons.warning,
-                      size: 20,
-                      color: colors.icon.warning,
-                      patina: colors.icon.warning,
-                    )
-                  : AppIcon(
-                      AppIcons.renew,
-                      size: 20,
-                      color: colors.icon.accent,
-                    ),
+              LineIcon(
+                size: 20,
+                line: AppTypography.labelLarge,
+                icon: warning
+                    ? AppIcon(
+                        AppIcons.warning,
+                        size: 20,
+                        color: colors.icon.warning,
+                        patina: colors.icon.warning,
+                      )
+                    : AppIcon(
+                        AppIcons.renew,
+                        size: 20,
+                        color: colors.icon.accent,
+                      ),
+              ),
               const SizedBox(width: AppSpacing.s),
               Expanded(
                 child: Column(

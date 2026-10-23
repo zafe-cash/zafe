@@ -1,7 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/layout/app_column.dart';
+import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/theme/app_theme.dart';
 import '../home/home_screen.dart' show AppNoticeCards;
 import '../../core/widgets/app_button.dart';
@@ -12,6 +16,7 @@ import '../../providers/vault_provider.dart';
 import '../settings/endpoint_sheet.dart';
 import 'onboarding_art.dart';
 import 'welcome_art.dart';
+import '../../core/widgets/line_icon.dart';
 
 /// Taps on the Welcome door (one Welcome screen exists at a time): each replays its
 /// unlock.
@@ -35,15 +40,17 @@ class WelcomeScreen extends ConsumerWidget {
       if (context.mounted) context.go('/home');
     }
 
-    // The text block over the hero art; the top gap keeps the title below the art's
-    // busy middle (the art is full width, 1240/1080 as tall) on short screens.
-    Widget content(double width) => Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+    // The title, the card and the buttons, below the hero art (`top` = half its height:
+    // the title sits on its faded lower part) or beside it. On a phone the free height
+    // goes above the title (buttons at the bottom, in reach); in a large window
+    // (`centred`) the block sits in the middle of the space it has.
+    Widget content({double top = 0, required bool centred}) => Padding(
+      padding: EdgeInsets.fromLTRB(16, centred ? 12 : 0, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(height: width * 1240 / 1080 * 0.5),
-          const Spacer(flex: 3),
+          SizedBox(height: top),
+          Spacer(flex: centred ? 1 : 3),
           Text(
             'Zafe',
             style: TextStyle(
@@ -61,7 +68,10 @@ class WelcomeScreen extends ConsumerWidget {
               color: colors.text.secondary,
             ),
           ),
-          const Spacer(),
+          if (centred)
+            const SizedBox(height: AppSpacing.md)
+          else
+            const Spacer(),
           const _InfoCard(),
           const SizedBox(height: AppSpacing.md),
           const AppNoticeCards(),
@@ -87,53 +97,109 @@ class WelcomeScreen extends ConsumerWidget {
           AppButton(
             expand: true,
             variant: AppButtonVariant.ghost,
-            onPressed: () => context.push('/restore'),
-            child: const Text('Restore from backup'),
+            onPressed: () => _alreadyInAVault(context),
+            child: const Text("I'm already in a vault"),
           ),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => context.push('/recover'),
-            child: const Text('Recover without a backup'),
-          ),
+          if (centred) const Spacer(),
         ],
       ),
     );
 
-    final scaffold = Scaffold(
-      backgroundColor: colors.background.window,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          OnboardingHero('welcome_vault', art: WelcomeArt(replay: _doorTaps)),
-          SafeArea(
-            // Fills the screen when it fits; scrolls on short phones or with large
-            // system text (it used to cut off the last buttons on a 360x640 phone).
-            child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: IntrinsicHeight(child: content(constraints.maxWidth)),
-                ),
+    // Fills its box when it fits; scrolls on short windows or with large system text
+    // (it used to cut off the last buttons on a 360x640 phone). `inset` centres content
+    // at most [maxWidth] wide (padding, which intrinsic sizing measures correctly).
+    Widget scrolling(double maxWidth, Widget Function(double inset) child) =>
+        LayoutBuilder(
+          builder: (context, box) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: box.maxHeight),
+              child: IntrinsicHeight(
+                child: child(math.max(0, (box.maxWidth - maxWidth) / 2)),
               ),
             ),
           ),
+        );
 
-          WelcomeDoorTap(onTap: () => _doorTaps.value++),
-          if (adding)
-            _CornerButton(
-              alignment: Alignment.topLeft,
-              icon: AppIcons.cross,
-              label: 'Cancel adding a vault',
-              onTap: cancel,
+    final art = WelcomeArt(replay: _doorTaps);
+    // Phones, portrait windows and nearly square ones: the art on top, the content
+    // below it, scrolling together (content scrolled over a fixed art put buttons on
+    // the picture).
+    // The scroll view stops above the navigation bar (as before the art scrolled).
+    Widget stacked(Size size) => SafeArea(
+      top: false,
+      left: false,
+      right: false,
+      child: scrolling(
+        kMaxContentWidth,
+        (inset) => Stack(
+          fit: StackFit.expand,
+          children: [
+            OnboardingHero('welcome_vault', art: art),
+            SafeArea(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: inset),
+                child: content(
+                  top: OnboardingHero.sizeIn(size).height * 0.5,
+                  centred: isLargeWindow(context),
+                ),
+              ),
             ),
-          _CornerButton(
-            alignment: Alignment.topRight,
-            icon: AppIcons.cog,
-            label: 'Server settings',
-            onTap: servers,
+            WelcomeDoorTap(onTap: () => _doorTaps.value++),
+          ],
+        ),
+      ),
+    );
+    // Landscape: the art fills the start half, the content is centred in the other.
+    Widget beside() => Row(
+      children: [
+        Expanded(
+          child: _ArtPanel(art: art, onTap: () => _doorTaps.value++),
+        ),
+        Expanded(
+          child: SafeArea(
+            left: false,
+            child: scrolling(
+              440,
+              (inset) => Padding(
+                padding: EdgeInsets.symmetric(horizontal: inset),
+                child: content(centred: true),
+              ),
+            ),
           ),
-        ],
+        ),
+      ],
+    );
+
+    final scaffold = Scaffold(
+      backgroundColor: colors.background.window,
+      // Clear of a hinge or a half-opened fold; otherwise the whole window.
+      body: AppColumn(
+        maxWidth: double.infinity,
+        child: Builder(
+          builder: (context) {
+            final size = MediaQuery.sizeOf(context);
+            final wide = size.width >= 600 && size.width >= size.height * 1.2;
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                wide ? beside() : stacked(size),
+                if (adding)
+                  _CornerButton(
+                    alignment: Alignment.topLeft,
+                    icon: AppIcons.cross,
+                    label: 'Cancel adding a vault',
+                    onTap: cancel,
+                  ),
+                _CornerButton(
+                  alignment: Alignment.topRight,
+                  icon: AppIcons.cog,
+                  label: 'Server settings',
+                  onTap: servers,
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
     if (!adding) return scaffold;
@@ -143,6 +209,124 @@ class WelcomeScreen extends ConsumerWidget {
         if (!didPop) cancel();
       },
       child: scaffold,
+    );
+  }
+}
+
+/// A member back on a new phone: restore from a backup if they have one, otherwise
+/// co-signers move the seat (two paths whose names mean little to a newcomer, so the
+/// question picks for them).
+Future<void> _alreadyInAVault(BuildContext context) async {
+  final route = await showAppMobileSheet<String>(
+    context: context,
+    builder: (sheetContext) {
+      final colors = sheetContext.colors;
+      void go(String route) => Navigator.of(sheetContext).pop(route);
+      return SingleChildScrollView(
+        // Scrolls once the sheet runs out of height (a short window).
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Do you have your backup?',
+                textAlign: TextAlign.center,
+                style: AppTypography.headlineSmall.copyWith(
+                  color: colors.text.accent,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'Without one, your co-signers can move your seat to this phone.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodyMedium.copyWith(
+                  color: colors.text.secondary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppButton(
+                expand: true,
+                onPressed: () => go('/restore'),
+                child: const Text('Yes, restore it'),
+              ),
+              const SizedBox(height: AppSpacing.s),
+              AppButton(
+                expand: true,
+                variant: AppButtonVariant.secondary,
+                onPressed: () => go('/recover'),
+                child: const Text('No, ask my co-signers'),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+  if (route != null && context.mounted) context.push(route);
+}
+
+/// The Welcome art filling the start half of a landscape window: cropped to fill it,
+/// fading into the window colour at the top (status bar), the bottom and toward the
+/// content. Tapping it turns the door's wheel.
+class _ArtPanel extends StatelessWidget {
+  const _ArtPanel({required this.art, required this.onTap});
+  final Widget art;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final window = context.colors.background.window;
+    final clear = window.withValues(alpha: 0);
+    Widget fade(Gradient gradient) => Positioned.fill(
+      child: IgnorePointer(
+        child: DecoratedBox(decoration: BoxDecoration(gradient: gradient)),
+      ),
+    );
+    return ExcludeSemantics(
+      child: GestureDetector(
+        key: kHeroArtKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(width: 1080, height: 1240, child: art),
+              ),
+              fade(
+                LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0, 0.1, 0.8, 1],
+                  colors: [
+                    window.withValues(alpha: 0.85),
+                    clear,
+                    clear,
+                    window,
+                  ],
+                ),
+              ),
+              fade(
+                LinearGradient(
+                  begin: AlignmentDirectional.centerStart,
+                  end: AlignmentDirectional.centerEnd,
+                  stops: const [0, 0.7, 1],
+                  colors: [clear, clear, window],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -244,7 +428,11 @@ class _InfoCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppIcon(icon, size: 20, color: colors.text.darkCard),
+          LineIcon(
+            size: 20,
+            line: AppTypography.labelLarge,
+            icon: AppIcon(icon, size: 20, color: colors.text.darkCard),
+          ),
           const SizedBox(width: AppSpacing.s),
           Expanded(
             child: Column(
