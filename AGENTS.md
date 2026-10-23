@@ -380,7 +380,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   (only passed when set: an empty define would replace the default).
 - iOS channels (`ZafeNative`): `payment_feedback`, `secure_screen`, `window_appearance`,
   `system_settings`, `clipboard` (localOnly + 60 s expiry), `haptics`. `device_auth` is Android
-  only (iOS keeps `local_auth`). URL schemes `zafe`, `zafe-testnet`, `zcash`; iPhone portrait only.
+  only (iOS keeps `local_auth`). URL schemes `zafe`, `zafe-testnet`, `zcash`; orientations follow main (large screens rotate).
 - Not done on iOS: export-compliance answer (`ITSAppUsesNonExemptEncryption`; Zafe has its own
   E2E crypto, so this is the owner's call, not ours), App Store/TestFlight upload, APNs push (the
   relay has no APNs sender; Firebase isn't configured, the app falls back to background checks),
