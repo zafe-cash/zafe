@@ -124,7 +124,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   Nonce, pool-nonce, kept-vote and leader files go through `zafe_core::durable` (temp + fsync +
   rename + fsync dir). Files are XChaCha20-Poly1305 encrypted with `NonceKey::derive(seeds,
   vault id)`; `put` errors so a failed write never publishes an approval. The directory must be
-  excluded from backups/device transfer (Android done; iOS `isExcludedFromBackup` not yet).
+  excluded from backups/device transfer (Android done; iOS: `ZafeBackup.excludeStateFromBackups()` flags Application Support and Documents at launch, device-untested).
   Interactive replies are kept (`keep_reply`) until the relay accepts them; `respond` skips
   closed/expired proposals.
 - **Leader**: never messages itself (relay 403); when it is a signer it signs locally
@@ -357,6 +357,50 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - COCKTAIL-DKG (frost#1033) not ready; align when it ships with Pallas. RedPallas FROST moving
   out of `reddsa` (frost#963): stay on 0.5.2. Changing t (frost#1082): resharing prototype in
   `tests/reshare.rs`, not shipped.
+
+## iOS (built in CI since 2026-10-07; never run on a device by an agent)
+
+- `.github/workflows/ios.yml` (macOS runner, **`macos-26` + latest stable Xcode**: `workmanager_apple`
+  uses `BGContinuedProcessingTask`, iOS 26 SDK only): an unsigned device build (artifact
+  `zafe-ios-unsigned`) and a simulator build. The `sign` job turns the device build into
+  `Zafe-signed.ipa` when the `ios-signing` environment has `IOS_CERT_P12_BASE64`,
+  `IOS_CERT_PASSWORD`, `IOS_PROFILE_BASE64` (development or ad-hoc profile for `xyz.zafe.zafe`
+  listing the phone's UDID); restrict that environment to trusted branches.
+- Deployment target **15.5** (`ios/Podfile`, project settings): ML Kit barcode scanning needs
+  15.5, `workmanager_apple` 14+. `ios/Podfile` is committed; keep its `platform` in sync.
+- Native iOS code lives in `ios/Runner/AppDelegate.swift` (channels `ZafeNative`, `ZafePrivacy`,
+  `ZafeBackup`, background task registration) and `SceneDelegate.swift`; no new Swift files, so
+  the Xcode project needs no edits. Background vault checks are a BGTaskScheduler periodic task
+  `zafe-vault-check` (Info.plist `BGTaskSchedulerPermittedIdentifiers` + `fetch`); the system
+  decides when it runs. The one-off "soon" check and in-app updates are Android only.
+- `scripts/ios-install.sh` installs the CI's unsigned build from Linux with **xtool** (`xtool install`,
+  your Apple ID, USB); unverified on a phone (xtool lacks most entitlements/extensions; a free
+  Apple ID signature lasts 7 days). Repository variables used by the iOS build: `IOS_BUNDLE_ID`
+  (default `xyz.zafe.zafe`, must match the signing profile), `ZAFE_RELAY_URL`, `ZAFE_LINK_HOST`
+  (only passed when set: an empty define would replace the default).
+- iOS channels (`ZafeNative`): `payment_feedback`, `secure_screen`, `window_appearance`,
+  `system_settings`, `clipboard` (localOnly + 60 s expiry), `haptics`. `device_auth` is Android
+  only (iOS keeps `local_auth`). URL schemes `zafe`, `zafe-testnet`, `zcash`; orientations follow main (large screens rotate).
+- **iOS push (2026-10-23, untested end to end)**: iOS goes through FCM like Android (FCM forwards to
+  APNs, so the relay needs no APNs key or sender): the app registers its Firebase installation ID
+  (`fcm-fid`), `FcmNotifier::message` carries an `apns` block (silent background push,
+  `content-available`, priority 5, no alert), `UIBackgroundModes` has `remote-notification`, and
+  `firebaseBackgroundHandler` runs the vault check. Firebase is initialised from dart-defines, not a
+  plist (`notifications/ios_firebase_options.dart`; repository variables `ZAFE_FIREBASE_IOS_API_KEY`,
+  `_APP_ID`, `_SENDER_ID`, `_PROJECT_ID`, values from `GoogleService-Info.plist`, not secrets; push is off
+  without them). Steps only the owner can do: add an iOS app to Firebase project `zafe-18c4d` with the
+  bundle id, upload an APNs auth key (.p8) there, enable Push Notifications on the App ID and regenerate
+  the provisioning profile (the sign job copies `aps-environment` from the profile). Silent pushes are
+  throttled by iOS and not delivered to a force-quit app, so timeliness is best effort; the next step
+  for reliability is a visible alert push plus a Notification Service Extension (not built).
+- **iOS universal links (2026-10-23, untested)**: the site already builds the
+  `apple-app-site-association` file from the variable `ZAFE_IOS_APP_IDS` (`<TeamID>.<bundle id>`, comma
+  separated; `site.yml`). The app side is an entitlement, added by the sign job when the profile has the
+  Associated Domains capability: it sets `applinks:$ZAFE_LINK_HOST` (a profile lists `*`). Needs the
+  capability on the App ID and a regenerated profile. Without it `zafe://` links still work. `app_links`
+  delivers the link; invites stay in the URL fragment.
+- Not done on iOS: export-compliance answer (`ITSAppUsesNonExemptEncryption`; Zafe has its own E2E
+  crypto, so this is the owner's call, not ours), App Store/TestFlight upload, a launch smoke test in CI.
 
 ## Machine hygiene
 

@@ -78,6 +78,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>zafe</string>
+				<string>zafe-testnet</string>
 			</array>
 		</dict>
 		<dict>
@@ -88,6 +89,17 @@
 				<string>zcash</string>
 			</array>
 		</dict>
+	</array>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.finance</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>zafe-vault-check</string>
 	</array>
 	<key>FlutterDeepLinkingEnabled</key>
 	<false/>

@@ -99,8 +99,8 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   reaches a server once Tor is requested, waiters wake on failure, a direct long poll
   and a lightwalletd call are cut; ignored live test: cold bootstrap ~14 s, testnet tip
   through Tor ~3.5 s, an HTTPS GET ~1 s), Dart `test/tor_setting_test.dart`; sheet
-  preview `flutter test tool/screens/tor_render_test.dart`. Not done: iOS backup
-  exclusion of the Tor dir, onion endpoints, per-vault circuit isolation.
+  preview `flutter test tool/screens/tor_render_test.dart`. Not done:
+  onion endpoints, per-vault circuit isolation (iOS excludes the whole support dir from backups).
 
 ## Illustrations
 
@@ -175,7 +175,7 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   The splash follows the app's theme setting, not just the OS: `AppThemeHost` sends it
   over `xyz.zafe/window_appearance` (`setBrightness`), and on Android 12+ `MainActivity`
   calls `UiModeManager.setApplicationNightMode`, which the OS persists for the next
-  launch's splash. Android < 12 and iOS (no handler yet) still follow the OS theme.
+  launch's splash. Android < 12 still follows the OS theme; on iOS the same channel sets `overrideUserInterfaceStyle` on the windows (the launch screen still follows the OS).
   Check resources without a Gradle build: `aapt2 compile --dir res` + `aapt2 link` against
   `platforms/android-36/android.jar`.
 - **Small phones and large text** (checked 2026-10-16): `flutter test
@@ -595,8 +595,9 @@ Learned while studying it:
   sound's tempo, kept in sync with `PaymentFeedback.taps`). Setting "Payment sounds"
   (`paymentSoundsProvider`, `zafe_payment_sounds`, default on, read in the bootstrap)
   mutes the sound only. Received plays from `ReceivedNotifier.refresh` for new txids that
-  are unmined or ≤ 2 confirmations, in the foreground, never on a first load. iOS: no
-  handler (haptics only); needs CAF/M4A copies. Payment sounds are a signature, not UI
+  are unmined or ≤ 2 confirmations, in the foreground, never on a first load. iOS: `ZafeNative`
+  (AppDelegate.swift) plays `assets/sounds/pay_*.m4a` (AAC, made by `build.sh` too) with AVAudioPlayer on
+  an ambient session (the silent switch mutes it) plus impact haptics. Payment sounds are a signature, not UI
   feedback: keep them clean, short, open intervals (the user rejected chimes, bass
   "tactile" thuds and bright major-third runs).
 - **Balance card + dollars** (2026-10-06, after Vizor): one total (pending included; what's
@@ -620,8 +621,7 @@ Learned while studying it:
 - **Secret screens** block capture: wrap a route's page in `SecureScreen`
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:
-  `xyz.zafe/haptics` and `window_appearance` have none yet (Dart swallows
-  `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
+  iOS handles the same channels in `ios/Runner/AppDelegate.swift` (`ZafeNative`): it can't block screenshots, so `ZafePrivacy` covers the app while the screen is recorded or mirrored on a secret screen (`UIScreen.isCaptured`) and always in the app switcher. Dart swallows `MissingPluginException` where there is no handler (tests). Check with `adb shell dumpsys window windows | grep SECURE`.
 - Settings (`/settings` tab) is app-only since 2026-10-16: Security (lock app), Privacy (hide
   amounts, Tor, diagnostics), System (theme, payment sounds, relay, Zcash server, licenses; fonts +
   NOTICE registered in `main.dart`). Vault things live in **Manage vaults** (`/vaults`,
@@ -726,8 +726,7 @@ Learned while studying it:
   `secureRequested`). That flag doesn't hide the **live** tile Android 13+ shows for the
   running app, so `AppLockGate` also draws `PrivacyCover` whenever the lifecycle isn't
   `resumed` (switcher, notification shade, system dialogs, the unlock prompt). iOS:
-  `SceneDelegate` adds a launch-screen cover on `sceneWillResignActive` (untested: iOS
-  has never been built). Verified on the emulator 2026-10-04: blank recents card,
+  `SceneDelegate` tells `ZafePrivacy` (AppDelegate.swift) to cover the app on `sceneWillResignActive` (built in CI, untested on a device). Verified on the emulator 2026-10-04: blank recents card,
   cover gone on return. Emulator test: the
   AVD has no screen lock (the lock then opens at once); `adb shell locksettings set-pin
   1234`, unlock with `adb shell input text 1234` + `KEYCODE_ENTER`, and `locksettings
