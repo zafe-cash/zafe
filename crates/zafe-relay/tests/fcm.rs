@@ -83,7 +83,15 @@ async fn sends_content_free_high_priority_pushes() {
             "message": {
                 "token": "device-token-1",
                 "data": { "t": "vault" },
-                "android": { "priority": "high", "collapse_key": "zafe" }
+                "android": { "priority": "high", "collapse_key": "zafe" },
+                "apns": {
+                    "headers": {
+                        "apns-push-type": "background",
+                        "apns-priority": "5",
+                        "apns-collapse-id": "zafe"
+                    },
+                    "payload": { "aps": { "content-available": 1 } }
+                }
             }
         })
     );
