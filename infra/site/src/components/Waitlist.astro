@@ -1,0 +1,19 @@
+---
+// The iPhone waitlist: a plain form (no JavaScript) posting to our own function
+// (api/waitlist.mjs, stored in a private Vercel Blob store). It answers with a redirect to
+// /waitlist (joined) or /waitlist-error. The hidden field is a trap for bots.
+interface Props {
+  id?: string;
+}
+const { id = 'iphone' } = Astro.props;
+---
+
+<form class="waitlist" id={id} method="post" action="/api/waitlist">
+  <label for={`${id}-email`}>iPhone? Get one email when it&rsquo;s out.</label>
+  <div class="waitlist-row">
+    <input id={`${id}-email`} name="email" type="email" required maxlength="254" autocomplete="email" inputmode="email" placeholder="you@example.com" />
+    <button type="submit">Notify me</button>
+  </div>
+  <p class="waitlist-trap" aria-hidden="true"><label>Leave empty <input name="website" type="text" tabindex="-1" autocomplete="off" /></label></p>
+  <p class="waitlist-note">One email, then we delete your address. <a href="/privacy#waitlist">Privacy</a></p>
+</form>

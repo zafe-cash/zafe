@@ -2,7 +2,8 @@
 // The footer every page shares: the mark and line, links, and what the site doesn't do.
 // `slim` (the showcase) is one quiet line, so the 3D page ends on the world.
 import BrandIcon from './BrandIcon.astro';
-import { downloadUrl, sourceUrl, specUrl, xUrl } from '../config';
+import PlayButton from './PlayButton.astro';
+import { sourceUrl, specUrl, xUrl } from '../config';
 
 interface Props {
   slim?: boolean;
@@ -20,23 +21,31 @@ const { slim = false } = Astro.props;
   <footer class="foot">
     <div class="foot-top">
       <p class="foot-brand"><img src="/assets/zafe.svg" alt="" width="52" height="52" /><span>Privacy,<br />held together.</span></p>
-      <ul>
-        {downloadUrl && <li><a href={downloadUrl} target="_blank" rel="noopener noreferrer">Android</a></li>}
-        <li><a href="/showcase">Showcase</a></li>
-        <li><a href={sourceUrl} target="_blank" rel="noopener noreferrer">Source</a></li>
-        <li><a href={specUrl} target="_blank" rel="noopener noreferrer">Spec</a></li>
-        <li><a href="/#security">Security</a></li>
-        <li><a href={`${sourceUrl}/issues`} target="_blank" rel="noopener noreferrer">Support</a></li>
-        <li><a href="/privacy">Privacy</a></li>
-      </ul>
+      <nav class="foot-links" aria-label="Footer">
+        <ul class="foot-get">
+          <li><PlayButton id="play-foot" class="foot-play"><BrandIcon name="googleplay" />Zafe for Android</PlayButton></li>
+          <li><a href="/download"><BrandIcon name="appstore" />Zafe for iPhone <em>soon</em></a></li>
+        </ul>
+        <ul>
+          <li><a href="/showcase">Showcase</a></li>
+          <li><a href={sourceUrl} target="_blank" rel="noopener noreferrer">Source</a></li>
+          <li><a href={specUrl} target="_blank" rel="noopener noreferrer">Spec</a></li>
+        </ul>
+        <ul>
+          <li><a href="/support">Support</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+        </ul>
+      </nav>
     </div>
     <div class="foot-bottom">
       <p>No cookies. No analytics.</p>
-      <ul class="foot-social" aria-label="Zafe elsewhere">
-        <li><a href={xUrl} target="_blank" rel="noopener noreferrer" aria-label="Zafe on X"><BrandIcon name="x" /></a></li>
-        <li><a href={sourceUrl} target="_blank" rel="noopener noreferrer" aria-label="Zafe on GitHub"><BrandIcon name="github" /></a></li>
-      </ul>
-      <p>Zafe, 2026</p>
+      <div class="foot-end">
+        <ul class="foot-social" aria-label="Zafe elsewhere">
+          <li><a href={xUrl} target="_blank" rel="noopener noreferrer" aria-label="Zafe on X"><BrandIcon name="x" /></a></li>
+          <li><a href={sourceUrl} target="_blank" rel="noopener noreferrer" aria-label="Zafe on GitHub"><BrandIcon name="github" /></a></li>
+        </ul>
+        <p>Zafe, 2026</p>
+      </div>
     </div>
     <p class="ghost" aria-hidden="true">zafe</p>
   </footer>

@@ -1,0 +1,583 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-23T12:00:00Z",
+  "title": "Design System: Zafe website",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "oklch(96.7% 0.0043 197.1)",
+        "tonalRamp": [
+          "oklch(15% 0.0043 197.1)",
+          "oklch(26% 0.0043 197.1)",
+          "oklch(37% 0.0043 197.1)",
+          "oklch(48% 0.0043 197.1)",
+          "oklch(59% 0.0043 197.1)",
+          "oklch(70% 0.0043 197.1)",
+          "oklch(82% 0.0043 197.1)",
+          "oklch(95% 0.0043 197.1)"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground White",
+        "canonical": "oklch(100.0% 0.0000 89.9)",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.9)",
+          "oklch(26% 0.0000 89.9)",
+          "oklch(37% 0.0000 89.9)",
+          "oklch(48% 0.0000 89.9)",
+          "oklch(59% 0.0000 89.9)",
+          "oklch(70% 0.0000 89.9)",
+          "oklch(82% 0.0000 89.9)",
+          "oklch(95% 0.0000 89.9)"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised Grey",
+        "canonical": "oklch(93.3% 0.0055 183.0)",
+        "tonalRamp": [
+          "oklch(15% 0.0055 183.0)",
+          "oklch(26% 0.0055 183.0)",
+          "oklch(37% 0.0055 183.0)",
+          "oklch(48% 0.0055 183.0)",
+          "oklch(59% 0.0055 183.0)",
+          "oklch(70% 0.0055 183.0)",
+          "oklch(82% 0.0055 183.0)",
+          "oklch(95% 0.0055 183.0)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(89.9% 0.0065 197.0)",
+        "tonalRamp": [
+          "oklch(15% 0.0065 197.0)",
+          "oklch(26% 0.0065 197.0)",
+          "oklch(37% 0.0065 197.0)",
+          "oklch(48% 0.0065 197.0)",
+          "oklch(59% 0.0065 197.0)",
+          "oklch(70% 0.0065 197.0)",
+          "oklch(82% 0.0065 197.0)",
+          "oklch(95% 0.0065 197.0)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(15.8% 0.0080 196.4)",
+        "tonalRamp": [
+          "oklch(15% 0.0080 196.4)",
+          "oklch(26% 0.0080 196.4)",
+          "oklch(37% 0.0080 196.4)",
+          "oklch(48% 0.0080 196.4)",
+          "oklch(59% 0.0080 196.4)",
+          "oklch(70% 0.0080 196.4)",
+          "oklch(82% 0.0080 196.4)",
+          "oklch(95% 0.0080 196.4)"
+        ]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Ink",
+        "canonical": "oklch(44.6% 0.0154 184.5)",
+        "tonalRamp": [
+          "oklch(15% 0.0154 184.5)",
+          "oklch(26% 0.0154 184.5)",
+          "oklch(37% 0.0154 184.5)",
+          "oklch(48% 0.0154 184.5)",
+          "oklch(59% 0.0154 184.5)",
+          "oklch(70% 0.0154 184.5)",
+          "oklch(82% 0.0154 184.5)",
+          "oklch(95% 0.0154 184.5)"
+        ]
+      },
+      "verdigris": {
+        "role": "primary",
+        "displayName": "Verdigris",
+        "canonical": "oklch(50.0% 0.0872 187.4)",
+        "tonalRamp": [
+          "oklch(15% 0.0872 187.4)",
+          "oklch(26% 0.0872 187.4)",
+          "oklch(37% 0.0872 187.4)",
+          "oklch(48% 0.0872 187.4)",
+          "oklch(59% 0.0872 187.4)",
+          "oklch(70% 0.0872 187.4)",
+          "oklch(82% 0.0872 187.4)",
+          "oklch(95% 0.0872 187.4)"
+        ]
+      },
+      "verdigris-pressed": {
+        "role": "primary",
+        "displayName": "Verdigris Pressed",
+        "canonical": "oklch(43.7% 0.0762 187.3)",
+        "tonalRamp": [
+          "oklch(15% 0.0762 187.3)",
+          "oklch(26% 0.0762 187.3)",
+          "oklch(37% 0.0762 187.3)",
+          "oklch(48% 0.0762 187.3)",
+          "oklch(59% 0.0762 187.3)",
+          "oklch(70% 0.0762 187.3)",
+          "oklch(82% 0.0762 187.3)",
+          "oklch(95% 0.0762 187.3)"
+        ]
+      },
+      "brand-label": {
+        "role": "neutral",
+        "displayName": "Label White",
+        "canonical": "oklch(100.0% 0.0000 89.9)",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.9)",
+          "oklch(26% 0.0000 89.9)",
+          "oklch(37% 0.0000 89.9)",
+          "oklch(48% 0.0000 89.9)",
+          "oklch(59% 0.0000 89.9)",
+          "oklch(70% 0.0000 89.9)",
+          "oklch(82% 0.0000 89.9)",
+          "oklch(95% 0.0000 89.9)"
+        ]
+      },
+      "band": {
+        "role": "neutral",
+        "displayName": "Sage Band",
+        "canonical": "oklch(93.8% 0.0065 185.3)",
+        "tonalRamp": [
+          "oklch(15% 0.0065 185.3)",
+          "oklch(26% 0.0065 185.3)",
+          "oklch(37% 0.0065 185.3)",
+          "oklch(48% 0.0065 185.3)",
+          "oklch(59% 0.0065 185.3)",
+          "oklch(70% 0.0065 185.3)",
+          "oklch(82% 0.0065 185.3)",
+          "oklch(95% 0.0065 185.3)"
+        ]
+      },
+      "vault-card": {
+        "role": "neutral",
+        "displayName": "Vault-Card Mint",
+        "canonical": "oklch(95.0% 0.0202 189.2)",
+        "tonalRamp": [
+          "oklch(15% 0.0202 189.2)",
+          "oklch(26% 0.0202 189.2)",
+          "oklch(37% 0.0202 189.2)",
+          "oklch(48% 0.0202 189.2)",
+          "oklch(59% 0.0202 189.2)",
+          "oklch(70% 0.0202 189.2)",
+          "oklch(82% 0.0202 189.2)",
+          "oklch(95% 0.0202 189.2)"
+        ]
+      },
+      "seam-tile": {
+        "role": "neutral",
+        "displayName": "Seam Tile",
+        "canonical": "oklch(36.9% 0.0640 188.6)",
+        "tonalRamp": [
+          "oklch(15% 0.0640 188.6)",
+          "oklch(26% 0.0640 188.6)",
+          "oklch(37% 0.0640 188.6)",
+          "oklch(48% 0.0640 188.6)",
+          "oklch(59% 0.0640 188.6)",
+          "oklch(70% 0.0640 188.6)",
+          "oklch(82% 0.0640 188.6)",
+          "oklch(95% 0.0640 188.6)"
+        ]
+      },
+      "footer-ink": {
+        "role": "neutral",
+        "displayName": "Footer Ink",
+        "canonical": "oklch(15.9% 0.0064 196.5)",
+        "tonalRamp": [
+          "oklch(15% 0.0064 196.5)",
+          "oklch(26% 0.0064 196.5)",
+          "oklch(37% 0.0064 196.5)",
+          "oklch(48% 0.0064 196.5)",
+          "oklch(59% 0.0064 196.5)",
+          "oklch(70% 0.0064 196.5)",
+          "oklch(82% 0.0064 196.5)",
+          "oklch(95% 0.0064 196.5)"
+        ]
+      },
+      "footer-text": {
+        "role": "neutral",
+        "displayName": "Footer Text",
+        "canonical": "oklch(96.7% 0.0043 197.1)",
+        "tonalRamp": [
+          "oklch(15% 0.0043 197.1)",
+          "oklch(26% 0.0043 197.1)",
+          "oklch(37% 0.0043 197.1)",
+          "oklch(48% 0.0043 197.1)",
+          "oklch(59% 0.0043 197.1)",
+          "oklch(70% 0.0043 197.1)",
+          "oklch(82% 0.0043 197.1)",
+          "oklch(95% 0.0043 197.1)"
+        ]
+      },
+      "footer-muted": {
+        "role": "neutral",
+        "displayName": "Footer Muted",
+        "canonical": "oklch(72.5% 0.0138 184.9)",
+        "tonalRamp": [
+          "oklch(15% 0.0138 184.9)",
+          "oklch(26% 0.0138 184.9)",
+          "oklch(37% 0.0138 184.9)",
+          "oklch(48% 0.0138 184.9)",
+          "oklch(59% 0.0138 184.9)",
+          "oklch(70% 0.0138 184.9)",
+          "oklch(82% 0.0138 184.9)",
+          "oklch(95% 0.0138 184.9)"
+        ]
+      },
+      "ghost-wordmark": {
+        "role": "neutral",
+        "displayName": "Ghost Wordmark",
+        "canonical": "oklch(22.0% 0.0089 196.5)",
+        "tonalRamp": [
+          "oklch(15% 0.0089 196.5)",
+          "oklch(26% 0.0089 196.5)",
+          "oklch(37% 0.0089 196.5)",
+          "oklch(48% 0.0089 196.5)",
+          "oklch(59% 0.0089 196.5)",
+          "oklch(70% 0.0089 196.5)",
+          "oklch(82% 0.0089 196.5)",
+          "oklch(95% 0.0089 196.5)"
+        ]
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "Selection Mint",
+        "canonical": "oklch(90.1% 0.0429 189.1)",
+        "tonalRamp": [
+          "oklch(15% 0.0429 189.1)",
+          "oklch(26% 0.0429 189.1)",
+          "oklch(37% 0.0429 189.1)",
+          "oklch(48% 0.0429 189.1)",
+          "oklch(59% 0.0429 189.1)",
+          "oklch(70% 0.0429 189.1)",
+          "oklch(82% 0.0429 189.1)",
+          "oklch(95% 0.0429 189.1)"
+        ]
+      },
+      "placeholder": {
+        "role": "neutral",
+        "displayName": "Placeholder",
+        "canonical": "oklch(54.1% 0.0152 179.0)",
+        "tonalRamp": [
+          "oklch(15% 0.0152 179.0)",
+          "oklch(26% 0.0152 179.0)",
+          "oklch(37% 0.0152 179.0)",
+          "oklch(48% 0.0152 179.0)",
+          "oklch(59% 0.0152 179.0)",
+          "oklch(70% 0.0152 179.0)",
+          "oklch(82% 0.0152 179.0)",
+          "oklch(95% 0.0152 179.0)"
+        ]
+      },
+      "scene-ink": {
+        "role": "tertiary",
+        "displayName": "Scene Ink",
+        "canonical": "oklch(27.7% 0.0178 190.3)",
+        "tonalRamp": [
+          "oklch(15% 0.0178 190.3)",
+          "oklch(26% 0.0178 190.3)",
+          "oklch(37% 0.0178 190.3)",
+          "oklch(48% 0.0178 190.3)",
+          "oklch(59% 0.0178 190.3)",
+          "oklch(70% 0.0178 190.3)",
+          "oklch(82% 0.0178 190.3)",
+          "oklch(95% 0.0178 190.3)"
+        ]
+      },
+      "scene-wall": {
+        "role": "tertiary",
+        "displayName": "Scene Wall",
+        "canonical": "oklch(79.2% 0.0440 181.6)",
+        "tonalRamp": [
+          "oklch(15% 0.0440 181.6)",
+          "oklch(26% 0.0440 181.6)",
+          "oklch(37% 0.0440 181.6)",
+          "oklch(48% 0.0440 181.6)",
+          "oklch(59% 0.0440 181.6)",
+          "oklch(70% 0.0440 181.6)",
+          "oklch(82% 0.0440 181.6)",
+          "oklch(95% 0.0440 181.6)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero H1 only; clamp(42px, 12vw, 56px) under 600px."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Story H2s, the close, Questions."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "/download option headings."
+      },
+      "title-small": {
+        "displayName": "Title small",
+        "purpose": "Popover titles, support contact labels."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Hero sub-line, step lines, close line; secondary ink."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base text, FAQ answers, feature lines."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Status line, loop captions, notes."
+      },
+      "action": {
+        "displayName": "Action",
+        "purpose": "Button labels."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Checksum command and certificate on /download."
+      }
+    },
+    "shadows": [
+      {
+        "name": "loop-frame",
+        "value": "0 30px 60px -45px rgba(0, 40, 38, 0.35)",
+        "purpose": "Every loop frame."
+      },
+      {
+        "name": "popover",
+        "value": "0 40px 80px -30px rgba(0, 40, 38, 0.45)",
+        "purpose": "QR and waitlist popovers; backdrop rgba(9, 14, 14, 0.35)."
+      },
+      {
+        "name": "contact-hover",
+        "value": "0 18px 40px -28px rgba(0, 40, 38, 0.45)",
+        "purpose": "Support contact cards on fine-pointer hover."
+      },
+      {
+        "name": "card-cast",
+        "value": "16px 18px 0 -2px rgba(30, 60, 56, 0.28)",
+        "purpose": "The app card inside each loop, drawn into the video (12px 14px in the tall cut). Illustration only, never page HTML."
+      }
+    ],
+    "motion": [
+      {
+        "name": "press",
+        "value": "transform 160ms cubic-bezier(0.23, 1, 0.32, 1); :active scale(0.97), 0.94 for icon buttons",
+        "purpose": "Every button."
+      },
+      {
+        "name": "hover-colour",
+        "value": "background-color/color 0.2s ease",
+        "purpose": "Hover, fine pointers only: (hover: hover) and (pointer: fine)."
+      },
+      {
+        "name": "disclosure",
+        "value": "transform 200ms cubic-bezier(0.23, 1, 0.32, 1); rotate(45deg) when open",
+        "purpose": "Patina plus marker turning to an x."
+      },
+      {
+        "name": "popover",
+        "value": "opacity/transform 200ms cubic-bezier(0.23, 1, 0.32, 1), from scale(0.96) via @starting-style",
+        "purpose": "Native popovers."
+      },
+      {
+        "name": "nav-underline",
+        "value": "transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), scaleX(0) to 1, 1.5px",
+        "purpose": "Nav link hover."
+      },
+      {
+        "name": "intro",
+        "value": "veil-close 0.8s cubic-bezier(0.7, 0, 0.2, 1) at 1s; rings 1.2s at 1.8s/2s; done by 3.2s",
+        "purpose": "Home only, CSS only: the mark's tile collapses into the nav logo. Removed with reduced motion."
+      },
+      {
+        "name": "hero-rise",
+        "value": "rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1), translateY(28px), delays 1.45/1.55/1.65/1.72s; band 1s at 1.8s",
+        "purpose": "The hero and first step arriving as the intro hands over. Removed with reduced motion."
+      },
+      {
+        "name": "loops",
+        "value": "muted looping H.264 video; loops.js pauses off-screen loops and drives the pause button",
+        "purpose": "The story's illustrated loops. With prefers-reduced-motion: reduce, a still instead."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "600px"
+      },
+      {
+        "name": "tall-loop",
+        "value": "700px"
+      },
+      {
+        "name": "features-two-col",
+        "value": "1100px"
+      }
+    ],
+    "scope": {
+      "inScope": [
+        "/",
+        "/download",
+        "/support",
+        "/privacy",
+        "/waitlist",
+        "/waitlist-error",
+        "404",
+        "Nav",
+        "Footer",
+        "PlayButton",
+        "IphoneButton",
+        "Waitlist",
+        "Loop"
+      ],
+      "outOfScope": "/showcase keeps its own world (3D diorama, light fixed nav, title card, slim footer)."
+    }
+  },
+  "components": [
+    {
+      "name": "Hero Badge",
+      "kind": "chip",
+      "refersTo": "hero-badge",
+      "description": "The one badge, above the hero H1: Beta status, linking to Google Play.",
+      "html": "<a class=\"ds-badge\" href=\"#\"><span>Beta</span>Now on Google Play<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M3.6 1.8 13.8 12 3.6 22.2a1.5 1.5 0 0 1-.6-1.2V3a1.5 1.5 0 0 1 .6-1.2Zm11.3 11.3 2.4 2.4-11.5 6.6 9.1-9Zm3.6-3.6L21 11a1.2 1.2 0 0 1 0 2l-2.5 1.5L15.9 12l2.6-2.5ZM5.8 1.9l11.5 6.6-2.4 2.4-9.1-9Z\"/></svg></a>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:4px 18px 4px 8px;border:1px solid #D9DFDF;border-radius:999px;background:#FFFFFF;color:#090E0E;font:500 15px/1.55 'DM Sans',system-ui,sans-serif;text-decoration:none;transition:border-color .2s ease,transform 160ms cubic-bezier(0.23,1,0.32,1)}.ds-badge span{padding:3px 10px;border-radius:999px;background:#E0F3F1;color:#00736C;font-size:13px}.ds-badge svg{color:#4B5755}@media (hover:hover) and (pointer:fine){.ds-badge:hover{border-color:#00736C}}.ds-badge:active{transform:scale(0.97)}.ds-badge:focus-visible{outline:3px solid #00736C;outline-offset:2px}"
+    },
+    {
+      "name": "Get Zafe Button",
+      "kind": "button",
+      "refersTo": "button-get-zafe",
+      "description": "The hero's one button, to /download.",
+      "html": "<a class=\"ds-get\" href=\"#\">Get Zafe</a>",
+      "css": ".ds-get{display:inline-flex;align-items:center;min-height:56px;padding:0 40px;border-radius:14px;background:#00736C;color:#FFFFFF;font:500 17px/1.55 'DM Sans',system-ui,sans-serif;text-decoration:none;transition:background-color .2s ease,transform 160ms cubic-bezier(0.23,1,0.32,1)}@media (hover:hover) and (pointer:fine){.ds-get:hover{background:#005F59}}.ds-get:active{transform:scale(0.97)}.ds-get:focus-visible{outline:3px solid #00736C;outline-offset:2px}"
+    },
+    {
+      "name": "Install Pair",
+      "kind": "button",
+      "refersTo": "button-play",
+      "description": "The close: Google Play (QR popover with a mouse) beside the outlined iPhone waitlist button.",
+      "html": "<div class=\"ds-pair\"><a class=\"ds-play\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M3.6 1.8 13.8 12 3.6 22.2a1.5 1.5 0 0 1-.6-1.2V3a1.5 1.5 0 0 1 .6-1.2Zm11.3 11.3 2.4 2.4-11.5 6.6 9.1-9Zm3.6-3.6L21 11a1.2 1.2 0 0 1 0 2l-2.5 1.5L15.9 12l2.6-2.5ZM5.8 1.9l11.5 6.6-2.4 2.4-9.1-9Z\"/></svg><span>Get it on Google Play</span></a><button class=\"ds-alt\" type=\"button\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.4.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4.1ZM13.9 4.9c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.1 1.1.1 2.3-.6 3-1.5Z\"/></svg><span>iPhone waitlist</span></button></div>",
+      "css": ".ds-pair{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}.ds-play,.ds-alt{display:inline-flex;align-items:center;min-height:56px;border-radius:14px;font:500 17px/1.55 'DM Sans',system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color .2s ease,color .2s ease,transform 160ms cubic-bezier(0.23,1,0.32,1)}.ds-play{gap:12px;padding:0 26px 0 22px;background:#00736C;color:#FFFFFF;border:0}.ds-alt{gap:10px;padding:0 24px 0 20px;background:transparent;color:#090E0E;border:1px solid #090E0E}@media (hover:hover) and (pointer:fine){.ds-play:hover{background:#005F59}.ds-alt:hover{background:#090E0E;color:#FFFFFF}}.ds-play:active,.ds-alt:active{transform:scale(0.97)}.ds-play:focus-visible,.ds-alt:focus-visible{outline:3px solid #00736C;outline-offset:2px}"
+    },
+    {
+      "name": "Platform Tab",
+      "kind": "custom",
+      "refersTo": "platform-tab",
+      "description": "Paper tab hanging from the hero into the sage band, with the platform icons.",
+      "html": "<div class=\"ds-band\"><div class=\"ds-tab\"><button class=\"ds-ti\" aria-label=\"Google Play\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M3.6 1.8 13.8 12 3.6 22.2a1.5 1.5 0 0 1-.6-1.2V3a1.5 1.5 0 0 1 .6-1.2Zm11.3 11.3 2.4 2.4-11.5 6.6 9.1-9Zm3.6-3.6L21 11a1.2 1.2 0 0 1 0 2l-2.5 1.5L15.9 12l2.6-2.5ZM5.8 1.9l11.5 6.6-2.4 2.4-9.1-9Z\"/></svg></button><button class=\"ds-ti\" aria-label=\"iPhone\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.4.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4.1ZM13.9 4.9c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.1 1.1.1 2.3-.6 3-1.5Z\"/></svg></button></div></div>",
+      "css": ".ds-band{position:relative;height:140px;background:#E6ECEB;border-top:40px solid #F1F5F5}.ds-tab{position:absolute;left:50%;top:0;translate:-50% 0;display:flex;gap:8px;padding:2px 28px 12px;background:#F1F5F5;border-radius:0 0 28px 28px}.ds-tab::before,.ds-tab::after{content:'';position:absolute;top:0;width:28px;height:28px}.ds-tab::before{right:100%;background:radial-gradient(circle at 0 100%,transparent 27.5px,#F1F5F5 28px)}.ds-tab::after{left:100%;background:radial-gradient(circle at 100% 100%,transparent 27.5px,#F1F5F5 28px)}.ds-ti{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border:0;border-radius:12px;background:none;color:#4B5755;cursor:pointer;transition:color .2s ease,background-color .2s ease,transform 160ms cubic-bezier(0.23,1,0.32,1)}.ds-ti svg{width:22px;height:22px}.ds-ti:hover{color:#090E0E;background:#E5EAE9}.ds-ti:active{transform:scale(0.94)}.ds-ti:focus-visible{outline:3px solid #00736C;outline-offset:2px}"
+    },
+    {
+      "name": "Story Loop",
+      "kind": "custom",
+      "refersTo": "loop-frame",
+      "description": "Illustrated scene with the app's inked card and flat cast shadow, grain off the card, pause button.",
+      "html": "<figure class=\"ds-loop\"><div class=\"ds-frame\"><div class=\"ds-card\"><p class=\"ds-amt\">12.50 <span>ZEC</span></p><p class=\"ds-who\">Maya asks you to approve</p><span class=\"ds-ok\">Approve</span></div><button class=\"ds-toggle\" aria-label=\"Pause animation\"><svg viewBox=\"0 0 16 16\" width=\"14\" height=\"14\" aria-hidden=\"true\"><rect x=\"3\" y=\"2\" width=\"3.5\" height=\"12\" rx=\"1\" fill=\"currentColor\"/><rect x=\"9.5\" y=\"2\" width=\"3.5\" height=\"12\" rx=\"1\" fill=\"currentColor\"/></svg></button></div></figure>",
+      "css": ".ds-loop{margin:0;max-width:640px}.ds-frame{position:relative;aspect-ratio:16/9;border-radius:32px;overflow:hidden;background:linear-gradient(#9DC5BD 0 62%,#BC9F78 62%);box-shadow:0 30px 60px -45px rgba(0,40,38,.35);display:grid;place-items:center}.ds-card{width:200px;padding:20px 16px 16px;border-radius:16px;background:#F1F5F5;border:1.6px solid #1E2B2A;box-shadow:12px 14px 0 -2px rgba(30,60,56,.28);font-family:'DM Sans',system-ui,sans-serif;color:#090E0E}.ds-amt{margin:0;font:500 28px/1 'Space Grotesk','DM Sans',system-ui,sans-serif;letter-spacing:-.03em}.ds-amt span{font-size:13px;color:#835A00}.ds-who{margin:8px 0 14px;font-size:12px;color:#4B5755}.ds-ok{display:block;padding:10px;border-radius:12px;background:#00736C;color:#fff;text-align:center;font-weight:500;font-size:14px}.ds-toggle{position:absolute;right:16px;bottom:16px;display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.85);color:#090E0E;cursor:pointer;transition:transform 160ms cubic-bezier(0.23,1,0.32,1),background-color .2s ease}.ds-toggle:hover{background:#fff}.ds-toggle:active{transform:scale(0.94)}.ds-toggle:focus-visible{outline:3px solid #00736C;outline-offset:2px}"
+    },
+    {
+      "name": "Feature List",
+      "kind": "custom",
+      "refersTo": "feature-list",
+      "description": "Made to live with: Patina icon and one line, three columns, no tiles.",
+      "html": "<ul class=\"ds-feat\"><li><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"13\" rx=\"3\" fill=\"currentColor\" fill-opacity=\".38\"/><rect x=\"3\" y=\"6\" width=\"18\" height=\"13\" rx=\"3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/></svg>Several vaults on one phone</li><li><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"5\" y=\"10\" width=\"14\" height=\"10\" rx=\"2.5\" fill=\"currentColor\" fill-opacity=\".38\"/><path d=\"M8 10V7a4 4 0 0 1 8 0v3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/><rect x=\"5\" y=\"10\" width=\"14\" height=\"10\" rx=\"2.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/></svg>Encrypted backups</li><li><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\" fill=\"currentColor\" fill-opacity=\".38\"/><circle cx=\"12\" cy=\"12\" r=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/></svg>Tor for every connection</li></ul>",
+      "css": ".ds-feat{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,max-content);gap:28px 32px;font:17px/1.55 'DM Sans',system-ui,sans-serif;color:#090E0E}.ds-feat li{display:flex;align-items:center;gap:12px}.ds-feat svg{width:22px;height:22px;flex:none;color:#4B5755}"
+    },
+    {
+      "name": "Waitlist Form",
+      "kind": "input",
+      "refersTo": "waitlist-input",
+      "description": "The iPhone waitlist: plain form, email field and outline submit.",
+      "html": "<form class=\"ds-wl\"><label for=\"ds-e\">iPhone? Get one email when it&rsquo;s out.</label><div class=\"ds-wl-row\"><input id=\"ds-e\" type=\"email\" placeholder=\"you@example.com\"><button type=\"button\">Notify me</button></div><p class=\"ds-wl-note\">One email, then we delete your address. <a href=\"#\">Privacy</a></p></form>",
+      "css": ".ds-wl{max-width:30rem;font:17px/1.55 'DM Sans',system-ui,sans-serif;color:#090E0E}.ds-wl label{display:block;font-weight:500;margin-bottom:12px}.ds-wl-row{display:flex;gap:8px}.ds-wl input{flex:1;min-width:0;min-height:52px;padding:0 16px;font:inherit;color:#090E0E;caret-color:#00736C;background:#FFFFFF;border:1px solid #D9DFDF;border-radius:12px}.ds-wl input::placeholder{color:#66726F}.ds-wl input:focus{outline:3px solid rgba(0,115,108,.35);outline-offset:0;border-color:#00736C}.ds-wl button{min-height:52px;padding:0 22px;font:inherit;font-weight:500;color:#090E0E;background:#FFFFFF;border:1px solid #090E0E;border-radius:12px;cursor:pointer;transition:background-color .2s ease,color .2s ease,transform 160ms cubic-bezier(0.23,1,0.32,1)}@media (hover:hover) and (pointer:fine){.ds-wl button:hover{background:#090E0E;color:#FFFFFF}}.ds-wl button:active{transform:scale(0.97)}.ds-wl button:focus-visible{outline:3px solid #00736C;outline-offset:2px}.ds-wl-note{font-size:14px;color:#4B5755;margin:10px 0 0}.ds-wl-note a{color:inherit;text-underline-offset:.18em}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "nav-get",
+      "description": "Links either side of the centred Seam mark; Get Zafe as a small verdigris button.",
+      "html": "<header class=\"ds-nav\"><nav class=\"ds-l\"><a href=\"#\">How it works</a><a href=\"#\">FAQ</a></nav><a href=\"#\" class=\"ds-mark\" aria-label=\"Zafe home\"><svg width=\"44\" height=\"44\" viewBox=\"0 0 100 100\"><rect width=\"100\" height=\"100\" rx=\"22\" fill=\"#004A46\"/><path d=\"M22 24h56v14L44 62h34v14H22V62l34-24H22Z\" fill=\"#51DDD2\"/></svg></a><nav class=\"ds-r\"><a href=\"#\">Support</a><a href=\"#\" class=\"ds-navget\">Get Zafe</a></nav></header>",
+      "css": ".ds-nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:56px;padding:36px 16px 0;font:16px/1.55 'DM Sans',system-ui,sans-serif}.ds-l,.ds-r{display:flex;gap:32px;align-items:center}.ds-l{justify-content:flex-end}.ds-nav a{color:#4B5755;text-decoration:none}.ds-nav a:hover{color:#090E0E}.ds-nav a:focus-visible{outline:3px solid #00736C;outline-offset:2px}.ds-mark svg{display:block}.ds-nav .ds-navget{padding:8px 16px;border-radius:10px;background:#00736C;color:#FFFFFF;font-weight:500}.ds-nav .ds-navget:hover{background:#005F59;color:#FFFFFF}"
+    },
+    {
+      "name": "Popover",
+      "kind": "card",
+      "refersTo": "popover",
+      "description": "Native popover: the Google Play QR (fine pointers) or the iPhone waitlist.",
+      "html": "<div class=\"ds-pop\"><div class=\"ds-qr\"></div><p class=\"ds-pop-t\">Scan with your phone</p><p class=\"ds-pop-l\"><a href=\"#\">Open Google Play</a><button type=\"button\">Close</button></p></div>",
+      "css": ".ds-pop{width:300px;padding:32px 32px 20px;border-radius:28px;background:#FFFFFF;color:#090E0E;text-align:center;box-shadow:0 40px 80px -30px rgba(0,40,38,.45);font-family:'DM Sans',system-ui,sans-serif}.ds-qr{width:180px;height:180px;margin:0 auto;background:repeating-conic-gradient(#090E0E 0 25%,#FFFFFF 0 50%) 0 0/24px 24px}.ds-pop-t{margin:20px 0 0;font:600 20px/1.2 'Space Grotesk','DM Sans',system-ui,sans-serif;letter-spacing:-.015em}.ds-pop-l{display:flex;justify-content:center;gap:8px;margin:8px 0 0;font-size:15px}.ds-pop-l a,.ds-pop-l button{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;color:#4B5755;font:inherit;background:none;border:0;cursor:pointer;text-decoration:none}.ds-pop-l a:hover,.ds-pop-l button:hover{color:#090E0E}"
+    },
+    {
+      "name": "Disclosure",
+      "kind": "custom",
+      "refersTo": "disclosure",
+      "description": "Native details; the Patina plus (verdigris on the home FAQ) turns to an x.",
+      "html": "<details class=\"ds-qa\" open><summary><svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" aria-hidden=\"true\"><path d=\"M40 128h176M128 40v176\" stroke=\"#00736C\" stroke-width=\"20\" stroke-linecap=\"round\" fill=\"none\"/></svg>Is it safe to use?</summary><p>It&rsquo;s a beta with no external audit yet, so start small.</p></details>",
+      "css": ".ds-qa{font:17px/1.55 'DM Sans',system-ui,sans-serif;color:#090E0E;padding:6px 0;max-width:44rem}.ds-qa summary{list-style:none;cursor:pointer;display:flex;gap:16px;align-items:center;min-height:44px;padding:10px 0;font-size:18px;font-weight:500}.ds-qa summary::-webkit-details-marker{display:none}.ds-qa summary svg{flex:none;transition:transform 200ms cubic-bezier(0.23,1,0.32,1)}.ds-qa[open] summary svg{transform:rotate(45deg)}.ds-qa p{margin:0;padding:4px 0 14px 32px;color:#4B5755}.ds-qa summary:focus-visible{outline:3px solid #00736C;outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "One Room, Real Cards",
+    "overview": "**Creative North Star: \"One Room, Real Cards\"**\n\nThe page is a calm paper column, and its pictures are drawings of one room: a desk in shade, a window patch of warm light, a lamp, an envelope and its wax, a brass tube, a strongbox, a sleeping cat. Each picture is a short loop in which the scene moves around one card the app renders itself (the request, the send, the keys, the vault). The drawing is authored, not generated: Blender scenes shaded in three flat toon bands from a hand-picked colour script, outlined with tinted, tapered Line Art ink, with a paper grain laid over the scene but masked off the card so the UI stays crisp.\n\nThe page around the drawings is quiet: a centred hero that fills the first screen (a Google Play status badge, the H1, a sub-line, one \"Get Zafe\" button), then a sage band whose paper tab holds the platform icons and the first loop, then four story steps, each an H2, one line and a loop. Space Grotesk headings at 500, DM Sans prose in secondary ink, 160px between steps. Verdigris marks only actions.\n\nMotion is the loops themselves, a CSS-only intro that collapses the mark into the nav logo, and the hero rising in as it hands over. The page has one script, `loops.js`: it shows each loop's pause button and pauses loops that are off screen. With reduced motion there is no intro, no rise, and every loop is a still.",
+    "keyCharacteristics": [
+      "Light scheme only (`color-scheme: light`); the shared footer is the one dark band.",
+      "Imagery is illustration: one room, toon bands, tinted ink lines, the app's own component cards on top. No screenshots in phone frames, no 3D renders, no stock.",
+      "Verdigris means \"act\". Nothing else on the page is coloured; the colour lives in the drawings.",
+      "One script, no inline scripts or styles (CSP `script-src 'self'; style-src 'self'`); popovers and forms work without it.",
+      "Every moving thing has a still: reduced motion shows stills, and loops pause."
+    ],
+    "rules": [
+      {
+        "name": "The Teal Is Action Rule",
+        "body": "On the page itself verdigris marks something you can press (or the FAQ marker). No teal headings, tints or decorative fills.",
+        "section": "colors"
+      },
+      {
+        "name": "The Colour Lives In The Room Rule",
+        "body": "Warm and saturated colour appears only inside the illustrations, from the colour script. The page chrome stays paper, white, ink and teal.",
+        "section": "colors"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "No uppercase tracked labels, eyebrows or kickers above headings. A step starts with its H2. The hero's Google Play badge is a link with a real status, not a label, and the only one.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Line Rule",
+        "body": "A story step is a heading and one sentence; the loop carries the rest (its moments are repeated as a screen-reader list, not as visible copy).",
+        "section": "typography"
+      },
+      {
+        "name": "The Drawn Shadow Rule",
+        "body": "The flat offset shadow and ink outline are the illustration's devices for the card it holds. Page HTML (buttons, cards, fields, popovers) never gets an offset shadow or an ink outline.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** picture every moment as one room drawn in toon bands and tinted ink, with one card the app renders itself on top (components, not cropped screens).",
+      "**Do** keep the paper grain a page layer masked off the card, never baked into the video.",
+      "**Do** give every loop a pause button and a reduced-motion still, and keep `loops.js` the page's only script.",
+      "**Do** keep pages free of inline scripts and styles (CSP); popovers and forms must work without JavaScript.",
+      "**Do** keep each story step to an H2, one line and a loop, 160px apart (112px under 600px).",
+      "**Do** keep verdigris for actions (The Teal Is Action Rule).",
+      "**Do** gate hover behind `(hover: hover) and (pointer: fine)` and press with a 0.97 scale over 160ms cubic-bezier(0.23, 1, 0.32, 1).",
+      "**Do** keep targets at least 44px."
+    ],
+    "donts": [
+      "**Don't** put eyebrow labels, kickers or badges above headings; the hero's Google Play badge is the single exception, not a pattern.",
+      "**Don't** number the steps; the headings carry the order.",
+      "**Don't** use phone-frame screenshots, 3D renders, generated scenes or stock imagery on these pages.",
+      "**Don't** use smooth gradient shading or Freestyle lines in the scenes; three flat bands and Line Art only.",
+      "**Don't** put an offset shadow or ink outline on page HTML (The Drawn Shadow Rule).",
+      "**Don't** build icon-card grids, facts strips, comparison tables or bento layouts.",
+      "**Don't** add a dark mode or dark sections beyond the shared footer.",
+      "**Don't** bring the /showcase world into these pages."
+    ]
+  }
+}

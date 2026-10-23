@@ -862,12 +862,15 @@ Learned while studying it:
   `adb shell "am start -a android.intent.action.VIEW -d 'zafe://join?invite=zafe-invite-v2:...'"`
   (quoted twice: the device shell splits it again; cold start: `adb shell am force-stop
   xyz.zafe.zafe` first).
-- **Website** (`infra/site/`, Astro 7, static): a calm home page `/` (no JS; structured
-  like safe.global, `lp-*` classes), the 3D story on `/showcase` (keep heavy motion off
-  the home page: the user's call, a treasury product should feel sober), and the invite
-  page `/join`. **The two pages must not look alike** (round 12): home shows the app's
-  real screens in phone frames (`.lp-phone`) and only one still of the world (the
-  `/showcase` teaser); the showcase has no logo intro, a fixed `light` nav (`Nav.astro`),
+- **Website** (`infra/site/`, Astro 7, static): a calm home page `/` (`hx-*`/`hc-*`
+  classes; since 2026-10-23 four illustrated loops, each a Blender scene moving with an
+  app-rendered card, `docs/site.md` §6; its only script is `loops.js`, the pause buttons), `/download`,
+  `/support`, the 3D story on `/showcase` (keep heavy motion off the home page: the user's
+  call, a treasury product should feel sober), and the invite page `/join`. The site's one
+  server function is the iPhone waitlist (`infra/site/api/waitlist.mjs`, private Vercel Blob;
+  README "The iPhone waitlist"); product truth for design work is `infra/site/PRODUCT.md`.
+  **The two pages must not look alike** (round 12): home shows the app's real components on
+  drawn (not 3D-rendered) scenes; the showcase has no logo intro, a fixed `light` nav (`Nav.astro`),
   a title card and a slim footer. Nav links marked `mobile` are the only ones on phones.
   Phones (2026-10-01 fixes): `body`'s `overflow-x: clip` doesn't stop the viewport
   scrolling sideways, so clip wide decorations on their section (`.lp-hero`) and check
@@ -875,6 +878,11 @@ Learned while studying it:
   on Android draws edge to edge) and footers pad `env(safe-area-inset-bottom)`; the 3D
   world starts phones at dpr 2 + MSAA 2 and stops adapting when a drop doesn't speed
   frames up (a 30 fps cap, not the GPU).
+  **Testing desktop-only CSS** (`(hover: hover) and (pointer: fine)`: the Google Play QR):
+  headless Chrome reports neither, so a plain agent-browser run only sees the phone path. Use
+  agent-browser >= 0.39 with `--session mouse --args
+  --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4`
+  (0.32 split launch args on every comma and Chrome refused to start).
   The whole design/build/verify/ship flow is the project skill `.claude/skills/landing-page`
   (`frames.sh` + `sheet.py` capture a scroll section frame by frame into a contact sheet).
   Chose Astro over Next.js (Vizor's site) to keep a strict CSP with no inline code: the

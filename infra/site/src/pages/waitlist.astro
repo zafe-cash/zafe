@@ -1,0 +1,15 @@
+---
+// Where the waitlist form lands after a good submission (api/waitlist.mjs redirects here).
+// noindex, not in the sitemap.
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+---
+
+<Base title="You're on the list · Zafe" description="The iPhone waitlist." bodyClass="not-found" noindex>
+  <Nav links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
+  <main class="nf">
+    <h1>You&rsquo;re on the list</h1>
+    <p class="sub">We&rsquo;ll send one email when Zafe is out for iPhone, then delete your address.</p>
+    <a class="pill" href="/">Back home</a>
+  </main>
+</Base>

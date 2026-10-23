@@ -3,6 +3,35 @@
 The landing page (`infra/site/src/pages/index.astro`) follows this brief. Keep it current
 when the page changes.
 
+## Round 13 (2026-10-22): one payment, several phones (impeccable + tasteskill)
+
+Critique first (impeccable dual review + tasteskill inspector, 22/36): the page was the
+category template (badge over H1, facts strip, 01/02/03 zigzag, bento, icon rows,
+comparison, ghost wordmark), never showed the mechanism, claimed "Nothing to take on trust"
+for an unaudited beta, sent first-timers to a raw Releases list, and said "Google Play:
+Soon" while the app was live there. The user picked: Zcash users first, light paper kept,
+no intro splash, no showcase teaser, a /download page, then "fit in, don't show off, drive
+traction". Built (direction contract in `infra/site/.impeccable/surfaces/`, product record
+in `infra/site/PRODUCT.md`):
+- **Hero**: "The Zcash multisig nobody can see", Google Play first, "Other ways to install",
+  a status line (Android, beta, not audited, iPhone waitlist); Bob's phone and yours on a
+  vault-card field that runs off the right edge.
+- **How a payment moves**: the same 12.50 ZEC payment in four real screens on one rail;
+  on desktop one sticky phone crossfades per step (CSS scroll timelines, a short blur
+  through the fade); without them, or with reduced motion, each step shows its phone.
+  The on-device check is said as "you sign what you see" (user feedback: the old line
+  didn't explain the protection).
+- **What the chain sees**: the real testnet record, "encrypted" fields as sealed chips.
+- **Set it up together**: create, compare four safety words (set large, labelled an
+  example), the phones make the key.
+- **Protections and limits** side by side; FAQ trimmed to five; the close has Google
+  Play, the APK and the **iPhone waitlist** (a plain form posting to `api/waitlist.mjs`,
+  private Vercel Blob; CSP `form-action 'self'`; privacy policy section "The iPhone waitlist").
+- New pages: `/download` (Play, APK with sha256 + signing certificate, testnet, waitlist,
+  next steps), `/support` (five common problems with the app's real button names, the
+  diagnostic report, contacts), `/waitlist` and `/waitlist-error` (noindex).
+- Kept the app's fonts on purpose: the page shows screenshots set in them.
+
 ## Round 12d: the minor items too
 
 "Fix the minor issues too, also update the skill accordingly." Fixed the three 12c left:
@@ -472,7 +501,7 @@ Patterns across the set:
   - inline `style=""` attributes and `<style>` blocks, including inside inline SVG. Diagrams must use presentation attributes (`fill`, `stroke`) or classes styled from `site.css`, and colour tokens must reach them through `currentColor` or classes for dark mode;
   - external fonts, embeds, analytics and video hosts.
 
-  Screens stay as self-hosted WebP with explicit `width`/`height`. Dark mode is by `prefers-color-scheme` (already in place). **[verify]** Whether the subset DM Sans WOFF2 kept the `tnum` feature. Tabular figures matter for amounts in diagrams.
+  Screens stay as self-hosted WebP with explicit `width`/`height`. The site is light only (see the third round). **[verify]** Whether the subset DM Sans WOFF2 kept the `tnum` feature. Tabular figures matter for amounts in diagrams.
 
 ---
 
@@ -582,6 +611,43 @@ Three directions that differ in substance:
 | What to avoid: padlock on matrix text | https://safe.global/security | `safe-security-1.png` |
 | Category gap: incumbents moved to enterprise/stablecoins | https://squads.so | `squads-1.png`, `squads-2.png` |
 | Competitor a Zcash reader will ask about | https://hhanh00.github.io/zkool2/ | `zkool-1.png` |
+
+## 6. Illustration (scene backgrounds behind live UI)
+
+Each section: an illustrated scene that moves with one real app component on top (Remotion
+composite). Built in Blender as a drawing, from code, so it stays authored and reproducible.
+Rejected on the way: a 3D render ("I asked for illustrations"), generated scenes, and
+style variants that only changed shading ("these all look very similar").
+
+- **Pipeline** (`infra/site/film/README.md`): the app renders the cards
+  (`site_motion_render_test.dart`); `infra/site/scenes/render.sh <workdir>` renders the four
+  scenes (`sign`, `sent`, `setup`, `live`) wide and tall with Blender (Windows Blender from WSL
+  works: point `BLENDER` at the .exe); `film/prepare.sh <workdir>` and `film/export.sh` composite
+  them in Remotion into `public/assets/motion/` (MP4, poster, reduced-motion still) and write
+  the grain masks. All eight loops render in about 3.5 min on an RTX 4060 laptop (`JOBS=6`
+  Blender processes: each takes about 1 GB of GPU memory).
+- **Kit**: `scenes/kit.py` (materials, lines, light, motion helpers), `scenes/props.py` (the
+  shared room and its props), `scenes/tex.py` (printed and drawn details). Tall cuts
+  (`ZAFE_TALL=1`, 720x1280) use a longer lens and stage the action below the card.
+- **Design before code**: three-value thumbnails with the card in place. The card is the
+  lightest large shape, the wall behind it mid, light only on paper and the window patch,
+  the darkest accents beside the card's edges, quiet corners.
+- **Colour**: a hand-picked (shadow, mid, light) triplet per material; shadows cool, lights
+  warm. **Props** from drawn profiles (lathe, blade, slab with a decal UV), not primitives.
+- **Lines**: Line Art, not Freestyle (speckled at alpha < 1, and its noise modifiers boil):
+  heavy contours, light inner lines, tinted per material, tapered, fixed-seed wobble.
+  Occluders need `lineart.usage = "EXCLUDE"` (Line Art ignores ray visibility).
+- **Texture** in object space (screen-space patterns swim); band-edge jitter on props only.
+  Paper grain is a static page layer masked off the card, never baked into the video.
+- **Components, not screens**: each loop shows one moment as a card the app renders itself
+  (`app/tool/screens/site_motion_render_test.dart`: request, send, keys, vault cards, 360 wide
+  at 3x), all at the request card's scale. Crops of full screens clip and look awkward.
+- **Motion**: key every frame from periodic functions or eased pose tables (seamless loops);
+  one primary action timed to the UI (the stamp strikes on the card's "Approved", frame 66),
+  one or two secondary ones; no whole-frame zoom.
+- **Delivery**: H.264 CRF 22-26 is enough (~400 KB with the card). Each loop has a pause
+  button (`public/assets/js/loops.js`, WCAG 2.2.2; it also stops loops off screen) and a still
+  with reduced motion (`components/Loop.astro`).
 
 ## Sources
 

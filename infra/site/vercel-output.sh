@@ -77,6 +77,17 @@ testnet_host="${ZAFE_TESTNET_HOST:-testnet.zafe.cash}"
 [[ "$testnet_host" =~ ^[a-z0-9.-]+$ ]] || die "ZAFE_TESTNET_HOST must be a bare lower-case host"
 testnet_host_re="${testnet_host//./\\\\.}"
 
+# The one function: the iPhone waitlist (api/waitlist.mjs), bundled with its dependency into
+# a single file, served at /api/waitlist (a Node function in the Build Output API).
+func="$output/functions/api/waitlist.func"
+mkdir -p "$func"
+"$here/node_modules/.bin/esbuild" "$here/api/waitlist.mjs" --bundle --platform=node \
+  --target=node22 --format=esm --outfile="$func/index.mjs" --log-level=warning \
+  --banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+cat > "$func/.vc-config.json" <<'JSON'
+{ "runtime": "nodejs22.x", "handler": "index.mjs", "launcherType": "Nodejs", "shouldAddHelpers": false, "maxDuration": 10 }
+JSON
+
 cat > "$output/config.json" <<EOF
 {
   "version": 3,

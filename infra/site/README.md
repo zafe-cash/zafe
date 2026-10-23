@@ -122,6 +122,17 @@ One-time setup:
 Try the Vercel output locally: `./build.sh && ./vercel-output.sh`, then read
 `.vercel/output/config.json`.
 
+**The iPhone waitlist** (`api/waitlist.mjs`, the only server code): `vercel-output.sh`
+bundles it with `@vercel/blob` into `.vercel/output/functions/api/waitlist.func`
+(Node 22), served at `POST /api/waitlist`. It stores each address as a private blob
+`waitlist/<sha256 of the address>.json` and redirects to `/waitlist` or `/waitlist-error`.
+One-time setup: in the Vercel project, Storage → Create → Blob, **private** access, and
+connect it to the project (that sets `BLOB_STORE_ID`; the function authenticates with the
+request's OIDC token, or `BLOB_READ_WRITE_TOKEN` if you add one). Without a store every
+signup lands on `/waitlist-error`. To read the list: `vercel blob list --prefix waitlist/`
+(or the dashboard), then delete the store after the launch email, as the privacy policy
+promises.
+
 **Cloudflare Pages** (reads `_headers`, serves `/join` from `join.html`):
 
 ```sh
@@ -139,7 +150,7 @@ zafe.example {
 	file_server
 	header /.well-known/* Content-Type application/json
 	header {
-		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
 	}

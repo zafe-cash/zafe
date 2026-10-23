@@ -10,7 +10,7 @@ import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
-import { getLabel, getNote, getUrl } from '../config';
+import { getLabel, getUrl } from '../config';
 ---
 
 <Base
@@ -137,8 +137,8 @@ import { getLabel, getNote, getUrl } from '../config';
         <div class="cta-card">
           <p class="tag">That&rsquo;s Zafe</p>
           <h2>Your turn</h2>
-          <p>{getNote}</p>
-          <a class="pill" href={getUrl} target="_blank" rel="noopener noreferrer">{getLabel}</a>
+          <p>On Google Play and as an APK. Bring your co-signers.</p>
+          <a class="pill" href={getUrl}>{getLabel}</a>
           <p class="cta-back"><a href="/">Back to home</a></p>
         </div>
       </div>

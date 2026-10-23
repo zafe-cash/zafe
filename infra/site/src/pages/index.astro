@@ -1,32 +1,34 @@
 ---
-// Home page, structured like safe.global (hero, how it works, features, security, a
-// comparison, FAQ, call to action) to Zafe's rules: light, few words, every claim
-// shipped (docs/tracker.md), no invented numbers. Calm on purpose: no JavaScript, motion
-// in CSS only; the 3D story lives on /showcase. Pictures are the app's real screens
-// (assets.py), the way safe.global shows its product; one still of the 3D world is the
-// door to /showcase. The chain card is the real testnet payment from the 2026-09-30 dry run.
+// Home page (direction: .impeccable/surfaces/src-pages-index-astro.md). One centred column:
+// the headline and the two ways to install, then the story in four illustrated loops (one
+// room; each scene moves with the app's own card, infra/site/scenes + film): you sign what
+// you see, it sends itself, start a vault together, made to live with; the close, questions.
+// The only script is loops.js (pause buttons, no play off screen); with reduced motion each
+// loop is a still. Every claim is shipped (docs/tracker.md); the link under the sending loop
+// is the real testnet payment from the 2026-09-30 dry run.
 import Base from '../layouts/Base.astro';
-import Icon from '../components/Icon.astro';
-import BrandIcon from '../components/BrandIcon.astro';
-import Mark from '../components/Mark.astro';
+import PlayButton from '../components/PlayButton.astro';
+import IphoneButton from '../components/IphoneButton.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
-import { downloadUrl, getLabel, getNote, getUrl, sourceUrl, specUrl, testnetUrl, xUrl } from '../config';
+import Mark from '../components/Mark.astro';
+import Icon from '../components/Icon.astro';
+import Loop from '../components/Loop.astro';
+import BrandIcon from '../components/BrandIcon.astro';
+import { downloadUrl, playUrl, sourceUrl, specUrl } from '../config';
 
 const faq = [
-  { q: 'Is Zafe safe to use?', a: 'Zafe is in beta on Zcash mainnet and hasn’t had an external audit yet. The app, the relay and the spec are open source, and the key is never in one place. Start with an amount you’re comfortable with, or try the testnet build first.' },
-  { q: 'Will I need to update?', a: 'Yes, before Zcash’s next network upgrade (NU7), planned for November 5. We’ll release a Zafe update that supports it; without it, payments are rejected by the network. Your funds stay safe either way. Everyone in a vault should run the same version, so update together.' },
-  { q: 'Is it really a multisig?', a: 'Yes, just not on-chain. Each phone holds a key share (FROST), and enough shares make one ordinary signature.' },
-  { q: 'What can the relay see?', a: 'Who messages whom, and when. Never amounts, addresses or keys. It can’t sign or move funds.' },
-  { q: 'Does Zafe track me?', a: 'No. There are no analytics, no crash reports and no third-party SDKs, in the app or on this site. If something breaks, the app keeps a scrubbed error log on your phone, and it leaves only if you share it.' },
-  { q: 'What if someone loses their phone?', a: 'The vault keeps working while enough members have theirs, and the share comes back from its encrypted backup. Lose too many, and the funds are gone for good.' },
-  { q: 'Can we remove a member?', a: 'Not yet. Make a new vault and move the funds.' },
-  { q: 'Which platforms?', a: 'Android today, as a direct download from GitHub. Google Play and the App Store are coming; we’ll announce them on X (@zafecash).' },
+  { q: 'Is it safe to use?', a: 'It’s a beta, so start small. The key is split across your phones and never put together, and the app, the relay and the spec are open source.' },
+  { q: 'Has it been audited?', a: 'Not yet. An external audit of the key, signing and checking code is planned, and its scope is public in the repository. Where Zafe differs from the Zcash drafts, the Zcash Foundation has confirmed the approach. Until the audit, keep amounts small.' },
+  { q: 'Is it really a multisig?', a: 'Yes. Each phone holds a share of the key (FROST), and enough of them sign together. The chain sees one ordinary signature.' },
+  { q: 'What if someone loses their phone?', a: 'They restore their backup, or the others move their seat to a new phone. Lose more phones than your rule allows, with no backups, and the funds are gone.' },
+  { q: 'Will I need to update?', a: 'Yes, before Zcash’s NU7 upgrade on November 5. Update together.' },
+  { q: 'iPhone?', a: 'Coming. Tap the Apple icon under “Get Zafe” to join the waitlist, and we’ll send one email when it’s out.' },
 ];
 
 // SEO (docs/seo.md): <title> carries the search terms, the share cards the tagline.
 const description =
-  'A private multisig wallet for Zcash teams and DAOs. Nothing moves until enough of you approve, and on-chain it looks like any payment.';
+  'A private multisig wallet for Zcash. Nothing moves until enough of you approve, and on-chain it looks like any payment.';
 const home = Astro.site!.href;
 // schema.org data for search engines; every value must match what the page says.
 const jsonLd = {
@@ -38,7 +40,7 @@ const jsonLd = {
       name: 'Zafe',
       url: home,
       logo: new URL('/assets/icons/icon-512.png', home).href,
-      sameAs: [sourceUrl, xUrl],
+      sameAs: [sourceUrl, 'https://x.com/zafecash', playUrl],
     },
     {
       '@type': 'WebSite',
@@ -53,6 +55,7 @@ const jsonLd = {
       description,
       operatingSystem: 'Android',
       applicationCategory: 'FinanceApplication',
+      installUrl: playUrl,
       ...(downloadUrl ? { downloadUrl } : {}),
       isAccessibleForFree: true,
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
@@ -68,10 +71,11 @@ const jsonLd = {
     },
   ],
 };
+
 ---
 
 <Base
-  title="Zafe: private multisig wallet for Zcash teams"
+  title="Zafe: private multisig wallet for Zcash"
   socialTitle="Zafe: the multisig nobody can see"
   description={description}
   jsonLd={jsonLd}
@@ -86,159 +90,88 @@ const jsonLd = {
     <div class="intro-ring second"></div>
     <div class="intro-mark"><Mark /></div>
   </div>
-  <Nav links={[{ href: '#how', label: 'How it works' }, { href: '#security', label: 'Security' }, { href: '/showcase', label: 'Showcase', mobile: true }]} />
+  <script is:inline slot="head" src="/assets/js/loops.js" defer></script>
+  <Nav links={[{ href: '#how', label: 'How it works' }, { href: '#faq', label: 'FAQ' }]} right={[{ href: '/support', label: 'Support' }]} />
 
   <main>
-    <!-- Hero: the headline, and the app itself (real renders, assets.py). -->
-    <section class="lp-hero">
-      <div class="lp-hero-copy">
-        <p class="tag">Now on mainnet · beta</p>
-        <h1>The multisig<br />nobody can see</h1>
-        <p class="sub">One private vault for your team. Nothing moves until enough of you approve.</p>
-        <div class="lp-actions">
-          <a class="pill" href={getUrl} target="_blank" rel="noopener noreferrer">{getLabel}</a>
-          <a class="lp-more" href="/showcase">Watch it in 3D <Icon name="chevron_forward" /></a>
-        </div>
-      </div>
-      <div class="lp-hero-art" aria-hidden="true">
-        <div class="lp-dial"></div>
-        <img class="lp-phone lp-phone-back" src="/assets/screens/story_bob_propose_dark.webp" width="780" height="1688" alt="" decoding="async" />
-        <img class="lp-phone lp-phone-front" src="/assets/screens/story_me_home_light.webp" width="780" height="1688" alt="" fetchpriority="high" decoding="async" />
+    <section class="hc-hero">
+      <PlayButton id="play-badge" class="hc-badge"><BrandIcon name="googleplay" /><span>Beta</span>Now on Google Play</PlayButton>
+      <h1>The Zcash multisig nobody can see</h1>
+      <p class="hc-sub">One shielded vault for your group. Nothing moves until enough of you approve.</p>
+      <div class="hx-actions">
+        <a class="hx-play hx-get-zafe" href="/download">Get Zafe</a>
       </div>
     </section>
 
-    <ul class="lp-facts" aria-label="At a glance">
-      <li><Icon name="eye_closed" />Shielded on Zcash</li>
-      <li><Icon name="key" />Threshold signatures (FROST)</li>
-      <li><Icon name="book" />Open source</li>
-      <li><Icon name="tor" />Tor built in</li>
-    </ul>
+    <div class="hc-band">
+    <div class="hc-tab">
+      <PlayButton id="play-tab" icon />
+      <IphoneButton id="ios-tab" icon />
+    </div>
+    <section id="how" class="hc-step" aria-labelledby="sign-title">
+      <h2 id="sign-title">You sign what you see</h2>
+      <p>Your phone checks the real transaction before you approve.</p>
+      <Loop
+        name="sign"
+        eager
+        alt="Maya’s request for 12.50 ZEC on a desk, approved; a wax stamp seals the envelope"
+        text={['Maya proposes 12.50 ZEC.', 'Your phone checks the real transaction, and you approve it.']}
+      />
+    </section>
+    </div>
 
-    <!-- How it works: one payment through the app's real screens, a big phone per step. -->
-    <section id="how" class="lp-section">
-      <header class="lp-head">
-        <p class="tag">How it works</p>
-        <h2>Three phones.<br />One vault.</h2>
-      </header>
-      <ol class="lp-flow">
-        <li>
-          <div class="lp-flow-copy">
-            <h3>Someone proposes</h3>
-            <p>Anyone in the vault drafts a payment. Nothing moves yet.</p>
-          </div>
-          <div class="lp-flow-art dark"><img class="lp-phone" src="/assets/screens/story_bob_propose_dark.webp" width="780" height="1688" alt="Zafe's review screen: a new payment of 12.50 ZEC, 2 of 3 signers needed" loading="lazy" decoding="async" /></div>
-        </li>
-        <li>
-          <div class="lp-flow-copy">
-            <h3>Everyone checks, then approves</h3>
-            <p>Each phone checks the payment on its own. One tap to approve.</p>
-          </div>
-          <div class="lp-flow-art"><img class="lp-phone" src="/assets/screens/story_me_review_light.webp" width="780" height="1936" alt="A payment with one of two approvals, checked on this device, and the Approve and sign button" loading="lazy" decoding="async" /></div>
-        </li>
-        <li>
-          <div class="lp-flow-copy">
-            <h3>It sends itself</h3>
-            <p>Once enough of you approve, it goes. On-chain, it looks like any payment.</p>
-          </div>
-          <div class="lp-flow-art gold"><img class="lp-phone" src="/assets/screens/story_me_sending_light.webp" width="780" height="1688" alt="Zafe's sending screen: coins leaving the vault" loading="lazy" decoding="async" /></div>
-        </li>
-      </ol>
+    <section class="hc-step" aria-labelledby="sent-title">
+      <h2 id="sent-title">It sends itself</h2>
+      <p>Once enough of you approve, it goes out on its own.</p>
+      <Loop
+        name="sent"
+        alt="“Sent!” beside a brass pneumatic tube that has just taken the sealed payment"
+        text={['Two of three approve, and it sends itself.', 'The chain sees an ordinary payment: recipient and amount encrypted, approvers hidden.']}
+      >
+        <figcaption>Sample data. <a href="https://testnet.zecblock.com/tx/e6ccd6b707e8ee7ed8b261855272dba317495afa6659e393d3f1691e9eef0237" target="_blank" rel="noopener noreferrer">See a real Zafe payment on the chain</a></figcaption>
+      </Loop>
     </section>
 
-    <!-- The one picture of the 3D world on this page: the door to the showcase. -->
-    <a class="lp-teaser" href="/showcase">
-      <picture>
-        <source media="(max-width: 760px)" srcset="/assets/stills/hero_tall.webp" width="780" height="1688" />
-        <img src="/assets/stills/hero_wide.webp" width="1440" height="900" alt="" loading="lazy" decoding="async" />
-      </picture>
-      <span class="lp-teaser-copy">
-        <span class="tag">Showcase</span>
-        <strong>Watch one payment in 3D</strong>
-        <span class="lp-more">Open the showcase <Icon name="chevron_forward" /></span>
-      </span>
-    </a>
-
-    <section id="features" class="lp-section">
-      <header class="lp-head">
-        <p class="tag">Features</p>
-        <h2>Your multisig,<br />held together</h2>
-      </header>
-      <div class="lp-cards">
-        <article class="lp-card lp-card-shot">
-          <div class="lp-card-copy">
-            <h3>Checked on every phone</h3>
-            <p>Your phone checks each payment against the vault&rsquo;s own keys: recipients, amounts, change and fee. If anything&rsquo;s off, it won&rsquo;t sign.</p>
-          </div>
-          <div class="lp-crop"><img src="/assets/screens/story_me_review_light.webp" width="780" height="1936" alt="The payment's details on the review screen, checked on this device: matches" loading="lazy" decoding="async" /></div>
-        </article>
-        <article class="lp-card">
-          <h3>Invisible on-chain</h3>
-          <p>The phones sign together as one. To the chain it&rsquo;s an ordinary shielded payment, like this real one from our testnet trial.</p>
-          <dl class="lp-chain">
-            <div><dt>tx</dt><dd>e6ccd6b7&hellip;9eef0237</dd></div>
-            <div><dt>block</dt><dd>4,422,289</dd></div>
-            <div><dt>to</dt><dd class="enc">encrypted</dd></div>
-            <div><dt>amount</dt><dd class="enc">encrypted</dd></div>
-          </dl>
-        </article>
-        <article class="lp-card">
-          <h3>Private all the way</h3>
-          <ul class="lp-list">
-            <li><Icon name="tor" />Optional Tor for every connection</li>
-            <li><Icon name="lock" />Encrypted backups</li>
-            <li><Icon name="eye" />Viewing keys for auditors</li>
-            <li><Icon name="unlock" />Unlock your phone to sign</li>
-          </ul>
-        </article>
-      </div>
+    <section id="setup" class="hc-step" aria-labelledby="setup-title">
+      <h2 id="setup-title">Start a vault together</h2>
+      <p>Everyone joins from their own phone, whenever they can.</p>
+      <Loop
+        name="setup"
+        alt="Three keys turned in a strongbox on a round table, beside “Vault keys ready”"
+        text={['You create the vault and share the invite with your co-signers.', 'Everyone sees the same four safety words and compares them.', 'The phones make the key together. Each keeps one share; nobody holds all of it.']}
+      />
     </section>
 
-    <section id="security" class="lp-section lp-security">
-      <header class="lp-sec-head">
-        <p class="tag">Security</p>
-        <h2>Nothing to take<br />on trust</h2>
-      </header>
-      <ul class="lp-rows">
-        <li>
-          <Icon name="key" />
-          <div><h3>No single key</h3><p>The key is split across your phones and never put together, not even to sign.</p></div>
-        </li>
-        <li>
-          <Icon name="eye_closed" />
-          <div><h3>A blind relay</h3><p>Phones talk through a relay that sees who and when. Never amounts, addresses or keys.</p></div>
-        </li>
-        <li>
-          <Icon name="eye_closed" />
-          <div><h3>No telemetry</h3><p>No analytics, no crash reports, no third-party SDKs. A build check fails if one is added.</p></div>
-        </li>
-        <li>
-          <Icon name="book" />
-          <div><h3>Open source</h3><p>The app, the relay and the <a href={specUrl} target="_blank" rel="noopener noreferrer">spec</a> are all <a href={sourceUrl} target="_blank" rel="noopener noreferrer">public</a>.</p></div>
-        </li>
+    <section class="hc-step" aria-labelledby="live-title">
+      <h2 id="live-title">Made to live with</h2>
+      <Loop
+        name="live"
+        alt="The vault’s balance with a request from Maya waiting, at a desk in the evening, a cat asleep"
+        text={['The vault at rest: its balance, and a request from Maya waiting for you.']}
+      />
+      <div class="hc-live">
+      <ul>
+        <li><Icon name="wallet" />Several vaults on one phone</li>
+        <li><Icon name="history" />History export for your books</li>
+        <li><Icon name="eye" />A viewing key for your accountant</li>
+        <li><Icon name="lock" />Encrypted backups</li>
+        <li><Icon name="users" />Move a lost phone&rsquo;s seat</li>
+        <li><Icon name="tor" />Tor for every connection</li>
       </ul>
-    </section>
-
-    <section class="lp-section">
-      <header class="lp-head">
-        <p class="tag">Compare</p>
-        <h2>Not all multisigs<br />are equal</h2>
-      </header>
-      <div class="lp-compare" role="region" aria-label="Comparison" tabindex="0">
-        <table>
-          <thead>
-            <tr><th scope="col"><span class="sr">Feature</span></th><th scope="col" class="us">Zafe</th><th scope="col">On-chain multisig</th><th scope="col"><span class="nowrap">Single-key</span> wallet</th></tr>
-          </thead>
-          <tbody>
-            <tr><th scope="row">Several people must approve</th><td class="us yes">Yes</td><td class="yes">Yes</td><td class="no">No</td></tr>
-            <tr><th scope="row">Balances and payments stay private</th><td class="us yes">Yes</td><td class="no">No</td><td>If shielded</td></tr>
-            <tr><th scope="row">Looks like an ordinary payment</th><td class="us yes">Yes</td><td class="no">No</td><td class="yes">Yes</td></tr>
-          </tbody>
-        </table>
       </div>
     </section>
 
-    <section id="faq" class="faq">
-      <h2>Questions?</h2>
+    <section class="hc-close" aria-labelledby="close-title">
+      <h2 id="close-title">Get Zafe</h2>
+      <p>Free on Android. iPhone soon.</p>
+      <div class="hx-actions">
+        <PlayButton id="play-close" />
+        <IphoneButton id="ios-close" />
+      </div>
+    </section>
+
+    <section id="faq" class="hx-faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">Questions</h2>
       <div class="qa">
         {faq.map((item, i) => (
           <details open={i === 0}>
@@ -246,33 +179,6 @@ const jsonLd = {
             <p>{item.a}</p>
           </details>
         ))}
-        <p class="more">More in the <a href={specUrl} target="_blank" rel="noopener noreferrer">spec</a>.</p>
-      </div>
-    </section>
-
-    <!-- The call to action: the vault's home screen on the vault card colour. -->
-    <section class="lp-cta" aria-label="Get Zafe">
-      <div class="lp-cta-card">
-        <div class="lp-cta-copy">
-          <p class="tag plain">Ready when you are</p>
-          <h2>Open your vault</h2>
-          <p>{getNote}</p>
-          <a class="pill" href={getUrl} target="_blank" rel="noopener noreferrer">{getLabel}</a>
-          {downloadUrl && (
-            <div class="lp-stores">
-              <p class="lp-stores-label">Also coming to</p>
-              <ul>
-                <li aria-label="Google Play, coming soon"><BrandIcon name="googleplay" /><span>Google Play</span><em>Soon</em></li>
-                <li aria-label="App Store, coming soon"><BrandIcon name="appstore" /><span>App Store</span><em>Soon</em></li>
-              </ul>
-              <p class="lp-stores-links">
-                <a href={xUrl} target="_blank" rel="noopener noreferrer"><BrandIcon name="x" />Follow @zafecash for launch news</a>
-                {testnetUrl && <a href={testnetUrl} target="_blank" rel="noopener noreferrer">Try the testnet build</a>}
-              </p>
-            </div>
-          )}
-        </div>
-        <div class="lp-cta-art" aria-hidden="true"><img class="lp-phone" src="/assets/screens/story_bob_home_dark.webp" width="780" height="1688" alt="" loading="lazy" decoding="async" /></div>
       </div>
     </section>
   </main>

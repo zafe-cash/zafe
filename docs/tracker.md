@@ -195,6 +195,16 @@ Open
         ghost-wordmark footer) in Zafe's type, colours and art (`docs/site.md`)
   - [x] Third round (2026-10-01): light only; CSS logo intro (the tile fills the
         screen, pieces lock, it ripples up into the nav logo); much shorter copy
+  - [x] Round 13 (2026-10-22): home rebuilt around one payment on several phones
+        (`docs/site.md`), `/download`, `/support`, iPhone email waitlist (Vercel function +
+        private Blob). Open: create and connect the private Blob store in Vercel (README
+        "The iPhone waitlist"); double opt-in for the waitlist *(idea)*; send the launch
+        email and delete the store when iOS ships
+  - [x] Illustrated section loops (2026-10-23, `docs/site.md` §6): the home page's films are
+        replaced by four loops (sign, sent, setup, live), wide and tall, each a Blender scene
+        moving with an app-rendered card; pause buttons, reduced-motion stills, grain masked off
+        the cards. Local only until the user has reviewed it. Optional: an illustrator for
+        painted texture maps and a paint-over
   - *(idea)* Show a second real payment (with a memo) once one is made; add a changelog
         or "last updated" to the site
   - [x] Domain: **zafe.cash** (Spaceship, registered 2026-10-01, expires 2027-10-01;

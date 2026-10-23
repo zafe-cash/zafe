@@ -30,7 +30,7 @@
   --raised: #E5EAE9;
   --line: #D9DFDF;
   --text: #090E0E;
-  --text-secondary: #55615F;
+  --text-secondary: #4B5755;
   --brand: #00736C;
   --brand-label: #FFFFFF;
   --card: #E0F3F1;
@@ -228,7 +228,7 @@ code { font-size: 0.95em; }
   padding: 36px 16px 0;
   font-size: 16px;
 }
-.nav-side { display: flex; gap: 32px; }
+.nav-side { display: flex; gap: 32px; align-items: center; }
 .nav-side.left { justify-content: flex-end; }
 .nav-side.right { justify-content: flex-start; }
 .nav a { color: var(--text-secondary); text-decoration: none; }
@@ -579,7 +579,9 @@ html.world-on .story-pin { position: sticky; top: 0; }
 /* Footer: dark, with the page's rounded bottom edge above it. */
 .foot {
   position: relative;
-  background: #0A0E0E;
+  /* The first 2px are paper: the footer clips its lip (::before), so without them its dark
+     top edge shows as a hairline above the lip at fractional zoom. */
+  background: linear-gradient(var(--window) 0 2px, #0A0E0E 2px);
   color: var(--ink-muted);
   margin-top: 0;
   /* The page draws under the phone's gesture bar (viewport-fit=cover in Base.astro): the
@@ -609,8 +611,8 @@ html.world-on .story-pin { position: sticky; top: 0; }
 }
 .foot-brand { display: flex; align-items: center; gap: 20px; }
 .foot-brand span { font-size: 30px; line-height: 1.1; color: var(--ink-text); }
-.foot ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, max-content); gap: 12px 48px; }
-.foot a { text-decoration: none; }
+.foot ul { list-style: none; padding: 0; margin: 0; }
+.foot a { color: inherit; text-decoration: none; } /* on every page, not only .home ones */
 .foot a:hover { color: var(--ink-text); }
 .foot-bottom { padding-top: 80px; }
 .ghost {
@@ -647,7 +649,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
   .hero .sub { font-size: 17px; }
   .ticks { grid-template-columns: 1fr 1fr; gap: 12px 20px; }
   .feature h3 { font-size: 30px; }
-  .foot ul { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -713,8 +714,9 @@ html.world-on .story-pin { position: sticky; top: 0; }
 }
 .intro-ring.second { animation-delay: 2s; }
 
-.home .nav-logo { animation: appear 0s linear 1.8s both; }
-.home .nav-side { animation: fade 0.6s ease 1.5s both; }
+/* Only where the intro plays (the home page): the nav waits for it. */
+.home:has(.intro) .nav-logo { animation: appear 0s linear 1.8s both; }
+.home:has(.intro) .nav-side { animation: fade 0.6s ease 1.5s both; }
 .home .hero > * { animation: rise 0.8s var(--rise) both; }
 .home .hero > :nth-child(1) { animation-delay: 1.45s; }
 .home .hero > :nth-child(2) { animation-delay: 1.55s; }
@@ -996,336 +998,243 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   .island-still { width: calc(100% + 44px); margin: -22px -22px 18px; }
 }
 
-/* Home page (index.astro, body.home.landing): structured like safe.global, calm. No
-   JavaScript. Pictures are the app's real screens (assets.py) in phone frames; one still
-   of the 3D world (.lp-teaser) is the door to /showcase. */
+/* Home page (index.astro, body.home.landing): one centred column. The headline and the two
+   ways to install, the film (infra/site/film: one payment, start to finish), the one-tap
+   close, questions. Light paper; teal only for actions, gold only for amounts and "sent".
+   No JavaScript: the films are muted, looping <video>s; with reduced motion a still. */
 
-/* A phone: the app's render in a rounded frame. Light screens get a light edge, dark
-   ones a dark edge. Tall renders are cut at the phone's height. */
-.lp-phone {
-  display: block;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 780 / 1688;
-  object-fit: cover;
-  object-position: 50% 0;
-  border-radius: 13% / 6%;
-  background: #F1F5F5;
-  border: 8px solid #FFFFFF;
-  box-shadow: 0 50px 90px -50px rgba(0, 40, 38, 0.55), 0 0 0 1px rgba(9, 14, 14, 0.08);
-}
-.lp-phone[src*="_dark"] { background: #080B0B; border-color: #1B2222; }
-
-/* Hero: headline left, two phones right over a faint safe dial (the vault card's rings). */
-.lp-hero {
-  position: relative;
-  max-width: 76rem;
-  margin: 0 auto;
-  min-height: min(calc(100vh - 80px), 860px);
-  padding: 40px 40px 72px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
-  align-items: center;
-  gap: 40px;
-}
-.lp-hero-copy { max-width: 40rem; position: relative; z-index: 1; }
-.lp-hero h1 { font-size: clamp(44px, 5vw, 72px); line-height: 1.02; margin: 28px 0 24px; }
-.lp-hero .sub { font-size: 19px; color: var(--text-secondary); max-width: 23em; margin-bottom: 36px; }
-.lp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; }
-.lp-more { display: inline-flex; align-items: center; gap: 6px; color: var(--brand) !important; font-weight: 500; text-decoration: none; }
-.lp-more .icon { width: 16px; height: 16px; transition: transform 0.2s var(--rise, ease); }
-.lp-more:hover .icon { transform: translateX(3px); }
-
-/* --ph is the front phone's height; the back phone hangs off it, so the overlap is the
-   same at every width (never two phones side by side). */
-.lp-hero-art { --ph: clamp(520px, calc(100vh - 160px), 680px); position: relative; height: var(--ph); }
-.lp-dial {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 150%;
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle, rgba(81, 221, 210, 0.22) 0, rgba(81, 221, 210, 0) 42%),
-    repeating-radial-gradient(circle, transparent 0 58px, rgba(0, 115, 108, 0.12) 59px 60px, transparent 61px 118px);
-  -webkit-mask-image: radial-gradient(circle, #000 30%, transparent 68%);
-  mask-image: radial-gradient(circle, #000 30%, transparent 68%);
-}
-.lp-hero-art .lp-phone { position: absolute; width: auto; }
-.lp-phone-front { right: 4%; top: 0; height: var(--ph); z-index: 1; }
-.lp-phone-back { right: calc(4% + var(--ph) * 0.29); top: 9%; height: calc(var(--ph) * 0.86); rotate: -4deg; }
-
-/* At a glance: facts, not numbers we don't have. */
-.lp-facts {
-  list-style: none;
-  max-width: 76rem;
-  margin: 0 auto;
-  padding: 28px 40px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 16px 32px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  color: var(--text-secondary);
-  font-size: 16px;
-}
-.lp-facts li { display: flex; align-items: center; gap: 10px; }
-.lp-facts .icon { color: var(--brand); width: 20px; height: 20px; }
-
-.lp-section { max-width: var(--width); margin: 0 auto; padding: 136px 16px 0; }
-.lp-head { text-align: center; margin-bottom: 64px; }
-.lp-head h2, .lp-sec-head h2 { font-size: clamp(36px, 4.4vw, 56px); line-height: 1.04; margin: 16px 0 0; }
-.lp-section h3 { font-size: 24px; line-height: 1.15; margin: 0 0 8px; }
-.lp-section p { color: var(--text-secondary); }
-
-/* How it works: one payment, a big phone per step, alternating sides. */
-.lp-flow { list-style: none; margin: 0; padding: 0; counter-reset: step; display: grid; gap: 32px; }
-.lp-flow li {
-  counter-increment: step;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 48px;
-  background: #FFFFFF;
-  border-radius: 40px;
-  padding: 0 72px;
-  overflow: hidden;
-  box-shadow: 0 0 0 1px rgba(9, 14, 14, 0.06);
-}
-.lp-flow li:nth-child(even) .lp-flow-copy { order: 1; }
-.lp-flow-copy { max-width: 24rem; }
-.lp-flow-copy h3 { font-size: clamp(28px, 2.6vw, 36px); line-height: 1.08; margin-bottom: 12px; }
-.lp-flow-copy h3::before {
-  content: counter(step, decimal-leading-zero);
-  display: block;
-  font-family: var(--mono);
-  font-size: 14px;
-  color: var(--brand);
-  margin-bottom: 16px;
-}
-.lp-flow-copy p { font-size: 18px; }
-/* The phone rises out of a tinted panel and is cut by the card's lower edge. */
-.lp-flow-art { position: relative; height: 520px; padding-top: 64px; }
-.lp-flow-art::before {
-  content: "";
-  position: absolute;
-  inset: 0 -40px -80px;
-  background: radial-gradient(closest-side at 50% 55%, #E0F3F1 0, rgba(224, 243, 241, 0) 100%);
-}
-.lp-flow-art.dark::before { background: radial-gradient(closest-side at 50% 55%, rgba(0, 74, 70, 0.22) 0, rgba(0, 74, 70, 0) 100%); }
-.lp-flow-art.gold::before { background: radial-gradient(closest-side at 50% 45%, rgba(243, 186, 60, 0.22) 0, rgba(243, 186, 60, 0) 100%); }
-.lp-flow-art .lp-phone { position: relative; width: min(340px, 100%); margin: 0 auto; }
-
-/* The door to the showcase: one still of the world, the words on its empty left. */
-.lp-teaser {
-  position: relative;
-  display: block;
-  max-width: var(--width);
-  margin: 136px auto 0;
-  border-radius: 40px;
-  overflow: hidden;
-  text-decoration: none;
-  aspect-ratio: 16 / 7;
-  background: #EEF2F1;
-  box-shadow: 0 0 0 1px rgba(9, 14, 14, 0.06);
-}
-.lp-teaser img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 80% 45%; transition: transform 1.2s var(--rise, ease); }
-.lp-teaser:hover img { transform: scale(1.03); }
-.lp-teaser-copy { position: absolute; left: 64px; top: 50%; transform: translateY(-50%); display: grid; justify-items: start; gap: 18px; max-width: 22rem; }
-.lp-teaser-copy strong { font-family: var(--display); font-weight: 600; font-size: clamp(32px, 3.4vw, 48px); line-height: 1.04; letter-spacing: -0.025em; color: var(--text); }
-
-/* Features: a screen card and two quiet ones. */
-.lp-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-.lp-card {
-  background: #FFFFFF;
-  border-radius: 32px;
-  padding: 40px;
-  box-shadow: 0 0 0 1px rgba(9, 14, 14, 0.06);
-}
-.lp-card-shot {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 48px;
-  align-items: center;
-  padding: 0 40px 0 56px;
-  overflow: hidden;
-}
-.lp-card-copy { max-width: 26rem; }
-/* The bottom of the tall review render: the checks and the approve button. */
-.lp-crop { height: 420px; overflow: hidden; padding-top: 48px; }
-.lp-crop img {
-  display: block;
-  width: min(420px, 100%);
-  margin: 0 auto;
-  height: 100%;
-  object-fit: cover;
-  object-position: 50% 100%;
-  border-radius: 28px 28px 0 0;
-  -webkit-mask-image: linear-gradient(transparent, #000 22%);
-  mask-image: linear-gradient(transparent, #000 22%);
-  box-shadow: 0 0 0 1px rgba(9, 14, 14, 0.06);
-}
-.lp-chain { margin: 28px 0 0; font-family: var(--mono); font-size: 14px; }
-.lp-chain div { display: grid; grid-template-columns: 6em 1fr; padding: 10px 0; border-top: 1px solid var(--line); }
-.lp-chain dt { color: var(--text-secondary); }
-.lp-chain dd { margin: 0; }
-.lp-chain .enc { color: var(--brand); }
-.lp-list { list-style: none; margin: 28px 0 0; padding: 0; }
-.lp-list li { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
-.lp-list .icon { color: var(--brand); width: 20px !important; height: 20px !important; }
-
-/* Security: the heading and the honest status on the left, three rows on the right. */
-.lp-security { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 64px; align-items: start; }
-.lp-warn {
-  display: flex;
-  gap: 12px;
-  margin-top: 32px !important;
-  padding: 18px 20px;
-  border-radius: 20px;
-  background: #FFF4EC;
-  box-shadow: 0 0 0 1px rgba(165, 81, 21, 0.18);
-  color: var(--text) !important;
-  max-width: 26rem;
-}
-.lp-warn .icon { color: #A55115; margin-top: 3px; }
-.lp-warn strong { font-weight: 500; }
-.lp-rows { list-style: none; margin: 0; padding: 0; }
-.lp-rows li { display: grid; grid-template-columns: 28px 1fr; gap: 20px; padding: 28px 0; border-top: 1px solid var(--line); }
-.lp-rows li:last-child { border-bottom: 1px solid var(--line); }
-.lp-rows .icon { width: 28px !important; height: 28px !important; color: var(--brand); }
-.lp-rows h3 { font-size: 22px; }
-.lp-rows a { color: var(--brand); }
-
-/* Comparison table. */
-.lp-compare { overflow-x: auto; }
-.lp-compare table { width: 100%; border-collapse: collapse; font-size: 17px; min-width: 560px; }
-.lp-compare th, .lp-compare td { padding: 20px 16px; text-align: center; border-bottom: 1px solid var(--line); }
-.lp-compare thead th { font-weight: 500; color: var(--text-secondary); font-size: 15px; }
-.lp-compare tbody th { text-align: left; font-weight: 400; }
-.lp-compare .us { background: #E0F3F1; }
-.lp-compare thead .us { color: var(--brand); font-family: var(--display); font-size: 20px; border-radius: 20px 20px 0 0; }
-.lp-compare tbody tr:last-child .us { border-radius: 0 0 20px 20px; }
-.lp-compare td.yes { color: var(--text); font-weight: 500; }
-.lp-compare td.us.yes { color: var(--brand); }
-.lp-compare td.no { color: var(--text-secondary); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-
-/* The call to action on the vault card colour, the vault's home screen rising in it. */
-.lp-cta { max-width: calc(var(--width) + 32px); margin: 40px auto 0; padding: 0 16px; }
-.lp-cta-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
-  align-items: end;
-  gap: 40px;
-  background: var(--card);
-  border-radius: 40px;
-  padding: 0 72px;
-  overflow: hidden;
-  color: var(--text);
-}
-.lp-cta-copy { padding: 88px 0; align-self: center; }
-.lp-cta-copy h2 { font-size: clamp(40px, 5vw, 64px); line-height: 1.02; margin: 16px 0 12px; }
-.lp-stores { margin-top: 36px; display: grid; gap: 14px; }
-.lp-stores-label { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); }
-.lp-stores ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
-.lp-stores li { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px 10px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); font-weight: 500; font-size: 15px; background: rgba(255, 255, 255, 0.55); }
-.lp-stores li em { font-style: normal; font-weight: 500; font-size: 12px; color: var(--brand); background: var(--card); border-radius: 999px; padding: 2px 8px; }
-.lp-stores .brand-icon { width: 18px; height: 18px; }
-.lp-stores-links { margin: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; }
-.lp-stores-links a { display: inline-flex; align-items: center; gap: 8px; color: var(--brand); font-weight: 500; text-decoration: none; }
-.lp-stores-links a:hover { text-decoration: underline; }
-.lp-stores-links .brand-icon { width: 14px; height: 14px; }
-.foot-social { list-style: none; margin: 0; padding: 0; display: flex; gap: 18px; align-items: center; }
-.foot-social a { display: inline-flex; color: inherit; opacity: 0.75; transition: opacity 0.2s ease; }
+.foot .foot-social { display: flex; gap: 4px; align-items: center; margin: -12px 0; }
+.foot-social a { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; color: inherit; opacity: 0.75; transition: opacity 0.2s ease; }
 .foot-social a:hover { opacity: 1; }
 .foot-social .brand-icon { width: 20px; height: 20px; }
-.lp-cta-copy > p:not(.tag) { color: var(--text-secondary); margin-bottom: 32px; font-size: 18px; }
-.lp-cta-art { height: 400px; padding-top: 56px; overflow: hidden; }
-.lp-cta-art .lp-phone { width: min(300px, 100%); margin: 0 auto; box-shadow: 0 0 0 1px rgba(9, 14, 14, 0.08); }
+.foot-top, .foot-bottom { padding-left: 24px; padding-right: 24px; }
 
-/* The intro hands over to the hero. */
-.landing .lp-hero-copy > * { animation: rise 0.8s var(--rise) both; }
-.landing .lp-hero-copy > :nth-child(1) { animation-delay: 1.45s; }
-.landing .lp-hero-copy > :nth-child(2) { animation-delay: 1.55s; }
-.landing .lp-hero-copy > :nth-child(3) { animation-delay: 1.65s; }
-.landing .lp-hero-copy > :nth-child(4) { animation-delay: 1.75s; }
-/* The headline isn't hidden: the closing veil reveals it. Starting it at opacity 0 left
-   the page with no Largest Contentful Paint at all (Lighthouse NO_LCP). */
-.landing .lp-hero-copy > h1 { animation: none; }
-.landing .lp-phone-front { animation: rise 1s var(--rise) 1.7s both; }
-.landing .lp-phone-back { animation: rise 1s var(--rise) 1.85s both; }
-.landing .lp-dial { animation: fade 1.2s ease 1.6s both; }
-/* Gentle reveals where the browser has scroll timelines; otherwise simply shown. */
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .lp-head, .lp-flow li, .lp-teaser, .lp-card, .lp-rows li, .lp-compare, .lp-cta-card {
-      animation: rise both var(--rise);
-      animation-timeline: view();
-      animation-range: entry 0% entry 40%;
-    }
-    .lp-flow-art .lp-phone, .lp-crop img, .lp-cta-art .lp-phone {
-      animation: phone-up both var(--rise);
-      animation-timeline: view();
-      animation-range: entry 0% cover 40%;
-    }
-  }
+::selection { background: #BFE8E4; color: var(--text); }
+:root { --press: cubic-bezier(0.23, 1, 0.32, 1); }
+.landing a { text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+.landing h1, .landing h2 { font-weight: 500; letter-spacing: -0.035em; text-wrap: balance; }
+.landing h2 { font-size: clamp(38px, 5vw, 64px); line-height: 1.02; margin: 0; }
+
+/* Nav: the mark in the middle, two items either side; Get Zafe is the one button. */
+
+/* Install actions: Google Play (PlayButton) and the iPhone waitlist (IphoneButton). */
+.hx-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
+.hx-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 26px 0 22px;
+  border-radius: 14px;
+  background: var(--brand);
+  color: var(--brand-label) !important;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.2s ease, transform 160ms var(--press);
 }
-@keyframes phone-up { from { transform: translateY(80px); } }
+.hx-play:active { transform: scale(0.97); }
+.hx-play .brand-icon { width: 20px; height: 20px; }
+@media (hover: hover) and (pointer: fine) { .hx-play:hover { background: #005F59; } }
+.hx-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--text-secondary); }
+@media (hover: hover) and (pointer: fine) { .hx-link:hover { color: var(--text); } }
+.hx-status { font-size: 15px; color: var(--text-secondary); }
+.hx-status a { color: inherit; }
+
+/* Hero: centred, then the film right under it. */
+/* The first screen is the hero: it fills the viewport below the nav (80px) up to 700px, and
+   the band's platform tab (62px) sits a little above the bottom edge as the cue to scroll. */
+.hc-hero {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 80px 24px 72px;
+  text-align: center;
+  min-height: min(calc(100svh - 80px - 62px - 72px), 700px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.hc-hero h1 { font-size: clamp(44px, 6vw, 92px); line-height: 1.02; margin: 0 auto 24px; max-width: 10.5em; }
+/* The badge over the headline: what you can do today, linking straight to Google Play. */
+.hc-badge {
+  align-self: center;
+  display: inline-flex;
+  font-family: inherit;
+  cursor: pointer;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0 0 28px;
+  padding: 4px 18px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ground);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color 0.2s ease, transform 160ms var(--press);
+}
+.hc-badge span { padding: 3px 10px; border-radius: 999px; background: var(--card); color: var(--brand); font-size: 13px; }
+.hc-badge .brand-icon { width: 16px; height: 16px; order: 1; color: var(--text-secondary); }
+.hc-badge:active { transform: scale(0.97); }
+.hc-badge.play-open { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .hc-badge.play-direct { display: none; }
+  .hc-badge.play-open { display: inline-flex; }
+}
+@media (hover: hover) and (pointer: fine) { .hc-badge:hover { border-color: var(--brand); } }
+.hc-sub { font-size: 18px; line-height: 1.55; color: var(--text-secondary); max-width: 24em; margin: 0 auto 32px !important; }
+.hc-hero .hx-status { margin-top: 20px !important; }
+
+/* The story: four steps, each a heading, a line and an illustrated loop (Loop.astro). */
+.hc-step { max-width: 100rem; margin: 0 auto; padding: 160px 0 0; text-align: center; }
+.hc-step > h2, .hc-step > p { padding: 0 24px; }
+.hc-step > p { color: var(--text-secondary); font-size: 18px; margin: 16px 0 0 !important; }
+.hc-band .hc-step { padding-top: 160px; }
+
+/* A loop: the scene and its card, 16:9 (9:16 on phones). The paper grain lies over the
+   illustration only: its mask (film/export.sh) cuts out the card so the UI stays crisp. */
+.hc-loop { max-width: 100rem; margin: 0 auto; padding: 48px 24px 0; }
+.hc-frame { position: relative; border-radius: 32px; overflow: hidden; background: var(--window); box-shadow: 0 30px 60px -45px rgba(0, 40, 38, 0.35); }
+.hc-frame video, .hc-frame img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.hc-frame .hc-still { display: none; }
+.hc-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url(/assets/ui/grain.png);
+  opacity: 0.2;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  -webkit-mask: var(--loop-mask) 0 0 / 100% 100% no-repeat;
+  mask: var(--loop-mask) 0 0 / 100% 100% no-repeat;
+}
+.loop-sign { --loop-mask: url(/assets/ui/mask-sign.svg); }
+.loop-sent { --loop-mask: url(/assets/ui/mask-sent.svg); }
+.loop-setup { --loop-mask: url(/assets/ui/mask-setup.svg); }
+.loop-live { --loop-mask: url(/assets/ui/mask-live.svg); }
+.hc-loop figcaption { margin-top: 20px; text-align: center; font-size: 15px; color: var(--text-secondary); }
+.hc-loop figcaption a { color: inherit; }
+/* Pause / play (loops.js shows it). */
+.loop-toggle {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 160ms var(--press), background-color 0.2s ease;
+}
+.loop-toggle[hidden] { display: none; }
+.loop-toggle:active { transform: scale(0.94); }
+.loop-toggle svg { width: 14px; height: 14px; }
+.loop-toggle .play, .loop-toggle[aria-pressed="true"] .pause { display: none; }
+.loop-toggle[aria-pressed="true"] .play { display: block; }
+@media (hover: hover) and (pointer: fine) { .loop-toggle:hover { background: #fff; } }
+/* The tall cut: phones, and portrait tablets (a 16:9 loop there makes the card's UI tiny).
+   It never grows taller than the screen. */
+@media (max-width: 700px), (orientation: portrait) and (max-width: 1100px) {
+  .hc-frame { border-radius: 24px; max-width: calc(88svh * 9 / 16); margin: 0 auto; }
+  .hc-frame video, .hc-frame img { aspect-ratio: 9 / 16; }
+  .loop-sign { --loop-mask: url(/assets/ui/mask-sign-tall.svg); }
+  .loop-sent { --loop-mask: url(/assets/ui/mask-sent-tall.svg); }
+  .loop-setup { --loop-mask: url(/assets/ui/mask-setup-tall.svg); }
+  .loop-live { --loop-mask: url(/assets/ui/mask-live-tall.svg); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .landing .lp-hero-copy > *, .landing .lp-phone-front, .landing .lp-phone-back, .landing .lp-dial { animation: none; }
+  .hc-frame video, .loop-toggle { display: none !important; }
+  .hc-frame .hc-still { display: block; }
 }
 
-@media (max-width: 900px) {
-  /* The dial is wider than the screen here; clip it (body's overflow-x doesn't stop the
-     viewport from scrolling sideways in every browser). */
-  .lp-hero { grid-template-columns: 1fr; padding: 40px 20px 56px; min-height: 0; gap: 24px; overflow-x: clip; }
-  .lp-hero-art { --ph: 560px; max-width: 460px; width: 100%; margin: 0 auto; }
-  .lp-flow li { grid-template-columns: 1fr; padding: 48px 32px 0; gap: 8px; }
-  .lp-flow li:nth-child(even) .lp-flow-copy { order: 0; }
-  .lp-flow-art { height: 440px; padding-top: 32px; }
-  .lp-teaser { margin-left: 16px; margin-right: 16px; aspect-ratio: auto; height: 520px; }
-  .lp-teaser img { object-position: 85% 50%; }
-  .lp-teaser-copy { left: 32px; right: 32px; top: 40px; transform: none; }
-  .lp-cards { grid-template-columns: 1fr; }
-  .lp-card-shot { grid-template-columns: 1fr; padding: 40px 32px 0; gap: 8px; }
-  .lp-security { grid-template-columns: 1fr; gap: 32px; }
-  .lp-cta-card { grid-template-columns: 1fr; padding: 0 32px; gap: 0; }
-  .lp-cta-copy { padding: 64px 0 24px; }
-  .lp-cta-art { height: 340px; padding-top: 24px; }
+/* Made to live with: shipped features, plain lines with the app's icons. */
+.hc-live { max-width: 56rem; margin: 0 auto; padding: 64px 24px 0; text-align: center; }
+.hc-live ul { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 32px; text-align: left; }
+.hc-live li { display: flex; align-items: center; gap: 12px; font-size: 17px; }
+.hc-live .icon { width: 22px; height: 22px; flex: none; color: var(--text-secondary); }
+
+/* The close: install. */
+.hc-close { max-width: 60rem; margin: 0 auto; padding: 152px 24px 0; text-align: center; }
+.hc-close p { color: var(--text-secondary); font-size: 18px; margin: 12px 0 32px !important; }
+
+/* Questions: one centred column. */
+.hx-faq { max-width: 44rem; margin: 0 auto; padding: 160px 24px 0; }
+.hx-faq h2 { text-align: center; margin-bottom: 40px; }
+.hx-faq .qa details, .hx-faq-list .qa details { padding: 6px 0; }
+.hx-faq .qa summary, .hx-faq-list .qa summary { min-height: 44px; padding: 10px 0; align-items: center; font-size: 18px; }
+.hx-faq .qa details p, .hx-faq-list .qa details p { padding: 4px 0 14px 32px; }
+.landing main { padding-bottom: 72px; }
+
+/* The iPhone waitlist form. */
+.waitlist { margin-top: 48px; max-width: 30rem; }
+.waitlist > label { display: block; font-weight: 500; margin-bottom: 12px; }
+.waitlist-row { display: flex; gap: 8px; }
+.waitlist input[type="email"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 16px;
+  font: inherit;
+  color: var(--text);
+  caret-color: var(--brand);
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 12px;
 }
-@media (max-width: 760px) {
-  .lp-hero h1 { font-size: clamp(40px, 11vw, 52px); }
-  .lp-hero .sub { font-size: 17px; }
-  .lp-hero-art { --ph: 480px; }
-  .lp-facts { padding: 22px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; font-size: 15px; }
-  .lp-facts li { align-items: flex-start; }
-  .lp-section { padding-top: 96px; }
-  .lp-head { margin-bottom: 40px; }
-  .lp-flow li { border-radius: 28px; padding: 36px 24px 0; }
-  .lp-flow-copy h3 { font-size: 26px; }
-  .lp-flow-copy p { font-size: 16px; }
-  .lp-flow-art { height: 380px; }
-  .lp-flow-art .lp-phone { width: 260px; }
-  .lp-teaser { margin-top: 96px; border-radius: 28px; height: 440px; }
-  .lp-teaser img { object-position: 50% 100%; }
-  .lp-teaser-copy { left: 24px; right: 24px; top: 32px; }
-  .lp-card { padding: 28px 24px; border-radius: 28px; }
-  .lp-card-shot { padding: 32px 24px 0; }
-  .lp-crop { height: 340px; padding-top: 24px; }
-  .lp-cta { margin-top: 24px; }
-  .lp-cta-card { border-radius: 28px; padding: 0 24px; }
-  .lp-cta-art { height: 300px; }
-  .lp-cta-art .lp-phone { width: 240px; }
-  .lp-compare table { min-width: 0; font-size: 13px; table-layout: fixed; }
-  .lp-compare th, .lp-compare td { padding: 14px 6px; }
-  .lp-compare thead th:first-child { width: 40%; }
-  .lp-compare tbody th { padding-left: 0; font-size: 14px; line-height: 1.35; }
-  .lp-compare thead th { font-size: 12px; }
-  .lp-compare thead .us { font-size: 16px; }
+.waitlist input[type="email"]::placeholder { color: #66726F; }
+.waitlist input[type="email"]:focus { outline: 3px solid rgba(0, 115, 108, 0.35); outline-offset: 0; border-color: var(--brand); }
+.waitlist button {
+  min-height: 52px;
+  padding: 0 22px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--ground);
+  border: 1px solid var(--text);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 160ms var(--press);
+}
+.waitlist button:active { transform: scale(0.97); }
+@media (hover: hover) and (pointer: fine) { .waitlist button:hover { background: var(--text); color: var(--ground); } }
+.waitlist-note { font-size: 14px; color: var(--text-secondary); margin-top: 10px !important; }
+.waitlist-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+/* The hero arrives as the intro hands over (the intro ends ~1.8 s; see .intro). */
+.landing .hc-hero > * , .landing .hc-band .hc-step { animation: rise 0.8s var(--rise) both; }
+.landing .hc-hero > :nth-child(1) { animation-delay: 1.45s; }
+.landing .hc-hero > :nth-child(2) { animation-delay: 1.55s; }
+.landing .hc-hero > :nth-child(3) { animation-delay: 1.65s; }
+.landing .hc-hero > :nth-child(4) { animation-delay: 1.72s; }
+.landing .hc-band .hc-step { animation-duration: 1s; animation-delay: 1.8s; }
+@media (prefers-reduced-motion: reduce) {
+  .landing .hc-hero > *, .landing .hc-band .hc-step { animation: none; }
+}
+
+@media (max-width: 600px) {
+  .hc-hero { padding-top: 48px; min-height: calc(100svh - 68px - 62px - 48px); }
+  .hc-hero h1 { font-size: clamp(42px, 12vw, 56px); }
+  .hc-sub { font-size: 18px; }
+  .hc-loop { padding: 32px 12px 0; }
+  .hc-step { padding-top: 112px; }
+  .hc-band .hc-step { padding-top: 124px; }
+  .hc-hero { padding-bottom: 56px; }
+  .hc-close, .hx-faq { padding-top: 112px; }
+  .hc-live { padding-top: 48px; }
+  .hc-live ul { grid-template-columns: minmax(0, 1fr); gap: 20px; max-width: 22rem; margin-left: auto; margin-right: auto; }
+  .hc-close p { font-size: 18px; }
+  .hx-play { width: 100%; justify-content: center; }
+  .waitlist-row { flex-direction: column; }
+  .foot-bottom { flex-direction: column; gap: 12px; }
+  .foot .foot-social { margin: 0 0 0 -12px; }
 }
 
 /* Showcase (showcase.astro, body.home.showcase): its own experience, not the home page.
@@ -1431,5 +1340,224 @@ html.world-on .foot-slim { background: var(--window); max-width: none; padding-l
 .legal li { margin: 0 0 8px; }
 .legal a { color: var(--brand); }
 .nf { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 120px 20px 80px; }
-.nf h1 { font-size: clamp(40px, 5vw, 64px); line-height: 1.02; margin: 24px 0 16px; }
+.nf h1 { font-size: clamp(40px, 5vw, 64px); line-height: 1.02; margin: 24px 0 16px; text-wrap: balance; }
 .nf .sub { font-size: 18px; color: var(--text-secondary); margin-bottom: 32px; }
+
+/* Download (download.astro): every way to install, one column. */
+.home main.dl { max-width: 44rem; margin: 0 auto; padding: 96px 24px 120px; }
+.dl h1 { font-size: clamp(44px, 6vw, 76px); line-height: 1; margin: 0 0 20px; }
+.dl-lead { font-size: 19px; color: var(--text-secondary); max-width: 30em; }
+.dl-option { margin-top: 72px; }
+.dl-play { margin-top: 48px; padding: 36px 36px 40px; border-radius: 28px; background: var(--card); }
+.dl-option h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.025em; margin: 0 0 8px; }
+.dl-option > p { color: var(--text-secondary); margin-bottom: 24px !important; }
+.dl-apk { background: var(--text); }
+.dl-apk:hover { background: #26302F; }
+.dl-note { font-size: 15px; color: var(--text-secondary); margin-top: 20px !important; max-width: 34em; }
+.dl-verify { margin-top: 20px; }
+.dl-verify summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; font-weight: 500; }
+.dl-verify p { color: var(--text-secondary); margin-top: 12px !important; }
+.dl-verify pre { margin: 10px 0 0; padding: 14px 16px; border-radius: 12px; background: var(--ground); overflow-x: auto; font-size: 14px; }
+.dl-verify pre code { font-family: var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; }
+.dl-option .waitlist { margin-top: 12px; }
+.dl-next { margin-top: 72px; }
+.dl-next h2 { font-size: clamp(32px, 4vw, 44px); line-height: 1.05; margin: 0 0 24px; }
+.dl-next ol { margin: 0; padding-left: 1.3em; display: grid; gap: 12px; font-size: 18px; }
+.dl-next li::marker { color: var(--text-secondary); font-family: var(--display); }
+.nf .waitlist { margin: 24px auto 0; text-align: left; }
+.hx-faq-list { margin-top: 48px; }
+.dl-contact { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+.dl-contact li { display: grid; gap: 2px; }
+.dl-contact a { font-weight: 500; color: var(--text); }
+.dl-contact span { color: var(--text-secondary); font-size: 15px; }
+.hx-faq .qa details + details, .hx-faq-list .qa details + details { border-top: 0; }
+
+/* Disclosure marker: the app's plus (Patina line icon), turned to an x when open. */
+.hx-faq .qa summary::before, .hx-faq-list .qa summary::before, .dl-verify summary::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: var(--text-secondary);
+  -webkit-mask: url("/assets/ui/plus.svg") center / contain no-repeat;
+  mask: url("/assets/ui/plus.svg") center / contain no-repeat;
+  transition: transform 200ms var(--press);
+}
+.dl-verify summary { gap: 12px; list-style: none; }
+.dl-verify summary::-webkit-details-marker { display: none; }
+.dl-verify[open] summary::before { transform: rotate(45deg); }
+.foot-top, .foot-bottom { padding-left: 24px; padding-right: 24px; }
+
+/* Google Play: phones follow the link; with a mouse the button opens a QR to scan. */
+button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
+.play-open { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .play-direct { display: none; }
+  .play-open { display: inline-flex; }
+}
+.play-pop {
+  margin: auto;
+  padding: 32px 32px 20px;
+  width: min(340px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 28px;
+  background: var(--ground);
+  color: var(--text);
+  text-align: center;
+  box-shadow: 0 40px 80px -30px rgba(0, 40, 38, 0.45);
+  opacity: 1;
+  transform: none;
+  transition: opacity 200ms var(--press), transform 200ms var(--press), overlay 200ms allow-discrete, display 200ms allow-discrete;
+}
+@starting-style { .play-pop:popover-open { opacity: 0; transform: scale(0.96); } }
+.play-pop::backdrop { background: rgba(9, 14, 14, 0.35); }
+.play-qr-code { display: block; width: 220px; height: 220px; margin: 0 auto; }
+.play-pop-title { margin-top: 20px !important; font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: -0.015em; }
+.play-pop-links { display: flex; justify-content: center; gap: 8px; margin-top: 8px !important; font-size: 15px; }
+.play-pop-links a, .play-pop-links button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; color: var(--text-secondary); font: inherit; background: none; border: 0; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .play-pop-links a:hover, .play-pop-links button:hover { color: var(--text); } }
+@media (prefers-reduced-motion: reduce) { .play-pop { transition: none; } }
+
+/* The second action beside Google Play (iPhone waitlist): outlined, same size. */
+.hx-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 0 24px 0 20px;
+  border-radius: 14px;
+  border: 1px solid var(--text);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 160ms var(--press);
+}
+.hx-alt:active { transform: scale(0.97); }
+.hx-alt .brand-icon { width: 18px; height: 18px; }
+@media (hover: hover) and (pointer: fine) { .hx-alt:hover { background: var(--text); color: var(--ground); } }
+.ios-pop { text-align: left; width: min(420px, calc(100vw - 32px)); }
+.ios-pop .play-pop-title { margin-top: 0 !important; }
+.ios-pop .waitlist { margin-top: 16px; }
+.ios-pop .play-pop-links { justify-content: flex-end; }
+@media (max-width: 600px) { .hx-alt { width: 100%; justify-content: center; } }
+.ios-pop .waitlist > label { font-weight: 400; color: var(--text-secondary); }
+
+/* Support (support.astro): centred; ways to reach us first, then the fixes, all visible. */
+.home main.sp { max-width: 46rem; margin: 0 auto; padding: 96px 24px 120px; text-align: center; }
+.sp h1 { font-size: clamp(40px, 6vw, 72px); line-height: 1; margin: 0 0 48px; }
+.sp-contact { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sp-contact a { height: 100%; display: grid; align-content: center; gap: 4px; padding: 24px 20px; border-radius: 20px; background: var(--ground); text-decoration: none; color: var(--text); transition: transform 160ms var(--press), box-shadow 0.2s ease; }
+.sp-contact a:active { transform: scale(0.98); }
+@media (hover: hover) and (pointer: fine) { .sp-contact a:hover { box-shadow: 0 18px 40px -28px rgba(0, 40, 38, 0.45); } }
+.sp-contact strong { font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: -0.015em; }
+.sp-contact span { font-size: 15px; color: var(--text-secondary); }
+.sp-note { margin: 20px auto 0 !important; max-width: 34em; font-size: 15px; color: var(--text-secondary); }
+.sp-fixes { margin-top: 112px; text-align: left; }
+.sp-fixes h2 { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; text-align: center; margin: 0 0 40px; }
+.sp-fixes dl { margin: 0; display: grid; gap: 28px; }
+.sp-fixes dt { font-weight: 600; font-size: 18px; }
+.sp-fixes dd { margin: 4px 0 0; color: var(--text-secondary); }
+@media (max-width: 700px) { .sp-contact { grid-template-columns: minmax(0, 1fr); } }
+
+/* The band the film sits on: a shade darker than the paper, with a paper tab hanging into
+   it from the hero, holding the platforms (Android now, iPhone soon). */
+.hc-band { position: relative; background: #E6ECEB; }
+.hc-tab {
+  position: absolute;
+  z-index: 2; /* above the film, whose entrance animation makes its own layer */
+  left: 50%;
+  top: 0;
+  translate: -50% 0;
+  display: flex;
+  gap: 8px;
+  padding: 2px 28px 12px;
+  background: var(--window);
+  border-radius: 0 0 28px 28px;
+}
+.hc-tab::before, .hc-tab::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  background: radial-gradient(circle at 0 100%, transparent 27.5px, var(--window) 28px);
+}
+.hc-tab::before { right: 100%; background: radial-gradient(circle at 0 100%, transparent 27.5px, var(--window) 28px); }
+.hc-tab::after { left: 100%; background: radial-gradient(circle at 100% 100%, transparent 27.5px, var(--window) 28px); }
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease, transform 160ms var(--press);
+}
+.tab-icon:active { transform: scale(0.94); }
+.tab-icon .brand-icon { width: 22px; height: 22px; }
+@media (hover: hover) and (pointer: fine) { .tab-icon:hover { color: var(--text); background: var(--raised); } }
+.hx-get-zafe { padding: 0 40px; }
+
+/* Questions: the first is open; the markers are the one accent on the list. */
+.hx-faq .qa summary::before { background: var(--brand); }
+.foot-bottom a { color: inherit; text-decoration: underline; text-underline-offset: 0.2em; }
+.tab-icon.play-open { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .tab-icon.play-direct { display: none; }
+  .tab-icon.play-open { display: inline-flex; }
+}
+
+/* Footer: the brand, then three short link columns (get it, the project, help); a quiet
+   bottom row; the wordmark large and cut by the page's bottom edge. */
+.foot-links { display: flex; gap: 56px; }
+.foot-links ul { display: grid; grid-template-columns: 1fr; gap: 14px; align-content: start; }
+.foot-links a { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.foot-links .brand-icon { width: 15px; height: 15px; opacity: 0.8; }
+/* "Zafe for Android" is a PlayButton (QR on a computer): the button looks like its links. */
+.foot-links .foot-play { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: inherit; text-decoration: none; }
+.foot-links button.foot-play { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+.foot-links button.foot-play:hover { color: var(--ink-text); }
+.foot-links .foot-play.play-open { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .foot-links .foot-play.play-direct { display: none; }
+  .foot-links .foot-play.play-open { display: inline-flex; }
+}
+.foot-links em { font-style: normal; font-size: 12px; padding: 1px 7px; border-radius: 999px; border: 1px solid #2E3636; color: var(--ink-muted); }
+.foot-bottom { align-items: center; }
+.foot-end { display: flex; align-items: center; gap: 20px; }
+.foot .ghost { font-size: clamp(140px, 30vw, 460px); line-height: 0.74; margin-top: 56px !important; margin-bottom: -0.16em !important; padding-bottom: 0; }
+@media (max-width: 700px) {
+  /* Phones: one column close to the edges (20px), links one under another, then the small
+     print, socials left and the year right. Inset 40px and split in columns it read as
+     squeezed. */
+  .foot-top, .foot-bottom, .foot .ghost { padding-left: 4px; padding-right: 4px; }
+  .foot-top { gap: 40px; }
+  .foot-links { display: flex; flex-direction: column; gap: 20px; width: 100%; }
+  .foot .foot-links ul { display: flex; flex-direction: column; gap: 0; }
+  .foot-links a, .foot-links .foot-play { font-size: 16px; }
+  .foot-bottom { flex-direction: column !important; align-items: stretch; gap: 8px; padding-top: 48px; }
+  .foot-end { justify-content: space-between; }
+  .foot .foot-social { margin: 0 0 0 -12px; }
+}
+
+/* Review fixes (2026-10-23). */
+.dl-option .hx-actions { justify-content: flex-start; } /* /download is left-aligned */
+.waitlist-note a { color: inherit; text-decoration: underline; text-underline-offset: 0.18em; }
+.nav:not(.nav-light) .nav-get { padding: 8px 16px; border-radius: 10px; background: var(--brand); color: var(--brand-label); font-weight: 500; }
+@media (hover: hover) and (pointer: fine) { .nav:not(.nav-light) .nav-get:hover { background: #005F59; color: var(--brand-label); } }
+.hc-live { max-width: 70rem; }
+.hc-live li { white-space: nowrap; }
+@media (max-width: 1100px) { .hc-live ul { grid-template-columns: repeat(2, max-content); justify-content: center; } }
+@media (max-width: 700px) {
+  .foot-links ul { gap: 0; }
+  .foot-links a { min-height: 44px; }
+  .hc-live li { white-space: normal; }
+  .hc-live ul { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
+}

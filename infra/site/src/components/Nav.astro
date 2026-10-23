@@ -6,13 +6,16 @@
 // Get Zafe on the right, nothing else.
 import Mark from './Mark.astro';
 import Icon from './Icon.astro';
-import { downloadUrl, getLabel, getUrl, sourceUrl } from '../config';
+import { getLabel, getUrl } from '../config';
 
+type Link = { href: string; label: string; mobile?: boolean; back?: boolean };
 interface Props {
-  links: { href: string; label: string; mobile?: boolean; back?: boolean }[];
+  links: Link[];
+  /** Links before Get Zafe on the right, so each side carries the same weight. */
+  right?: Link[];
   light?: boolean;
 }
-const { links, light = false } = Astro.props;
+const { links, right = [], light = false } = Astro.props;
 ---
 
 <header class:list={['nav', { 'nav-light': light }]}>
@@ -26,7 +29,9 @@ const { links, light = false } = Astro.props;
   </nav>
   <a class="nav-logo" href="/" aria-label="Zafe home"><Mark /></a>
   <nav class="nav-side right" aria-label="Links">
-    {!light && downloadUrl && <a href={sourceUrl} target="_blank" rel="noopener noreferrer">Source</a>}
-    <a class="nav-m" href={getUrl} target="_blank" rel="noopener noreferrer">{getLabel}</a>
+    {right.map((l) => (
+      <a href={l.href} class:list={{ 'nav-m': l.mobile }}>{l.label}</a>
+    ))}
+    <a class="nav-m nav-get" href={getUrl}>{getLabel}</a>
   </nav>
 </header>
