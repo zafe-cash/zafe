@@ -7,12 +7,13 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
 /// The vault's spends the log doesn't account for (empty when all is well, or before the
 /// first sync). Reads the wallet database `sync_vault` keeps and the vault log; call it
-/// after a sync, so the wallet has seen the chain.
-Future<List<UnapprovedSpendInfo>> unapprovedSpends({
+/// after a sync, so the wallet has seen the chain. Keeps working while the relay can't be
+/// reached, from this phone's log copy (`from_copy_at`).
+Future<UnapprovedSpends> unapprovedSpends({
   required String relayUrl,
   required String dbDir,
   required List<int> dbKey,
@@ -47,4 +48,28 @@ class UnapprovedSpendInfo {
           runtimeType == other.runtimeType &&
           txid == other.txid &&
           minedHeight == other.minedHeight;
+}
+
+/// What the alert found, and what it was based on.
+class UnapprovedSpends {
+  final List<UnapprovedSpendInfo> spends;
+
+  /// Set when the relay couldn't be reached and the check ran on this phone's copy of
+  /// the vault history: when that copy last matched the relay (Unix seconds), for "based
+  /// on this phone's history from 09:14". A spend a newer entry would explain may show
+  /// until the relay is back.
+  final BigInt? fromCopyAt;
+
+  const UnapprovedSpends({required this.spends, this.fromCopyAt});
+
+  @override
+  int get hashCode => spends.hashCode ^ fromCopyAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is UnapprovedSpends &&
+          runtimeType == other.runtimeType &&
+          spends == other.spends &&
+          fromCopyAt == other.fromCopyAt;
 }

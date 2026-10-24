@@ -20,14 +20,18 @@ RecoveryCodeInfo parseRecoveryCode({required String code}) =>
 
 /// Co-signer: one step of the safety check with the phone that showed `code` (poll it
 /// while the screen is open). `None` until the new phone has taken part; then the four
-/// words to compare with it on a call before approving.
+/// words to compare with it on a call before approving. Runs on the vault's relay (from
+/// `material`; `relay_url` for a vault from before per-vault relays), where the new phone
+/// takes part after opening the co-signer's [`seat_link`].
 Future<String?> newPhoneWords({
   required String relayUrl,
   required List<int> seeds,
+  Uint8List? material,
   required String code,
 }) => RustLib.instance.api.crateApiRepairNewPhoneWords(
   relayUrl: relayUrl,
   seeds: seeds,
+  material: material,
   code: code,
 );
 
@@ -50,14 +54,35 @@ Future<bool> approveSeatMove({
   words: words,
 );
 
+/// The co-signer's link for a phone recovering a seat in this vault: the vault's relay
+/// and mailbox (`zafe-seat-v1:...`; `default_relay_url` stands in for a vault on the
+/// app-wide relay). The new phone opens it before the safety check.
+String seatLink({
+  required List<int> material,
+  required String defaultRelayUrl,
+}) => RustLib.instance.api.crateApiRepairSeatLink(
+  material: material,
+  defaultRelayUrl: defaultRelayUrl,
+);
+
+/// Parses a seat link a co-signer sent (also inside a message or a `zafe://seat?link=`
+/// URL).
+SeatLinkInfo parseSeatLink({required String text}) =>
+    RustLib.instance.api.crateApiRepairParseSeatLink(text: text);
+
 /// The new phone: checks whether its seat moved and the repaired key has arrived. On
-/// `Done` the key has been checked against the vault (spec §10.4.2).
+/// `Done` the key has been checked against the vault (spec §10.4.2), and its relay history
+/// against what every helper vouched for. `relay_url` and `label`: from the co-signer's
+/// seat link ([`parse_seat_link`]); without a label (no link: the app-wide relay), every
+/// mailbox the relay lists for this phone is checked.
 Future<RecoveryProgress> checkRecovery({
   required String relayUrl,
   required List<int> seeds,
+  String? label,
 }) => RustLib.instance.api.crateApiRepairCheckRecovery(
   relayUrl: relayUrl,
   seeds: seeds,
+  label: label,
 );
 
 /// The words a co-signer (`cosigner_key_hex`) sees for this new phone.
@@ -175,4 +200,25 @@ enum RecoveryStage {
 
   /// Done: `material` and `invite` hold the vault (save them like a restored backup).
   done,
+}
+
+/// Where a co-signer's seat link points.
+class SeatLinkInfo {
+  final String relayUrl;
+
+  /// The vault's mailbox on that relay (hex), for [`check_recovery`].
+  final String label;
+
+  const SeatLinkInfo({required this.relayUrl, required this.label});
+
+  @override
+  int get hashCode => relayUrl.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SeatLinkInfo &&
+          runtimeType == other.runtimeType &&
+          relayUrl == other.relayUrl &&
+          label == other.label;
 }

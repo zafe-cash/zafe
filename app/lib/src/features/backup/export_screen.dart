@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../providers/endpoints_provider.dart';
 import '../../core/platform/sensitive_clipboard.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/storage/member_names.dart';
@@ -84,6 +85,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     }
     final vault = ref.read(vaultProvider);
     final backup = await rust.exportVaultBackup(
+      relayUrl: ref.read(endpointsProvider).relayUrl,
       seeds: vault.identity!,
       material: vault.material!,
       invite: vault.invite!,

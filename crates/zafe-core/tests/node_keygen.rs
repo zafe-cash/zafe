@@ -168,7 +168,7 @@ async fn three_members_create_a_vault_over_the_relay() {
     // Once the vault exists, a member's regular `respond` deletes its keygen messages
     // from the relay; nothing is left to delete the next time.
     for (id, material) in ids.iter().zip([&a, &b, &c]) {
-        let vault = material.descriptor.vault_id;
+        let vault = material.label();
         assert!(!relay.inbox(id, vault, 0).await.unwrap().is_empty());
         let mut store = MemoryNonceStore::default();
         let report = respond(&relay, id, material, &net, 100, &mut store, &mut r0)

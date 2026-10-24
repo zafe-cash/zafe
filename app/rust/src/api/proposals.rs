@@ -28,7 +28,9 @@ use zcash_protocol::memo::{Memo, MemoBytes};
 use super::{
     error::{ZafeError, ZafeErrorKind},
     names::SignerName,
-    vault::{identity, material, network, open_wallet, runtime, sent_txs, wallet_lock},
+    vault::{
+        identity, material, network, open_wallet, runtime, sent_txs, vault_relay, wallet_lock,
+    },
 };
 use crate::frb_generated::StreamSink;
 
@@ -467,7 +469,7 @@ pub fn list_proposals(
 ) -> Result<ProposalList, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::pooled(relay_url);
+    let relay = vault_relay(&relay_url, &m);
     let mut pool = pool_store(&state_dir, &seeds, &m);
     // A device just restored from a backup retires the commitments its previous device
     // published (see `node::top_up_pool`); the marker is removed once that is logged.
@@ -491,7 +493,8 @@ pub fn list_proposals(
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
-        if let Err(e) = repair::help_repairs(&relay, &me, &m, &state, &repair_dir, &mut OsRng).await
+        if let Err(e) =
+            repair::help_repairs(&relay, &me, &m, &chain, &state, &repair_dir, &mut OsRng).await
         {
             eprintln!("share repair: {e}");
         }
@@ -556,7 +559,7 @@ pub fn retry_repair(
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| ZafeError::invalid("not a signer key"))?;
     runtime().block_on(repair::retry_repair(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         replacement,
@@ -730,7 +733,7 @@ pub fn propose_payment(
     let m = self::material(&material)?;
     let requests = payment_requests(&m, &payments)?;
     let mut watch = crate::diag::Stopwatch::new("propose");
-    let relay = RelayClient::pooled(relay_url);
+    let relay = vault_relay(&relay_url, &m);
     let proposed = propose_inner(
         &mut watch,
         &relay,
@@ -777,7 +780,7 @@ pub fn propose_and_approve(
     let net = network(&m.descriptor.network)?;
     let requests = payment_requests(&m, &payments)?;
     let mut watch = crate::diag::Stopwatch::new("propose-approve");
-    let relay = RelayClient::pooled(relay_url);
+    let relay = vault_relay(&relay_url, &m);
     let proposed = propose_inner(
         &mut watch,
         &relay,
@@ -984,7 +987,7 @@ pub fn propose_again(
         watch.lap(if scanned { "scan" } else { "noscan" });
         Ok::<_, ZafeError>(
             node::propose_again(
-                &RelayClient::pooled(relay_url),
+                &vault_relay(&relay_url, &m),
                 &me,
                 &m,
                 &mut wallet,
@@ -1026,7 +1029,7 @@ pub fn invalidate_proposal(
         watch.lap(if scanned { "scan" } else { "noscan" });
         Ok::<_, ZafeError>(
             node::invalidate(
-                &RelayClient::pooled(relay_url),
+                &vault_relay(&relay_url, &m),
                 &me,
                 &m,
                 &mut wallet,
@@ -1091,8 +1094,7 @@ pub fn review_proposal(
     let mut watch = crate::diag::Stopwatch::new("review");
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
     watch.lap("tip");
-    let (_, state) =
-        runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
+    let (_, state) = runtime().block_on(node::load_state(&vault_relay(&relay_url, &m), &me, &m))?;
     watch.lap("log");
     let reviewed = node::review(&state, &m, &net, tip, id);
     watch.lap("check");
@@ -1172,7 +1174,7 @@ pub fn approve_proposal(
     let mut store = nonce_store(&state_dir, &seeds, &m);
     let mut pool = pool_store(&state_dir, &seeds, &m);
     let approved = runtime().block_on(node::approve(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         &net,
@@ -1202,7 +1204,7 @@ pub fn reject_proposal(
     let id = parse_id(&proposal_id)?;
     let mut watch = crate::diag::Stopwatch::new("reject");
     let result = runtime().block_on(node::reject(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         id,
@@ -1225,7 +1227,7 @@ pub fn set_my_name(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     runtime().block_on(node::set_name(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         &name,
@@ -1247,7 +1249,7 @@ pub fn attest_backup(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     runtime().block_on(node::attest_backup(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         at,
@@ -1268,7 +1270,7 @@ pub fn cancel_proposal(
     let id = parse_id(&proposal_id)?;
     let mut watch = crate::diag::Stopwatch::new("cancel");
     let result = runtime().block_on(node::cancel(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         id,
@@ -1356,7 +1358,7 @@ pub fn answer_signing_requests(
     };
     watch.lap("tip");
     let report = runtime().block_on(node::respond(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         &net,
@@ -1449,7 +1451,7 @@ pub fn send_with_progress(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
-    let relay = RelayClient::pooled(relay_url);
+    let relay = vault_relay(&relay_url, &m);
     let mut watch = crate::diag::Stopwatch::new("send");
     let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
     watch.lap("tip");

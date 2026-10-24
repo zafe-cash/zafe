@@ -2,14 +2,15 @@
 
 use zafe_core::{
     history, node,
-    relay_client::RelayClient,
     wallet::{VaultWallet, WalletError},
 };
 
 use super::{
     error::ZafeError,
     names::{to_map, SignerName},
-    vault::{identity, material, network, runtime, wallet_key, wallet_lock, wallet_path},
+    vault::{
+        identity, material, network, runtime, vault_relay, wallet_key, wallet_lock, wallet_path,
+    },
 };
 
 /// CSV of every payment the vault sent (from the vault log) and received (from this
@@ -27,8 +28,7 @@ pub fn export_history_csv(
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
-    let (_, state) =
-        runtime().block_on(node::load_state(&RelayClient::pooled(relay_url), &me, &m))?;
+    let (_, state) = runtime().block_on(node::load_state(&vault_relay(&relay_url, &m), &me, &m))?;
 
     let key = wallet_key(&db_key)?;
     let path = wallet_path(&db_dir, &m);

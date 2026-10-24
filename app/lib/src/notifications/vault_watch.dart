@@ -196,6 +196,8 @@ Future<void> _registerToken(String token) async {
         relayUrl: relayUrl,
         seeds: v.identity!,
         vaultId: v.id,
+        material: v.material,
+        invite: v.invite,
         platform: platform,
         token: token,
       );
@@ -497,13 +499,13 @@ Future<void> _checkVault(
     } catch (_) {}
     List<rust_spends.UnapprovedSpendInfo>? unapproved;
     try {
-      unapproved = await rust_spends.unapprovedSpends(
+      unapproved = (await rust_spends.unapprovedSpends(
         relayUrl: endpoints.relayUrl,
         dbDir: paths.dbDir,
         dbKey: dbKey,
         seeds: seeds,
         material: material,
-      );
+      )).spends;
     } catch (_) {}
     var list = await rust.listProposals(
       relayUrl: endpoints.relayUrl,

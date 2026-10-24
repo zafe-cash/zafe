@@ -547,11 +547,23 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
             (`vault_id` from the first entry, `/v1/log/append-labelled`), `/v1/push/forget`,
             `GET /v1/info`, expiry (1 year idle, 30 days unused), create token, `RELAY_DB` 4;
             `relay_client` methods + `RelayTooOld` / `CreateTokenRefused`. Details in
-            `docs/relay-move.md` §7. Left: node/app use them (labels for new vaults, picker,
-            map the new errors in the bridge), promote the relay before an app needs it
-- [ ] Relay URL per vault: the invite carries the vault's relay URL and the app stores it
-      with the vault (today one relay setting per network for the whole app), so vaults on
-      a self-hosted relay and on ours coexist in one app. Bumps the invite version
+            `docs/relay-move.md` §7. Left: promote the relay before an app needs it
+      - [x] Client foundations (2026-10-25, branch `relay-client`, phase 2a, Rust + bridge,
+            no screens): per-vault relay in `VaultMaterial` 2, random labels for new vaults,
+            `INVITE` 3, create token sealed at setup (`LOG_KEY_MESSAGE` 1), `BACKUP` 3 with
+            the log copy installed before the first load, `REPAIR` 3 anchors + seat link
+            (`SEAT_LINK` 1), spend alert from the copy, relay status per vault, relay route
+            `/v1/mailbox/replace-labelled`, bridge errors `RelayOutdated` /
+            `CreateTokenRefused`. Details: `docs/relay-move.md` §7
+      - [ ] Phase 2b (app): relay picker (Create > Relay, `check_relay` info), relay shown
+            on join (`InviteInfo.relay_url`), Settings split (`vault_relay_settings`), create
+            token field (pass it to `create_vault` and **every** `setup_step`; keep it with
+            the invite), seat link share/scan (`seat_link`, `parse_seat_link`,
+            `check_recovery(label)`), "Can't reach relay · since" (`vault_relay_status`),
+            "based on this phone's history from" (`UnapprovedSpends.from_copy_at`)
+- [x] Relay URL per vault (Rust side 2026-10-25, see above): the invite carries the vault's
+      relay URL and the vault keeps it in its material, so vaults on a self-hosted relay and
+      on ours coexist in one app. UI in phase 2b
 - [ ] Mainnet relay: second compose service + `relay.zafe.cash` + Litestream to object
       storage + a `relay-mainnet` environment with required reviewers that promotes a
       digest already on testnet

@@ -41,13 +41,15 @@ class UnapprovedSpendsNotifier
     _loading = true;
     try {
       final paths = await ZafePaths.get();
-      final items = await rust.unapprovedSpends(
+      // `fromCopyAt` (relay unreachable, checked from this phone's history) is shown by
+      // phase 2b's outage status.
+      final items = (await rust.unapprovedSpends(
         relayUrl: ref.read(endpointsProvider).relayUrl,
         dbDir: paths.dbDir,
         dbKey: walletKeyFor(seeds, vaultId),
         seeds: seeds,
         material: material,
-      );
+      )).spends;
       if (ref.read(vaultProvider).activeId == vaultId) {
         state = items;
         // Seen on screen: the background check doesn't announce it again.

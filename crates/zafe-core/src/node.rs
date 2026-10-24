@@ -135,16 +135,93 @@ fn chain_err(e: zafe_proto::ChainError) -> NodeError {
     }
 }
 
+/// A vault's two ids on a relay. `vault` is the vault id: the descriptor names it, every
+/// log entry carries it (`EntryHeader::mailbox`) and the keys are bound to it. `label` is
+/// the mailbox id the relay files the vault under, used for everything addressed to the
+/// relay: envelope headers, signed requests, appends (`docs/relay-move.md` §4.6). A new
+/// vault's label is random; vaults made before labels have label = vault id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VaultIds {
+    pub vault: MailboxId,
+    pub label: MailboxId,
+}
+
+impl VaultIds {
+    /// A vault from before labels: its mailbox id is its vault id.
+    pub const fn legacy(id: MailboxId) -> Self {
+        Self {
+            vault: id,
+            label: id,
+        }
+    }
+}
+
+/// Where a vault lives: its relay, its mailbox label there and the relay's create token
+/// (a private relay's `ZAFE_RELAY_CREATE_TOKEN`, needed to restore the vault there). Part
+/// of [`VaultMaterial`] (so it is in secure storage and backups) and never in invites or
+/// links: the token travels only sealed between members.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaultRelay {
+    /// `None`: the app-wide relay setting (vaults made before per-vault relays).
+    pub url: Option<String>,
+    pub label: MailboxId,
+    pub create_token: Option<String>,
+}
+
+impl VaultRelay {
+    /// A vault from before per-vault relays: on the app-wide relay, under its vault id.
+    pub fn legacy(vault_id: MailboxId) -> Self {
+        Self {
+            url: None,
+            label: vault_id,
+            create_token: None,
+        }
+    }
+
+    /// The relay URL, or `default` (the app-wide setting) for a vault without one.
+    pub fn url_or<'a>(&'a self, default: &'a str) -> &'a str {
+        self.url.as_deref().unwrap_or(default)
+    }
+}
+
+/// Redacted: the create token is a secret of the relay's operator.
+impl core::fmt::Debug for VaultRelay {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("VaultRelay")
+            .field("url", &self.url)
+            .field("label", &hex::encode(self.label))
+            .field("create_token", &self.create_token.as_ref().map(|_| "…"))
+            .finish()
+    }
+}
+
 /// Everything a new member needs to join (shared out of band as a string or QR code).
+/// Never carries the relay's create token.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invite {
-    pub mailbox: MailboxId,
+    /// The vault id (keys, descriptor and log entries are bound to it).
+    pub vault_id: MailboxId,
+    /// The relay's mailbox id for the vault ([`VaultIds::label`]).
+    pub label: MailboxId,
+    /// The vault's relay. `None` only from a version 2 invite: the joiner's default relay.
+    pub relay_url: Option<String>,
     pub join_token: [u8; 32],
     /// Creator's Ed25519 key, so joiners know whose round-1 message carries the birthday.
     pub creator: [u8; 32],
     pub threshold: u16,
     pub members: u16,
     pub name: String,
+}
+
+/// A version 2 invite: the mailbox id was the vault id, on the joiner's relay.
+#[derive(Deserialize)]
+struct InviteV2 {
+    mailbox: MailboxId,
+    join_token: [u8; 32],
+    creator: [u8; 32],
+    threshold: u16,
+    members: u16,
+    name: String,
 }
 
 impl Invite {
@@ -161,7 +238,8 @@ impl Invite {
     }
 
     /// Parses an invite; one from another version of Zafe fails with
-    /// [`NodeError::UnsupportedVersion`] rather than "invalid invite".
+    /// [`NodeError::UnsupportedVersion`] rather than "invalid invite". A version 2 invite
+    /// reads as label = vault id with no relay URL.
     pub fn decode(s: &str) -> Result<Self, NodeError> {
         let rest = s
             .trim()
@@ -169,9 +247,29 @@ impl Invite {
             .ok_or(NodeError::BadInvite)?;
         let (found, body) = rest.split_once(':').ok_or(NodeError::BadInvite)?;
         let found: u16 = found.parse().map_err(|_| NodeError::BadInvite)?;
+        let body = hex::decode(body).map_err(|_| NodeError::BadInvite)?;
+        if found == 2 {
+            let v2: InviteV2 = postcard::from_bytes(&body).map_err(|_| NodeError::BadInvite)?;
+            return Ok(Self {
+                vault_id: v2.mailbox,
+                label: v2.mailbox,
+                relay_url: None,
+                join_token: v2.join_token,
+                creator: v2.creator,
+                threshold: v2.threshold,
+                members: v2.members,
+                name: v2.name,
+            });
+        }
         version::check(Format::Invite, found)?;
-        postcard::from_bytes(&hex::decode(body).map_err(|_| NodeError::BadInvite)?)
-            .map_err(|_| NodeError::BadInvite)
+        postcard::from_bytes(&body).map_err(|_| NodeError::BadInvite)
+    }
+
+    pub fn ids(&self) -> VaultIds {
+        VaultIds {
+            vault: self.vault_id,
+            label: self.label,
+        }
     }
 }
 
@@ -238,6 +336,19 @@ pub struct VaultMaterial {
     pub vault_secret: [u8; 32],
     pub log_key_epoch: u32,
     pub log_key: [u8; 32],
+    /// The vault's relay, label and create token (version 2).
+    pub relay: VaultRelay,
+}
+
+/// Version 1 material: no relay (the app-wide one, label = vault id).
+#[derive(Deserialize)]
+struct VaultMaterialV1 {
+    descriptor: VaultDescriptor,
+    key_package: Vec<u8>,
+    public_key_package: Vec<u8>,
+    vault_secret: [u8; 32],
+    log_key_epoch: u32,
+    log_key: [u8; 32],
 }
 
 impl core::fmt::Debug for VaultMaterial {
@@ -255,10 +366,39 @@ impl VaultMaterial {
         Ok(version::encode(Format::VaultMaterial, self)?)
     }
 
+    /// Reads versions 1 (as a vault on the app-wide relay under its vault id) and 2.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, NodeError> {
-        let material: Self = version::decode(Format::VaultMaterial, bytes)?;
+        let material: Self = match version::split(Format::VaultMaterial, bytes)? {
+            (1, body) => {
+                let v1: VaultMaterialV1 = postcard::from_bytes(body)
+                    .map_err(|_| DecodeError::Malformed(Format::VaultMaterial))?;
+                Self {
+                    relay: VaultRelay::legacy(v1.descriptor.vault_id),
+                    descriptor: v1.descriptor,
+                    key_package: v1.key_package,
+                    public_key_package: v1.public_key_package,
+                    vault_secret: v1.vault_secret,
+                    log_key_epoch: v1.log_key_epoch,
+                    log_key: v1.log_key,
+                }
+            }
+            _ => version::decode(Format::VaultMaterial, bytes)?,
+        };
         version::check(Format::Descriptor, material.descriptor.version)?;
         Ok(material)
+    }
+
+    /// The vault id and its relay label.
+    pub fn ids(&self) -> VaultIds {
+        VaultIds {
+            vault: self.descriptor.vault_id,
+            label: self.relay.label,
+        }
+    }
+
+    /// The relay's mailbox id for this vault.
+    pub fn label(&self) -> MailboxId {
+        self.relay.label
     }
 
     pub fn key_package(&self) -> Result<KeyPackage, NodeError> {
@@ -288,6 +428,12 @@ impl VaultMaterial {
 
 // --- Setup: create, join, seal, safety number ------------------------------------------
 
+/// Creates a vault's mailbox on `relay` and returns the invite. The vault id and the
+/// mailbox label are both random and different (`docs/relay-move.md` §4.6), so the relay
+/// must have labelled mailboxes: an older one fails with
+/// [`RelayClientError::RelayTooOld`] before anything is created. A private relay needs
+/// its create token on `relay` ([`RelayClient::with_create_token`]); the creator's
+/// key-generation steps then seal it to every member.
 pub async fn create_vault<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     creator: &Identity,
@@ -296,19 +442,25 @@ pub async fn create_vault<R: RngCore + CryptoRng>(
     members: u16,
     rng: &mut R,
 ) -> Result<Invite, NodeError> {
-    let mut mailbox = [0u8; 16];
+    let mut vault_id = [0u8; 16];
+    let mut label = [0u8; 16];
     let mut join_token = [0u8; 32];
-    rng.fill_bytes(&mut mailbox);
+    rng.fill_bytes(&mut vault_id);
+    rng.fill_bytes(&mut label);
     rng.fill_bytes(&mut join_token);
-    KeygenParams::new(mailbox, threshold, members).map_err(proto)?;
+    KeygenParams::new(vault_id, threshold, members).map_err(proto)?;
+    // `/v1/info` came with labelled mailboxes: a relay without it can't hold this vault.
+    relay.info().await?;
     relay
-        .create_mailbox(creator, mailbox, &join_token, members)
+        .create_mailbox(creator, label, &join_token, members)
         .await?;
     // Lets the relay check approvals when a lost member's seat moves (spec §10.1). An
     // older relay without the route still hosts the vault, without seat moves.
-    relay.set_threshold(creator, mailbox, threshold).await?;
+    relay.set_threshold(creator, label, threshold).await?;
     Ok(Invite {
-        mailbox,
+        vault_id,
+        label,
+        relay_url: Some(relay.base_url().to_owned()),
         join_token,
         creator: creator.public().sig_pk,
         threshold,
@@ -322,9 +474,7 @@ pub async fn join_vault(
     member: &Identity,
     invite: &Invite,
 ) -> Result<(), NodeError> {
-    relay
-        .join(member, invite.mailbox, invite.join_token)
-        .await?;
+    relay.join(member, invite.label, invite.join_token).await?;
     Ok(())
 }
 
@@ -350,7 +500,7 @@ pub async fn membership(
     who: &Identity,
     invite: &Invite,
 ) -> Result<Membership, NodeError> {
-    let response = relay.members(who, invite.mailbox).await?;
+    let response = relay.members(who, invite.label).await?;
     let mut out = Membership {
         members: response.members,
         sealed: response.sealed,
@@ -358,14 +508,14 @@ pub async fn membership(
         waiting_for: Vec::new(),
     };
     if out.sealed {
-        let (words, waiting) = safety_check(relay, who, invite.mailbox, &out.members).await?;
+        let (words, waiting) = safety_check(relay, who, invite.ids(), &out.members).await?;
         out.safety_words = words;
         out.waiting_for = waiting;
     }
     Ok(out)
 }
 
-/// Relay URL, mailbox, sender, envelope kind.
+/// Relay URL, mailbox label, sender, envelope kind.
 type SafetySent = (String, MailboxId, [u8; 32], u8);
 
 /// Commitments and values this process already sent, per relay, so polling doesn't send
@@ -393,14 +543,17 @@ pub async fn wait_for_safety_words(
     }
 }
 
+/// The words are bound to the vault id (shared out of band in the invite); messages go
+/// to the relay's label.
 async fn safety_check(
     relay: &RelayClient,
     me: &Identity,
-    mailbox: MailboxId,
+    ids: VaultIds,
     members: &[IdentityPublic],
 ) -> Result<(Option<String>, Vec<[u8; 32]>), NodeError> {
+    let (vault, label) = (ids.vault, ids.label);
     let my_pk = me.public().sig_pk;
-    let secret = crate::sas::secret(me, &mailbox);
+    let secret = crate::sas::secret(me, &vault);
     let by_pk: BTreeMap<[u8; 32], IdentityPublic> =
         members.iter().map(|m| (m.sig_pk, *m)).collect();
     if !by_pk.contains_key(&my_pk) {
@@ -412,7 +565,7 @@ async fn safety_check(
 
     let mut commits = BTreeMap::<[u8; 32], [u8; 32]>::new();
     let mut reveals = BTreeMap::<[u8; 32], [u8; 32]>::new();
-    for (_, sender, env) in read_inbox(relay, me, mailbox, &by_pk, 0).await? {
+    for (_, sender, env) in read_inbox(relay, me, label, &by_pk, 0).await? {
         let slot = match env.header.kind {
             Kind::SafetyCommit => &mut commits,
             Kind::SafetyReveal => &mut reveals,
@@ -429,12 +582,12 @@ async fn safety_check(
     }
 
     let send = |kind: Kind, payload: [u8; 32]| async move {
-        let key = (relay.base_url().to_owned(), mailbox, my_pk, kind as u8);
+        let key = (relay.base_url().to_owned(), label, my_pk, kind as u8);
         if SAFETY_SENT.lock().expect("not poisoned").contains(&key) {
             return Ok::<_, NodeError>(());
         }
         send_fresh(relay, &mut SeqCounter::default(), |seq| {
-            Envelope::public(me, mailbox, seq, kind, &payload).map_err(proto)
+            Envelope::public(me, label, seq, kind, &payload).map_err(proto)
         })
         .await?;
         SAFETY_SENT.lock().expect("not poisoned").insert(key);
@@ -442,7 +595,7 @@ async fn safety_check(
     };
     send(
         Kind::SafetyCommit,
-        crate::sas::commitment(&mailbox, &my_pk, &secret),
+        crate::sas::commitment(&vault, &my_pk, &secret),
     )
     .await?;
     let missing_commits: Vec<_> = others
@@ -466,7 +619,7 @@ async fn safety_check(
     let mut values = vec![(*me.public(), secret)];
     for pk in &others {
         let value = reveals[pk];
-        if crate::sas::commitment(&mailbox, pk, &value) != commits[pk] {
+        if crate::sas::commitment(&vault, pk, &value) != commits[pk] {
             return Err(NodeError::Verification(
                 "a member's safety value doesn't match what it committed to: stop, and \
                  don't make keys for this setup"
@@ -475,7 +628,7 @@ async fn safety_check(
         }
         values.push((by_pk[pk], value));
     }
-    Ok((Some(crate::sas::words(&mailbox, &values)), Vec::new()))
+    Ok((Some(crate::sas::words(&vault, &values)), Vec::new()))
 }
 
 /// Creator only, before membership is locked: abandons the setup and deletes it on the
@@ -491,7 +644,7 @@ pub async fn cancel_setup(
             "only the creator can cancel a setup".to_owned(),
         ));
     }
-    Ok(relay.cancel_setup(creator, invite.mailbox).await?)
+    Ok(relay.cancel_setup(creator, invite.label).await?)
 }
 
 /// Creator only: restarts the invite's 72-hour clock (before the setup locks), e.g. when
@@ -506,7 +659,7 @@ pub async fn renew_invite(
             "only the creator can renew an invite".to_owned(),
         ));
     }
-    Ok(relay.renew_invite(creator, invite.mailbox).await?)
+    Ok(relay.renew_invite(creator, invite.label).await?)
 }
 
 /// Creator only: freezes membership once all `n` members have joined.
@@ -515,7 +668,7 @@ pub async fn seal(
     creator: &Identity,
     invite: &Invite,
 ) -> Result<(), NodeError> {
-    let members = relay.members(creator, invite.mailbox).await?.members;
+    let members = relay.members(creator, invite.label).await?.members;
     if members.len() != usize::from(invite.members) {
         return Err(NodeError::NotReady(format!(
             "{} of {} members joined",
@@ -526,7 +679,7 @@ pub async fn seal(
     relay
         .seal(
             creator,
-            invite.mailbox,
+            invite.label,
             members.iter().map(|m| m.sig_pk).collect(),
         )
         .await?;
@@ -700,8 +853,8 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         return waiting("safety words", membership.waiting_for.clone());
     };
     let params =
-        KeygenParams::new(invite.mailbox, invite.threshold, invite.members).map_err(proto)?;
-    let frost_id = |pk: &[u8; 32]| member_identifier(pk, &invite.mailbox).map_err(proto);
+        KeygenParams::new(invite.vault_id, invite.threshold, invite.members).map_err(proto)?;
+    let frost_id = |pk: &[u8; 32]| member_identifier(pk, &invite.vault_id).map_err(proto);
 
     // This member's state: made once, when it confirms the words.
     let path = state_dir.join(state_dir::KEYGEN);
@@ -719,7 +872,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             }
             // Its state is gone once the vault is saved: a late step from another process
             // must not start a second round 1 for a vault that already exists.
-            if !relay.read_log(me, invite.mailbox, 0).await?.is_empty() {
+            if !relay.read_log(me, invite.label, 0).await?.is_empty() {
                 return Err(NodeError::NotReady(
                     "this vault's keys were already made".into(),
                 ));
@@ -727,7 +880,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             let round1 = Round1::start(params, frost_id(&my_pk)?, rng).map_err(proto)?;
             let contribution = SkContribution::generate(rng);
             let msg = Round1Msg {
-                sk_commitment: contribution.commitment(&invite.mailbox, &my_pk),
+                sk_commitment: contribution.commitment(&invite.vault_id, &my_pk),
                 package: round1.package().serialize().map_err(proto)?,
                 birthday_height: if is_creator {
                     options.creator_birthday_height
@@ -778,7 +931,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         .collect::<Result<_, NodeError>>()?;
     let mut seq = SeqCounter::default();
     let public = |kind: Kind, payload: Vec<u8>| {
-        move |n| Envelope::public(me, invite.mailbox, n, kind, &payload).map_err(proto)
+        move |n| Envelope::public(me, invite.label, n, kind, &payload).map_err(proto)
     };
 
     // Round 1: broadcast, with a commitment to this member's `sk` contribution.
@@ -793,7 +946,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         st.save(&path, key)?;
     }
 
-    let received = read_received(relay, me, invite.mailbox, &by_pk).await?;
+    let received = read_received(relay, me, invite.label, &by_pk).await?;
     let from_all = |kind: Kind, from: &[[u8; 32]]| {
         let got: BTreeMap<[u8; 32], Vec<u8>> = from
             .iter()
@@ -872,7 +1025,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
                 (Kind::SkContribution, contribution.as_bytes().as_slice()),
             ] {
                 send_fresh(relay, &mut seq, |n| {
-                    Envelope::sealed(me, &to, invite.mailbox, n, kind, payload, rng).map_err(proto)
+                    Envelope::sealed(me, &to, invite.label, n, kind, payload, rng).map_err(proto)
                 })
                 .await?;
             }
@@ -913,7 +1066,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         let arr: [u8; 32] = bytes.as_slice().try_into().map_err(proto)?;
         let id = frost_id(&pk)?;
         let revealed = SkContribution::from_bytes(arr);
-        crate::keygen::check_contribution(&invite.mailbox, &pk, &commitments[&id], &revealed)
+        crate::keygen::check_contribution(&invite.vault_id, &pk, &commitments[&id], &revealed)
             .map_err(|e| NodeError::Protocol(e.to_string()))?;
         contributions.insert(id, revealed);
     }
@@ -931,7 +1084,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     .ok_or_else(|| NodeError::Protocol("cannot build unified address".into()))?
     .encode(network);
     let descriptor = VaultDescriptor {
-        vault_id: invite.mailbox,
+        vault_id: invite.vault_id,
         version: version::DESCRIPTOR,
         name: invite.name.clone(),
         network: network_name.to_owned(),
@@ -985,9 +1138,11 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         signatures.push((pk, sig));
     }
 
-    // Log key: the creator makes it (saved before it leaves), seals it to every member,
-    // then writes the VaultCreated entry. Others wait for both.
-    let log_key = if is_creator {
+    // Log key: the creator makes it (saved before it leaves), seals it to every member
+    // with the relay's create token, then writes the VaultCreated entry. Others wait for
+    // both.
+    let ids = invite.ids();
+    let (log_key, create_token) = if is_creator {
         let key_bytes = match st.log_key {
             Some(k) => k,
             None => {
@@ -998,12 +1153,12 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             }
         };
         let log_key = LogKey::from_bytes(0, key_bytes);
+        let create_token = relay.create_token().map(str::to_owned);
         if st.sent & SENT_LOG == 0 {
+            let bytes = encode_log_key_message(&log_key, create_token.as_deref())?;
             for pk in &others {
-                let mut bytes = 0u32.to_le_bytes().to_vec();
-                bytes.extend_from_slice(log_key.as_bytes());
                 send_fresh(relay, &mut seq, |n| {
-                    Envelope::sealed(me, &by_pk[pk], invite.mailbox, n, Kind::LogKey, &bytes, rng)
+                    Envelope::sealed(me, &by_pk[pk], invite.label, n, Kind::LogKey, &bytes, rng)
                         .map_err(proto)
                 })
                 .await?;
@@ -1015,7 +1170,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             let entry = LogEntry::create(
                 me,
                 &log_key,
-                invite.mailbox,
+                invite.vault_id,
                 0,
                 [0; 32],
                 &event.to_bytes().map_err(proto)?,
@@ -1023,30 +1178,25 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             )
             .map_err(proto)?;
             // A conflict means an earlier step appended it; the check below compares it.
-            relay.append_log(&entry).await?;
+            append_entry(relay, me, ids, &entry).await?;
             st.sent |= SENT_LOG;
             st.save(&path, key)?;
         }
-        log_key
+        (log_key, create_token)
     } else {
         let (msgs, missing) = from_all(Kind::LogKey, &[invite.creator]);
         if !missing.is_empty() {
             return waiting("log key", missing);
         }
-        let bytes = &msgs[&invite.creator];
-        if bytes.len() != 36 {
-            return Err(NodeError::Protocol("bad log key".into()));
-        }
-        let epoch = u32::from_le_bytes(bytes[..4].try_into().expect("4 bytes"));
-        LogKey::from_bytes(epoch, bytes[4..].try_into().expect("32 bytes"))
+        decode_log_key_message(&msgs[&invite.creator])?
     };
 
     // Everyone checks the log's first entry is the descriptor they signed.
-    let entries = relay.read_log(me, invite.mailbox, 0).await?;
+    let entries = relay.read_log(me, invite.label, 0).await?;
     if entries.is_empty() {
         return waiting("vault log", vec![invite.creator]);
     }
-    let mut chain = Chain::new(invite.mailbox);
+    let mut chain = Chain::new(invite.vault_id);
     for e in entries {
         chain.append(e, members).map_err(chain_err)?;
     }
@@ -1064,7 +1214,63 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         vault_secret: *output.vault_secret.as_bytes(),
         log_key_epoch: log_key.epoch,
         log_key: *log_key.as_bytes(),
+        relay: VaultRelay {
+            url: invite.relay_url.clone(),
+            label: invite.label,
+            create_token,
+        },
     })))
+}
+
+/// The creator's sealed `Kind::LogKey` payload ([`version::LOG_KEY_MESSAGE`]).
+#[derive(Serialize, Deserialize)]
+struct LogKeyMessage {
+    epoch: u32,
+    key: [u8; 32],
+    /// The relay's create token, so any member can restore the vault on a private relay.
+    create_token: Option<String>,
+}
+
+fn encode_log_key_message(key: &LogKey, create_token: Option<&str>) -> Result<Vec<u8>, NodeError> {
+    Ok(version::encode(
+        Format::LogKeyMessage,
+        &LogKeyMessage {
+            epoch: key.epoch,
+            key: *key.as_bytes(),
+            create_token: create_token.map(str::to_owned),
+        },
+    )?)
+}
+
+/// Reads a [`LogKeyMessage`], or the untagged payload of creators from before it: epoch
+/// (u32 LE, 0 at setup) || key. Its first two bytes are then 0, never a version tag.
+fn decode_log_key_message(bytes: &[u8]) -> Result<(LogKey, Option<String>), NodeError> {
+    if bytes.len() == 36 && bytes[..2] == [0, 0] {
+        let epoch = u32::from_le_bytes(bytes[..4].try_into().expect("4 bytes"));
+        return Ok((
+            LogKey::from_bytes(epoch, bytes[4..].try_into().expect("32 bytes")),
+            None,
+        ));
+    }
+    let m: LogKeyMessage = version::decode(Format::LogKeyMessage, bytes)?;
+    let token = m.create_token.filter(|t| !t.trim().is_empty());
+    Ok((LogKey::from_bytes(m.epoch, m.key), token))
+}
+
+/// Appends `entry` to the vault's mailbox: by the entry's vault id where the label is the
+/// vault id (`/v1/log/append`), else to the label (`/v1/log/append-labelled`, signed by
+/// `me`, a member of that mailbox).
+async fn append_entry(
+    relay: &RelayClient,
+    me: &Identity,
+    ids: VaultIds,
+    entry: &LogEntry,
+) -> Result<AppendResult, RelayClientError> {
+    if ids.label == entry.header.mailbox {
+        relay.append_log(entry).await
+    } else {
+        relay.append_log_to(me, ids.label, entry).await
+    }
 }
 
 /// The creator locks membership as soon as every seat is taken (no tap: the safety words
@@ -1176,21 +1382,19 @@ pub async fn read_inbox(
 
 // --- Vault log helpers -------------------------------------------------------------------
 
-/// Reads new log entries after the chain's head (following pagination), verifying each
-/// against the membership as of that entry (seats can move) and applying it to `state`.
-/// Saves the longer chain to this device's copy.
-async fn catch_up(
+/// Reads new log entries after the chain's head from the vault's mailbox `label`
+/// (following pagination), verifying each against the membership as of that entry (seats
+/// can move) and applying it to `state`. Saves nothing.
+async fn fetch_rest(
     relay: &RelayClient,
     me: &Identity,
+    label: MailboxId,
     key: &LogKey,
     chain: &mut Chain,
     state: &mut VaultState,
 ) -> Result<(), NodeError> {
-    let before = chain.len();
     loop {
-        let batch = relay
-            .read_log(me, state.descriptor.vault_id, chain.len())
-            .await?;
+        let batch = relay.read_log(me, label, chain.len()).await?;
         if batch.is_empty() {
             break;
         }
@@ -1201,6 +1405,20 @@ async fn catch_up(
             state.apply_entry(&entry, key);
         }
     }
+    Ok(())
+}
+
+/// [`fetch_rest`], then saves the longer chain to this device's copy.
+async fn catch_up(
+    relay: &RelayClient,
+    me: &Identity,
+    label: MailboxId,
+    key: &LogKey,
+    chain: &mut Chain,
+    state: &mut VaultState,
+) -> Result<(), NodeError> {
+    let before = chain.len();
+    fetch_rest(relay, me, label, key, chain, state).await?;
     if chain.len() > before {
         save_copy(relay, chain);
     }
@@ -1210,7 +1428,7 @@ async fn catch_up(
 /// Saves the verified chain to this device's log copy, when there is one. Best effort: a
 /// failed write leaves the older (shorter) anchor in place, and the log itself is safe on
 /// the relay.
-fn save_copy(relay: &RelayClient, chain: &Chain) {
+pub(crate) fn save_copy(relay: &RelayClient, chain: &Chain) {
     if let Some(cache) = relay.log_cache() {
         if let Err(e) = cache.write(&chain.mailbox(), chain.entries()) {
             eprintln!("log copy: {e}");
@@ -1221,16 +1439,16 @@ fn save_copy(relay: &RelayClient, chain: &Chain) {
 /// Starts a chain and replay from `first`, which must be the vault's `Created` entry.
 fn start_chain(
     first: &LogEntry,
-    mailbox: MailboxId,
+    vault_id: MailboxId,
     key: &LogKey,
 ) -> Result<(Chain, VaultState), NodeError> {
     let state = VaultState::replay(std::slice::from_ref(first), key).map_err(vault_err)?;
-    if state.descriptor.vault_id != mailbox {
+    if state.descriptor.vault_id != vault_id {
         return Err(NodeError::Protocol(
             "the vault log belongs to another vault".into(),
         ));
     }
-    let mut chain = Chain::new(mailbox);
+    let mut chain = Chain::new(vault_id);
     chain
         .append(first.clone(), &state.member_identities())
         .map_err(chain_err)?;
@@ -1257,25 +1475,136 @@ fn extend_chain(
 /// from the relay. `None` when there is no usable copy.
 fn load_copy(
     relay: &RelayClient,
-    mailbox: MailboxId,
+    vault_id: MailboxId,
     key: &LogKey,
 ) -> Result<Option<(Chain, VaultState)>, NodeError> {
-    let Some(cache) = relay.log_cache() else {
-        return Ok(None);
-    };
-    let saved = cache.read(&mailbox)?;
+    match relay.log_cache() {
+        Some(cache) => copy_in(cache, vault_id, key),
+        None => Ok(None),
+    }
+}
+
+fn copy_in(
+    cache: &crate::log_cache::LogCache,
+    vault_id: MailboxId,
+    key: &LogKey,
+) -> Result<Option<(Chain, VaultState)>, NodeError> {
+    let saved = cache.read(&vault_id)?;
     let Some((first, rest)) = saved.split_first() else {
         return Ok(None);
     };
     // A copy that no longer verifies is an error, never a silent first load: the relay
     // would be trusted again without the anchor.
-    start_chain(first, mailbox, key)
+    start_chain(first, vault_id, key)
         .and_then(|(mut chain, mut state)| {
             extend_chain(&mut chain, &mut state, rest.iter().cloned(), key)?;
             Ok((chain, state))
         })
         .map(Some)
         .map_err(|e| NodeError::LogCopyInvalid(e.to_string()))
+}
+
+/// The vault's state from this device's log copy alone, without the relay: for what must
+/// keep working while the relay can't be reached (the unapproved-spend alert, spec
+/// §10.4.4; `docs/relay-move.md` §5). Also returns when the copy was last known to match
+/// the relay (Unix seconds: the last time this phone reached the relay, else when the copy
+/// was written), so the app can say "based on this phone's history from 09:14". `None`
+/// without a copy.
+pub fn state_from_copy(
+    relay: &RelayClient,
+    material: &VaultMaterial,
+) -> Result<Option<(VaultState, u64)>, NodeError> {
+    let Some(cache) = relay.log_cache() else {
+        return Ok(None);
+    };
+    let vault = material.descriptor.vault_id;
+    let Some((_, state)) = copy_in(cache, vault, &material.log_key())? else {
+        return Ok(None);
+    };
+    let as_of = cache
+        .relay_status(&vault)
+        .last_reached
+        .or_else(|| cache.written_at(&vault))
+        .unwrap_or(0);
+    Ok(Some((state, as_of)))
+}
+
+/// Installs `entries` (a vault's log as [`LogEntry::to_bytes`], e.g. from a backup) as this
+/// device's copy of the vault's log, once they verify against `material` (signatures,
+/// chain, the vault's keys). From then on a relay must hold that history, or a longer one
+/// that extends it (spec §6.3; `docs/relay-move.md` §6): a restored phone is anchored
+/// before its first relay load. A longer copy already on the device is kept. Returns the
+/// number of entries the copy now has.
+pub fn install_log_copy(
+    cache: &crate::log_cache::LogCache,
+    material: &VaultMaterial,
+    entries: &[Vec<u8>],
+) -> Result<u64, NodeError> {
+    let parsed = entries
+        .iter()
+        .map(|b| LogEntry::from_bytes(b).map_err(proto))
+        .collect::<Result<Vec<_>, _>>()?;
+    let Some((first, rest)) = parsed.split_first() else {
+        return Ok(cache.read(&material.descriptor.vault_id)?.len() as u64);
+    };
+    let key = material.log_key();
+    let (mut chain, mut state) = start_chain(first, material.descriptor.vault_id, &key)?;
+    extend_chain(&mut chain, &mut state, rest.iter().cloned(), &key)?;
+    if state.descriptor.group_public_key != material.descriptor.group_public_key
+        || state.descriptor.ufvk != material.descriptor.ufvk
+    {
+        return Err(NodeError::Protocol(
+            "the log copy belongs to another vault".into(),
+        ));
+    }
+    cache.write(&material.descriptor.vault_id, chain.entries())?;
+    Ok(cache.read(&material.descriptor.vault_id)?.len() as u64)
+}
+
+/// A point in a vault's log another member vouches for: its length and the hash of its
+/// last entry. A first load must match or extend it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogAnchor {
+    pub vault_id: MailboxId,
+    pub len: u64,
+    pub head: [u8; 32],
+}
+
+impl LogAnchor {
+    pub fn of(chain: &Chain) -> Self {
+        Self {
+            vault_id: chain.mailbox(),
+            len: chain.len(),
+            head: chain.head(),
+        }
+    }
+
+    /// Refuses `chain` unless it holds this anchor's history: shorter is a rollback,
+    /// another entry at the anchor's head a fork.
+    pub fn check(&self, chain: &Chain) -> Result<(), NodeError> {
+        if chain.mailbox() != self.vault_id {
+            return Err(NodeError::Protocol(
+                "the vault log belongs to another vault".into(),
+            ));
+        }
+        if self.len == 0 {
+            return Ok(());
+        }
+        if chain.len() < self.len {
+            return Err(NodeError::RelayRolledBack {
+                local_len: self.len,
+            });
+        }
+        let at = chain.entries()[(self.len - 1) as usize]
+            .hash()
+            .map_err(proto)?;
+        if at != self.head {
+            return Err(NodeError::RelayForked {
+                index: self.len - 1,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// How long a passed membership check is trusted (per mailbox, per process).
@@ -1289,24 +1618,25 @@ fn membership_checks() -> &'static MembershipChecks {
     CHECKS.get_or_init(Default::default)
 }
 
-/// Compares the relay's member list and threshold with the membership the replayed log
-/// ends with (spec §6.3). `reseed` lets whoever restores a relay choose both, and the
-/// relay can't read the log to check them, so every member does. A seat move the relay
-/// hasn't applied yet (log ahead of the relay) is tolerated: the old key may still hold
-/// the seat. A relay without the route (older) is checked on its member list alone;
-/// the threshold is then unknown.
+/// Compares the relay's member list and threshold for the vault's mailbox `label` with
+/// the membership the replayed log ends with (spec §6.3). `reseed` lets whoever restores a
+/// relay choose both, and the relay can't read the log to check them, so every member
+/// does. A seat move the relay hasn't applied yet (log ahead of the relay) is tolerated:
+/// the old key may still hold the seat. A relay without the route (older) is checked on its
+/// member list alone; the threshold is then unknown.
 pub async fn check_relay_membership(
     relay: &RelayClient,
     me: &Identity,
+    label: MailboxId,
     state: &VaultState,
 ) -> Result<(), NodeError> {
-    check_relay_membership_with(relay, me, state, None).await
+    check_relay_membership_with(relay, me, label, state, None).await
 }
 
-/// Whether this relay's member list for `mailbox` was compared within
+/// Whether this relay's member list for `label` was compared within
 /// [`MEMBERSHIP_RECHECK`] (a seat move since then still forces a new check).
-fn membership_checked_recently(relay: &RelayClient, mailbox: MailboxId) -> bool {
-    let cache_key = (relay.base_url().to_string(), mailbox);
+fn membership_checked_recently(relay: &RelayClient, label: MailboxId) -> bool {
+    let cache_key = (relay.base_url().to_string(), label);
     membership_checks()
         .lock()
         .expect("lock")
@@ -1338,12 +1668,12 @@ async fn relay_members(
 async fn check_relay_membership_with(
     relay: &RelayClient,
     me: &Identity,
+    label: MailboxId,
     state: &VaultState,
     fetched: Option<Result<RelayMembers, NodeError>>,
 ) -> Result<(), NodeError> {
-    let mailbox = state.descriptor.vault_id;
     let moves = state.replacements.len();
-    let cache_key = (relay.base_url().to_string(), mailbox);
+    let cache_key = (relay.base_url().to_string(), label);
     if let Some((at, seen)) = membership_checks().lock().expect("lock").get(&cache_key) {
         if *seen == moves && at.elapsed() < MEMBERSHIP_RECHECK {
             return Ok(());
@@ -1351,7 +1681,7 @@ async fn check_relay_membership_with(
     }
     let (members, threshold) = match fetched {
         Some(fetched) => fetched?,
-        None => relay_members(relay, me, mailbox).await?,
+        None => relay_members(relay, me, label).await?,
     };
     let mismatch = |why: String| Err(NodeError::RelayMembership(why));
     let mut held: Vec<IdentityPublic> = members;
@@ -1387,8 +1717,44 @@ async fn check_relay_membership_with(
     Ok(())
 }
 
-/// Reads and verifies the whole log, returning the chain and the replayed state.
+/// Reads and verifies the whole log, returning the chain and the replayed state. Records
+/// whether the relay could be reached (`log_cache::LogCache::relay_status`).
 pub async fn load_state(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+) -> Result<(Chain, VaultState), NodeError> {
+    let result = Box::pin(load_state_inner(relay, me, material)).await;
+    record_reach(relay, material.descriptor.vault_id, &result);
+    result
+}
+
+/// Notes in the device's relay status whether `result` came from the relay or the relay
+/// couldn't be reached. Errors of this device's own (a bad copy, an encoding) say nothing.
+fn record_reach<T>(relay: &RelayClient, vault: MailboxId, result: &Result<T, NodeError>) {
+    let Some(cache) = relay.log_cache() else {
+        return;
+    };
+    let reached = match result {
+        Ok(_) => true,
+        Err(NodeError::Relay(e)) => !e.is_unreachable(),
+        Err(
+            NodeError::RelayRolledBack { .. }
+            | NodeError::RelayForked { .. }
+            | NodeError::RelayLostVault { .. }
+            | NodeError::RelayMembership(_),
+        ) => true,
+        Err(_) => return,
+    };
+    cache.record_relay(&vault, reached);
+}
+
+/// Whether `e` means the relay couldn't be reached (as opposed to an answer from it).
+pub fn relay_unreachable(e: &NodeError) -> bool {
+    matches!(e, NodeError::Relay(r) if r.is_unreachable())
+}
+
+async fn load_state_inner(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,
@@ -1397,16 +1763,16 @@ pub async fn load_state(
     // their layout deeper than rustc's query depth limit.
     // The relay's member list doesn't depend on the log: when it is due for a check, read
     // both at once (over Tor each request is a new stream, ~1 s).
-    let mailbox = material.descriptor.vault_id;
+    let ids = material.ids();
     let members = async {
-        match membership_checked_recently(relay, mailbox) {
+        match membership_checked_recently(relay, ids.label) {
             true => None,
-            false => Some(relay_members(relay, me, mailbox).await),
+            false => Some(relay_members(relay, me, ids.label).await),
         }
     };
     let log_key = material.log_key();
     let (log, members) =
-        Box::pin(async { tokio::join!(load_log(relay, me, mailbox, &log_key), members) }).await;
+        Box::pin(async { tokio::join!(load_log(relay, me, ids, &log_key), members) }).await;
     let (chain, state) = log?;
     let d = &state.descriptor;
     if d.group_public_key != material.descriptor.group_public_key
@@ -1416,7 +1782,10 @@ pub async fn load_state(
             "the vault log belongs to another vault".into(),
         ));
     }
-    Box::pin(check_relay_membership_with(relay, me, &state, members)).await?;
+    Box::pin(check_relay_membership_with(
+        relay, me, ids.label, &state, members,
+    ))
+    .await?;
     Ok((chain, state))
 }
 
@@ -1441,7 +1810,7 @@ pub struct Followed {
 pub async fn follow_relay(
     relay: &RelayClient,
     me: &Identity,
-    mailbox: MailboxId,
+    ids: VaultIds,
     key: &LogKey,
 ) -> Result<Followed, NodeError> {
     let Some(cache) = relay.log_cache() else {
@@ -1449,10 +1818,10 @@ pub async fn follow_relay(
             "this device keeps no copy to discard".into(),
         ));
     };
-    let ours: Vec<LogEntry> = match load_copy(relay, mailbox, key) {
+    let ours: Vec<LogEntry> = match load_copy(relay, ids.vault, key) {
         Ok(Some((copy, _))) => {
             // Only a real fork qualifies.
-            match Box::pin(load_log(relay, me, mailbox, key)).await {
+            match Box::pin(load_log(relay, me, ids, key)).await {
                 Err(NodeError::RelayForked { .. }) => {}
                 Err(e) => return Err(e),
                 Ok(_) => {
@@ -1469,20 +1838,20 @@ pub async fn follow_relay(
             ))
         }
         // A copy that doesn't verify is no anchor to keep.
-        Err(NodeError::LogCopyInvalid(_)) => cache.read(&mailbox)?,
+        Err(NodeError::LogCopyInvalid(_)) => cache.read(&ids.vault)?,
         Err(e) => return Err(e),
     };
     // The relay's log must stand on its own, checked without the anchor.
     let bare = relay.clone().with_log_cache(None);
-    let (theirs, state) = Box::pin(load_log(&bare, me, mailbox, key)).await?;
-    Box::pin(check_relay_membership(&bare, me, &state)).await?;
+    let (theirs, state) = Box::pin(load_log(&bare, me, ids, key)).await?;
+    Box::pin(check_relay_membership(&bare, me, ids.label, &state)).await?;
     // Where the two histories part.
     let common = ours
         .iter()
         .zip(theirs.entries())
         .take_while(|(a, b)| matches!((a.hash(), b.hash()), (Ok(x), Ok(y)) if x == y))
         .count() as u64;
-    cache.remove(&mailbox);
+    cache.remove(&ids.vault);
     save_copy(relay, &theirs);
     Ok(Followed {
         dropped: ours.len() as u64 - common,
@@ -1490,17 +1859,34 @@ pub async fn follow_relay(
     })
 }
 
-/// Reads and verifies the log of `mailbox` with `key`, without the member's material (a
-/// device recovering a seat has only the log key at first). The `Created` entry is checked
-/// against the descriptor it carries, which every member signed; later entries against the
-/// membership as of each entry.
+/// Reads and verifies the log of the vault `ids` names with `key`, without the member's
+/// material (a device recovering a seat has only the log key at first). The `Created`
+/// entry is checked against the descriptor it carries, which every member signed; later
+/// entries against the membership as of each entry. Saves the result as this device's
+/// copy (the anchor of later loads).
 pub async fn load_log(
     relay: &RelayClient,
     me: &Identity,
-    mailbox: MailboxId,
+    ids: VaultIds,
     key: &LogKey,
 ) -> Result<(Chain, VaultState), NodeError> {
-    let (mut chain, mut state, saved_len, rest) = match load_copy(relay, mailbox, key)? {
+    let (chain, state, saved_len) = read_log_verified(relay, me, ids, key).await?;
+    if saved_len == 0 || chain.len() > saved_len {
+        save_copy(relay, &chain);
+    }
+    Ok((chain, state))
+}
+
+/// [`load_log`] without saving the copy: the caller checks more first (a recovering
+/// phone's anchors). Also returns how many entries the device's copy had.
+pub(crate) async fn read_log_verified(
+    relay: &RelayClient,
+    me: &Identity,
+    ids: VaultIds,
+    key: &LogKey,
+) -> Result<(Chain, VaultState, u64), NodeError> {
+    let label = ids.label;
+    let (mut chain, mut state, saved_len, rest) = match load_copy(relay, ids.vault, key)? {
         Some((mut chain, mut state)) => {
             let saved_len = chain.len();
             // The copy is the anchor: the relay must still hold its last entry, and the
@@ -1508,7 +1894,7 @@ pub async fn load_log(
             let last = chain.entries().last().expect("a saved copy has entries");
             let last_hash = last.hash().map_err(proto)?;
             let from = saved_len - 1;
-            let page = match relay.read_log(me, mailbox, from).await {
+            let page = match relay.read_log(me, label, from).await {
                 Err(RelayClientError::Status { status: 404, .. }) => {
                     return Err(NodeError::RelayLostVault {
                         local_len: saved_len,
@@ -1529,24 +1915,21 @@ pub async fn load_log(
             (chain, state, saved_len, rest)
         }
         None => {
-            let first_page = relay.read_log(me, mailbox, 0).await?;
+            let first_page = relay.read_log(me, label, 0).await?;
             let first = first_page.first().ok_or(NodeError::Invalid(
                 crate::vault::VaultError::NotCreatedFirst,
             ))?;
             let rest = first_page.len() as u64 >= zafe_proto::relay::READ_PAGE;
-            let (mut chain, mut state) = start_chain(first, mailbox, key)?;
+            let (mut chain, mut state) = start_chain(first, ids.vault, key)?;
             extend_chain(&mut chain, &mut state, first_page.into_iter().skip(1), key)?;
             (chain, state, 0, rest)
         }
     };
     // A short page was the end of the log: one round trip instead of two.
     if rest {
-        catch_up(relay, me, key, &mut chain, &mut state).await?;
+        fetch_rest(relay, me, label, key, &mut chain, &mut state).await?;
     }
-    if saved_len == 0 || chain.len() > saved_len {
-        save_copy(relay, &chain);
-    }
-    Ok((chain, state))
+    Ok((chain, state, saved_len))
 }
 
 /// What [`reseed_relay`] did.
@@ -1563,24 +1946,24 @@ pub enum Reseeded {
 /// Roughly how much log goes into one reseed request (the relay's body limit is 1 MiB).
 const RESEED_BATCH_BYTES: usize = 512 * 1024;
 
-/// Restores the vault's log on the relay from this device's copy (spec §6.3): after the
-/// relay lost its database (or was rolled back to an older one), or when the members move
-/// to another relay (change the URL in Settings, then restore from the member whose copy
-/// is longest). A relay that doesn't know the vault is recreated with the membership
-/// the log ends with and the whole log; one that holds an older part of the same log gets
-/// the missing entries appended. Pending messages (signing requests, repair messages) are
-/// not restored: they are asked for again. The device re-registers its push token after.
+/// Restores the vault's log on the relay, under its label there, from this device's copy
+/// (spec §6.3): after the relay lost its database (or was rolled back to an older one). A
+/// relay that doesn't know the vault is recreated with the membership the log ends with
+/// and the whole log (a private relay needs the vault's create token on `relay`); one that
+/// holds an older part of the same log gets the missing entries appended. Pending messages
+/// (signing requests, repair messages) are not restored: they are asked for again. The
+/// device re-registers its push token after.
 ///
 /// Never makes the relay agree with a log it doesn't already match: a relay whose entries
 /// differ from the copy is [`NodeError::RelayForked`].
 pub async fn reseed_relay(
     relay: &RelayClient,
     me: &Identity,
-    mailbox: MailboxId,
+    ids: VaultIds,
     key: &LogKey,
 ) -> Result<Reseeded, NodeError> {
     use zafe_proto::relay::Reseed;
-    let (chain, state) = load_copy(relay, mailbox, key)?.ok_or_else(|| {
+    let (chain, state) = load_copy(relay, ids.vault, key)?.ok_or_else(|| {
         NodeError::Protocol("this device has no copy of the vault log to restore from".into())
     })?;
     let total = chain.len();
@@ -1601,7 +1984,7 @@ pub async fn reseed_relay(
             end += 1;
         }
         let request = Reseed {
-            mailbox,
+            mailbox: ids.label,
             members: members.clone(),
             threshold,
             from: from as u64,
@@ -1613,8 +1996,8 @@ pub async fn reseed_relay(
         if !answer.restored {
             // The relay had the vault already: check its members against the log, its
             // history against our copy, and catch it up.
-            Box::pin(check_relay_membership(relay, me, &state)).await?;
-            return catch_relay_up(relay, me, mailbox, &chain, answer.len).await;
+            Box::pin(check_relay_membership(relay, me, ids.label, &state)).await?;
+            return catch_relay_up(relay, me, ids, &chain, answer.len).await;
         }
         if answer.open {
             return Ok(Reseeded::Restored { entries: total });
@@ -1636,7 +2019,7 @@ pub async fn reseed_relay(
 async fn catch_relay_up(
     relay: &RelayClient,
     me: &Identity,
-    mailbox: MailboxId,
+    ids: VaultIds,
     chain: &Chain,
     relay_len: u64,
 ) -> Result<Reseeded, NodeError> {
@@ -1644,7 +2027,7 @@ async fn catch_relay_up(
     let shared = relay_len.min(chain.len());
     if shared > 0 {
         let at = shared - 1;
-        let page = relay.read_log(me, mailbox, at).await?;
+        let page = relay.read_log(me, ids.label, at).await?;
         let theirs = page.first().ok_or(NodeError::RelayRolledBack {
             local_len: chain.len(),
         })?;
@@ -1659,7 +2042,7 @@ async fn catch_relay_up(
     }
     let mut appended = 0;
     for entry in &ours[relay_len as usize..] {
-        match relay.append_log(entry).await? {
+        match append_entry(relay, me, ids, entry).await? {
             AppendResult::Appended { .. } => appended += 1,
             AppendResult::Conflict { .. } => {
                 return Err(NodeError::Protocol(
@@ -1686,21 +2069,14 @@ pub async fn append_event<R: RngCore + CryptoRng>(
 ) -> Result<u64, NodeError> {
     let bytes = event.to_bytes().map_err(proto)?;
     let key = material.log_key();
+    let ids = material.ids();
     for _ in 0..10 {
         state
             .check(me.public().sig_pk, event)
             .map_err(NodeError::Invalid)?;
-        let entry = LogEntry::create(
-            me,
-            &key,
-            material.descriptor.vault_id,
-            chain.len(),
-            chain.head(),
-            &bytes,
-            rng,
-        )
-        .map_err(proto)?;
-        match relay.append_log(&entry).await? {
+        let entry = LogEntry::create(me, &key, ids.vault, chain.len(), chain.head(), &bytes, rng)
+            .map_err(proto)?;
+        match append_entry(relay, me, ids, &entry).await? {
             AppendResult::Appended { index } => {
                 chain
                     .append(entry.clone(), &state.log_authors())
@@ -1709,7 +2085,9 @@ pub async fn append_event<R: RngCore + CryptoRng>(
                 save_copy(relay, chain);
                 return Ok(index);
             }
-            AppendResult::Conflict { .. } => catch_up(relay, me, &key, chain, state).await?,
+            AppendResult::Conflict { .. } => {
+                catch_up(relay, me, ids.label, &key, chain, state).await?
+            }
         }
     }
     Err(NodeError::Protocol(
@@ -3288,7 +3666,7 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
         let env = Envelope::sealed(
             me,
             &to,
-            material.descriptor.vault_id,
+            material.label(),
             seq.next_seq(),
             Kind::SigningRequest,
             &bytes,
@@ -3351,9 +3729,7 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
         })
     };
 
-    for (cursor, leader, env) in
-        read_inbox(relay, me, material.descriptor.vault_id, &members, 0).await?
-    {
+    for (cursor, leader, env) in read_inbox(relay, me, material.label(), &members, 0).await? {
         match env.header.kind {
             Kind::Join
             | Kind::DkgRound1
@@ -3437,7 +3813,7 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
                     Envelope::sealed(
                         me,
                         &leader,
-                        material.descriptor.vault_id,
+                        material.label(),
                         n,
                         Kind::SignatureShares,
                         &reply,
@@ -3456,7 +3832,7 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
     if !done.is_empty() {
         // Best effort: whatever stays expires on the relay after its retention period.
         report.acknowledged = relay
-            .ack_inbox(me, material.descriptor.vault_id, &done)
+            .ack_inbox(me, material.label(), &done)
             .await
             .unwrap_or(0);
     }
@@ -3497,7 +3873,7 @@ async fn read_shares(
     let members = members_by_pk(state);
     let wanted = request_hash(request)?;
     let mut shares = BTreeMap::new();
-    for (_, from, env) in read_inbox(relay, me, material.descriptor.vault_id, &members, 0).await? {
+    for (_, from, env) in read_inbox(relay, me, material.label(), &members, 0).await? {
         if env.header.kind != Kind::SignatureShares {
             continue;
         }
@@ -3818,37 +4194,70 @@ mod tests {
     }
     use super::*;
 
-    /// The app embeds invites in `zafe://join?invite=...` links and QR codes unescaped,
-    /// which relies on this character set; it also bounds the QR size.
-    #[test]
-    fn invite_text_is_url_safe_and_small() {
-        let invite = Invite {
-            mailbox: [7; 16],
+    fn invite(name: &str) -> Invite {
+        Invite {
+            vault_id: [7; 16],
+            label: [8; 16],
+            relay_url: Some("https://testnet.relay.zafe.cash".into()),
             join_token: [9; 32],
             creator: [3; 32],
             threshold: 2,
             members: 3,
-            name: "Grants committee — Ops fund 2026".into(),
-        };
+            name: name.into(),
+        }
+    }
+
+    /// The app embeds invites in `zafe://join?invite=...` links and QR codes unescaped,
+    /// which relies on this character set; it also bounds the QR size (a version 10 QR
+    /// code holds 395 alphanumeric characters at medium error correction).
+    #[test]
+    fn invite_text_is_url_safe_and_small() {
+        let invite = invite("Grants committee — Ops fund 2026");
         let text = invite.encode();
         assert!(text
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-:._~".contains(&b)));
-        assert!(text.len() < 300, "{} chars", text.len());
+        assert!(text.len() < 400, "{} chars", text.len());
         assert_eq!(Invite::decode(&text).unwrap(), invite);
     }
 
+    /// A version 2 invite (no relay, mailbox = vault id) still joins: label = vault id,
+    /// on the joiner's default relay.
     #[test]
-    fn invites_from_another_version_are_rejected_as_such() {
-        let invite = Invite {
+    fn version_2_invites_still_decode() {
+        #[derive(Serialize)]
+        struct V2 {
+            mailbox: MailboxId,
+            join_token: [u8; 32],
+            creator: [u8; 32],
+            threshold: u16,
+            members: u16,
+            name: String,
+        }
+        let body = postcard::to_allocvec(&V2 {
             mailbox: [7; 16],
             join_token: [9; 32],
             creator: [3; 32],
             threshold: 2,
             members: 3,
             name: "Ops".into(),
-        };
-        let text = invite.encode();
+        })
+        .unwrap();
+        let old = Invite::decode(&format!("zafe-invite-v2:{}", hex::encode(body))).unwrap();
+        assert_eq!(
+            old,
+            Invite {
+                label: [7; 16],
+                relay_url: None,
+                ..invite("Ops")
+            }
+        );
+        assert_eq!(old.ids(), VaultIds::legacy([7; 16]));
+    }
+
+    #[test]
+    fn invites_from_another_version_are_rejected_as_such() {
+        let text = invite("Ops").encode();
         let tag = format!("zafe-invite-v{}:", version::INVITE);
         assert!(text.starts_with(&tag));
         let newer = text.replacen(&tag, &format!("zafe-invite-v{}:", version::INVITE + 1), 1);
@@ -3872,6 +4281,76 @@ mod tests {
             Invite::decode("zafe-invite-vx:00"),
             Err(NodeError::BadInvite)
         ));
+    }
+
+    /// The setup log key message carries the create token; the untagged 36-byte payload
+    /// of older creators still reads.
+    #[test]
+    fn log_key_messages_old_and_new() {
+        let key = LogKey::from_bytes(0, [5; 32]);
+        let bytes = encode_log_key_message(&key, Some("s3cret")).unwrap();
+        let (back, token) = decode_log_key_message(&bytes).unwrap();
+        assert_eq!((back.epoch, *back.as_bytes()), (0, [5; 32]));
+        assert_eq!(token.as_deref(), Some("s3cret"));
+        let bytes = encode_log_key_message(&key, None).unwrap();
+        assert_eq!(decode_log_key_message(&bytes).unwrap().1, None);
+        let mut legacy = 0u32.to_le_bytes().to_vec();
+        legacy.extend_from_slice(&[5; 32]);
+        let (back, token) = decode_log_key_message(&legacy).unwrap();
+        assert_eq!((back.epoch, *back.as_bytes(), token), (0, [5; 32], None));
+    }
+
+    /// Version 1 material reads as a vault on the app-wide relay under its vault id.
+    #[test]
+    fn version_1_material_reads_as_legacy_relay() {
+        let descriptor = crate::vault::VaultDescriptor {
+            vault_id: [7; 16],
+            version: version::DESCRIPTOR,
+            name: "Grants".into(),
+            network: "regtest".into(),
+            threshold: 1,
+            members: vec![],
+            group_public_key: [1; 32],
+            ufvk: "uview".into(),
+            address: "u".into(),
+            use_qsk: true,
+            birthday_height: 2,
+            proposal_expiry_blocks: 8064,
+            epoch: 0,
+            transcript_hash: [2; 32],
+        };
+        #[derive(Serialize)]
+        struct V1 {
+            descriptor: crate::vault::VaultDescriptor,
+            key_package: Vec<u8>,
+            public_key_package: Vec<u8>,
+            vault_secret: [u8; 32],
+            log_key_epoch: u32,
+            log_key: [u8; 32],
+        }
+        let mut bytes = 1u16.to_le_bytes().to_vec();
+        bytes.extend(
+            postcard::to_allocvec(&V1 {
+                descriptor,
+                key_package: vec![3],
+                public_key_package: vec![4],
+                vault_secret: [5; 32],
+                log_key_epoch: 0,
+                log_key: [6; 32],
+            })
+            .unwrap(),
+        );
+        let m = VaultMaterial::from_bytes(&bytes).unwrap();
+        assert_eq!(m.relay, VaultRelay::legacy([7; 16]));
+        assert_eq!(m.ids(), VaultIds::legacy([7; 16]));
+        assert_eq!(m.relay.url_or("https://r"), "https://r");
+        // Saved again, it is version 2 and keeps its relay.
+        let again = VaultMaterial::from_bytes(&m.to_bytes().unwrap()).unwrap();
+        assert_eq!(again.relay, m.relay);
+        assert_eq!(
+            &m.to_bytes().unwrap()[..2],
+            &version::VAULT_MATERIAL.to_le_bytes()
+        );
     }
 
     #[test]

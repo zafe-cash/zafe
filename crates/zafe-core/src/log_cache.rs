@@ -11,8 +11,10 @@
 //! more than the relay holds, and the log key stays in secure storage. A file is replaced
 //! atomically and only ever grows.
 //!
-//! A missing file means "no anchor yet" (first load on this device, a restored backup):
-//! the first log the relay serves is trusted once, as before. A file that doesn't parse is
+//! A missing file means "no anchor yet" (first load on this device, or a restore from a
+//! backup made before backups carried the copy): the first log the relay serves is trusted
+//! once, as before. A backup's copy and a recovered seat's anchor are installed or checked
+//! before that first load (`node::install_log_copy`, `node::LogAnchor`). A file that doesn't parse is
 //! treated the same (a crash can't leave one: writes are atomic), a file in a newer
 //! version is an error (update the app).
 
@@ -39,7 +41,8 @@ pub enum LogCacheError {
     UnsupportedVersion(#[from] UnsupportedVersion),
 }
 
-/// A directory holding one `<mailbox hex>.log` file per vault.
+/// A directory holding one `<vault id hex>.log` file per vault, and its `<vault id
+/// hex>.status` ([`RelayStatus`]).
 #[derive(Clone, Debug)]
 pub struct LogCache {
     dir: PathBuf,
@@ -130,7 +133,7 @@ impl LogCache {
         Ok(true)
     }
 
-    /// Deletes a vault's copy (removing the vault from this device).
+    /// Deletes a vault's copy (removing the vault from this device, or following a fork).
     pub fn remove(&self, mailbox: &MailboxId) {
         let _ = fs::remove_file(self.file(mailbox));
     }
@@ -138,4 +141,88 @@ impl LogCache {
     pub fn dir(&self) -> &Path {
         &self.dir
     }
+
+    /// When the copy of the vault's log was last written (Unix seconds), if there is one.
+    pub fn written_at(&self, mailbox: &MailboxId) -> Option<u64> {
+        let modified = fs::metadata(self.file(mailbox)).ok()?.modified().ok()?;
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs())
+    }
+
+    fn status_file(&self, vault: &MailboxId) -> PathBuf {
+        self.dir.join(format!("{}.status", hex::encode(vault)))
+    }
+
+    /// When this device last reached the vault's relay, and since when it can't. A display
+    /// hint only: an unreadable file is "unknown".
+    pub fn relay_status(&self, vault: &MailboxId) -> RelayStatus {
+        if let Some(s) = STATUS
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&self.status_file(vault)).copied())
+        {
+            return s;
+        }
+        fs::read(self.status_file(vault))
+            .ok()
+            .and_then(|b| version::decode(Format::RelayStatus, &b).ok())
+            .unwrap_or_default()
+    }
+
+    /// Records that a request for the vault reached its relay (`reached`) or couldn't.
+    /// Written at most once a minute while the relay answers, so a busy app doesn't write
+    /// on every request. Best effort.
+    pub fn record_relay(&self, vault: &MailboxId, reached: bool) {
+        let now = unix_now();
+        let old = self.relay_status(vault);
+        let new = if reached {
+            RelayStatus {
+                last_reached: Some(now),
+                unreachable_since: None,
+            }
+        } else {
+            RelayStatus {
+                last_reached: old.last_reached,
+                unreachable_since: old.unreachable_since.or(Some(now)),
+            }
+        };
+        let stale = |at: Option<u64>| at.is_none_or(|t| now.saturating_sub(t) >= 60);
+        let changed = if reached {
+            old.unreachable_since.is_some() || stale(old.last_reached)
+        } else {
+            old.unreachable_since.is_none()
+        };
+        if !changed {
+            return;
+        }
+        let path = self.status_file(vault);
+        if let Ok(mut m) = STATUS.lock() {
+            m.insert(path.clone(), new);
+        }
+        if let Ok(bytes) = version::encode(Format::RelayStatus, &new) {
+            let _ = fs::create_dir_all(&self.dir);
+            let _ = crate::durable::write(&path, &bytes);
+        }
+    }
+}
+
+/// Whether this device could reach a vault's relay, for "Can't reach relay · since 09:14".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RelayStatus {
+    /// The last request that the relay answered (Unix seconds).
+    pub last_reached: Option<u64>,
+    /// The first failed request since then, while the relay can't be reached.
+    pub unreachable_since: Option<u64>,
+}
+
+/// The last status recorded by this process per file (saves a read per request).
+static STATUS: Mutex<std::collections::BTreeMap<PathBuf, RelayStatus>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }

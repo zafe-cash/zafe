@@ -6,12 +6,13 @@ use serde::{de::DeserializeOwned, Serialize};
 use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, ForgetPush,
-        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend, LogRead,
-        LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse, MembersRead, MembersResponse,
-        PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush,
-        RelayInfo, Remove, RenewInvite, ReplaceApproval, ReplaceMember, Reseed, ReseedResponse,
-        Seal, SetThreshold, Signed, WaitRequest, WaitResponse, CREATE_TOKEN_HEADER,
-        MAX_ACK_CURSORS, MAX_WAIT_SECS, UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
+        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
+        LabelledReplace, LogRead, LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse,
+        MembersRead, MembersResponse, PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind,
+        RecoveryValues, RegisterPush, RelayInfo, Remove, RenewInvite, ReplaceApproval,
+        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
+        WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNKNOWN_MAILBOX,
+        UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
     Envelope, Identity, LogEntry, MailboxId, ProtoError,
@@ -68,6 +69,17 @@ pub enum RelayClientError {
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 impl RelayClientError {
+    /// The relay couldn't be reached or didn't answer itself: no connection, a timeout, Tor
+    /// not connected, or a gateway error (502-504) from a proxy in front of it. Anything
+    /// else came from the relay.
+    pub fn is_unreachable(&self) -> bool {
+        match self {
+            RelayClientError::Transport { .. } => true,
+            RelayClientError::Status { status, .. } => (502..=504).contains(status),
+            _ => false,
+        }
+    }
+
     /// This app is older than what it talked to: updating the app fixes it.
     pub fn app_outdated(&self) -> bool {
         match self {
@@ -315,6 +327,11 @@ impl RelayClient {
             .filter(|t| !t.is_empty())
             .map(str::to_owned);
         self
+    }
+
+    /// The create token this client sends with creations and restores, if any.
+    pub fn create_token(&self) -> Option<&str> {
+        self.create_token.as_deref()
     }
 
     /// `GET /health`: whether a Zafe relay answers at this URL (200 `ok`).
@@ -619,6 +636,35 @@ impl RelayClient {
             },
         )
         .await
+    }
+
+    /// [`RelayClient::replace_member`] for the vault this relay files under `mailbox` (its
+    /// label there). The approvals are signed over `approval`, which names the vault id:
+    /// where the label is the vault id the older route is used; otherwise
+    /// `/v1/mailbox/replace-labelled` ([`RelayClientError::RelayTooOld`] on a relay
+    /// without it).
+    pub async fn replace_member_at(
+        &self,
+        who: &Identity,
+        mailbox: MailboxId,
+        approval: ReplaceApproval,
+        approvals: Vec<([u8; 32], Vec<u8>)>,
+    ) -> Result<(), RelayClientError> {
+        if mailbox == approval.mailbox {
+            return self.replace_member(who, approval, approvals).await;
+        }
+        const ROUTE: &str = "/v1/mailbox/replace-labelled";
+        self.signed(
+            ROUTE,
+            who,
+            LabelledReplace {
+                mailbox,
+                approval,
+                approvals,
+            },
+        )
+        .await
+        .map_err(route_missing(ROUTE))
     }
 
     /// Leaves one value of the safety check of `subject`'s seat recovery (see

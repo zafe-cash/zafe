@@ -205,6 +205,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RecoveryStage dco_decode_recovery_stage(dynamic raw);
 
   @protected
+  RelayCheck dco_decode_relay_check(dynamic raw);
+
+  @protected
+  RelayStatusInfo dco_decode_relay_status_info(dynamic raw);
+
+  @protected
   RepairInfo dco_decode_repair_info(dynamic raw);
 
   @protected
@@ -215,6 +221,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ScannedRequest dco_decode_scanned_request(dynamic raw);
+
+  @protected
+  SeatLinkInfo dco_decode_seat_link_info(dynamic raw);
 
   @protected
   SeatMove dco_decode_seat_move(dynamic raw);
@@ -250,6 +259,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   UnapprovedSpendInfo dco_decode_unapproved_spend_info(dynamic raw);
 
   @protected
+  UnapprovedSpends dco_decode_unapproved_spends(dynamic raw);
+
+  @protected
   void dco_decode_unit(dynamic raw);
 
   @protected
@@ -257,6 +269,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   VaultActivityKind dco_decode_vault_activity_kind(dynamic raw);
+
+  @protected
+  VaultRelaySettings dco_decode_vault_relay_settings(dynamic raw);
 
   @protected
   VaultSummary dco_decode_vault_summary(dynamic raw);
@@ -460,6 +475,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RecoveryStage sse_decode_recovery_stage(SseDeserializer deserializer);
 
   @protected
+  RelayCheck sse_decode_relay_check(SseDeserializer deserializer);
+
+  @protected
+  RelayStatusInfo sse_decode_relay_status_info(SseDeserializer deserializer);
+
+  @protected
   RepairInfo sse_decode_repair_info(SseDeserializer deserializer);
 
   @protected
@@ -470,6 +491,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ScannedRequest sse_decode_scanned_request(SseDeserializer deserializer);
+
+  @protected
+  SeatLinkInfo sse_decode_seat_link_info(SseDeserializer deserializer);
 
   @protected
   SeatMove sse_decode_seat_move(SseDeserializer deserializer);
@@ -507,6 +531,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  UnapprovedSpends sse_decode_unapproved_spends(SseDeserializer deserializer);
+
+  @protected
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
@@ -514,6 +541,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   VaultActivityKind sse_decode_vault_activity_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  VaultRelaySettings sse_decode_vault_relay_settings(
     SseDeserializer deserializer,
   );
 
@@ -767,6 +799,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_recovery_stage(RecoveryStage self, SseSerializer serializer);
 
   @protected
+  void sse_encode_relay_check(RelayCheck self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_relay_status_info(
+    RelayStatusInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_repair_info(RepairInfo self, SseSerializer serializer);
 
   @protected
@@ -783,6 +824,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ScannedRequest self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_seat_link_info(SeatLinkInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_seat_move(SeatMove self, SseSerializer serializer);
@@ -821,6 +865,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_unapproved_spends(
+    UnapprovedSpends self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_unit(void self, SseSerializer serializer);
 
   @protected
@@ -829,6 +879,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_vault_activity_kind(
     VaultActivityKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_vault_relay_settings(
+    VaultRelaySettings self,
     SseSerializer serializer,
   );
 

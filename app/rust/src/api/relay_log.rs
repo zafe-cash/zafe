@@ -1,13 +1,10 @@
 //! Restoring the vault log on a relay that lost it (spec §6.3), from this device's copy.
 
-use zafe_core::{
-    node::{self, Reseeded},
-    relay_client::RelayClient,
-};
+use zafe_core::node::{self, Reseeded};
 
 use super::{
     error::ZafeError,
-    vault::{identity, material, runtime},
+    vault::{identity, material, runtime, vault_relay},
 };
 
 /// Restores the vault's log on the relay from this phone's copy: recreates the vault
@@ -15,7 +12,8 @@ use super::{
 /// entries were put back (0: the relay already had everything this phone has). Refuses a
 /// relay whose history differs from this phone's copy (`RelayForked`). Messages that were
 /// in flight (signing requests) are not restored: members are asked again. Re-register
-/// the push token afterwards.
+/// the push token afterwards. Runs on the vault's own relay, under its label, with its
+/// create token (a private relay refuses a restore without it: `CreateTokenRefused`).
 pub fn restore_relay(
     relay_url: String,
     seeds: Vec<u8>,
@@ -23,13 +21,8 @@ pub fn restore_relay(
 ) -> Result<u32, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::pooled(relay_url);
-    let out = runtime().block_on(node::reseed_relay(
-        &relay,
-        &me,
-        m.descriptor.vault_id,
-        &m.log_key(),
-    ))?;
+    let relay = vault_relay(&relay_url, &m);
+    let out = runtime().block_on(node::reseed_relay(&relay, &me, m.ids(), &m.log_key()))?;
     Ok(match out {
         Reseeded::Restored { entries } => u32::try_from(entries).unwrap_or(u32::MAX),
         Reseeded::CaughtUp { appended } => u32::try_from(appended).unwrap_or(u32::MAX),
@@ -48,12 +41,7 @@ pub fn follow_relay(
 ) -> Result<u32, ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let relay = RelayClient::pooled(relay_url);
-    let out = runtime().block_on(node::follow_relay(
-        &relay,
-        &me,
-        m.descriptor.vault_id,
-        &m.log_key(),
-    ))?;
+    let relay = vault_relay(&relay_url, &m);
+    let out = runtime().block_on(node::follow_relay(&relay, &me, m.ids(), &m.log_key()))?;
     Ok(u32::try_from(out.dropped).unwrap_or(u32::MAX))
 }

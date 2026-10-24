@@ -256,6 +256,19 @@ pub struct ReplaceMember {
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
 }
 
+/// [`ReplaceMember`] on a labelled mailbox (`POST /v1/mailbox/replace-labelled`, a newer
+/// route: an older relay answers 404 with no body). The approvals are signed over
+/// `approval`, whose `mailbox` is the **vault id** (the same signatures are in the vault
+/// log); `mailbox` here is this relay's label for the vault, and the relay requires
+/// `approval.mailbox` to be the vault id it stored from the mailbox's first entry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LabelledReplace {
+    pub mailbox: MailboxId,
+    pub approval: ReplaceApproval,
+    /// `(approver sig_pk, signature)`.
+    pub approvals: Vec<([u8; 32], Vec<u8>)>,
+}
+
 /// Restores a vault on a relay that lost it (wiped database, or moving to another relay)
 /// from a member's saved copy of the log (`POST /v1/mailbox/reseed`; a newer route: a relay
 /// without it answers 404). Signed by one of `members`.

@@ -2,8 +2,11 @@
 //! restore them on another.
 //!
 //! Contents: the member's identity seeds, the vault material (FROST key package, vault
-//! secret `sk`, descriptor, log key; `use_qsk` is part of the descriptor), the invite and
-//! (since version 2) the local names this member gave the other signers.
+//! secret `sk`, descriptor, log key, and since material version 2 the vault's relay URL,
+//! mailbox label and create token; `use_qsk` is part of the descriptor), the invite, (since
+//! version 2) the local names this member gave the other signers and (since version 3)
+//! this device's copy of the vault log, so a restore is anchored before it first talks to
+//! a relay (`node::install_log_copy`).
 //! **Never** FROST nonces or pre-published pool nonces: a restored device must never be
 //! able to reuse a nonce, so it starts with none and publishes a fresh pool.
 //!
@@ -20,7 +23,7 @@
 //! the same bytes for password managers and copy/paste.
 //!
 //! Versions: 1 had no signer names; it still decrypts (its contents are migrated with
-//! no names). 2 (current) adds `names`.
+//! no names). 2 adds `names`; it still decrypts (no log copy). 3 (current) adds `log`.
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
@@ -44,6 +47,8 @@ const MAGIC: &[u8; 7] = b"ZAFEBAK";
 const VERSION: u8 = version::BACKUP as u8;
 /// The first format (no signer names): still read, migrated to [`Contents`].
 const VERSION_1: u8 = 1;
+/// Signer names, no log copy: still read.
+const VERSION_2: u8 = 2;
 /// Longest signer name kept from a backup (the app caps names at 32 characters).
 const MAX_NAME_CHARS: usize = 64;
 /// Most names kept from a backup (vaults have far fewer members).
@@ -104,6 +109,33 @@ pub struct Contents {
     pub created_at: u64,
     /// Local names for the vault's signers (signing key hex → name), since version 2.
     pub names: BTreeMap<String, String>,
+    /// This device's copy of the vault log (`LogEntry::to_bytes` each, in order), since
+    /// version 3. Encrypted with the log key and signed, like on the relay; empty when the
+    /// device had none.
+    pub log: Vec<Vec<u8>>,
+}
+
+/// Version 2 contents (no log copy).
+#[derive(Deserialize)]
+struct ContentsV2 {
+    identity_seeds: Vec<u8>,
+    material: Vec<u8>,
+    invite: String,
+    created_at: u64,
+    names: BTreeMap<String, String>,
+}
+
+impl From<ContentsV2> for Contents {
+    fn from(v2: ContentsV2) -> Self {
+        Self {
+            identity_seeds: v2.identity_seeds,
+            material: v2.material,
+            invite: v2.invite,
+            created_at: v2.created_at,
+            names: v2.names,
+            log: Vec::new(),
+        }
+    }
 }
 
 /// Version 1 contents (no names).
@@ -123,6 +155,7 @@ impl From<ContentsV1> for Contents {
             invite: v1.invite,
             created_at: v1.created_at,
             names: BTreeMap::new(),
+            log: Vec::new(),
         }
     }
 }
@@ -133,6 +166,7 @@ impl core::fmt::Debug for Contents {
         f.debug_struct("Contents")
             .field("created_at", &self.created_at)
             .field("names", &self.names.len())
+            .field("log", &self.log.len())
             .finish_non_exhaustive()
     }
 }
@@ -232,7 +266,7 @@ pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Contents, BackupError> 
         return Err(BackupError::NotABackup);
     }
     let found = bytes[7];
-    if found != VERSION_1 {
+    if found != VERSION_1 && found != VERSION_2 {
         version::check(Format::Backup, u16::from(found))?;
     }
     let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().expect("4"));
@@ -266,12 +300,14 @@ pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Contents, BackupError> 
             .map_err(|_| BackupError::WrongPassphraseOrDamaged)?,
     );
     let bad = |_| BackupError::Encoding("backup contents".into());
-    let mut contents: Contents = if found == VERSION_1 {
-        postcard::from_bytes::<ContentsV1>(&plain)
+    let mut contents: Contents = match found {
+        VERSION_1 => postcard::from_bytes::<ContentsV1>(&plain)
             .map_err(bad)?
-            .into()
-    } else {
-        postcard::from_bytes(&plain).map_err(bad)?
+            .into(),
+        VERSION_2 => postcard::from_bytes::<ContentsV2>(&plain)
+            .map_err(bad)?
+            .into(),
+        _ => postcard::from_bytes(&plain).map_err(bad)?,
     };
     contents.validate()?;
     // Names are display-only; drop anything a signer row couldn't show.
@@ -357,9 +393,9 @@ mod tests {
         created_at: u64,
     }
 
-    /// A backup made by a version-1 build still restores, with no names.
+    /// Backups made by version 1 and 2 builds still restore (no names, no log copy).
     #[test]
-    fn version_1_backups_migrate() {
+    fn older_backups_migrate() {
         let mut rng = StdRng::seed_from_u64(9);
         let me = Identity::generate(&mut rng);
         let material = VaultMaterial {
@@ -388,6 +424,7 @@ mod tests {
             vault_secret: [5; 32],
             log_key_epoch: 0,
             log_key: [6; 32],
+            relay: crate::node::VaultRelay::legacy([7; 16]),
         }
         .to_bytes()
         .unwrap();
@@ -407,5 +444,29 @@ mod tests {
         assert_eq!(back.invite, "zafe-invite-v1:abc");
         assert_eq!(back.created_at, 5);
         assert!(back.names.is_empty());
+        assert!(back.log.is_empty());
+
+        // Version 2: names, no log copy.
+        #[derive(Serialize)]
+        struct V2<'a> {
+            identity_seeds: &'a [u8],
+            material: &'a [u8],
+            invite: &'a str,
+            created_at: u64,
+            names: BTreeMap<String, String>,
+        }
+        let names = BTreeMap::from([("ab".to_owned(), "Bob".to_owned())]);
+        let plain = postcard::to_allocvec(&V2 {
+            identity_seeds: &seeds,
+            material: &material,
+            invite: "zafe-invite-v2:abc",
+            created_at: 6,
+            names: names.clone(),
+        })
+        .unwrap();
+        let bytes = seal(VERSION_2, &plain, PASS, KdfParams::DEFAULT, &mut rng).unwrap();
+        let back = decrypt(&bytes, PASS).unwrap();
+        assert_eq!((back.names, back.created_at), (names, 6));
+        assert!(back.log.is_empty());
     }
 }

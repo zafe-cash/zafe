@@ -13,7 +13,7 @@ use zafe_core::{
     relay_client::RelayClient,
     repair::{
         approve_replacement, current_material, help_repairs, new_phone_words, recovery_checks,
-        retry_repair, try_recover, RecoveryRequest, RecoveryStatus,
+        retry_repair, try_recover, RecoveryRequest, RecoveryStatus, SeatLink,
     },
     signing,
     wallet::regtest_network,
@@ -195,6 +195,13 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let mut rng = StdRng::seed_from_u64(71);
     let dir = std::env::temp_dir().join(format!("zafe-repair-{}", std::process::id()));
     let (dir_b, dir_c) = (dir.join("b"), dir.join("c"));
+    // A co-signer's seat link tells the new device where the vault is: its own relay (not
+    // the default given here) and the mailbox label there.
+    let link =
+        SeatLink::decode(&SeatLink::for_vault(b, "https://unused.example").encode()).unwrap();
+    assert_eq!(link.relay_url, relay.base_url());
+    assert_eq!(link.label, b.label());
+    let label = Some(link.label);
     set_name(&relay, &ids[0], a, "Alice", &mut rng)
         .await
         .unwrap();
@@ -211,7 +218,7 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let words_c = compare_words(&relay, &ids[2], &fresh).await;
     assert_ne!(words_b, words_c, "each co-signer has its own words");
     assert!(matches!(
-        try_recover(&relay, &fresh).await.unwrap(),
+        try_recover(&relay, &fresh, label).await.unwrap(),
         RecoveryStatus::Waiting
     ));
 
@@ -240,7 +247,7 @@ async fn a_lost_seat_moves_to_a_new_device() {
         Err(NodeError::Invalid(_))
     ));
     assert!(matches!(
-        try_recover(&relay, &fresh).await.unwrap(),
+        try_recover(&relay, &fresh, label).await.unwrap(),
         RecoveryStatus::Waiting
     ));
 
@@ -250,7 +257,7 @@ async fn a_lost_seat_moves_to_a_new_device() {
             .await
             .unwrap()
     );
-    let (_, state) = load_state(&relay, &ids[1], b).await.unwrap();
+    let (chain, state) = load_state(&relay, &ids[1], b).await.unwrap();
     assert!(state.descriptor.member(&old).is_none());
     assert!(state.descriptor.member(&fresh.public().sig_pk).is_some());
     assert_eq!(
@@ -258,7 +265,7 @@ async fn a_lost_seat_moves_to_a_new_device() {
         "Alice",
         "the name moves too"
     );
-    let on_relay = relay.members(&ids[1], a.descriptor.vault_id).await.unwrap();
+    let on_relay = relay.members(&ids[1], a.label()).await.unwrap();
     assert!(on_relay.members.contains(fresh.public()));
     assert!(!on_relay.members.iter().any(|m| m.sig_pk == old));
     assert!(
@@ -266,44 +273,52 @@ async fn a_lost_seat_moves_to_a_new_device() {
         "the lost device is out"
     );
     assert!(matches!(
-        try_recover(&relay, &fresh).await.unwrap(),
+        try_recover(&relay, &fresh, label).await.unwrap(),
         RecoveryStatus::SeatMoved { received: 0, .. }
     ));
 
     // The two helpers repair the share, whenever each of them runs.
-    let first = help_repairs(&relay, &ids[1], b, &state, &dir_b, &mut rng)
+    let first = help_repairs(&relay, &ids[1], b, &chain, &state, &dir_b, &mut rng)
         .await
         .unwrap();
     assert_eq!(
         (first.deltas_sent, first.sigmas_sent, first.waiting),
         (1, 0, 1)
     );
-    let second = help_repairs(&relay, &ids[2], c, &state, &dir_c, &mut rng)
+    let second = help_repairs(&relay, &ids[2], c, &chain, &state, &dir_c, &mut rng)
         .await
         .unwrap();
     assert_eq!((second.deltas_sent, second.sigmas_sent), (1, 1));
     assert!(matches!(
-        try_recover(&relay, &fresh).await.unwrap(),
+        try_recover(&relay, &fresh, label).await.unwrap(),
         RecoveryStatus::SeatMoved {
             received: 1,
             needed: 2
         }
     ));
-    let third = help_repairs(&relay, &ids[1], b, &state, &dir_b, &mut rng)
+    let third = help_repairs(&relay, &ids[1], b, &chain, &state, &dir_b, &mut rng)
         .await
         .unwrap();
     assert_eq!((third.deltas_sent, third.sigmas_sent), (0, 1));
     // Done: nothing more to do.
-    let again = help_repairs(&relay, &ids[1], b, &state, &dir_b, &mut rng)
+    let again = help_repairs(&relay, &ids[1], b, &chain, &state, &dir_b, &mut rng)
         .await
         .unwrap();
     assert_eq!(again, Default::default());
 
-    let RecoveryStatus::Done { material, invite } = try_recover(&relay, &fresh).await.unwrap()
+    let RecoveryStatus::Done { material, invite } =
+        try_recover(&relay, &fresh, label).await.unwrap()
     else {
         panic!("not recovered");
     };
-    assert_eq!(invite.mailbox, a.descriptor.vault_id);
+    assert_eq!(invite.vault_id, a.descriptor.vault_id);
+    assert_eq!(invite.label, a.label());
+    assert_ne!(
+        invite.label, invite.vault_id,
+        "a new vault's mailbox is a label"
+    );
+    assert_eq!(material.ids(), a.ids());
+    assert_eq!(material.relay.url.as_deref(), Some(relay.base_url()));
     assert_eq!(invite.threshold, 2);
     let (repaired, original) = (material.key_package().unwrap(), a.key_package().unwrap());
     assert_eq!(repaired.identifier(), original.identifier());
@@ -356,12 +371,20 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
             .await
             .unwrap();
     }
-    let (_, state) = load_state(&relay, &ids[1], &m[1]).await.unwrap();
+    let (chain, state) = load_state(&relay, &ids[1], &m[1]).await.unwrap();
     let index = state.replacements[0].index;
     // Member 1 does its part; member 2 (the other helper) never does.
-    let report = help_repairs(&relay, &ids[1], &m[1], &state, &dir.join("1"), &mut rng)
-        .await
-        .unwrap();
+    let report = help_repairs(
+        &relay,
+        &ids[1],
+        &m[1],
+        &chain,
+        &state,
+        &dir.join("1"),
+        &mut rng,
+    )
+    .await
+    .unwrap();
     assert_eq!(report.waiting, 1);
 
     // Only a member who isn't helping can take over, and only from a helper.
@@ -394,11 +417,12 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
 
     // The new attempt: member 1 starts over, member 3 joins, and the key arrives.
     for (i, sigmas) in [(1usize, 0usize), (3, 1), (1, 1)] {
-        let (_, state) = load_state(&relay, &ids[i], &m[i]).await.unwrap();
+        let (chain, state) = load_state(&relay, &ids[i], &m[i]).await.unwrap();
         let report = help_repairs(
             &relay,
             &ids[i],
             &m[i],
+            &chain,
             &state,
             &dir.join(i.to_string()),
             &mut rng,
@@ -407,7 +431,8 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
         .unwrap();
         assert_eq!(report.sigmas_sent, sigmas, "member {i}");
     }
-    let RecoveryStatus::Done { material, .. } = try_recover(&relay, &fresh).await.unwrap() else {
+    let RecoveryStatus::Done { material, .. } = try_recover(&relay, &fresh, None).await.unwrap()
+    else {
         panic!("not recovered");
     };
     assert_eq!(

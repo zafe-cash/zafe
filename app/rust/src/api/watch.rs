@@ -134,12 +134,13 @@ pub fn watch_vault_with(
     on_event: impl FnMut(VaultActivity) -> bool + Send + 'static,
 ) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
-    let mailbox = self::material(&material)?.descriptor.vault_id;
+    let m = self::material(&material)?;
     watches().send_modify(|w| w.latest = w.latest.max(watch_id));
     runtime().spawn(watch_loop(
-        RelayClient::pooled(relay_url),
+        super::vault::vault_relay(&relay_url, &m),
         me,
-        mailbox,
+        m.label(),
+        m.descriptor.vault_id,
         watch_id,
         on_event,
     ));
@@ -162,6 +163,7 @@ async fn watch_loop(
     relay: RelayClient,
     me: Identity,
     mailbox: MailboxId,
+    vault: MailboxId,
     id: i64,
     mut on_event: impl FnMut(VaultActivity) -> bool,
 ) {
@@ -183,6 +185,13 @@ async fn watch_loop(
             r = relay.wait_for_activity(&me, mailbox, log_len, inbox_after, wait) => r,
         };
         let mut pause = Duration::ZERO;
+        // "Can't reach relay · since 09:14" (throttled: at most a write a minute).
+        if let Some(cache) = relay.log_cache() {
+            match &result {
+                Err(e) if e.is_unreachable() => cache.record_relay(&vault, false),
+                _ => cache.record_relay(&vault, true),
+            }
+        }
         let event = match result {
             Ok(Some(now)) => {
                 failures = 0;

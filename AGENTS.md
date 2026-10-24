@@ -200,10 +200,14 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     update before a seat move); 5 `RepairRetry`/`RepairDone`; 6 one-tap per fully covered group
     (gate by tag); 7 `Broadcast` must carry the PCZT's txid (gate); 8 `PoolReset` (gate);
     9 highest-version replay + parseable PCZT check (gate).
-  - `BACKUP` 2 (signer names; v1 still restores), `RELAY_DB` 4 (vault id + expiry columns;
-    migrated from 1-3, old rows get `vault_id = id`, seen today, shared),
-    `REPAIR` 2, `INVITE` 2 (safety words), `NONCES`/`POOL_NONCE` 2 (encrypted; v1 still read),
-    `DKG_ROUND1` 3, `LOG_CACHE` 1.
+  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 4 (vault
+    id + expiry columns; migrated from 1-3, old rows get `vault_id = id`, seen today, shared),
+    `REPAIR` 3 (sigma carries the helper's `LogAnchor` + create token; v2 still read),
+    `INVITE` 3 (2: safety words; 3: vault id + label + relay URL, v2 reads as label = vault
+    id on the default relay), `VAULT_MATERIAL` 2 (`relay`; v1 reads as legacy),
+    `NONCES`/`POOL_NONCE` 2 (encrypted; v1 still read), `DKG_ROUND1` 3, `LOG_CACHE` 1,
+    `LOG_KEY_MESSAGE` 1 (setup log key + create token; the untagged 36-byte payload still
+    reads), `SEAT_LINK` 1 (`zafe-seat-v1:`), `RELAY_STATUS` 1.
 
 ### Relay and client
 - **Relay is blind**: it sees public keys, ciphertext, metadata. Clients drop envelopes for
@@ -212,10 +216,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   process issued (clocks step back). Keygen, safety-word and signing-reply sends go through
   `node::send_fresh` (re-seal with a fresh seq on 409).
 - **Rollback and loss** (spec §6.3, `log_cache`): each device keeps the verified log
-  (`<dir>/<vault id>.log`, grows only). `load_log` rebuilds from it and refuses a relay
-  missing our last entry (`RelayRolledBack`), with another one (`RelayForked`) or no mailbox
-  (`RelayLostVault`). A copy that doesn't verify is `LogCopyInvalid`, never a silent first
-  load. `log_cache::configure` once per process/isolate (bridge `identity()` fails closed
+  (`<dir>/<vault id>.log`, keyed by vault id, never the label; grows only). `load_log`
+  rebuilds from it and refuses a relay missing our last entry (`RelayRolledBack`), with
+  another one (`RelayForked`) or no mailbox (`RelayLostVault`). A copy that doesn't verify is
+  `LogCopyInvalid`, never a silent first load. `log_cache::configure` once per process/isolate (bridge `identity()` fails closed
   otherwise). Restore with `reseed_relay`; leave a fork only via `node::follow_relay` (behind a
   dialog + unlock). Don't build anything that changes replay of existing entries without a gate.
 - **Relay membership check**: `reseed` lets the restorer pick members, so
@@ -237,8 +241,28 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - **Labels** (`docs/relay-move.md` §4.6): a relay mailbox id is a label; `mailboxes.vault_id`
   (from the first entry) must match every entry's `EntryHeader.mailbox` (appends and reseed).
   `/v1/log/append` only reaches label == vault id; labelled vaults use `/v1/log/append-labelled`
-  (`RelayClient::append_log_to`). New routes answer 404 only for "unknown mailbox"
-  (`UNKNOWN_MAILBOX`): a bare 404 is an old relay (`RelayClientError::RelayTooOld`).
+  (`RelayClient::append_log_to`). Seat-move approvals are signed over the **vault id** (they
+  are in the log too): labelled mailboxes use `/v1/mailbox/replace-labelled`
+  (`replace_member_at`), which checks the stored vault id. New routes answer 404 only for
+  "unknown mailbox" (`UNKNOWN_MAILBOX`): a bare 404 is an old relay (`RelayTooOld`).
+- **Vault ids vs labels in clients** (`node::VaultIds`): the vault id binds keys, FROST ids,
+  `sk` commitments, safety words, the descriptor and `EntryHeader.mailbox`/`Chain`/log copy;
+  the **label** addresses the relay (envelope `Header.mailbox`, every signed request, appends,
+  inbox, membership check). New vaults get a random label ≠ vault id (`create_vault`, which
+  refuses a relay without `/v1/info`); legacy vaults have label = vault id. Never pass
+  `descriptor.vault_id` to a `RelayClient` method: use `material.label()` / `ids()`.
+- **Per-vault relay** lives in `VaultMaterial.relay` (`VaultRelay { url, label,
+  create_token }`; secure storage, CLI `vault.bin`, backups). `url: None` = a pre-2026-10-25
+  vault on the app-wide setting. Bridge calls build clients with `vault::vault_relay(default,
+  &m)` / `invite_relay`; the `relay_url` Dart passes is only that fallback. The CLI always
+  uses `--relay`. The create token reaches members only sealed (`LogKeyMessage` at setup,
+  repair sigma) and in backups, never in invites or seat links; the creator's `setup_step`
+  needs it on **every** call (it goes out once, with the log key).
+- **Anchors**: a restore installs the backup's log copy (`node::install_log_copy`, verified)
+  before the first relay load; a recovering phone checks every sigma's `LogAnchor` before
+  trusting the log and saves its copy only after (`node::read_log_verified`). Relay
+  reachability per vault: `LogCache::relay_status` (`<vault>.status`, written by `load_state`
+  and the bridge watch, at most once a minute while reachable).
 - **Expiry** (`zafe_relay::expiry`, off in `Relay::new()`): every authenticated mailbox
   request calls `relay.touch` after its membership check (writes at most once a day), except
   leaving (`/v1/push/forget`). Deletion goes through `delete_mailbox`: add any new
@@ -350,7 +374,9 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   (state in `~/.cache/zafe-harness`; `cargo build -p zafe-cli` after core changes). WSL2 has no
   USB: `adb pair IP:PORT CODE` on one line. Record with `adb shell screenrecord` as a
   background task. Phone: proof ~1.7 s on 8 threads, round 2 12 ms / 6.8 MB.
-- Toolchain: `~/android/install-toolchain.sh`, `source ~/android/env.sh`.
+- Toolchain: `~/android/install-toolchain.sh`, `source ~/android/env.sh`. env.sh puts
+  `~/flutter` (3.41, too old for `pubspec.yaml`) first: then `export
+  PATH=$HOME/flutter-3.47/bin:$PATH` (no `fvm` binary here).
 
 ## Upstream status (check before relying on it)
 

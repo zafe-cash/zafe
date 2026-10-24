@@ -34,13 +34,14 @@ use serde::{Deserialize, Serialize};
 use zafe_proto::{
     relay::{RecoveryPut, RecoveryValueKind, ReplaceApproval, Signed},
     version::{self, Format},
-    Envelope, Identity, IdentityPublic, Kind, LogKey, MailboxId,
+    Chain, Envelope, Identity, IdentityPublic, Kind, LogKey, MailboxId,
 };
 
 use crate::{
     node::{
-        append_event, frost_id_of, load_log, load_state, members_by_pk, read_inbox, send_fresh,
-        Invite, NodeError, SeqCounter, VaultMaterial,
+        append_event, frost_id_of, load_state, members_by_pk, read_inbox, read_log_verified,
+        save_copy, send_fresh, Invite, LogAnchor, NodeError, SeqCounter, VaultIds, VaultMaterial,
+        VaultRelay,
     },
     relay_client::RelayClient,
     vault::{Replacement, VaultEvent, VaultState},
@@ -296,31 +297,32 @@ pub async fn approve_replacement<R: RngCore + CryptoRng>(
     append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
     let moved = state.replacement_to(&request.identity.sig_pk).is_some();
     if moved {
-        push_seat_moves(relay, me, &state).await?;
+        push_seat_moves(relay, me, material.label(), &state).await?;
     }
     Ok(moved)
 }
 
-/// Tells the relay about seat moves it hasn't made yet (idempotent; any member can).
+/// Tells the relay, which files the vault under `label`, about seat moves it hasn't made
+/// yet (idempotent; any member can). The approvals are signed over the vault id.
 pub async fn push_seat_moves(
     relay: &RelayClient,
     me: &Identity,
+    label: MailboxId,
     state: &VaultState,
 ) -> Result<(), NodeError> {
     if state.replacements.is_empty() {
         return Ok(());
     }
-    let mailbox = state.descriptor.vault_id;
-    let on_relay = relay.members(me, mailbox).await?.members;
+    let on_relay = relay.members(me, label).await?.members;
     for r in &state.replacements {
         if on_relay.iter().any(|m| m.sig_pk == r.old) {
             let approval = ReplaceApproval {
-                mailbox,
+                mailbox: state.descriptor.vault_id,
                 old: r.old,
                 new: r.new,
             };
             relay
-                .replace_member(me, approval, r.approvals.clone())
+                .replace_member_at(me, label, approval, r.approvals.clone())
                 .await?;
         }
     }
@@ -349,6 +351,50 @@ struct SigmaMsg {
     attempt: u32,
     sigma: Vec<u8>,
     data: VaultData,
+    /// The helper's log when it sent this (version 3): the new phone's first load must
+    /// hold this history. It also names the vault id (the relay knows only the label).
+    anchor: Option<LogAnchor>,
+    /// The relay's create token, so the new phone can restore the vault on a private relay
+    /// (version 3).
+    create_token: Option<String>,
+}
+
+/// A version 2 sigma: no anchor, no create token.
+#[derive(Deserialize)]
+struct SigmaMsgV2 {
+    replacement: u64,
+    attempt: u32,
+    sigma: Vec<u8>,
+    data: VaultData,
+}
+
+fn decode_sigma(bytes: &[u8]) -> Result<SigmaMsg, version::DecodeError> {
+    match version::split(Format::Repair, bytes)? {
+        (2, body) => {
+            let v2: SigmaMsgV2 = postcard::from_bytes(body)
+                .map_err(|_| version::DecodeError::Malformed(Format::Repair))?;
+            Ok(SigmaMsg {
+                replacement: v2.replacement,
+                attempt: v2.attempt,
+                sigma: v2.sigma,
+                data: v2.data,
+                anchor: None,
+                create_token: None,
+            })
+        }
+        _ => version::decode(Format::Repair, bytes),
+    }
+}
+
+/// Decodes a repair payload whose layout version 3 left unchanged (deltas, a helper's
+/// saved state): versions 2 and 3.
+fn decode_repair<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, version::DecodeError> {
+    match version::split(Format::Repair, bytes)? {
+        (2, body) => {
+            postcard::from_bytes(body).map_err(|_| version::DecodeError::Malformed(Format::Repair))
+        }
+        _ => version::decode(Format::Repair, bytes),
+    }
 }
 
 /// A helper's own deltas for one move, kept until its sigma is sent (a second part 1 would
@@ -405,11 +451,14 @@ fn repair_ids(
 
 /// Helper: does this member's part in repairing the share of every moved seat it helps
 /// with (spec §10.4.2). Safe to call on every refresh: each step is recorded in `dir`
-/// (secret: the deltas are shares of the member's key share; deleted once done).
+/// (secret: the deltas are shares of the member's key share; deleted once done). `chain`
+/// and `state` are the loaded log (`load_state`): the sigma carries its length and head,
+/// which the new phone's first load must hold.
 pub async fn help_repairs<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,
+    chain: &Chain,
     state: &VaultState,
     dir: &Path,
     rng: &mut R,
@@ -426,8 +475,8 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
         return Ok(report);
     }
     std::fs::create_dir_all(dir).map_err(proto)?;
-    push_seat_moves(relay, me, state).await?;
-    let mailbox = state.descriptor.vault_id;
+    let mailbox = material.label();
+    push_seat_moves(relay, me, mailbox, state).await?;
     let key_package = material.key_package()?;
     let members = members_by_pk(state);
     let mut seq = SeqCounter::default();
@@ -441,7 +490,7 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
         let Ok(bytes) = env.open(me, &from) else {
             continue;
         };
-        let Ok(msg) = version::decode::<DeltaMsg>(Format::Repair, &bytes) else {
+        let Ok(msg) = decode_repair::<DeltaMsg>(&bytes) else {
             continue;
         };
         received
@@ -454,7 +503,7 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
         let helpers = r.helpers();
         let state_path = helper_path(dir, r, DELTA_EXT);
         let mut hs: HelperState = match std::fs::read(&state_path) {
-            Ok(bytes) => version::decode(Format::Repair, &bytes)?,
+            Ok(bytes) => decode_repair(&bytes)?,
             Err(_) => {
                 let deltas = repairable::repair_share_part1::<PallasBlake2b512, _>(
                     &helper_ids,
@@ -531,6 +580,8 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
                 log_key_epoch: material.log_key_epoch,
                 log_key: material.log_key,
             },
+            anchor: Some(LogAnchor::of(chain)),
+            create_token: material.relay.create_token.clone(),
         };
         let payload = version::encode(Format::Repair, &msg)?;
         send_fresh(relay, &mut seq, |n| {
@@ -563,9 +614,18 @@ pub enum RecoveryStatus {
 
 /// Recovering device: checks whether its seat has moved and the helpers' repair is
 /// complete, and if so builds and verifies its vault material (spec §10.4.2 checks).
-pub async fn try_recover(relay: &RelayClient, me: &Identity) -> Result<RecoveryStatus, NodeError> {
+/// `label`: the vault's mailbox on this relay, from a co-signer's [`SeatLink`]; `None`
+/// looks at every mailbox the relay lists this device in.
+pub async fn try_recover(
+    relay: &RelayClient,
+    me: &Identity,
+    label: Option<MailboxId>,
+) -> Result<RecoveryStatus, NodeError> {
     let mut status = RecoveryStatus::Waiting;
     for mailbox in relay.mailboxes(me).await? {
+        if label.is_some_and(|l| l != mailbox) {
+            continue;
+        }
         match recover_from(relay, me, mailbox).await? {
             done @ RecoveryStatus::Done { .. } => return Ok(done),
             s @ RecoveryStatus::SeatMoved { .. } => status = s,
@@ -578,24 +638,24 @@ pub async fn try_recover(relay: &RelayClient, me: &Identity) -> Result<RecoveryS
 async fn recover_from(
     relay: &RelayClient,
     me: &Identity,
-    mailbox: MailboxId,
+    label: MailboxId,
 ) -> Result<RecoveryStatus, NodeError> {
     let on_relay: BTreeMap<[u8; 32], IdentityPublic> = relay
-        .members(me, mailbox)
+        .members(me, label)
         .await?
         .members
         .into_iter()
         .map(|m| (m.sig_pk, m))
         .collect();
     let mut messages: BTreeMap<([u8; 32], u32), (u64, SigmaMsg)> = BTreeMap::new();
-    for (cursor, from, env) in read_inbox(relay, me, mailbox, &on_relay, 0).await? {
+    for (cursor, from, env) in read_inbox(relay, me, label, &on_relay, 0).await? {
         if env.header.kind != Kind::RepairSigma {
             continue;
         }
         let Ok(bytes) = env.open(me, &from) else {
             continue;
         };
-        if let Ok(msg) = version::decode::<SigmaMsg>(Format::Repair, &bytes) {
+        if let Ok(msg) = decode_sigma(&bytes) {
             messages
                 .entry((from.sig_pk, msg.attempt))
                 .or_insert((cursor, msg));
@@ -608,9 +668,27 @@ async fn recover_from(
         });
     };
     // The log key from a helper lets this device read the log, and the log decides
-    // which move is ours and who the helpers are.
+    // which move is ours and who the helpers are. A sigma from before anchors comes from
+    // a vault whose label is its vault id.
     let key = LogKey::from_bytes(first.data.log_key_epoch, first.data.log_key);
-    let (chain, state) = load_log(relay, me, mailbox, &key).await?;
+    let ids = match &first.anchor {
+        Some(a) => VaultIds {
+            vault: a.vault_id,
+            label,
+        },
+        None => VaultIds::legacy(label),
+    };
+    // Not saved as this device's copy until everything checked out.
+    let (chain, state, _) = read_log_verified(relay, me, ids, &key).await?;
+    // Each sender vouches for the history it had: the relay must serve all of it (it can
+    // delay the sigmas, not shorten or change the log under them). Checked for every
+    // sigma before the log is trusted to say who the helpers are: a relay that dropped the
+    // seat move itself is caught here. A sender the relay made up can only stall this.
+    for (_, m) in messages.values() {
+        if let Some(anchor) = &m.anchor {
+            anchor.check(&chain)?;
+        }
+    }
     let r = state.replacement_to(&me.public().sig_pk).ok_or_else(|| {
         NodeError::Protocol("the vault log has no seat move to this device".into())
     })?;
@@ -656,6 +734,11 @@ async fn recover_from(
         vault_secret: data.vault_secret,
         log_key_epoch: data.log_key_epoch,
         log_key: data.log_key,
+        relay: VaultRelay {
+            url: Some(relay.base_url().to_owned()),
+            label,
+            create_token: from_helpers.iter().find_map(|m| m.create_token.clone()),
+        },
     };
     let network = ZafeNetwork::from_name(&state.descriptor.network)
         .ok_or_else(|| proto("unknown network"))?;
@@ -670,13 +753,17 @@ async fn recover_from(
             "the vault secret doesn't give the vault's viewing key",
         ));
     }
+    // Everything checked out: this history is now the device's anchor.
+    save_copy(relay, &chain);
     let creator = chain
         .entries()
         .first()
         .map(|e| e.header.author)
         .unwrap_or_default();
     let invite = Invite {
-        mailbox,
+        vault_id: ids.vault,
+        label,
+        relay_url: Some(relay.base_url().to_owned()),
         join_token: [0; 32],
         creator,
         threshold: state.descriptor.threshold,
@@ -687,11 +774,64 @@ async fn recover_from(
         .iter()
         .filter_map(|pk| messages.get(&(*pk, r.attempt)).map(|(c, _)| *c))
         .collect();
-    let _ = relay.ack_inbox(me, mailbox, &cursors).await;
+    let _ = relay.ack_inbox(me, label, &cursors).await;
     Ok(RecoveryStatus::Done {
         material: Box::new(material),
         invite,
     })
+}
+
+/// Where a vault is, from a co-signer to the phone recovering a seat (text
+/// `zafe-seat-v1:<hex>`, a link or a QR code): its relay URL and mailbox label. The new
+/// phone takes part in the safety check and collects its key there. Not secret (it lets
+/// nobody read or write: the relay checks membership), and it never carries the create
+/// token, which arrives sealed with the repaired key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatLink {
+    pub relay_url: String,
+    pub label: MailboxId,
+}
+
+impl SeatLink {
+    const PREFIX: &'static str = "zafe-seat-v";
+
+    /// The link for `material`'s vault; `default_relay` stands in for a vault on the
+    /// app-wide relay.
+    pub fn for_vault(material: &VaultMaterial, default_relay: &str) -> Self {
+        Self {
+            relay_url: material.relay.url_or(default_relay).to_owned(),
+            label: material.label(),
+        }
+    }
+
+    pub fn encode(&self) -> String {
+        format!(
+            "{}{}:{}",
+            Self::PREFIX,
+            version::SEAT_LINK,
+            hex::encode(postcard::to_allocvec(self).expect("encodable"))
+        )
+    }
+
+    /// Parses a link (also found inside a message or a `zafe://seat?link=` URL); one from
+    /// another version of Zafe fails with [`NodeError::UnsupportedVersion`].
+    pub fn decode(text: &str) -> Result<Self, NodeError> {
+        let bad = || NodeError::Protocol("not a seat recovery link".into());
+        let code = text
+            .split(|c: char| c.is_whitespace() || c == '=' || c == '&')
+            .find(|w| w.starts_with(Self::PREFIX))
+            .unwrap_or(text);
+        let rest = code.trim().strip_prefix(Self::PREFIX).ok_or_else(bad)?;
+        let (found, body) = rest.split_once(':').ok_or_else(bad)?;
+        let found: u16 = found.parse().map_err(|_| bad())?;
+        version::check(Format::SeatLink, found)?;
+        let link: Self =
+            postcard::from_bytes(&hex::decode(body).map_err(|_| bad())?).map_err(|_| bad())?;
+        if !(link.relay_url.starts_with("https://") || link.relay_url.starts_with("http://")) {
+            return Err(bad());
+        }
+        Ok(link)
+    }
 }
 
 /// Member: takes over from `stalled`, a helper who isn't doing its part in repairing the
@@ -758,4 +898,101 @@ pub fn current_material(material: &VaultMaterial, state: &VaultState) -> Option<
         descriptor: state.descriptor.clone(),
         ..material.clone()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data() -> VaultData {
+        VaultData {
+            public_key_package: vec![1, 2],
+            vault_secret: [3; 32],
+            log_key_epoch: 0,
+            log_key: [4; 32],
+        }
+    }
+
+    /// A sigma from a helper on an older app (version 2: no anchor, no token) still reads;
+    /// deltas and saved helper state of version 2 too.
+    #[test]
+    fn version_2_repair_payloads_still_read() {
+        #[derive(Serialize)]
+        struct V2 {
+            replacement: u64,
+            attempt: u32,
+            sigma: Vec<u8>,
+            data: VaultData,
+        }
+        let mut bytes = 2u16.to_le_bytes().to_vec();
+        bytes.extend(
+            postcard::to_allocvec(&V2 {
+                replacement: 7,
+                attempt: 1,
+                sigma: vec![9],
+                data: data(),
+            })
+            .unwrap(),
+        );
+        let m = decode_sigma(&bytes).unwrap();
+        assert_eq!((m.replacement, m.attempt, m.sigma), (7, 1, vec![9]));
+        assert!(m.data == data() && m.anchor.is_none() && m.create_token.is_none());
+
+        let delta = DeltaMsg {
+            replacement: 7,
+            attempt: 1,
+            delta: vec![5],
+        };
+        let mut old = 2u16.to_le_bytes().to_vec();
+        old.extend(postcard::to_allocvec(&delta).unwrap());
+        let back: DeltaMsg = decode_repair(&old).unwrap();
+        assert_eq!(back.delta, vec![5]);
+        let now: DeltaMsg =
+            decode_repair(&version::encode(Format::Repair, &delta).unwrap()).unwrap();
+        assert_eq!(now.replacement, 7);
+
+        let current = SigmaMsg {
+            replacement: 7,
+            attempt: 1,
+            sigma: vec![9],
+            data: data(),
+            anchor: Some(LogAnchor {
+                vault_id: [1; 16],
+                len: 4,
+                head: [2; 32],
+            }),
+            create_token: Some("t".into()),
+        };
+        let back = decode_sigma(&version::encode(Format::Repair, &current).unwrap()).unwrap();
+        assert_eq!(back.anchor, current.anchor);
+        assert_eq!(back.create_token.as_deref(), Some("t"));
+        let mut newer = version::encode(Format::Repair, &current).unwrap();
+        newer[..2].copy_from_slice(&(version::REPAIR + 1).to_le_bytes());
+        assert!(decode_sigma(&newer).is_err());
+    }
+
+    #[test]
+    fn seat_links_round_trip_and_reject_other_versions() {
+        let link = SeatLink {
+            relay_url: "https://relay.dao.org".into(),
+            label: [6; 16],
+        };
+        let text = link.encode();
+        assert!(text.starts_with("zafe-seat-v1:"));
+        assert_eq!(SeatLink::decode(&text).unwrap(), link);
+        assert_eq!(
+            SeatLink::decode(&format!("zafe://seat?link={text}&x=1")).unwrap(),
+            link
+        );
+        let newer = text.replacen("zafe-seat-v1:", "zafe-seat-v2:", 1);
+        assert!(matches!(
+            SeatLink::decode(&newer),
+            Err(NodeError::UnsupportedVersion(v)) if v.is_newer()
+        ));
+        let not_a_url = SeatLink {
+            relay_url: "javascript:alert(1)".into(),
+            label: [6; 16],
+        };
+        assert!(SeatLink::decode(&not_a_url.encode()).is_err());
+    }
 }

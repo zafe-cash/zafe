@@ -133,7 +133,7 @@ fn payment_flow_through_bridge() {
     // Setup: A creates a 2-of-3 vault, B and C join, A seals.
     let seeds: Vec<Vec<u8>> = (0..3).map(|_| vault::generate_identity().seeds).collect();
     let invite =
-        vault::create_vault(relay.clone(), seeds[0].clone(), "Grants".into(), 2, 3).unwrap();
+        vault::create_vault(relay.clone(), seeds[0].clone(), "Grants".into(), 2, 3, None).unwrap();
     for s in &seeds[1..] {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
@@ -509,7 +509,7 @@ fn payment_flow_through_bridge() {
     )
     .unwrap();
     assert!(
-        flagged.is_empty(),
+        flagged.spends.is_empty() && flagged.from_copy_at.is_none(),
         "unexpected unapproved spends: {flagged:?}"
     );
     // The vault's own payment (and its change) is not an incoming payment.
@@ -758,8 +758,15 @@ fn payment_flow_through_bridge() {
     // the first one. E's app watches lightwalletd's mempool, so the payment is listed as
     // received (unmined) before any block includes it.
     let seeds2: Vec<Vec<u8>> = (0..2).map(|_| vault::generate_identity().seeds).collect();
-    let invite2 =
-        vault::create_vault(relay.clone(), seeds2[0].clone(), "Payroll".into(), 2, 2).unwrap();
+    let invite2 = vault::create_vault(
+        relay.clone(),
+        seeds2[0].clone(),
+        "Payroll".into(),
+        2,
+        2,
+        None,
+    )
+    .unwrap();
     vault::join_vault(relay.clone(), seeds2[1].clone(), invite2.clone()).unwrap();
     let setups2: Vec<Setup> = seeds2
         .iter()
@@ -969,6 +976,7 @@ fn payment_flow_through_bridge() {
     assert!(backed_up(&members[1]).is_empty());
     let a = &members[0];
     let exported = backup::export_vault_backup(
+        relay.clone(),
         a.seeds.clone(),
         a.material.clone(),
         invite.clone(),

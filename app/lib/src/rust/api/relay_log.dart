@@ -12,7 +12,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// entries were put back (0: the relay already had everything this phone has). Refuses a
 /// relay whose history differs from this phone's copy (`RelayForked`). Messages that were
 /// in flight (signing requests) are not restored: members are asked again. Re-register
-/// the push token afterwards.
+/// the push token afterwards. Runs on the vault's own relay, under its label, with its
+/// create token (a private relay refuses a restore without it: `CreateTokenRefused`).
 Future<int> restoreRelay({
   required String relayUrl,
   required List<int> seeds,

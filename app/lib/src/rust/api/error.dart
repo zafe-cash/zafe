@@ -127,4 +127,8 @@ enum ZafeErrorKind {
 
   /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
   inviteExpired,
+
+  /// The relay is private: creating or restoring a vault there needs its create token,
+  /// and none or the wrong one was given (ask whoever runs it).
+  createTokenRefused,
 }

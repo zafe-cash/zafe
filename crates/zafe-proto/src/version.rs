@@ -52,11 +52,16 @@ pub const RELAY_API: u16 = 1;
 /// compare commit-then-reveal safety words (`zafe_core::sas`) instead of a 12-digit hash
 /// of the member keys, so an older app must not join (it would show a number nobody else
 /// has): it reports "update Zafe" for a version 2 invite.
-pub const INVITE: u16 = 2;
+/// 3 (2026-10-25): carries the vault's relay URL and its mailbox label there (a random id
+/// separate from the vault id; `docs/relay-move.md` §4.6). Version 2 still decodes, as
+/// label = vault id on the joiner's default relay.
+pub const INVITE: u16 = 3;
 /// A member's identity seeds as stored on a device and in backups.
 pub const IDENTITY_SEEDS: u16 = 1;
 /// A member's vault material (key package, vault secret, descriptor, log key).
-pub const VAULT_MATERIAL: u16 = 1;
+/// 2 (2026-10-25): adds the vault's relay (`node::VaultRelay`: URL, mailbox label, create
+/// token). Version 1 still decodes, as label = vault id on the app-wide relay.
+pub const VAULT_MATERIAL: u16 = 2;
 /// DKG round-1 envelope payload.
 /// 2 (2026-09-30): the creator's message also carries the proposal expiry window.
 /// 3 (2026-10-01): every member's message carries a commitment to its `sk` contribution.
@@ -84,8 +89,11 @@ pub const KEYGEN_STATE: u16 = 1;
 /// This device's copy of a vault's log (`log_cache::LogCache`, `<mailbox>.log`).
 pub const LOG_CACHE: u16 = 1;
 /// Encrypted vault backups (`ZAFEBAK`; the tag is a single byte there). 2 added signer
-/// names (2026-09-30); version 1 still decrypts and is migrated.
-pub const BACKUP: u16 = 2;
+/// names (2026-09-30); version 1 still decrypts and is migrated. 3 (2026-10-25): carries
+/// the vault's log copy (`log_cache`), installed before the restored phone's first relay
+/// load; the material inside holds the relay URL, label and create token. 1 and 2 still
+/// restore (no log copy: the first load is trusted, as before).
+pub const BACKUP: u16 = 3;
 /// The relay's SQLite schema (`PRAGMA user_version`). 2: storage quota counters on
 /// `mailboxes` (migrated from 1 at startup). 3: `mailboxes.threshold` for moving a lost
 /// member's seat (migrated from 1 and 2). 4 (2026-10-25): `mailboxes.vault_id` (a mailbox id
@@ -93,11 +101,24 @@ pub const BACKUP: u16 = 2;
 /// `created_day` and `shared` for expiry (migrated from 1-3; existing rows get
 /// `vault_id = id`, today as last seen, and count as shared).
 pub const RELAY_DB: u16 = 4;
-/// Share repair envelope payloads (RTS deltas and sigmas). 2 (2026-10-01): both carry the
-/// repair attempt.
-pub const REPAIR: u16 = 2;
+/// Share repair envelope payloads (RTS deltas and sigmas) and a helper's saved deltas.
+/// 2 (2026-10-01): both carry the repair attempt. 3 (2026-10-25): a sigma also carries the
+/// helper's log anchor (length and head hash), which the recovering phone's first load
+/// must match or extend, and the relay's create token. Version 2 still decodes (a sigma
+/// without an anchor).
+pub const REPAIR: u16 = 3;
 /// A recovering device's request to take over a lost member's seat (`zafe-recover-v1:`).
 pub const RECOVERY_REQUEST: u16 = 1;
+/// The log key the creator seals to each member at setup (`Kind::LogKey` payload), with
+/// the relay's create token (2026-10-25). Before it the payload was untagged: epoch (u32
+/// LE, always 0 at setup) || key, 36 bytes; those still read.
+pub const LOG_KEY_MESSAGE: u16 = 1;
+/// Where a vault is, from a co-signer to a recovering phone (`zafe-seat-v1:`): the relay
+/// URL and mailbox label (2026-10-25).
+pub const SEAT_LINK: u16 = 1;
+/// When this phone last reached a vault's relay (`relay_status`, `<vault id>.status` next
+/// to the log copy; a display hint, unreadable counts as unknown).
+pub const RELAY_STATUS: u16 = 1;
 
 /// Each versioned format. [`Format::current`] is the version this build writes and reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -124,6 +145,9 @@ pub enum Format {
     RelayDb,
     Repair,
     RecoveryRequest,
+    LogKeyMessage,
+    SeatLink,
+    RelayStatus,
 }
 
 impl Format {
@@ -151,6 +175,9 @@ impl Format {
             Format::RelayDb => RELAY_DB,
             Format::Repair => REPAIR,
             Format::RecoveryRequest => RECOVERY_REQUEST,
+            Format::LogKeyMessage => LOG_KEY_MESSAGE,
+            Format::SeatLink => SEAT_LINK,
+            Format::RelayStatus => RELAY_STATUS,
         }
     }
 
@@ -178,6 +205,9 @@ impl Format {
             Format::RelayDb => "relay database",
             Format::Repair => "share repair message",
             Format::RecoveryRequest => "recovery request",
+            Format::LogKeyMessage => "log key message",
+            Format::SeatLink => "seat recovery link",
+            Format::RelayStatus => "relay status",
         }
     }
 }

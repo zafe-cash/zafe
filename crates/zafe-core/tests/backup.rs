@@ -47,6 +47,7 @@ fn material_for(ids: &[&Identity]) -> Vec<u8> {
         vault_secret: [5; 32],
         log_key_epoch: 0,
         log_key: [6; 32],
+        relay: zafe_core::node::VaultRelay::legacy([7; 16]),
     }
     .to_bytes()
     .unwrap()
@@ -66,6 +67,7 @@ fn contents(rng: &mut StdRng) -> (Contents, Identity) {
             invite: "zafe-invite-v1:abc".into(),
             created_at: 1_700_000_000,
             names: [(hex::encode([1u8; 32]), "Alice".to_string())].into(),
+            log: vec![vec![1, 2, 3]],
         },
         me,
     )
@@ -136,13 +138,13 @@ fn wrong_passphrase_and_tampering_fail() {
         BackupError::NotABackup
     );
     let mut newer = bytes.clone();
-    newer[7] = 3;
+    newer[7] = zafe_proto::version::BACKUP as u8 + 1;
     assert_eq!(
         backup::decrypt(&newer, PASS).unwrap_err(),
         BackupError::UnsupportedVersion(UnsupportedVersion {
             format: Format::Backup,
-            found: 3,
-            supported: 2
+            found: zafe_proto::version::BACKUP + 1,
+            supported: zafe_proto::version::BACKUP
         })
     );
 }

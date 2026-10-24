@@ -7,8 +7,12 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Checks that a Zafe relay answers at `relay_url` (`GET /health`).
-Future<void> checkRelay({required String relayUrl}) =>
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `fmt`
+
+/// Checks the one relay the user selected (never a list of them in the background: each
+/// would learn this phone's address): that a Zafe relay answers at `relay_url` (`GET
+/// /health`), and what it says about itself. Through Tor when Tor is on.
+Future<RelayCheck> checkRelay({required String relayUrl}) =>
     RustLib.instance.api.crateApiEndpointsCheckRelay(relayUrl: relayUrl);
 
 /// Checks that lightwalletd answers at `lightwalletd_url` and serves `network_name`
@@ -20,3 +24,71 @@ Future<int> checkLightwalletd({
   lightwalletdUrl: lightwalletdUrl,
   networkName: networkName,
 );
+
+/// What a relay says about itself (`GET /v1/info`), for the relay picker.
+class RelayCheck {
+  /// The relay is older than labelled mailboxes (no `/v1/info`): it can't hold a new
+  /// vault (grey it out). The other fields are then unknown (zero / false / `None`).
+  final bool tooOld;
+  final int relayApiVersion;
+
+  /// It sends push notifications ("No notifications" when false).
+  final bool push;
+
+  /// Creating or restoring a vault there needs its create token.
+  final bool createTokenRequired;
+
+  /// Most members one vault may have.
+  final int maxMembers;
+
+  /// Requests per minute per signing key (`None`: unlimited).
+  final int? requestsPerMinute;
+
+  /// Bytes of vault history one vault may keep (`None`: unlimited).
+  final BigInt? logBytes;
+
+  /// Days an undelivered message is kept.
+  final int deliveryRetentionDays;
+
+  /// Days without use after which the relay deletes a vault (`None`: never).
+  final int? idleDays;
+
+  const RelayCheck({
+    required this.tooOld,
+    required this.relayApiVersion,
+    required this.push,
+    required this.createTokenRequired,
+    required this.maxMembers,
+    this.requestsPerMinute,
+    this.logBytes,
+    required this.deliveryRetentionDays,
+    this.idleDays,
+  });
+
+  @override
+  int get hashCode =>
+      tooOld.hashCode ^
+      relayApiVersion.hashCode ^
+      push.hashCode ^
+      createTokenRequired.hashCode ^
+      maxMembers.hashCode ^
+      requestsPerMinute.hashCode ^
+      logBytes.hashCode ^
+      deliveryRetentionDays.hashCode ^
+      idleDays.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RelayCheck &&
+          runtimeType == other.runtimeType &&
+          tooOld == other.tooOld &&
+          relayApiVersion == other.relayApiVersion &&
+          push == other.push &&
+          createTokenRequired == other.createTokenRequired &&
+          maxMembers == other.maxMembers &&
+          requestsPerMinute == other.requestsPerMinute &&
+          logBytes == other.logBytes &&
+          deliveryRetentionDays == other.deliveryRetentionDays &&
+          idleDays == other.idleDays;
+}

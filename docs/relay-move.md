@@ -19,7 +19,8 @@ history, or values passed between members sealed or out of band.
 - **Each phone keeps a verified copy of the vault log** (`log_cache`). `node::reseed_relay`
   rebuilds a vault on any relay from one copy; the app offers it only on the same relay.
   Backups don't carry the copy, so a restore trusts its first load.
-- **The relay URL is one app-wide setting per network.** Invites don't carry it.
+- **The relay URL is one app-wide setting per network.** Invites don't carry it. (Phase 2a
+  moved it into each vault's material; see §7.)
 - **Log entries and envelopes are bound to the mailbox id** (`EntryHeader.mailbox`, in the AAD
   and signature; `Header.mailbox` for envelopes), and the relay files a vault under that same
   id (`lib.rs:1055`, `lib.rs:1375`).
@@ -285,7 +286,56 @@ with `VaultMoved`; (4) standby relay. Each protection ships with or before what 
   before the check, so every guess costs one creation.
 - **Members:** at most 64 per mailbox, now on `create` too (vaults have at most 15).
 - **Older relays:** a 404 whose body isn't "unknown mailbox" → `RelayClientError::RelayTooOld
-  { route }`; the bridge doesn't map it yet (phase 1 app work).
+  { route }`; the bridge maps it to `RelayOutdated` (phase 2a).
+
+**Client foundations built (2026-10-25, branch `relay-client`, phase 2a: Rust core, CLI,
+bridge; no screens).** What it refines:
+- **Where the per-vault relay lives:** in `VaultMaterial` (`VAULT_MATERIAL` 2, `relay:
+  VaultRelay { url, label, create_token }`), not a separate file: it is in secure storage
+  already, travels in backups with the material, and every core call that talks to the relay
+  already has the material. `url: None` (all version 1 material) means the app-wide setting,
+  so testers' vaults keep working; the bridge builds every vault client from the material
+  (`vault_relay`) and treats the URL Dart passes as that fallback only. A move (phase 3)
+  rewrites the material, as a seat move already does.
+- **Two ids** (`node::VaultIds`): the vault id stays what keys, FROST identifiers, `sk`
+  commitments, the safety words, the descriptor and every log entry are bound to; the label
+  addresses the relay (envelope headers, signed requests, appends, inbox). The log copy is
+  keyed by vault id, so it survives a move. `create_vault` picks both at random and refuses a
+  relay without `/v1/info` (`RelayTooOld`): a new vault never falls back to a vault-id mailbox.
+- **Invite** (`INVITE` 3): vault id, label, relay URL. A version 2 invite reads as label =
+  vault id on the joiner's default relay.
+- **Seat moves on a label needed one more relay route.** A `ReplaceApproval` is signed over
+  the vault id (the same signatures are in the log), but `/v1/mailbox/replace` finds the
+  mailbox by it. Added `/v1/mailbox/replace-labelled` (`LabelledReplace { mailbox,
+  approval, approvals }`), which checks the vault id the label holds; the older route is used
+  where label = vault id.
+- **Create token:** the creator's client carries it (`with_create_token`) through create and
+  every `setup_step`; it goes to the members sealed with the log key (`LOG_KEY_MESSAGE` 1;
+  older creators' untagged 36-byte payload still reads) and to a recovered seat in the
+  sigma; it is in backups through the material, never in invites or seat links. Restores
+  (`reseed_relay`) send the vault's own token. `set_vault_create_token` lets a member add
+  one later.
+- **Backups** (`BACKUP` 3) carry the log copy. Export also pins the relay URL into the
+  material it backs up (a legacy vault's app-wide relay), so the backup names the relay.
+  Import verifies the copy against the material and installs it before anything talks to a
+  relay (`node::install_log_copy`); a longer copy already on the phone is kept.
+- **Seat recovery** (`REPAIR` 3): each sigma carries the helper's `LogAnchor { vault_id, len,
+  head }` and the create token. The new phone checks every sigma's anchor right after reading
+  the log, before using the log to decide who the helpers are (a relay that dropped the seat
+  move itself is caught), and saves its copy only once everything checked out. The anchor
+  also gives the vault id (the relay only knows the label); a version 2 sigma means a legacy
+  vault (label = vault id). **Where recovery starts:** the new phone used to look only at the
+  app-wide relay. A co-signer now gives it a **seat link** (`zafe-seat-v1:<hex>`, `SEAT_LINK`
+  1: relay URL + label, not secret); the new phone runs the safety check and collects its key
+  on that relay (`try_recover(.., Some(label))`). Without a link it checks every mailbox the
+  default relay lists, as before.
+- **Outage:** `node::state_from_copy` replays the phone's copy; the bridge's
+  `unapproved_spends` falls back to it when the relay can't be reached (transport errors,
+  502-504) and returns `from_copy_at`. Reachability per vault is `LogCache::relay_status`
+  (`<vault id>.status`: last reached, unreachable since), written by `load_state` and the
+  bridge's long-poll watch, at most once a minute while reachable.
+- **CLI:** `--relay` always wins (one relay has different addresses from the host and an
+  emulator); `--create-token`; `zafe seat link`; `zafe recover --link`.
 
 ## 8. Review: each part on its own
 
@@ -372,6 +422,10 @@ itself only works from our relay (§10). ✓ (limit stated)
   - **Only `log_append` (`:1375`) and reseed's entry check (`:1055`) use the entry's vault id as
     the mailbox.** Those two change: a labelled append route, and "the vault id matches the one
     stored from the first entry".
+  - **Found in phase 2a: seat moves too.** `replace_member` takes the mailbox from the
+    `ReplaceApproval`, which is signed over the vault id (the same signatures are in the
+    log). Added `/v1/mailbox/replace-labelled`, which takes the label and checks the
+    stored vault id.
 - **Rule 1 is enforced by clients only.** Once a reseed finishes, the mailbox is open
   (`sealed = 1`, `:1083`) and `log_append` accepts any member's correctly chained entry. The
   relay can't tell catch-up from a new entry, so a dishonest member could write early and

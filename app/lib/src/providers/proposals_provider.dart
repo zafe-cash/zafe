@@ -477,6 +477,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
   Future<String?> newPhoneWords(String code) => rust_repair.newPhoneWords(
     relayUrl: _endpoints.relayUrl,
     seeds: _vault.identity!,
+    material: _vault.material,
     code: code,
   );
 

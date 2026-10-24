@@ -58,6 +58,7 @@ fn step(
         confirmed,
         birthday,
         None,
+        None,
     )
     .unwrap()
 }
@@ -97,7 +98,7 @@ pub fn keygen(
                         &decoded,
                         &membership,
                         std::path::Path::new(&m.state_dir),
-                        &NonceKey::derive(&m.seeds, &decoded.mailbox),
+                        &NonceKey::derive(&m.seeds, &decoded.vault_id),
                         Some(words),
                         &regtest_network(),
                         "regtest",

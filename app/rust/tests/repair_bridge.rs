@@ -41,7 +41,7 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     rust_lib_zafe::api::app::init_log_cache(tmp.join("log").to_string_lossy().into_owned());
     let seeds: Vec<Vec<u8>> = (0..3).map(|_| vault::generate_identity().seeds).collect();
     let invite =
-        vault::create_vault(relay.clone(), seeds[0].clone(), "Grants".into(), 2, 3).unwrap();
+        vault::create_vault(relay.clone(), seeds[0].clone(), "Grants".into(), 2, 3, None).unwrap();
     for s in &seeds[1..] {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
@@ -75,14 +75,19 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         .unwrap()
     };
 
-    // Member 0 loses their phone; the new phone shows its codes.
+    // Member 0 loses their phone; the new phone shows its codes, and a co-signer sends it
+    // the vault's seat link (its relay and mailbox; not the default relay given here).
+    let link = repair::seat_link(materials[1].clone(), "https://unused.example".into()).unwrap();
+    let link = repair::parse_seat_link(format!("Open this: {link}")).unwrap();
+    assert_eq!(link.relay_url, relay);
+    let (seat_relay, label) = (link.relay_url, Some(link.label));
     let fresh = vault::generate_identity();
     let code = repair::recovery_code(fresh.seeds.clone()).unwrap();
     let parsed =
         repair::parse_recovery_code(format!("Move my seat please: {}", code.code)).unwrap();
     assert_eq!(parsed.key_hex, fresh.public_key_hex);
     assert!(matches!(
-        repair::check_recovery(relay.clone(), fresh.seeds.clone())
+        repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone())
             .unwrap()
             .stage,
         RecoveryStage::Waiting
@@ -93,14 +98,20 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     let words_of = |i: usize, code: &str| {
         for _ in 0..4 {
             // The new phone's poll: commit, then reveal once challenged.
-            repair::check_recovery(relay.clone(), fresh.seeds.clone()).unwrap();
-            if let Some(w) =
-                repair::new_phone_words(relay.clone(), seeds[i].clone(), code.to_owned()).unwrap()
+            repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone()).unwrap();
+            if let Some(w) = repair::new_phone_words(
+                relay.clone(),
+                seeds[i].clone(),
+                Some(materials[i].clone()),
+                code.to_owned(),
+            )
+            .unwrap()
             {
                 let me = vault::identity_public_key(seeds[i].clone()).unwrap();
-                let shown = repair::check_recovery(relay.clone(), fresh.seeds.clone())
-                    .unwrap()
-                    .checks;
+                let shown =
+                    repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone())
+                        .unwrap()
+                        .checks;
                 let on_new = shown.iter().find(|c| c.cosigner_key_hex == me).unwrap();
                 assert_eq!(on_new.words, w);
                 return w;
@@ -149,7 +160,8 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
                 updated[k] = m;
             }
         }
-        let p = repair::check_recovery(relay.clone(), fresh.seeds.clone()).unwrap();
+        let p =
+            repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone()).unwrap();
         if matches!(p.stage, RecoveryStage::Done) {
             done = Some(p);
             break;

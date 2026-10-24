@@ -68,6 +68,9 @@ pub enum ZafeErrorKind {
     KeygenIncomplete,
     /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
     InviteExpired,
+    /// The relay is private: creating or restoring a vault there needs its create token,
+    /// and none or the wrong one was given (ask whoever runs it).
+    CreateTokenRefused,
 }
 
 /// Which server an error came from, when it came from one.
@@ -167,6 +170,11 @@ impl From<NodeError> for ZafeError {
                 }
             }
             NodeError::Relay(RelayClientError::Transport { failure, .. }) => net_kind(*failure),
+            // A relay without a route this app needs: whoever runs it must update it.
+            NodeError::Relay(RelayClientError::RelayTooOld { .. }) => ZafeErrorKind::RelayOutdated,
+            NodeError::Relay(RelayClientError::CreateTokenRefused) => {
+                ZafeErrorKind::CreateTokenRefused
+            }
             NodeError::Relay(RelayClientError::Status { status: 404, body })
                 if body.contains("unknown mailbox") =>
             {

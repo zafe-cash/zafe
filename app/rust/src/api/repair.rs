@@ -6,12 +6,12 @@
 use rand::rngs::OsRng;
 use zafe_core::{
     relay_client::RelayClient,
-    repair::{self, RecoveryRequest, RecoveryStatus},
+    repair::{self, RecoveryRequest, RecoveryStatus, SeatLink},
 };
 
 use super::{
     error::{ZafeError, ZafeErrorKind},
-    vault::{identity, material, runtime},
+    vault::{identity, material, runtime, vault_relay},
 };
 
 type Result<T, E = ZafeError> = std::result::Result<T, E>;
@@ -50,16 +50,23 @@ pub fn parse_recovery_code(code: String) -> Result<RecoveryCodeInfo> {
 
 /// Co-signer: one step of the safety check with the phone that showed `code` (poll it
 /// while the screen is open). `None` until the new phone has taken part; then the four
-/// words to compare with it on a call before approving.
-pub fn new_phone_words(relay_url: String, seeds: Vec<u8>, code: String) -> Result<Option<String>> {
+/// words to compare with it on a call before approving. Runs on the vault's relay (from
+/// `material`; `relay_url` for a vault from before per-vault relays), where the new phone
+/// takes part after opening the co-signer's [`seat_link`].
+pub fn new_phone_words(
+    relay_url: String,
+    seeds: Vec<u8>,
+    material: Option<Vec<u8>>,
+    code: String,
+) -> Result<Option<String>> {
     let me = identity(&seeds)?;
     let request = decode(&code)?;
+    let relay = match material {
+        Some(bytes) => vault_relay(&relay_url, &self::material(&bytes)?),
+        None => RelayClient::pooled(relay_url),
+    };
     let mut watch = crate::diag::Stopwatch::new("seat-words");
-    let words = runtime().block_on(repair::new_phone_words(
-        &RelayClient::pooled(relay_url),
-        &me,
-        &request.identity,
-    ));
+    let words = runtime().block_on(repair::new_phone_words(&relay, &me, &request.identity));
     watch.lap("relay");
     watch.finish();
     Ok(words?)
@@ -100,7 +107,7 @@ pub fn approve_seat_move(
     }
     let mut watch = crate::diag::Stopwatch::new("seat-approve");
     let moved = runtime().block_on(repair::approve_replacement(
-        &RelayClient::pooled(relay_url),
+        &vault_relay(&relay_url, &m),
         &me,
         &m,
         old,
@@ -142,17 +149,62 @@ pub struct CosignerWords {
     pub words: String,
 }
 
+/// The co-signer's link for a phone recovering a seat in this vault: the vault's relay
+/// and mailbox (`zafe-seat-v1:...`; `default_relay_url` stands in for a vault on the
+/// app-wide relay). The new phone opens it before the safety check.
+#[flutter_rust_bridge::frb(sync)]
+pub fn seat_link(material: Vec<u8>, default_relay_url: String) -> Result<String> {
+    let m = self::material(&material)?;
+    Ok(SeatLink::for_vault(&m, &default_relay_url).encode())
+}
+
+/// Where a co-signer's seat link points.
+pub struct SeatLinkInfo {
+    pub relay_url: String,
+    /// The vault's mailbox on that relay (hex), for [`check_recovery`].
+    pub label: String,
+}
+
+/// Parses a seat link a co-signer sent (also inside a message or a `zafe://seat?link=`
+/// URL).
+#[flutter_rust_bridge::frb(sync)]
+pub fn parse_seat_link(text: String) -> Result<SeatLinkInfo> {
+    let link = SeatLink::decode(&text).map_err(|e| match e {
+        zafe_core::node::NodeError::UnsupportedVersion(_) => e.into(),
+        _ => ZafeError::invalid("That isn't a Zafe seat link"),
+    })?;
+    Ok(SeatLinkInfo {
+        relay_url: link.relay_url,
+        label: hex::encode(link.label),
+    })
+}
+
 /// The new phone: checks whether its seat moved and the repaired key has arrived. On
-/// `Done` the key has been checked against the vault (spec §10.4.2).
-pub fn check_recovery(relay_url: String, seeds: Vec<u8>) -> Result<RecoveryProgress> {
+/// `Done` the key has been checked against the vault (spec §10.4.2), and its relay history
+/// against what every helper vouched for. `relay_url` and `label`: from the co-signer's
+/// seat link ([`parse_seat_link`]); without a label (no link: the app-wide relay), every
+/// mailbox the relay lists for this phone is checked.
+pub fn check_recovery(
+    relay_url: String,
+    seeds: Vec<u8>,
+    label: Option<String>,
+) -> Result<RecoveryProgress> {
     let me = identity(&seeds)?;
+    let label = label
+        .map(|l| {
+            hex::decode(l.trim())
+                .ok()
+                .and_then(|b| <[u8; 16]>::try_from(b).ok())
+                .ok_or_else(|| ZafeError::invalid("bad mailbox label"))
+        })
+        .transpose()?;
     let relay = RelayClient::pooled(relay_url);
     let mut watch = crate::diag::Stopwatch::new("recover");
     // Both read the relay (~1 s each over Tor): at once. The safety check's next step
     // (commit, then reveal once challenged) only matters while waiting for approvals.
     let (status, checks) = runtime().block_on(async {
         tokio::join!(
-            repair::try_recover(&relay, &me),
+            repair::try_recover(&relay, &me, label),
             repair::recovery_checks(&relay, &me)
         )
     });

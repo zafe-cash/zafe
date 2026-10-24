@@ -42,8 +42,14 @@ struct Cli {
     /// Directory holding this member's state.
     #[arg(long, env = "ZAFE_HOME", default_value = "./zafe-home")]
     home: PathBuf,
+    /// The relay. Always used (a dev tool: one relay can have different addresses from the
+    /// host and an emulator); the vault's own relay URL is recorded but not followed.
     #[arg(long, env = "ZAFE_RELAY", default_value = "http://127.0.0.1:8787")]
     relay: String,
+    /// A private relay's create token (`ZAFE_RELAY_CREATE_TOKEN` there): sent when
+    /// creating or restoring a vault. Restores fall back to the vault's own token.
+    #[arg(long, env = "ZAFE_CREATE_TOKEN")]
+    create_token: Option<String>,
     #[arg(
         long,
         env = "ZAFE_LIGHTWALLETD",
@@ -124,6 +130,10 @@ enum Command {
     Recover {
         #[arg(long)]
         wait: bool,
+        /// The co-signer's seat link (`zafe seat link`): the vault's relay and mailbox.
+        /// Without it, every mailbox `--relay` lists for this device is checked.
+        #[arg(long)]
+        link: Option<String>,
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
@@ -152,6 +162,9 @@ enum SeatCmd {
     Repair,
     /// Take over from a helper who stalled the repair of the seat moved at `replacement`.
     Retry { replacement: u64, stalled: String },
+    /// Print the link a new device recovering a seat needs (`zafe recover --link`): the
+    /// vault's relay and mailbox.
+    Link,
 }
 
 #[derive(Subcommand)]
@@ -296,7 +309,7 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&home.0)?;
     // Keep a copy of the vault log: a relay that loses or rewinds it is then refused.
     zafe_core::log_cache::configure(home.path(LOG_DIR));
-    let relay = RelayClient::new(&cli.relay);
+    let relay = RelayClient::new(&cli.relay).with_create_token(cli.create_token.as_deref());
     let mut rng = OsRng;
 
     match cli.command {
@@ -353,10 +366,14 @@ async fn main() -> Result<()> {
         }
         Command::RestoreRelay => {
             let material = home.material()?;
+            let token = cli
+                .create_token
+                .as_deref()
+                .or(material.relay.create_token.as_deref());
             let out = node::reseed_relay(
-                &relay,
+                &relay.clone().with_create_token(token),
                 &home.identity()?,
-                material.descriptor.vault_id,
+                material.ids(),
                 &material.log_key(),
             )
             .await?;
@@ -424,6 +441,15 @@ async fn main() -> Result<()> {
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs(),
                 names: Default::default(),
+                log: match zafe_core::log_cache::configured() {
+                    Some(cache) => cache
+                        .read(&home.material()?.descriptor.vault_id)?
+                        .iter()
+                        .map(|e| e.to_bytes())
+                        .collect::<Result<_, _>>()
+                        .map_err(|e| anyhow!("log copy: {e:?}"))?,
+                    None => Vec::new(),
+                },
             };
             let bytes = zafe_core::backup::encrypt(
                 &contents,
@@ -617,12 +643,19 @@ async fn main() -> Result<()> {
                         .await?;
                     println!("retrying with you as a helper");
                 }
+                SeatCmd::Link => {
+                    println!(
+                        "{}",
+                        repair::SeatLink::for_vault(&material, &cli.relay).encode()
+                    );
+                }
                 SeatCmd::Repair => {
-                    let (_, state) = node::load_state(&relay, &me, &material).await?;
+                    let (chain, state) = node::load_state(&relay, &me, &material).await?;
                     let report = repair::help_repairs(
                         &relay,
                         &me,
                         &material,
+                        &chain,
                         &state,
                         &home.path(state_dir::REPAIR),
                         &mut rng,
@@ -635,7 +668,17 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::Recover { wait, timeout_secs } => {
+        Command::Recover {
+            wait,
+            link,
+            timeout_secs,
+        } => {
+            let link = link.as_deref().map(repair::SeatLink::decode).transpose()?;
+            let relay = match &link {
+                Some(l) => RelayClient::new(&l.relay_url),
+                None => relay.clone(),
+            };
+            let label = link.as_ref().map(|l| l.label);
             if home.path(VAULT_FILE).exists() {
                 bail!("this home already holds a vault");
             }
@@ -659,7 +702,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                match repair::try_recover(&relay, &me).await? {
+                match repair::try_recover(&relay, &me, label).await? {
                     RecoveryStatus::Done { material, invite } => {
                         fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
                         fs::write(home.path(INVITE_FILE), invite.encode())?;
@@ -837,7 +880,7 @@ async fn vault(
                 home.0.clone(),
                 NonceKey::derive(
                     &fs::read(home.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?,
-                    &invite.mailbox,
+                    &invite.vault_id,
                 ),
                 rng,
                 Duration::from_secs(timeout_secs),
@@ -863,6 +906,9 @@ async fn vault(
             println!("address {}", m.descriptor.address);
             println!("ufvk {}", m.descriptor.ufvk);
             println!("birthday {}", m.descriptor.birthday_height);
+            println!("vault id {}", hex::encode(m.descriptor.vault_id));
+            println!("relay label {}", hex::encode(m.label()));
+            println!("relay {}", m.relay.url.as_deref().unwrap_or("(default)"));
         }
     }
     Ok(())

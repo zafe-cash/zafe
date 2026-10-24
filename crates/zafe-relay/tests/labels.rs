@@ -777,3 +777,135 @@ async fn mailboxes_have_at_most_64_members() {
         StatusCode::OK
     );
 }
+
+/// A seat move on a labelled mailbox: the approvals are signed over the vault id (the same
+/// signatures are in the vault log), the request names the label, and the relay checks the
+/// vault id it holds for that label.
+#[tokio::test]
+async fn a_seat_moves_on_a_labelled_mailbox() {
+    use zafe_proto::relay::{
+        LabelledReplace, MembersResponse, ReplaceApproval, ReplaceMember, SetThreshold,
+    };
+    let app = relay().router();
+    let ids = ids(3, 90);
+    let fresh = &self::ids(1, 91)[0];
+    let create = CreateMailbox {
+        mailbox: LABEL,
+        join_token_hash: join_token_hash(&TOKEN),
+        max_members: 3,
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/create", &ids[0], create).await.0,
+        StatusCode::OK
+    );
+    let threshold = SetThreshold {
+        mailbox: LABEL,
+        threshold: 2,
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/threshold", &ids[0], threshold)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    for id in &ids[1..] {
+        let join = Join {
+            mailbox: LABEL,
+            join_token: TOKEN,
+        };
+        assert_eq!(
+            signed(&app, "/v1/mailbox/join", id, join).await.0,
+            StatusCode::OK
+        );
+    }
+    let seal = Seal {
+        mailbox: LABEL,
+        members: ids.iter().map(|i| i.public().sig_pk).collect(),
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/seal", &ids[0], seal).await.0,
+        StatusCode::OK
+    );
+    let mut rng = StdRng::seed_from_u64(92);
+    let first = &entries(VAULT, &ids, 1, &mut rng)[0];
+    assert_eq!(
+        append_to(&app, &ids[0], LABEL, first).await.0,
+        StatusCode::OK
+    );
+
+    let approval = ReplaceApproval {
+        mailbox: VAULT,
+        old: ids[0].public().sig_pk,
+        new: *fresh.public(),
+    };
+    let approvals = |a: &ReplaceApproval| {
+        ids[1..]
+            .iter()
+            .map(|i| (i.public().sig_pk, a.sign(i).unwrap()))
+            .collect::<Vec<_>>()
+    };
+    // The older route finds the mailbox by the vault id: there is none under it.
+    let by_id = ReplaceMember {
+        approval,
+        approvals: approvals(&approval),
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/replace", &ids[1], by_id).await.0,
+        StatusCode::NOT_FOUND
+    );
+    // Approvals for another vault don't move a seat here.
+    let other = ReplaceApproval {
+        mailbox: OTHER_VAULT,
+        ..approval
+    };
+    let wrong = LabelledReplace {
+        mailbox: LABEL,
+        approval: other,
+        approvals: approvals(&other),
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/replace-labelled", &ids[1], wrong)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    // One approval is below the threshold.
+    let short = LabelledReplace {
+        mailbox: LABEL,
+        approval,
+        approvals: approvals(&approval)[..1].to_vec(),
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/replace-labelled", &ids[1], short)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let labelled = || LabelledReplace {
+        mailbox: LABEL,
+        approval,
+        approvals: approvals(&approval),
+    };
+    assert_eq!(
+        signed(&app, "/v1/mailbox/replace-labelled", &ids[1], labelled())
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let read = MembersRead {
+        mailbox: LABEL,
+        timestamp: NOW,
+    };
+    let (status, body) = signed(&app, "/v1/mailbox/members", &ids[1], read).await;
+    assert_eq!(status, StatusCode::OK);
+    let members = decode_body::<MembersResponse>(&body).unwrap().members;
+    assert!(members.contains(fresh.public()));
+    assert!(!members.iter().any(|m| m.sig_pk == ids[0].public().sig_pk));
+    // Repeating it (any member may push a move) succeeds and changes nothing.
+    assert_eq!(
+        signed(&app, "/v1/mailbox/replace-labelled", &ids[2], labelled())
+            .await
+            .0,
+        StatusCode::OK
+    );
+}

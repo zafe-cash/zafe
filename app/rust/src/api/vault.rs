@@ -58,6 +58,24 @@ pub(crate) fn identity(seeds: &[u8]) -> Result<Identity, ZafeError> {
     }
 }
 
+/// The client for a vault's own relay, with its create token. `default_url` is the
+/// app-wide relay setting, used only by vaults from before per-vault relays.
+pub(crate) fn vault_relay(default_url: &str, m: &VaultMaterial) -> RelayClient {
+    RelayClient::pooled(m.relay.url_or(default_url))
+        .with_create_token(m.relay.create_token.as_deref())
+}
+
+/// The client for the relay a setup runs on: the invite's (`default_url`, the app-wide
+/// setting, for an invite from before invites carried it).
+pub(crate) fn invite_relay(
+    default_url: &str,
+    invite: &Invite,
+    create_token: Option<&str>,
+) -> RelayClient {
+    RelayClient::pooled(invite.relay_url.as_deref().unwrap_or(default_url))
+        .with_create_token(create_token)
+}
+
 /// Vault material as stored by the app (`VaultMaterial::to_bytes`, versioned).
 pub(crate) fn material(bytes: &[u8]) -> Result<VaultMaterial, ZafeError> {
     match VaultMaterial::from_bytes(bytes) {
@@ -96,30 +114,39 @@ pub struct InviteInfo {
     pub threshold: u16,
     pub members: u16,
     pub creator_hex: String,
+    /// The vault's relay (shown as a fact on the join screen). `None` for an invite from
+    /// an older app: the vault is on this phone's default relay.
+    pub relay_url: Option<String>,
 }
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn parse_invite(invite: String) -> Result<InviteInfo, ZafeError> {
     let i = Invite::decode(&invite)?;
     Ok(InviteInfo {
-        vault_id: hex::encode(i.mailbox),
+        vault_id: hex::encode(i.vault_id),
         name: i.name,
         threshold: i.threshold,
         members: i.members,
         creator_hex: hex::encode(i.creator),
+        relay_url: i.relay_url,
     })
 }
 
-/// Creates a vault mailbox on the relay and returns the invite string to share.
+/// Creates a vault mailbox on the relay at `relay_url` (the one picked for this vault) and
+/// returns the invite string to share. A private relay needs its `create_token`; keep it
+/// with the invite and pass it to every [`setup_step`]: the creator seals it to the members
+/// with the log key. Fails with `RelayOutdated` on a relay without labelled mailboxes and
+/// `CreateTokenRefused` when the token is missing or wrong.
 pub fn create_vault(
     relay_url: String,
     seeds: Vec<u8>,
     name: String,
     threshold: u16,
     members: u16,
+    create_token: Option<String>,
 ) -> Result<String, ZafeError> {
     let me = identity(&seeds)?;
-    let relay = RelayClient::pooled(relay_url);
+    let relay = RelayClient::pooled(relay_url).with_create_token(create_token.as_deref());
     let mut watch = crate::diag::Stopwatch::new("create");
     let invite = runtime().block_on(node::create_vault(
         &relay, &me, &name, threshold, members, &mut OsRng,
@@ -129,12 +156,14 @@ pub fn create_vault(
     Ok(invite?.encode())
 }
 
+/// Joins the vault on the invite's relay (`relay_url`, the default relay, only for an
+/// invite from an older app).
 pub fn join_vault(relay_url: String, seeds: Vec<u8>, invite: String) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     let mut watch = crate::diag::Stopwatch::new("join");
     let joined = runtime().block_on(node::join_vault(
-        &RelayClient::pooled(relay_url),
+        &invite_relay(&relay_url, &invite, None),
         &me,
         &invite,
     ));
@@ -166,7 +195,7 @@ pub struct SetupProgress {
     pub material: Option<Vec<u8>>,
 }
 
-/// Sealed setups' membership by (relay, mailbox, member): see `setup_step`.
+/// Sealed setups' membership by (relay, mailbox label, member): see `setup_step`.
 type SealedKey = (String, zafe_proto::MailboxId, [u8; 32]);
 static SEALED: std::sync::Mutex<std::collections::BTreeMap<SealedKey, node::Membership>> =
     std::sync::Mutex::new(std::collections::BTreeMap::new());
@@ -177,7 +206,9 @@ static SEALED: std::sync::Mutex<std::collections::BTreeMap<SealedKey, node::Memb
 /// (the words the user compared), starts this member's part of key generation; later
 /// steps continue it from `state_dir` without it. The creator's birthday
 /// (`birthday_height`, else lightwalletd's tip + 1; the app passes `None`) and a joiner's
-/// birthday ceiling are fixed once, when key generation starts.
+/// birthday ceiling are fixed once, when key generation starts. The setup runs on the
+/// invite's relay (`relay_url` only for an invite from an older app). The creator passes
+/// the relay's `create_token` it created the vault with (`None` on an open relay).
 #[allow(clippy::too_many_arguments)]
 pub fn setup_step(
     relay_url: String,
@@ -189,13 +220,14 @@ pub fn setup_step(
     confirmed_safety_number: Option<String>,
     birthday_height: Option<u32>,
     expiry_days: Option<u32>,
+    create_token: Option<String>,
 ) -> Result<SetupProgress, ZafeError> {
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     let net = network(&network_name)?;
-    let relay = RelayClient::pooled(relay_url);
+    let relay = invite_relay(&relay_url, &invite, create_token.as_deref());
     let dir = PathBuf::from(state_dir);
-    let key = zafe_core::nonce_store::NonceKey::derive(&seeds, &invite.mailbox);
+    let key = zafe_core::nonce_store::NonceKey::derive(&seeds, &invite.vault_id);
     let is_creator = me.public().sig_pk == invite.creator;
     let mut watch = crate::diag::Stopwatch::new("setup");
     // "They match": key generation starts and needs the chain tip (the creator's birthday,
@@ -222,7 +254,7 @@ pub fn setup_step(
             // ~4 s over Tor). Steps before the tap still ask the relay (a cancelled setup).
             let key = (
                 relay.base_url().to_owned(),
-                invite.mailbox,
+                invite.label,
                 me.public().sig_pk,
             );
             if confirmed_safety_number.is_some() || node::keygen_started(&dir) {
@@ -339,7 +371,7 @@ pub fn renew_invite(relay_url: String, seeds: Vec<u8>, invite: String) -> Result
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     Ok(runtime().block_on(node::renew_invite(
-        &RelayClient::pooled(relay_url),
+        &invite_relay(&relay_url, &invite, None),
         &me,
         &invite,
     ))?)
@@ -349,7 +381,7 @@ pub fn cancel_setup(relay_url: String, seeds: Vec<u8>, invite: String) -> Result
     let me = identity(&seeds)?;
     let invite = Invite::decode(&invite)?;
     Ok(runtime().block_on(node::cancel_setup(
-        &RelayClient::pooled(relay_url),
+        &invite_relay(&relay_url, &invite, None),
         &me,
         &invite,
     ))?)
@@ -544,7 +576,7 @@ pub fn sync_vault(
     let m = self::material(&material)?;
     crate::diag::remember_support_dir(&db_dir);
     let mut watch = crate::diag::Stopwatch::new("sync");
-    let relay = RelayClient::pooled(relay_url);
+    let relay = vault_relay(&relay_url, &m);
     // The network-only steps first, together and without the wallet lock (each is ~1-2 s
     // over Tor; a payment being proposed waits for this lock): the server's tip and
     // network, and the vault log for the note holds.
@@ -619,13 +651,16 @@ pub fn sync_vault(
 }
 
 /// Registers this device's push token (FCM on Android, APNs on iOS) for the vault, so the
-/// relay can wake it on vault activity. Pushes carry no content.
-/// Works during setup too (the vault id is the invite's mailbox), so setup steps can be
-/// woken by pushes.
+/// relay can wake it on vault activity. Pushes carry no content. On the vault's own relay
+/// and mailbox: from its `material`, else (during setup, so setup steps can be woken by
+/// pushes) from its `invite`; with neither, `vault_id` on `relay_url` (a vault from before
+/// labels).
 pub fn register_push(
     relay_url: String,
     seeds: Vec<u8>,
     vault_id: String,
+    material: Option<Vec<u8>>,
+    invite: Option<String>,
     platform: String,
     token: String,
 ) -> Result<(), ZafeError> {
@@ -634,13 +669,84 @@ pub fn register_push(
         .ok()
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| ZafeError::invalid("bad vault id"))?;
+    let (relay, mailbox) = match (material, invite) {
+        (Some(bytes), _) => {
+            let m = self::material(&bytes)?;
+            (vault_relay(&relay_url, &m), m.label())
+        }
+        (None, Some(text)) => {
+            let i = Invite::decode(&text)?;
+            (invite_relay(&relay_url, &i, None), i.label)
+        }
+        (None, None) => (RelayClient::pooled(relay_url), vault_id),
+    };
     let platform = match platform.as_str() {
         "fcm" => zafe_proto::relay::PushPlatform::Fcm,
         "fcm-fid" => zafe_proto::relay::PushPlatform::FcmFid,
         "apns" => zafe_proto::relay::PushPlatform::Apns,
         other => return Err(ZafeError::invalid(format!("unknown push platform {other}"))),
     };
-    runtime()
-        .block_on(RelayClient::pooled(relay_url).register_push(&me, vault_id, platform, token))?;
+    runtime().block_on(relay.register_push(&me, mailbox, platform, token))?;
     Ok(())
+}
+
+/// Where a vault lives (Settings: "Relay · everyone in Grants").
+pub struct VaultRelaySettings {
+    /// The vault's relay (the app-wide one for a vault from before per-vault relays).
+    pub url: String,
+    /// The vault has no relay of its own and follows the app-wide setting.
+    pub uses_default: bool,
+    /// The relay's mailbox id for the vault (hex); the vault id for older vaults.
+    pub label: String,
+    /// A create token is stored for the vault's relay (the token itself stays here).
+    pub has_create_token: bool,
+}
+
+#[flutter_rust_bridge::frb(sync)]
+pub fn vault_relay_settings(
+    material: Vec<u8>,
+    default_relay_url: String,
+) -> Result<VaultRelaySettings, ZafeError> {
+    let m = self::material(&material)?;
+    Ok(VaultRelaySettings {
+        url: m.relay.url_or(&default_relay_url).to_owned(),
+        uses_default: m.relay.url.is_none(),
+        label: hex::encode(m.label()),
+        has_create_token: m.relay.create_token.is_some(),
+    })
+}
+
+/// The vault's material with `token` stored as its relay's create token (`None` or blank
+/// clears it), e.g. typed in before restoring the vault on a private relay. Save the
+/// result in place of the material.
+#[flutter_rust_bridge::frb(sync)]
+pub fn set_vault_create_token(
+    material: Vec<u8>,
+    token: Option<String>,
+) -> Result<Vec<u8>, ZafeError> {
+    let mut m = self::material(&material)?;
+    m.relay.create_token = token.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+    Ok(m.to_bytes()?)
+}
+
+/// When this phone last reached the vault's relay (Unix seconds), and since when it
+/// can't: for "Can't reach relay · since 09:14". Both `None` before the first request.
+pub struct RelayStatusInfo {
+    pub last_reached: Option<u64>,
+    pub unreachable_since: Option<u64>,
+}
+
+#[flutter_rust_bridge::frb(sync)]
+pub fn vault_relay_status(vault_id: String) -> Result<RelayStatusInfo, ZafeError> {
+    let vault: [u8; 16] = hex::decode(&vault_id)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| ZafeError::invalid("bad vault id"))?;
+    let status = zafe_core::log_cache::configured()
+        .map(|c| c.relay_status(&vault))
+        .unwrap_or_default();
+    Ok(RelayStatusInfo {
+        last_reached: status.last_reached,
+        unreachable_since: status.unreachable_since,
+    })
 }

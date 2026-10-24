@@ -42,7 +42,7 @@ struct Member {
 
 impl Member {
     fn key(&self, invite: &Invite) -> NonceKey {
-        NonceKey::derive(&self.id.public().sig_pk, &invite.mailbox)
+        NonceKey::derive(&self.id.public().sig_pk, &invite.vault_id)
     }
 
     /// One step, from a fresh relay client (as a restarted app or a background check
@@ -216,7 +216,7 @@ async fn a_state_file_that_does_not_decrypt_is_an_error_not_a_fresh_start() {
         &invite,
         &m,
         &members[1].dir,
-        &NonceKey::derive(b"another key", &invite.mailbox),
+        &NonceKey::derive(b"another key", &invite.vault_id),
         Some(&words),
         &regtest_network(),
         "regtest",
@@ -239,7 +239,7 @@ async fn a_send_overtaken_by_a_later_seq_is_sealed_again() {
     let (url, members, invite) = setup().await;
     let relay = RelayClient::new(url);
     let me = &members[1].id;
-    let public = |seq| Envelope::public(me, invite.mailbox, seq, Kind::DkgEcho, &[0; 32]).unwrap();
+    let public = |seq| Envelope::public(me, invite.label, seq, Kind::DkgEcho, &[0; 32]).unwrap();
     let mut seq = SeqCounter::default();
     let (earlier, later) = (seq.next_seq(), seq.next_seq());
     relay.send(&public(later)).await.unwrap();

@@ -21,14 +21,18 @@ String suggestBackupPassphrase() =>
     RustLib.instance.api.crateApiBackupSuggestBackupPassphrase();
 
 /// Encrypts this device's copy of a vault (Argon2id 64 MiB; takes a second or two), with
-/// the local names this device gave the signers.
+/// the local names this device gave the signers and this phone's copy of the vault
+/// history, which anchors the restored phone. The backup names the vault's relay:
+/// `relay_url` (the app-wide setting) for a vault from before per-vault relays.
 Future<ExportedBackup> exportVaultBackup({
+  required String relayUrl,
   required List<int> seeds,
   required List<int> material,
   required String invite,
   required List<SignerName> names,
   required String passphrase,
 }) => RustLib.instance.api.crateApiBackupExportVaultBackup(
+  relayUrl: relayUrl,
   seeds: seeds,
   material: material,
   invite: invite,
@@ -37,7 +41,9 @@ Future<ExportedBackup> exportVaultBackup({
 );
 
 /// Decrypts a backup (file bytes, or the pasted text form) and checks it: the identity must
-/// be a member of the vault it restores.
+/// be a member of the vault it restores. The backup's copy of the vault history (since
+/// backup version 3) is checked and installed as this phone's copy before anything talks
+/// to a relay, so no relay can serve this phone a shorter history than the backup's.
 Future<ImportedVault> importVaultBackup({
   required List<int> data,
   required String passphrase,

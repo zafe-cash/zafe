@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `identity`, `material`, `network`, `note_count`, `open_wallet`, `record_synced_tip`, `remove_wallet_files`, `runtime`, `sent_txs`, `synced_tip`, `wallet_key`, `wallet_lock`, `wallet_path`
+// These functions are ignored because they are not marked as `pub`: `identity`, `invite_relay`, `material`, `network`, `note_count`, `open_wallet`, `record_synced_tip`, `remove_wallet_files`, `runtime`, `sent_txs`, `synced_tip`, `vault_relay`, `wallet_key`, `wallet_lock`, `wallet_path`
 
 IdentityInfo generateIdentity() =>
     RustLib.instance.api.crateApiVaultGenerateIdentity();
@@ -19,21 +19,29 @@ String identityPublicKey({required List<int> seeds}) =>
 InviteInfo parseInvite({required String invite}) =>
     RustLib.instance.api.crateApiVaultParseInvite(invite: invite);
 
-/// Creates a vault mailbox on the relay and returns the invite string to share.
+/// Creates a vault mailbox on the relay at `relay_url` (the one picked for this vault) and
+/// returns the invite string to share. A private relay needs its `create_token`; keep it
+/// with the invite and pass it to every [`setup_step`]: the creator seals it to the members
+/// with the log key. Fails with `RelayOutdated` on a relay without labelled mailboxes and
+/// `CreateTokenRefused` when the token is missing or wrong.
 Future<String> createVault({
   required String relayUrl,
   required List<int> seeds,
   required String name,
   required int threshold,
   required int members,
+  String? createToken,
 }) => RustLib.instance.api.crateApiVaultCreateVault(
   relayUrl: relayUrl,
   seeds: seeds,
   name: name,
   threshold: threshold,
   members: members,
+  createToken: createToken,
 );
 
+/// Joins the vault on the invite's relay (`relay_url`, the default relay, only for an
+/// invite from an older app).
 Future<void> joinVault({
   required String relayUrl,
   required List<int> seeds,
@@ -50,7 +58,9 @@ Future<void> joinVault({
 /// (the words the user compared), starts this member's part of key generation; later
 /// steps continue it from `state_dir` without it. The creator's birthday
 /// (`birthday_height`, else lightwalletd's tip + 1; the app passes `None`) and a joiner's
-/// birthday ceiling are fixed once, when key generation starts.
+/// birthday ceiling are fixed once, when key generation starts. The setup runs on the
+/// invite's relay (`relay_url` only for an invite from an older app). The creator passes
+/// the relay's `create_token` it created the vault with (`None` on an open relay).
 Future<SetupProgress> setupStep({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -61,6 +71,7 @@ Future<SetupProgress> setupStep({
   String? confirmedSafetyNumber,
   int? birthdayHeight,
   int? expiryDays,
+  String? createToken,
 }) => RustLib.instance.api.crateApiVaultSetupStep(
   relayUrl: relayUrl,
   lightwalletdUrl: lightwalletdUrl,
@@ -71,6 +82,7 @@ Future<SetupProgress> setupStep({
   confirmedSafetyNumber: confirmedSafetyNumber,
   birthdayHeight: birthdayHeight,
   expiryDays: expiryDays,
+  createToken: createToken,
 );
 
 /// Deletes this member's key-generation state, once the vault's material is saved (or
@@ -146,22 +158,47 @@ Future<Balance> syncVault({
 );
 
 /// Registers this device's push token (FCM on Android, APNs on iOS) for the vault, so the
-/// relay can wake it on vault activity. Pushes carry no content.
-/// Works during setup too (the vault id is the invite's mailbox), so setup steps can be
-/// woken by pushes.
+/// relay can wake it on vault activity. Pushes carry no content. On the vault's own relay
+/// and mailbox: from its `material`, else (during setup, so setup steps can be woken by
+/// pushes) from its `invite`; with neither, `vault_id` on `relay_url` (a vault from before
+/// labels).
 Future<void> registerPush({
   required String relayUrl,
   required List<int> seeds,
   required String vaultId,
+  Uint8List? material,
+  String? invite,
   required String platform,
   required String token,
 }) => RustLib.instance.api.crateApiVaultRegisterPush(
   relayUrl: relayUrl,
   seeds: seeds,
   vaultId: vaultId,
+  material: material,
+  invite: invite,
   platform: platform,
   token: token,
 );
+
+VaultRelaySettings vaultRelaySettings({
+  required List<int> material,
+  required String defaultRelayUrl,
+}) => RustLib.instance.api.crateApiVaultVaultRelaySettings(
+  material: material,
+  defaultRelayUrl: defaultRelayUrl,
+);
+
+/// The vault's material with `token` stored as its relay's create token (`None` or blank
+/// clears it), e.g. typed in before restoring the vault on a private relay. Save the
+/// result in place of the material.
+Uint8List setVaultCreateToken({required List<int> material, String? token}) =>
+    RustLib.instance.api.crateApiVaultSetVaultCreateToken(
+      material: material,
+      token: token,
+    );
+
+RelayStatusInfo vaultRelayStatus({required String vaultId}) =>
+    RustLib.instance.api.crateApiVaultVaultRelayStatus(vaultId: vaultId);
 
 class Balance {
   final int height;
@@ -236,12 +273,17 @@ class InviteInfo {
   final int members;
   final String creatorHex;
 
+  /// The vault's relay (shown as a fact on the join screen). `None` for an invite from
+  /// an older app: the vault is on this phone's default relay.
+  final String? relayUrl;
+
   const InviteInfo({
     required this.vaultId,
     required this.name,
     required this.threshold,
     required this.members,
     required this.creatorHex,
+    this.relayUrl,
   });
 
   @override
@@ -250,7 +292,8 @@ class InviteInfo {
       name.hashCode ^
       threshold.hashCode ^
       members.hashCode ^
-      creatorHex.hashCode;
+      creatorHex.hashCode ^
+      relayUrl.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -261,7 +304,28 @@ class InviteInfo {
           name == other.name &&
           threshold == other.threshold &&
           members == other.members &&
-          creatorHex == other.creatorHex;
+          creatorHex == other.creatorHex &&
+          relayUrl == other.relayUrl;
+}
+
+/// When this phone last reached the vault's relay (Unix seconds), and since when it
+/// can't: for "Can't reach relay · since 09:14". Both `None` before the first request.
+class RelayStatusInfo {
+  final BigInt? lastReached;
+  final BigInt? unreachableSince;
+
+  const RelayStatusInfo({this.lastReached, this.unreachableSince});
+
+  @override
+  int get hashCode => lastReached.hashCode ^ unreachableSince.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RelayStatusInfo &&
+          runtimeType == other.runtimeType &&
+          lastReached == other.lastReached &&
+          unreachableSince == other.unreachableSince;
 }
 
 /// Where a setup stands for this member, after one step of it ([`setup_step`]).
@@ -328,6 +392,45 @@ class SetupProgress {
           keygenStage == other.keygenStage &&
           keygenWaitingFor == other.keygenWaitingFor &&
           material == other.material;
+}
+
+/// Where a vault lives (Settings: "Relay · everyone in Grants").
+class VaultRelaySettings {
+  /// The vault's relay (the app-wide one for a vault from before per-vault relays).
+  final String url;
+
+  /// The vault has no relay of its own and follows the app-wide setting.
+  final bool usesDefault;
+
+  /// The relay's mailbox id for the vault (hex); the vault id for older vaults.
+  final String label;
+
+  /// A create token is stored for the vault's relay (the token itself stays here).
+  final bool hasCreateToken;
+
+  const VaultRelaySettings({
+    required this.url,
+    required this.usesDefault,
+    required this.label,
+    required this.hasCreateToken,
+  });
+
+  @override
+  int get hashCode =>
+      url.hashCode ^
+      usesDefault.hashCode ^
+      label.hashCode ^
+      hasCreateToken.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is VaultRelaySettings &&
+          runtimeType == other.runtimeType &&
+          url == other.url &&
+          usesDefault == other.usesDefault &&
+          label == other.label &&
+          hasCreateToken == other.hasCreateToken;
 }
 
 class VaultSummary {

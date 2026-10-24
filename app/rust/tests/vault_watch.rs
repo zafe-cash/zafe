@@ -157,7 +157,8 @@ fn vault_watch_reports_activity_and_stops() {
     assert_eq!(next(&events), VaultActivityKind::Activity);
 
     // A message for this member (e.g. a signing request): news.
-    let vault = materials[0].descriptor.vault_id;
+    // Envelopes go to the vault's mailbox label on the relay.
+    let vault = materials[0].label();
     let envelope = Envelope::sealed(
         &ids[1],
         ids[0].public(),
@@ -208,7 +209,10 @@ fn vault_watch_reports_activity_and_stops() {
         &rt,
         axum::Router::new().route("/health", axum::routing::get(|| async { "ok" })),
     );
-    let events = start(&old, &ids[0], &materials[0], 5);
+    // The watch follows the vault's own relay, not the default it is given.
+    let mut moved = materials[0].clone();
+    moved.relay.url = Some(old.clone());
+    let events = start(&url, &ids[0], &moved, 5);
     assert_eq!(next(&events), VaultActivityKind::Unsupported);
     assert_ended(&events);
 }

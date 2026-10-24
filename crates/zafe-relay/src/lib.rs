@@ -22,8 +22,10 @@
 //! could create first (`docs/relay-move.md` §4.6). The relay keeps the vault id of a
 //! mailbox's first entry (`mailboxes.vault_id`) and refuses entries of any other vault.
 //! `/v1/log/append` finds the mailbox from the entry, so it only reaches mailboxes whose
-//! label is the vault id; `/v1/log/append-labelled` takes the label. Every other route
-//! takes the mailbox from the request or the envelope header.
+//! label is the vault id; `/v1/log/append-labelled` takes the label. Seat moves are signed
+//! over the vault id: `/v1/mailbox/replace` finds the mailbox by it, and
+//! `/v1/mailbox/replace-labelled` takes the label and checks the vault id it holds. Every
+//! other route takes the mailbox from the request or the envelope header.
 
 use std::{
     path::Path,
@@ -56,13 +58,13 @@ use zafe_proto::{
     log::GENESIS_PREV_HASH,
     relay::{
         encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, ForgetPush,
-        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend, LogRead,
-        LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse, MembersRead, MembersResponse,
-        PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush,
-        RelayExpiry, RelayInfo, RelayLimits, RelayVersions, Remove, RenewInvite, ReplaceMember,
-        Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest, WaitResponse,
-        CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
-        UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
+        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
+        LabelledReplace, LogRead, LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse,
+        MembersRead, MembersResponse, PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind,
+        RecoveryValues, RegisterPush, RelayExpiry, RelayInfo, RelayLimits, RelayVersions, Remove,
+        RenewInvite, ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold,
+        Signed, WaitRequest, WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS,
+        MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS, UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -496,6 +498,10 @@ impl Relay {
             .route("/v1/mailbox/info", post(mailbox_info))
             .route("/v1/mailbox/threshold", post(set_threshold))
             .route("/v1/mailbox/replace", post(replace_member))
+            .route(
+                "/v1/mailbox/replace-labelled",
+                post(replace_member_labelled),
+            )
             .route("/v1/mailbox/reseed", post(reseed))
             .route("/v1/mailboxes", post(mailboxes))
             .route("/v1/recovery/put", post(recovery_put))
@@ -1159,12 +1165,48 @@ async fn set_threshold(State(relay): State<Relay>, body: Bytes) -> RelayResult {
 async fn replace_member(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<ReplaceMember>(&relay, &body)?;
     let a = req.payload.approval;
+    replace_in(
+        &relay,
+        &req.signer.sig_pk,
+        &a.mailbox,
+        a,
+        &req.payload.approvals,
+    )
+}
+
+/// [`replace_member`] on a labelled mailbox (see [`LabelledReplace`]): the approvals are
+/// signed over the vault id, which must be the one this mailbox holds.
+async fn replace_member_labelled(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<LabelledReplace>(&relay, &body)?;
+    let p = req.payload;
+    replace_in(
+        &relay,
+        &req.signer.sig_pk,
+        &p.mailbox,
+        p.approval,
+        &p.approvals,
+    )
+}
+
+/// Moves `approval.old`'s seat in mailbox `label` to `approval.new`.
+fn replace_in(
+    relay: &Relay,
+    signer: &[u8; 32],
+    label: &MailboxId,
+    a: ReplaceApproval,
+    approvals: &[([u8; 32], Vec<u8>)],
+) -> RelayResult {
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
-    let mb = mailbox(&tx, &a.mailbox)?;
-    let current = members_of(&tx, &a.mailbox)?;
+    let mb = mailbox(&tx, label)?;
+    // The approvals name the vault: they must be for the one this mailbox holds (before
+    // its first entry, a mailbox holds the vault its id names).
+    if mb.vault_id.unwrap_or(*label) != a.mailbox {
+        return Err(RelayError::OtherVault);
+    }
+    let current = members_of(&tx, label)?;
     let is_member = |pk: &[u8; 32]| current.iter().any(|m| &m.sig_pk == pk);
-    if req.signer.sig_pk != a.new.sig_pk && !is_member(&req.signer.sig_pk) {
+    if *signer != a.new.sig_pk && !is_member(signer) {
         return Err(RelayError::Forbidden);
     }
     if !is_member(&a.old) && current.contains(&a.new) {
@@ -1174,7 +1216,7 @@ async fn replace_member(State(relay): State<Relay>, body: Bytes) -> RelayResult 
         return Err(RelayError::Forbidden);
     }
     let mut approvers = std::collections::BTreeSet::new();
-    for (pk, signature) in &req.payload.approvals {
+    for (pk, signature) in approvals {
         let Some(by) = current
             .iter()
             .find(|m| &m.sig_pk == pk && m.sig_pk != a.old)
@@ -1190,20 +1232,20 @@ async fn replace_member(State(relay): State<Relay>, body: Bytes) -> RelayResult 
     }
     tx.execute(
         "DELETE FROM members WHERE mailbox = ?1 AND sig_pk = ?2",
-        params![&a.mailbox[..], &a.old[..]],
+        params![&label[..], &a.old[..]],
     )?;
     tx.execute(
         "DELETE FROM push_tokens WHERE mailbox = ?1 AND member = ?2",
-        params![&a.mailbox[..], &a.old[..]],
+        params![&label[..], &a.old[..]],
     )?;
     tx.execute(
         "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
-        params![&a.mailbox[..], &a.new.sig_pk[..], &a.new.enc_pk[..]],
+        params![&label[..], &a.new.sig_pk[..], &a.new.enc_pk[..]],
     )?;
-    relay.touch(&tx, &a.mailbox, &mb, &req.signer.sig_pk)?;
+    relay.touch(&tx, label, &mb, signer)?;
     tx.commit()?;
     drop(db);
-    relay.waiters.signal(&a.mailbox);
+    relay.waiters.signal(label);
     ok(&())
 }
 

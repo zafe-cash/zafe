@@ -74,22 +74,43 @@ pub struct ExportedBackup {
 }
 
 /// Encrypts this device's copy of a vault (Argon2id 64 MiB; takes a second or two), with
-/// the local names this device gave the signers.
+/// the local names this device gave the signers and this phone's copy of the vault
+/// history, which anchors the restored phone. The backup names the vault's relay:
+/// `relay_url` (the app-wide setting) for a vault from before per-vault relays.
 pub fn export_vault_backup(
+    relay_url: String,
     seeds: Vec<u8>,
     material: Vec<u8>,
     invite: String,
     names: Vec<SignerName>,
     passphrase: String,
 ) -> Result<ExportedBackup, ZafeError> {
+    let mut m = super::vault::material(&material)?;
+    if m.relay.url.is_none() {
+        m.relay.url = Some(relay_url.trim_end_matches('/').to_owned());
+    }
+    let cache = zafe_core::log_cache::configured().ok_or_else(|| {
+        ZafeError::new(
+            ZafeErrorKind::Other,
+            "the log copy is not set up (init_log_cache was not called)",
+        )
+    })?;
+    let log = cache
+        .read(&m.descriptor.vault_id)
+        .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?
+        .iter()
+        .map(|e| e.to_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| ZafeError::new(ZafeErrorKind::Other, format!("log copy: {e:?}")))?;
     let contents = Contents {
         identity_seeds: seeds,
-        material,
+        material: m.to_bytes()?,
         invite,
         created_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
         names: to_map(names),
+        log,
     };
     let bytes = backup::encrypt(&contents, &passphrase, KdfParams::DEFAULT, &mut OsRng)?;
     // Open it again before handing it out: the member attests this backup in the log.
@@ -110,7 +131,9 @@ pub struct ImportedVault {
 }
 
 /// Decrypts a backup (file bytes, or the pasted text form) and checks it: the identity must
-/// be a member of the vault it restores.
+/// be a member of the vault it restores. The backup's copy of the vault history (since
+/// backup version 3) is checked and installed as this phone's copy before anything talks
+/// to a relay, so no relay can serve this phone a shorter history than the backup's.
 pub fn import_vault_backup(data: Vec<u8>, passphrase: String) -> Result<ImportedVault, ZafeError> {
     let bytes = match std::str::from_utf8(&data) {
         Ok(text) if text.trim_start().starts_with("zafe-backup-v1:") => backup::from_text(text)?,
@@ -118,6 +141,13 @@ pub fn import_vault_backup(data: Vec<u8>, passphrase: String) -> Result<Imported
     };
     let contents = backup::decrypt(&bytes, &passphrase)?;
     let material = contents.validate()?;
+    let cache = zafe_core::log_cache::configured().ok_or_else(|| {
+        ZafeError::new(
+            ZafeErrorKind::Other,
+            "the log copy is not set up (init_log_cache was not called)",
+        )
+    })?;
+    zafe_core::node::install_log_copy(&cache, &material, &contents.log)?;
     Ok(ImportedVault {
         vault_id: hex::encode(material.descriptor.vault_id),
         name: material.descriptor.name.clone(),
