@@ -297,6 +297,12 @@ async fn counters_survive_a_restart() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Drops what schema 4 added (labels and expiry), turning a fresh database into schema 3.
+const V4_COLUMNS: &str = "ALTER TABLE mailboxes DROP COLUMN vault_id;
+     ALTER TABLE mailboxes DROP COLUMN last_seen_day;
+     ALTER TABLE mailboxes DROP COLUMN created_day;
+     ALTER TABLE mailboxes DROP COLUMN shared;";
+
 /// Schema 1 had no counters (nor thresholds): opening it adds them and fills the counters
 /// from the stored rows.
 #[tokio::test]
@@ -306,12 +312,13 @@ async fn a_schema_1_database_is_migrated() {
     let before = fill(&Relay::open(&path).unwrap(), &mut rng).await;
 
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch(
-        "ALTER TABLE mailboxes DROP COLUMN delivery_bytes;
+    conn.execute_batch(&format!(
+        "{V4_COLUMNS}
+         ALTER TABLE mailboxes DROP COLUMN delivery_bytes;
          ALTER TABLE mailboxes DROP COLUMN log_bytes;
          ALTER TABLE mailboxes DROP COLUMN threshold;
-         PRAGMA user_version = 1;",
-    )
+         PRAGMA user_version = 1;"
+    ))
     .unwrap();
     drop(conn);
 
@@ -333,10 +340,11 @@ async fn a_schema_2_database_is_migrated() {
     let before = fill(&Relay::open(&path).unwrap(), &mut rng).await;
 
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch(
-        "ALTER TABLE mailboxes DROP COLUMN threshold;
-         PRAGMA user_version = 2;",
-    )
+    conn.execute_batch(&format!(
+        "{V4_COLUMNS}
+         ALTER TABLE mailboxes DROP COLUMN threshold;
+         PRAGMA user_version = 2;"
+    ))
     .unwrap();
     drop(conn);
 
@@ -351,6 +359,48 @@ async fn a_schema_2_database_is_migrated() {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
     assert_eq!(version, zafe_proto::version::RELAY_DB);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Schema 3 had no labels or expiry: every mailbox is filed under its vault id, counts as
+/// seen today and as shared, so the first expiry after the upgrade deletes nothing.
+#[tokio::test]
+async fn a_schema_3_database_is_migrated() {
+    use zafe_relay::expiry::Expiry;
+    let (dir, path) = temp_db("labels-migrate");
+    let mut rng = StdRng::seed_from_u64(7);
+    let before = fill(&Relay::open(&path).unwrap(), &mut rng).await;
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(&format!("{V4_COLUMNS} PRAGMA user_version = 3;"))
+        .unwrap();
+    drop(conn);
+
+    // Long after the mailbox was made: the migration counts it as seen at the upgrade.
+    let now = Arc::new(AtomicU64::new(T0 + 400 * 86_400));
+    let relay = Relay::open_with_clock(&path, clock(&now))
+        .unwrap()
+        .with_expiry(Expiry::hosted());
+    assert_eq!(relay.usage(&MAILBOX).unwrap(), before);
+    assert_eq!(relay.expire().unwrap(), 0);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let (vault_id, last_seen, shared): (Vec<u8>, i64, i64) = conn
+        .query_row(
+            "SELECT vault_id, last_seen_day, shared FROM mailboxes",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(vault_id, MAILBOX);
+    assert_eq!(last_seen, ((T0 + 400 * 86_400) / 86_400) as i64);
+    assert_eq!(shared, 1);
+    let version: u16 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, zafe_proto::version::RELAY_DB);
+    // A year later with no member request, it does expire.
+    now.fetch_add(366 * 86_400, Ordering::SeqCst);
+    assert_eq!(relay.expire().unwrap(), 1);
     std::fs::remove_dir_all(&dir).ok();
 }
 

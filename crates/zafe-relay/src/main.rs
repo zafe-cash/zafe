@@ -22,13 +22,22 @@
 //!   of vault log per mailbox
 //! - `ZAFE_RELAY_MAX_VAULTS_PER_KEY`: mailboxes one signing key may create (default 8).
 //!   `0` turns that quota off, as for the three before it
+//! - `ZAFE_RELAY_EXPIRY`: `off` keeps every mailbox (default: on, [`Expiry::hosted`]:
+//!   deleted after a year without member requests, or 30 days after creation when no
+//!   member but the creator ever made one)
+//! - `ZAFE_RELAY_IDLE_DAYS` / `ZAFE_RELAY_UNUSED_DAYS`: those two periods; `0` turns that
+//!   rule off
+//! - `ZAFE_RELAY_CREATE_TOKEN`: when set, creating or restoring a mailbox needs this token
+//!   (a private relay). Never logged
 //!
 //! [`Limits::hosted`]: zafe_relay::limits::Limits::hosted
 //! [`Quotas::hosted`]: zafe_relay::quota::Quotas::hosted
+//! [`Expiry::hosted`]: zafe_relay::expiry::Expiry::hosted
 
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use zafe_relay::{
+    expiry::Expiry,
     limits::{DailyRate, Limits, Rate},
     quota::Quotas,
 };
@@ -93,9 +102,28 @@ async fn main() -> std::io::Result<()> {
         quotas.log_bytes,
         quotas.mailboxes_per_key
     );
-    let relay = relay.with_limits(limits).with_quotas(quotas);
+    let expiry = expiry_from_env(|name| std::env::var(name).ok());
+    tracing::info!(
+        "expiry: idle days {:?}, unused days {:?}",
+        expiry.idle_days,
+        expiry.unused_days
+    );
+    let create_token = std::env::var("ZAFE_RELAY_CREATE_TOKEN").ok();
+    let relay = relay
+        .with_limits(limits)
+        .with_quotas(quotas)
+        .with_expiry(expiry)
+        .with_create_token(create_token.as_deref());
+    tracing::info!(
+        "create token: {}",
+        if relay.info().create_token {
+            "required"
+        } else {
+            "not required"
+        }
+    );
 
-    // Hourly retention pruning of old undelivered envelopes.
+    // Hourly: old undelivered envelopes, then mailboxes nobody uses.
     let pruner = relay.clone();
     tokio::spawn(async move {
         loop {
@@ -103,6 +131,11 @@ async fn main() -> std::io::Result<()> {
                 Ok(n) if n > 0 => tracing::info!("pruned {n} expired deliveries"),
                 Ok(_) => {}
                 Err(e) => tracing::warn!("prune failed: {e}"),
+            }
+            match pruner.expire() {
+                Ok(n) if n > 0 => tracing::info!("expired {n} unused mailboxes"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("expiry failed: {e}"),
             }
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
@@ -166,6 +199,22 @@ fn quotas_from_env(var: impl Fn(&str) -> Option<String>) -> Quotas {
     quotas
 }
 
+/// Mailbox expiry from the environment (see the module docs).
+fn expiry_from_env(var: impl Fn(&str) -> Option<String>) -> Expiry {
+    if var("ZAFE_RELAY_EXPIRY").is_some_and(|v| v.trim().eq_ignore_ascii_case("off")) {
+        return Expiry::none();
+    }
+    let mut expiry = Expiry::hosted();
+    let days = |name: &str, default: Option<u32>| match var(name).map(|v| v.trim().parse::<u32>()) {
+        Some(Ok(0)) => None,
+        Some(Ok(n)) => Some(n),
+        _ => default,
+    };
+    expiry.idle_days = days("ZAFE_RELAY_IDLE_DAYS", expiry.idle_days);
+    expiry.unused_days = days("ZAFE_RELAY_UNUSED_DAYS", expiry.unused_days);
+    expiry
+}
+
 /// `ZAFE_RELAY_LISTEN` wins; otherwise `PORT` (Fly.io, Cloud Run, ...) on all interfaces;
 /// otherwise the local development default.
 fn listen_addr(listen: Option<String>, port: Option<String>) -> String {
@@ -196,8 +245,9 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{limits_from_env, listen_addr, quotas_from_env};
+    use super::{expiry_from_env, limits_from_env, listen_addr, quotas_from_env};
     use zafe_relay::{
+        expiry::Expiry,
         limits::{DailyRate, Limits, Rate},
         quota::Quotas,
     };
@@ -230,6 +280,23 @@ mod tests {
         assert_eq!(q.mailboxes_per_key, Some(3));
         let q = quotas_from_env(env(&[("ZAFE_RELAY_MAX_INBOX", "lots")]));
         assert_eq!(q, Quotas::hosted(), "unparsable values keep the default");
+    }
+
+    #[test]
+    fn expiry_from_the_environment() {
+        assert_eq!(expiry_from_env(env(&[])), Expiry::hosted());
+        assert_eq!(
+            expiry_from_env(env(&[("ZAFE_RELAY_EXPIRY", "off")])),
+            Expiry::none()
+        );
+        let e = expiry_from_env(env(&[
+            ("ZAFE_RELAY_IDLE_DAYS", "90"),
+            ("ZAFE_RELAY_UNUSED_DAYS", "0"),
+        ]));
+        assert_eq!(e.idle_days, Some(90));
+        assert_eq!(e.unused_days, None);
+        let e = expiry_from_env(env(&[("ZAFE_RELAY_IDLE_DAYS", "soon")]));
+        assert_eq!(e, Expiry::hosted(), "unparsable values keep the default");
     }
 
     #[test]

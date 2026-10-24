@@ -23,7 +23,8 @@ history, or values passed between members sealed or out of band.
 - **Log entries and envelopes are bound to the mailbox id** (`EntryHeader.mailbox`, in the AAD
   and signature; `Header.mailbox` for envelopes), and the relay files a vault under that same
   id (`lib.rs:1055`, `lib.rs:1375`).
-- **A relay never deletes a mailbox** (`Relay::prune` deletes only old deliveries).
+- **A relay never deletes a mailbox** (`Relay::prune` deletes only old deliveries; expiry
+  is now built, see §7).
 - **The unapproved-spend alert stops during an outage** (`api/spends.rs` loads from the relay).
 - **Push works only from our relay** (FCM with Zafe's service account) (§10).
 
@@ -261,6 +262,30 @@ clean up after themselves on a relay:
 **Order:** (1) per-vault relay + labels for new vaults + invite/backup/recovery anchors;
 (2) relay labelled routes, expiry, create token + picker + self-host page; (3) move and follow
 with `VaultMoved`; (4) standby relay. Each protection ships with or before what it protects.
+
+**Relay side built (2026-10-25, branch `relay-labels`, not deployed).** What it refines:
+- **Labelled append:** `POST /v1/log/append-labelled`, a `Signed<LabelledAppend { mailbox,
+  entry, timestamp }>` by any member of that mailbox (catch-up posts others' entries); the
+  entry's author must be a current member, as on `/v1/log/append`. `RelayClient::append_log_to`.
+- **Vault id:** stored from the first entry (append or reseed); any entry of another vault is
+  400 "this mailbox holds another vault". Old mailboxes were migrated with `vault_id = id`.
+- **Push forget:** never answers 404 (nothing registered is nothing to forget), so a 404 always
+  means an older relay; it doesn't count as use for expiry.
+- **`GET /v1/info`** is JSON (fields can be added without a `RELAY_API` bump): versions,
+  limits (body, members, quotas, key rate, delivery retention), push, create token, expiry.
+- **Expiry:** `last_seen_day`, `created_day` (day numbers) and `shared` (a member other than
+  the creator made a request). The 30-day rule applies to every mailbox, not only labelled
+  ones: from now on every new mailbox is a label, and a setup nobody joined is as dead as a
+  move nobody followed. Migrated mailboxes count as shared and seen on upgrade day, so only
+  the 1-year rule applies to them. Off in `Relay::new()`, on in the binary
+  (`ZAFE_RELAY_EXPIRY`, `ZAFE_RELAY_IDLE_DAYS`, `ZAFE_RELAY_UNUSED_DAYS`).
+- **Create token:** a request header (`zafe-create-token`), so no body changed; refusal is
+  401 with `www-authenticate: zafe-create-token` (`RelayClientError::CreateTokenRefused`).
+  Stored as a BLAKE2b hash, compared with `subtle`. The per-IP creation bucket is charged
+  before the check, so every guess costs one creation.
+- **Members:** at most 64 per mailbox, now on `create` too (vaults have at most 15).
+- **Older relays:** a 404 whose body isn't "unknown mailbox" → `RelayClientError::RelayTooOld
+  { route }`; the bridge doesn't map it yet (phase 1 app work).
 
 ## 8. Review: each part on its own
 

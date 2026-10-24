@@ -14,7 +14,16 @@
 //!
 //! Limits: request rates per key and IP ([`limits`]) and storage per mailbox ([`quota`]),
 //! both off in [`Relay::new`] and on in the `zafe-relay` binary. Long polls
-//! (`/v1/wait`, [`wait`]) are capped per key and in total, always.
+//! (`/v1/wait`, [`wait`]) are capped per key and in total, always. Mailboxes nobody uses
+//! expire ([`expiry`]), also off in [`Relay::new`].
+//!
+//! Labels: a mailbox id is this relay's label for a vault. It may differ from the vault id
+//! the log entries carry (`EntryHeader::mailbox`), so a vault can move to a mailbox nobody
+//! could create first (`docs/relay-move.md` §4.6). The relay keeps the vault id of a
+//! mailbox's first entry (`mailboxes.vault_id`) and refuses entries of any other vault.
+//! `/v1/log/append` finds the mailbox from the entry, so it only reaches mailboxes whose
+//! label is the vault id; `/v1/log/append-labelled` takes the label. Every other route
+//! takes the mailbox from the request or the envelope header.
 
 use std::{
     path::Path,
@@ -25,18 +34,20 @@ use std::{
 use axum::{
     body::Bytes,
     extract::{ConnectInfo, DefaultBodyLimit, Extension, Request, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use rusqlite::{params, Connection, OptionalExtension};
+pub mod expiry;
 pub mod fcm;
 pub mod limits;
 pub mod quota;
 pub mod wait;
 
+use expiry::{day, Expiry};
 use limits::{Buckets, Limits};
 use quota::{Quota, Quotas, Usage};
 use wait::Waiters;
@@ -44,13 +55,14 @@ use wait::Waiters;
 use zafe_proto::{
     log::GENESIS_PREV_HASH,
     relay::{
-        encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxAck,
-        InboxAckResponse, InboxRead, InboxResponse, Join, LogRead, LogResponse, MailboxInfo,
-        MailboxesRead, MailboxesResponse, MembersRead, MembersResponse, PushPlatform, RecoveryPut,
-        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, Remove, RenewInvite,
-        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
-        WaitResponse, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
-        UNSUPPORTED_VERSION_HEADER,
+        encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, ForgetPush,
+        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend, LogRead,
+        LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse, MembersRead, MembersResponse,
+        PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush,
+        RelayExpiry, RelayInfo, RelayLimits, RelayVersions, Remove, RenewInvite, ReplaceMember,
+        Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest, WaitResponse,
+        CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
+        UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -75,11 +87,19 @@ pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// Undelivered envelopes older than this are pruned (spec §6.1).
 pub const DELIVERY_RETENTION_SECS: u64 = 30 * 24 * 3600;
 
+/// Most members one mailbox may have (created or restored). Vaults have at most 15.
+pub const MAX_MEMBERS: u16 = 64;
+
 type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 /// Sends content-free "vault activity" pushes. Real APNs/FCM senders plug in here (M1).
 pub trait Notifier: Send + Sync {
     fn notify(&self, platform: PushPlatform, token: &str);
+
+    /// Whether pushes really go out (`GET /v1/info` says so to clients).
+    fn delivers(&self) -> bool {
+        true
+    }
 }
 
 /// Default notifier: logs that a push would be sent.
@@ -88,6 +108,10 @@ pub struct LogNotifier;
 impl Notifier for LogNotifier {
     fn notify(&self, platform: PushPlatform, _token: &str) {
         tracing::debug!(platform = platform.as_str(), "push: vault activity");
+    }
+
+    fn delivers(&self) -> bool {
+        false
     }
 }
 
@@ -100,7 +124,12 @@ pub struct Relay {
     per_ip: Option<Arc<Buckets<std::net::IpAddr>>>,
     creates_per_ip: Option<Arc<Buckets<std::net::IpAddr>>>,
     client_ip_header: Option<String>,
+    /// The configured limits, as `GET /v1/info` reports them.
+    limits: Limits,
     quotas: Quotas,
+    expiry: Expiry,
+    /// [`create_token_hash`] of `ZAFE_RELAY_CREATE_TOKEN` (never the token itself).
+    create_token: Option<[u8; 32]>,
     waiters: Arc<Waiters>,
 }
 
@@ -116,8 +145,16 @@ pub enum RelayError {
     Unauthenticated,
     #[error("not allowed")]
     Forbidden,
-    #[error("unknown mailbox")]
+    #[error("{}", UNKNOWN_MAILBOX)]
     NotFound,
+    /// A log entry of another vault than the one the mailbox holds (the vault id of its
+    /// first entry).
+    #[error("this mailbox holds another vault")]
+    OtherVault,
+    /// This relay needs a create token to create or restore a mailbox, and the request
+    /// didn't carry the right one (HTTP 401, `www-authenticate: zafe-create-token`).
+    #[error("this relay needs a create token")]
+    CreateTokenRequired,
     /// The invite is older than `INVITE_TTL_SECS` and wasn't renewed (HTTP 410 Gone).
     #[error("this invite expired")]
     InviteExpired,
@@ -167,6 +204,14 @@ impl IntoResponse for RelayError {
             )
                 .into_response();
         }
+        if let RelayError::CreateTokenRequired = self {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(axum::http::header::WWW_AUTHENTICATE, CREATE_TOKEN_HEADER)],
+                self.to_string(),
+            )
+                .into_response();
+        }
         if let RelayError::UnsupportedVersion(v) = self {
             return (
                 StatusCode::UPGRADE_REQUIRED,
@@ -176,8 +221,12 @@ impl IntoResponse for RelayError {
                 .into_response();
         }
         let status = match self {
-            RelayError::BadRequest | RelayError::Stale => StatusCode::BAD_REQUEST,
-            RelayError::Unauthenticated => StatusCode::UNAUTHORIZED,
+            RelayError::BadRequest | RelayError::Stale | RelayError::OtherVault => {
+                StatusCode::BAD_REQUEST
+            }
+            RelayError::Unauthenticated | RelayError::CreateTokenRequired => {
+                StatusCode::UNAUTHORIZED
+            }
             RelayError::Forbidden => StatusCode::FORBIDDEN,
             RelayError::NotFound => StatusCode::NOT_FOUND,
             RelayError::InviteExpired => StatusCode::GONE,
@@ -196,8 +245,11 @@ type RelayResult = Result<Vec<u8>, RelayError>;
 
 // `mailboxes.delivery_bytes` / `log_bytes`: running totals for the storage quotas (bytes of
 // this mailbox's `deliveries.envelope` / `log_entries.entry`), kept in step by every insert
-// and by pruning (see `quota`). No SQL comments inside the schema: SQLite keeps the CREATE
-// text and re-parses it on ALTER TABLE.
+// and by pruning (see `quota`). `vault_id`: the vault id of the first log entry (NULL until
+// there is one; the id is only a label). `last_seen_day` / `created_day`: day numbers for
+// expiry; `shared`: a member other than the creator has made a request (see `expiry`).
+// No SQL comments inside the schema: SQLite keeps the CREATE text and re-parses it on
+// ALTER TABLE.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS mailboxes (
     id BLOB PRIMARY KEY,
@@ -209,7 +261,11 @@ CREATE TABLE IF NOT EXISTS mailboxes (
     created_at INTEGER NOT NULL,
     delivery_bytes INTEGER NOT NULL DEFAULT 0,
     log_bytes INTEGER NOT NULL DEFAULT 0,
-    threshold INTEGER NOT NULL DEFAULT 0
+    threshold INTEGER NOT NULL DEFAULT 0,
+    vault_id BLOB,
+    last_seen_day INTEGER NOT NULL DEFAULT 0,
+    created_day INTEGER NOT NULL DEFAULT 0,
+    shared INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS members (
     mailbox BLOB NOT NULL,
@@ -307,13 +363,18 @@ impl Relay {
         )?;
         // Version 0 with tables: written before versioning (unversioned envelopes and log
         // entries), refused; delete it. Older schemas migrate from `found` here.
-        if found == 1 {
-            migrate_from_v1(&conn)?;
-            migrate_from_v2(&conn)?;
-        } else if found == 2 {
-            migrate_from_v2(&conn)?;
-        } else if found != 0 || has_tables {
-            version::check(version::Format::RelayDb, found)?;
+        match found {
+            1..=3 => {
+                if found == 1 {
+                    migrate_from_v1(&conn)?;
+                }
+                if found <= 2 {
+                    migrate_from_v2(&conn)?;
+                }
+                migrate_from_v3(&conn, day(clock()))?;
+            }
+            0 if !has_tables => {}
+            _ => version::check(version::Format::RelayDb, found)?,
         }
         conn.execute_batch(SCHEMA)?;
         conn.pragma_update(None, "user_version", version::RELAY_DB)?;
@@ -325,7 +386,10 @@ impl Relay {
             per_ip: None,
             creates_per_ip: None,
             client_ip_header: None,
+            limits: Limits::none(),
             quotas: Quotas::none(),
+            expiry: Expiry::none(),
+            create_token: None,
             waiters: Arc::new(Waiters::new(
                 wait::DEFAULT_WAITS_PER_KEY,
                 wait::DEFAULT_WAITS_TOTAL,
@@ -343,6 +407,24 @@ impl Relay {
     /// Sets storage quotas (none by default; `zafe-relay` uses [`Quotas::hosted`]).
     pub fn with_quotas(mut self, quotas: Quotas) -> Self {
         self.quotas = quotas;
+        self
+    }
+
+    /// Sets when [`Relay::expire`] deletes mailboxes (never by default; `zafe-relay` uses
+    /// [`Expiry::hosted`]).
+    pub fn with_expiry(mut self, expiry: Expiry) -> Self {
+        self.expiry = expiry;
+        self
+    }
+
+    /// Makes `/v1/mailbox/create` and the first `/v1/mailbox/reseed` of a mailbox need
+    /// `token` in the [`CREATE_TOKEN_HEADER`] header (a private relay). `None` or blank:
+    /// anyone may create. Only a hash of it is kept.
+    pub fn with_create_token(mut self, token: Option<&str>) -> Self {
+        self.create_token = token
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| create_token_hash(t.as_bytes()));
         self
     }
 
@@ -374,7 +456,8 @@ impl Relay {
         self.per_key = limits.per_key.map(|r| Arc::new(Buckets::new(r)));
         self.per_ip = limits.per_ip.map(|r| Arc::new(Buckets::new(r)));
         self.creates_per_ip = limits.creates_per_ip.map(|r| Arc::new(Buckets::daily(r)));
-        self.client_ip_header = limits.client_ip_header;
+        self.client_ip_header = limits.client_ip_header.clone();
+        self.limits = limits;
         self
     }
 
@@ -402,6 +485,7 @@ impl Relay {
     pub fn router(self) -> Router {
         Router::new()
             .route("/health", get(health))
+            .route("/v1/info", get(info))
             .route("/v1/mailbox/create", post(create))
             .route("/v1/mailbox/join", post(join))
             .route("/v1/mailbox/seal", post(seal))
@@ -417,10 +501,12 @@ impl Relay {
             .route("/v1/recovery/put", post(recovery_put))
             .route("/v1/recovery/read", post(recovery_read))
             .route("/v1/push/register", post(register_push))
+            .route("/v1/push/forget", post(forget_push))
             .route("/v1/envelope", post(post_envelope))
             .route("/v1/inbox", post(inbox))
             .route("/v1/inbox/ack", post(inbox_ack))
             .route("/v1/log/append", post(log_append))
+            .route("/v1/log/append-labelled", post(log_append_labelled))
             .route("/v1/log/read", post(log_read))
             .route("/v1/wait", post(wait))
             .layer(middleware::from_fn_with_state(self.clone(), limit_ip))
@@ -465,8 +551,131 @@ impl Relay {
         Ok(deleted)
     }
 
+    /// Deletes mailboxes nobody uses any more ([`expiry`]) with everything stored for them.
+    /// Returns how many. Does nothing unless [`Relay::with_expiry`] set a rule.
+    pub fn expire(&self) -> Result<usize, RelayError> {
+        let today = day(self.now());
+        let before = |days: Option<u32>| days.map(|d| today.saturating_sub(i64::from(d)));
+        let (idle, unused) = (
+            before(self.expiry.idle_days),
+            before(self.expiry.unused_days),
+        );
+        if idle.is_none() && unused.is_none() {
+            return Ok(0);
+        }
+        let mut db = self.db.lock().expect("lock");
+        let tx = db.transaction()?;
+        let ids = {
+            // A scan of `mailboxes` once an hour, never on a request.
+            let mut stmt = tx.prepare(
+                "SELECT id FROM mailboxes
+                 WHERE (?1 IS NOT NULL AND last_seen_day < ?1)
+                    OR (?2 IS NOT NULL AND shared = 0 AND created_day < ?2)",
+            )?;
+            let rows = stmt.query_map(params![idle, unused], |r| r.get::<_, Vec<u8>>(0))?;
+            rows.map(|r| {
+                MailboxId::try_from(r.map_err(RelayError::from)?).map_err(|_| RelayError::Storage)
+            })
+            .collect::<Result<Vec<MailboxId>, RelayError>>()?
+        };
+        for id in &ids {
+            delete_mailbox(&tx, id)?;
+        }
+        tx.commit()?;
+        drop(db);
+        for id in &ids {
+            self.waiters.signal(id);
+        }
+        Ok(ids.len())
+    }
+
+    /// What `GET /v1/info` answers.
+    pub fn info(&self) -> RelayInfo {
+        let q = &self.quotas;
+        RelayInfo {
+            versions: RelayVersions::current(),
+            limits: RelayLimits {
+                max_body_bytes: MAX_BODY_BYTES as u64,
+                max_members: MAX_MEMBERS,
+                log_bytes: q.log_bytes,
+                delivery_bytes: q.delivery_bytes,
+                envelopes_per_recipient: q.envelopes_per_recipient,
+                mailboxes_per_key: q.mailboxes_per_key,
+                requests_per_minute: self.limits.per_key.map(|r| r.per_minute),
+                delivery_retention_days: (DELIVERY_RETENTION_SECS / expiry::DAY_SECS) as u32,
+            },
+            push: self.notifier.delivers(),
+            create_token: self.create_token.is_some(),
+            expiry: RelayExpiry {
+                idle_days: self.expiry.idle_days,
+                unused_days: self.expiry.unused_days,
+            },
+        }
+    }
+
     fn now(&self) -> u64 {
         (self.clock)()
+    }
+
+    fn today(&self) -> i64 {
+        day(self.now())
+    }
+
+    /// Records that member `who` made a request to mailbox `id` (row `mb`) today, for
+    /// [`expiry`]. Writes only when the day or the shared flag changes: at most once per
+    /// mailbox per day, plus once when a member other than the creator first shows up.
+    fn touch(
+        &self,
+        db: &Connection,
+        id: &MailboxId,
+        mb: &MailboxRow,
+        who: &[u8; 32],
+    ) -> Result<(), RelayError> {
+        let today = self.today();
+        let other = *who != mb.creator;
+        if mb.last_seen_day >= today && (mb.shared || !other) {
+            return Ok(());
+        }
+        db.execute(
+            "UPDATE mailboxes SET last_seen_day = MAX(last_seen_day, ?2), shared = shared OR ?3
+             WHERE id = ?1",
+            params![&id[..], today, other],
+        )?;
+        Ok(())
+    }
+
+    /// Refuses a creation without this relay's create token (if it has one). Compared as
+    /// hashes in constant time; the token is never logged.
+    fn check_create_token(&self, headers: &HeaderMap) -> Result<(), RelayError> {
+        use subtle::ConstantTimeEq;
+        let Some(want) = &self.create_token else {
+            return Ok(());
+        };
+        let given = headers
+            .get(CREATE_TOKEN_HEADER)
+            .map(|v| v.as_bytes())
+            .unwrap_or_default();
+        let given = String::from_utf8_lossy(given);
+        if bool::from(create_token_hash(given.trim().as_bytes()).ct_eq(want)) {
+            Ok(())
+        } else {
+            Err(RelayError::CreateTokenRequired)
+        }
+    }
+
+    /// Takes one creation from the client address's daily bucket, then checks the create
+    /// token, so wrong tokens count against the bucket too.
+    fn charge_creation(
+        &self,
+        ip: Option<std::net::IpAddr>,
+        headers: &HeaderMap,
+    ) -> Result<(), RelayError> {
+        if let (Some(buckets), Some(ip)) = (&self.creates_per_ip, ip) {
+            buckets
+                .take(ip, self.now())
+                .map_err(RelayError::RateLimited)?;
+        }
+        self.check_create_token(headers)
     }
 
     fn check_fresh(&self, timestamp: u64) -> Result<(), RelayError> {
@@ -478,6 +687,36 @@ impl Relay {
 }
 
 // --- Storage helpers ---------------------------------------------------------------------
+
+/// `BLAKE2b-256("Zafe_CreateToken", token)`.
+fn create_token_hash(token: &[u8]) -> [u8; 32] {
+    blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"Zafe_CreateToken")
+        .hash(token)
+        .as_bytes()
+        .try_into()
+        .expect("32 bytes")
+}
+
+/// Deletes mailbox `id` and every row stored for it. The storage counters live on the
+/// mailbox row, so they go with it; the per-key mailbox count is counted from the table.
+fn delete_mailbox(tx: &Connection, id: &MailboxId) -> Result<(), RelayError> {
+    for table in [
+        "members",
+        "deliveries",
+        "sender_seqs",
+        "push_tokens",
+        "log_entries",
+    ] {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE mailbox = ?1"),
+            params![&id[..]],
+        )?;
+    }
+    tx.execute("DELETE FROM mailboxes WHERE id = ?1", params![&id[..]])?;
+    Ok(())
+}
 
 /// Schema 1 → 2: adds the quota counters to `mailboxes` and fills them from the stored
 /// rows (one scan, at startup).
@@ -507,6 +746,25 @@ fn migrate_from_v2(conn: &Connection) -> Result<(), RelayError> {
          COMMIT;",
     )?;
     tracing::info!("relay database migrated from schema 2 to 3 (thresholds)");
+    Ok(())
+}
+
+/// Schema 3 → 4: labels and expiry. Every existing mailbox was filed under its vault id
+/// (`vault_id = id`), counts as seen `today` (so nothing expires at the first prune after
+/// the upgrade) and as shared (only the idle rule applies to it).
+fn migrate_from_v3(conn: &Connection, today: i64) -> Result<(), RelayError> {
+    conn.execute_batch(&format!(
+        "BEGIN;
+         ALTER TABLE mailboxes ADD COLUMN vault_id BLOB;
+         ALTER TABLE mailboxes ADD COLUMN last_seen_day INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE mailboxes ADD COLUMN created_day INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE mailboxes ADD COLUMN shared INTEGER NOT NULL DEFAULT 0;
+         UPDATE mailboxes SET vault_id = id, last_seen_day = {today}, created_day = {today},
+             shared = 1;
+         PRAGMA user_version = 4;
+         COMMIT;"
+    ))?;
+    tracing::info!("relay database migrated from schema 3 to 4 (labels, expiry)");
     Ok(())
 }
 
@@ -555,6 +813,10 @@ struct MailboxRow {
     threshold: u16,
     /// When the invite was issued or last renewed (`created_at`, seconds).
     issued_at: u64,
+    /// The vault id of the first log entry (`None` before there is one).
+    vault_id: Option<MailboxId>,
+    last_seen_day: i64,
+    shared: bool,
 }
 
 fn arr32(v: Vec<u8>) -> Result<[u8; 32], RelayError> {
@@ -564,22 +826,31 @@ fn arr32(v: Vec<u8>) -> Result<[u8; 32], RelayError> {
 fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
     let row = db
         .query_row(
-            "SELECT creator, join_token_hash, max_members, sealed, threshold, created_at
+            "SELECT creator, join_token_hash, max_members, sealed, threshold, created_at,
+                    vault_id, last_seen_day, shared
              FROM mailboxes WHERE id = ?1",
             params![&id[..]],
             |r| {
                 Ok((
-                    r.get::<_, Vec<u8>>(0)?,
-                    r.get::<_, Vec<u8>>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, i64>(4)?,
-                    r.get::<_, i64>(5)?,
+                    (
+                        r.get::<_, Vec<u8>>(0)?,
+                        r.get::<_, Vec<u8>>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, i64>(5)?,
+                    ),
+                    (
+                        r.get::<_, Option<Vec<u8>>>(6)?,
+                        r.get::<_, i64>(7)?,
+                        r.get::<_, i64>(8)?,
+                    ),
                 ))
             },
         )
         .optional()?
         .ok_or(RelayError::NotFound)?;
+    let (row, (vault_id, last_seen_day, shared)) = row;
     Ok(MailboxRow {
         creator: arr32(row.0)?,
         join_token_hash: arr32(row.1)?,
@@ -587,6 +858,11 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
         sealed: row.3 != 0,
         threshold: u16::try_from(row.4).map_err(|_| RelayError::Storage)?,
         issued_at: u64::try_from(row.5).unwrap_or(0),
+        vault_id: vault_id
+            .map(|v| MailboxId::try_from(v).map_err(|_| RelayError::Storage))
+            .transpose()?,
+        last_seen_day,
+        shared: shared != 0,
     })
 }
 
@@ -651,29 +927,28 @@ fn ok<T: serde::Serialize>(value: &T) -> RelayResult {
 async fn create(
     State(relay): State<Relay>,
     Extension(ClientIp(ip)): Extension<ClientIp>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> RelayResult {
     let req = verified::<CreateMailbox>(&relay, &body)?;
     let p = &req.payload;
-    if p.max_members < 2 {
+    if p.max_members < 2 || p.max_members > MAX_MEMBERS {
         return Err(RelayError::BadRequest);
     }
-    if let (Some(buckets), Some(ip)) = (&relay.creates_per_ip, ip) {
-        buckets
-            .take(ip, relay.now())
-            .map_err(RelayError::RateLimited)?;
-    }
+    relay.charge_creation(ip, &headers)?;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let inserted = tx.execute(
-        "INSERT OR IGNORE INTO mailboxes (id, creator, join_token_hash, max_members, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR IGNORE INTO mailboxes
+             (id, creator, join_token_hash, max_members, created_at, last_seen_day, created_day)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
         params![
             &p.mailbox[..],
             &req.signer.sig_pk[..],
             &p.join_token_hash[..],
             p.max_members,
-            relay.now() as i64
+            relay.now() as i64,
+            relay.today()
         ],
     )?;
     if inserted == 0 {
@@ -732,6 +1007,7 @@ async fn join(State(relay): State<Relay>, body: Bytes) -> RelayResult {
             &req.signer.enc_pk[..]
         ],
     )?;
+    relay.touch(&tx, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     tx.commit()?;
     ok(&())
 }
@@ -757,6 +1033,7 @@ async fn seal(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         "UPDATE mailboxes SET sealed = 1 WHERE id = ?1",
         params![&req.payload.mailbox[..]],
     )?;
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     ok(&())
 }
 
@@ -771,6 +1048,7 @@ async fn remove(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         "DELETE FROM members WHERE mailbox = ?1 AND sig_pk = ?2",
         params![&req.payload.mailbox[..], &req.payload.member[..]],
     )?;
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     ok(&())
 }
 
@@ -793,6 +1071,7 @@ async fn renew_invite(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         "UPDATE mailboxes SET created_at = ?1 WHERE id = ?2",
         params![now, &id[..]],
     )?;
+    relay.touch(&db, id, &mb, &req.signer.sig_pk)?;
     ok(&())
 }
 
@@ -815,13 +1094,7 @@ async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::Forbidden);
     }
     let tx = db.transaction()?;
-    for table in ["members", "deliveries", "sender_seqs", "push_tokens"] {
-        tx.execute(
-            &format!("DELETE FROM {table} WHERE mailbox = ?1"),
-            params![&id[..]],
-        )?;
-    }
-    tx.execute("DELETE FROM mailboxes WHERE id = ?1", params![&id[..]])?;
+    delete_mailbox(&tx, id)?;
     tx.commit()?;
     drop(db);
     relay.waiters.signal(id);
@@ -837,6 +1110,7 @@ async fn members(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk) {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     ok(&MembersResponse {
         members,
         sealed: mb.sealed,
@@ -852,6 +1126,7 @@ async fn mailbox_info(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk) {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     ok(&MailboxInfo {
         members,
         sealed: mb.sealed,
@@ -874,6 +1149,7 @@ async fn set_threshold(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         "UPDATE mailboxes SET threshold = ?2 WHERE id = ?1",
         params![&p.mailbox[..], p.threshold],
     )?;
+    relay.touch(&db, &p.mailbox, &mb, &req.signer.sig_pk)?;
     ok(&())
 }
 
@@ -924,22 +1200,23 @@ async fn replace_member(State(relay): State<Relay>, body: Bytes) -> RelayResult 
         "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
         params![&a.mailbox[..], &a.new.sig_pk[..], &a.new.enc_pk[..]],
     )?;
+    relay.touch(&tx, &a.mailbox, &mb, &req.signer.sig_pk)?;
     tx.commit()?;
     drop(db);
     relay.waiters.signal(&a.mailbox);
     ok(&())
 }
 
-/// Most members a reseeded mailbox may list (the same order as any real vault).
-const MAX_RESEED_MEMBERS: usize = 64;
-
 /// Restores a vault from a member's saved copy of its log (see [`Reseed`]). The relay is
 /// blind: it can check chaining and signatures, not what the entries say, and it doesn't
 /// require their authors to be current members (seats move). Members verify the log
-/// themselves, and their own saved copies must agree with whatever is restored.
+/// themselves, and their own saved copies must agree with whatever is restored. The
+/// mailbox id is a label: the entries' vault id is kept from the first one and must not
+/// change.
 async fn reseed(
     State(relay): State<Relay>,
     Extension(ClientIp(ip)): Extension<ClientIp>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> RelayResult {
     let req = verified::<Reseed>(&relay, &body)?;
@@ -948,7 +1225,7 @@ async fn reseed(
     let signer = req.signer.sig_pk;
     let mut seen = std::collections::BTreeSet::new();
     if p.members.len() < 2
-        || p.members.len() > MAX_RESEED_MEMBERS
+        || p.members.len() > usize::from(MAX_MEMBERS)
         || !p.members.iter().any(|m| m.sig_pk == signer)
         || !p.members.iter().all(|m| seen.insert(m.sig_pk))
         || p.threshold == 0
@@ -965,25 +1242,24 @@ async fn reseed(
             |r| r.get::<_, i64>(0),
         )? as u64)
     };
-    match mailbox(&tx, &p.mailbox) {
+    // The vault id the mailbox holds so far (`None`: no entry yet).
+    let stored_vault = match mailbox(&tx, &p.mailbox) {
         Err(RelayError::NotFound) => {
-            if let (Some(buckets), Some(ip)) = (&relay.creates_per_ip, ip) {
-                buckets
-                    .take(ip, relay.now())
-                    .map_err(RelayError::RateLimited)?;
-            }
+            relay.charge_creation(ip, &headers)?;
             // No join token (its hash is all zeros: nothing hashes to it), so nobody can
             // join; the members are listed by the signer, who alone may continue.
             tx.execute(
-                "INSERT INTO mailboxes (id, creator, join_token_hash, max_members, created_at, threshold)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO mailboxes (id, creator, join_token_hash, max_members, created_at,
+                     threshold, last_seen_day, created_day)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
                 params![
                     &p.mailbox[..],
                     &signer[..],
                     &[0u8; 32][..],
                     p.members.len() as i64,
                     relay.now() as i64,
-                    p.threshold
+                    p.threshold,
+                    relay.today()
                 ],
             )?;
             if let Some(max) = relay.quotas.mailboxes_per_key {
@@ -1002,12 +1278,15 @@ async fn reseed(
                     params![&p.mailbox[..], &m.sig_pk[..], &m.enc_pk[..]],
                 )?;
             }
+            None
         }
         Err(e) => return Err(e),
         Ok(mb) if mb.sealed => {
             // Already open: a member learns where its log is, nothing changes.
             member(&tx, &p.mailbox, &signer)?.ok_or(RelayError::Forbidden)?;
+            relay.touch(&tx, &p.mailbox, &mb, &signer)?;
             let len = count(&tx)?;
+            tx.commit()?;
             return ok(&ReseedResponse {
                 len,
                 open: true,
@@ -1020,8 +1299,10 @@ async fn reseed(
             if mb.creator != signer || mb.join_token_hash != [0u8; 32] {
                 return Err(RelayError::Forbidden);
             }
+            relay.touch(&tx, &p.mailbox, &mb, &signer)?;
+            mb.vault_id
         }
-    }
+    };
 
     let mut len = count(&tx)?;
     if p.from != len {
@@ -1049,11 +1330,17 @@ async fn reseed(
         params![&p.mailbox[..]],
         |r| r.get(0),
     )?;
+    let mut vault = stored_vault;
     for bytes in &p.entries {
         let entry = LogEntry::from_bytes(bytes).map_err(bad_request)?;
         let h = &entry.header;
-        if h.mailbox != p.mailbox || h.index != len || h.prev_hash != head {
+        if h.index != len || h.prev_hash != head {
             return Err(RelayError::BadRequest);
+        }
+        match vault {
+            Some(v) if v != h.mailbox => return Err(RelayError::OtherVault),
+            Some(_) => {}
+            None => vault = Some(h.mailbox),
         }
         // Only the author's key is needed to check a signature.
         entry
@@ -1080,6 +1367,12 @@ async fn reseed(
         "UPDATE mailboxes SET log_bytes = ?2 WHERE id = ?1",
         params![&p.mailbox[..], used],
     )?;
+    if let (None, Some(v)) = (stored_vault, vault) {
+        tx.execute(
+            "UPDATE mailboxes SET vault_id = ?2 WHERE id = ?1",
+            params![&p.mailbox[..], &v[..]],
+        )?;
+    }
     let open = p.finish && len > 0;
     if open {
         tx.execute(
@@ -1183,13 +1476,27 @@ async fn register_push(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::BadRequest);
     }
     let db = relay.db.lock().expect("lock");
-    mailbox(&db, &req.payload.mailbox)?;
+    let mb = mailbox(&db, &req.payload.mailbox)?;
     if member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     db.execute(
         "INSERT OR REPLACE INTO push_tokens (mailbox, member, platform, token) VALUES (?1, ?2, ?3, ?4)",
         params![&req.payload.mailbox[..], &req.signer.sig_pk[..], req.payload.platform.as_str(), &req.payload.token],
+    )?;
+    ok(&())
+}
+
+/// Deletes the signer's push token for a mailbox (see [`ForgetPush`]). Not a use of the
+/// mailbox for [`expiry`], and never 404: nothing registered is nothing to forget.
+async fn forget_push(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<ForgetPush>(&relay, &body)?;
+    relay.check_fresh(req.payload.timestamp)?;
+    let db = relay.db.lock().expect("lock");
+    db.execute(
+        "DELETE FROM push_tokens WHERE mailbox = ?1 AND member = ?2",
+        params![&req.payload.mailbox[..], &req.signer.sig_pk[..]],
     )?;
     ok(&())
 }
@@ -1199,7 +1506,7 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let h = &envelope.header;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
-    mailbox(&tx, &h.mailbox)?;
+    let mb = mailbox(&tx, &h.mailbox)?;
     let members = members_of(&tx, &h.mailbox)?;
     let sender = members
         .iter()
@@ -1240,6 +1547,7 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     )?;
 
     check_delivery_quotas(&tx, &relay.quotas, &h.mailbox, &recipients, body.len())?;
+    relay.touch(&tx, &h.mailbox, &mb, &sender.sig_pk)?;
     let now = relay.now() as i64;
     for recipient in &recipients {
         let cursor: i64 = tx.query_row(
@@ -1300,10 +1608,11 @@ async fn inbox(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<InboxRead>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
-    mailbox(&db, &req.payload.mailbox)?;
+    let mb = mailbox(&db, &req.payload.mailbox)?;
     if member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     let after = i64::try_from(req.payload.after).unwrap_or(i64::MAX);
     let mut stmt = db.prepare(
         "SELECT cursor, envelope FROM deliveries
@@ -1334,10 +1643,11 @@ async fn inbox_ack(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     }
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
-    mailbox(&tx, &req.payload.mailbox)?;
+    let mb = mailbox(&tx, &req.payload.mailbox)?;
     if member(&tx, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&tx, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     let mut deleted = 0u64;
     let mut bytes = 0i64;
     for &cursor in &req.payload.cursors {
@@ -1367,32 +1677,72 @@ async fn inbox_ack(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&InboxAckResponse { deleted })
 }
 
+/// `/v1/log/append`: the body is the entry, and the mailbox is the one named by the entry's
+/// vault id (a mailbox whose label is its vault id). The entry's author is the requester.
 async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let entry = LogEntry::from_bytes(&body).map_err(bad_request)?;
+    let label = entry.header.mailbox;
+    append_entry(&relay, &label, &entry, &body, None)
+}
+
+/// `/v1/log/append-labelled` (see [`LabelledAppend`]): the signed request names the mailbox,
+/// and its signer, a member, is the requester.
+async fn log_append_labelled(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<LabelledAppend>(&relay, &body)?;
+    relay.check_fresh(req.payload.timestamp)?;
+    let entry = LogEntry::from_bytes(&req.payload.entry).map_err(bad_request)?;
+    append_entry(
+        &relay,
+        &req.payload.mailbox,
+        &entry,
+        &req.payload.entry,
+        Some(&req.signer.sig_pk),
+    )
+}
+
+/// Appends `entry` (`bytes` as received) to the log of mailbox `label`. `poster`: the member
+/// who signed a labelled request (already charged to its rate limit); `None` charges the
+/// entry's author instead.
+fn append_entry(
+    relay: &Relay,
+    label: &MailboxId,
+    entry: &LogEntry,
+    bytes: &[u8],
+    poster: Option<&[u8; 32]>,
+) -> RelayResult {
     let h = &entry.header;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
-    let mb = mailbox(&tx, &h.mailbox)?;
+    let mb = mailbox(&tx, label)?;
+    if let Some(poster) = poster {
+        member(&tx, label, poster)?.ok_or(RelayError::Forbidden)?;
+    }
     if !mb.sealed {
         return Err(RelayError::Forbidden);
     }
-    let author = member(&tx, &h.mailbox, &h.author)?.ok_or(RelayError::Forbidden)?;
+    let author = member(&tx, label, &h.author)?.ok_or(RelayError::Forbidden)?;
     // Verify before answering anything about the log, `Conflict { len }` included: only
     // a member's signed entry learns the log length (audit L7).
     entry
         .verify_signature(&author)
         .map_err(|_| RelayError::Unauthenticated)?;
-    relay.limit_key(&author.sig_pk)?;
+    if poster.is_none() {
+        relay.limit_key(&author.sig_pk)?;
+    }
+    if mb.vault_id.is_some_and(|v| v != h.mailbox) {
+        return Err(RelayError::OtherVault);
+    }
+    relay.touch(&tx, label, &mb, poster.unwrap_or(&author.sig_pk))?;
 
     let len: i64 = tx.query_row(
         "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
-        params![&h.mailbox[..]],
+        params![&label[..]],
         |r| r.get(0),
     )?;
     let head: Option<Vec<u8>> = tx
         .query_row(
             "SELECT hash FROM log_entries WHERE mailbox = ?1 ORDER BY idx DESC LIMIT 1",
-            params![&h.mailbox[..]],
+            params![&label[..]],
             |r| r.get(0),
         )
         .optional()?;
@@ -1401,42 +1751,55 @@ async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         None => GENESIS_PREV_HASH,
     };
     if h.index != len as u64 || h.prev_hash != head {
+        tx.commit()?; // keeps the touch
         return ok(&AppendResult::Conflict { len: len as u64 });
     }
     let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
     if let Some(cap) = relay.quotas.log_bytes {
         let used: i64 = tx.query_row(
             "SELECT log_bytes FROM mailboxes WHERE id = ?1",
-            params![&h.mailbox[..]],
+            params![&label[..]],
             |r| r.get(0),
         )?;
-        if (used as u64).saturating_add(body.len() as u64) > cap {
+        if (used as u64).saturating_add(bytes.len() as u64) > cap {
             return Err(RelayError::QuotaExceeded(Quota::Log));
         }
     }
     tx.execute(
         "INSERT INTO log_entries (mailbox, idx, entry, hash) VALUES (?1, ?2, ?3, ?4)",
-        params![&h.mailbox[..], len, &body[..], &hash[..]],
+        params![&label[..], len, bytes, &hash[..]],
     )?;
     tx.execute(
         "UPDATE mailboxes SET log_bytes = log_bytes + ?2 WHERE id = ?1",
-        params![&h.mailbox[..], body.len() as i64],
+        params![&label[..], bytes.len() as i64],
     )?;
+    if mb.vault_id.is_none() {
+        tx.execute(
+            "UPDATE mailboxes SET vault_id = ?2 WHERE id = ?1",
+            params![&label[..], &h.mailbox[..]],
+        )?;
+    }
     // Every other member learns there is vault activity (a proposal, a vote, a send...);
     // the push carries nothing else, the app reads the encrypted log itself.
-    let others: Vec<[u8; 32]> = members_of(&tx, &h.mailbox)?
+    let others: Vec<[u8; 32]> = members_of(&tx, label)?
         .iter()
         .map(|m| m.sig_pk)
         .filter(|pk| *pk != h.author)
         .collect();
-    let pushes = push_tokens(&tx, &h.mailbox, others.iter())?;
+    let pushes = push_tokens(&tx, label, others.iter())?;
     tx.commit()?;
     drop(db);
-    relay.waiters.signal(&h.mailbox);
+    relay.waiters.signal(label);
     for (platform, token) in pushes {
         relay.notifier.notify(platform, &token);
     }
     ok(&AppendResult::Appended { index: len as u64 })
+}
+
+/// What this relay is and allows (see [`RelayInfo`]): JSON, unauthenticated, nothing about
+/// any mailbox.
+async fn info(State(relay): State<Relay>) -> Response {
+    axum::Json(relay.info()).into_response()
 }
 
 /// Liveness and readiness for load balancers and uptime checks: 200 `ok` when the
@@ -1457,10 +1820,11 @@ async fn log_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<LogRead>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
-    mailbox(&db, &req.payload.mailbox)?;
+    let mb = mailbox(&db, &req.payload.mailbox)?;
     if member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
     let from = i64::try_from(req.payload.from).unwrap_or(i64::MAX);
     let mut stmt = db.prepare(
         "SELECT entry FROM log_entries WHERE mailbox = ?1 AND idx >= ?2 ORDER BY idx LIMIT ?3",
@@ -1482,14 +1846,14 @@ fn activity(
     who: &[u8; 32],
 ) -> Result<WaitResponse, RelayError> {
     let db = relay.db.lock().expect("lock");
-    let exists: bool = db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM mailboxes WHERE id = ?1)",
-        params![&mailbox[..]],
-        |r| r.get(0),
-    )?;
-    if !exists || member(&db, mailbox, who)?.is_none() {
+    let mb = match self::mailbox(&db, mailbox) {
+        Err(RelayError::NotFound) => return Err(RelayError::Forbidden),
+        r => r?,
+    };
+    if member(&db, mailbox, who)?.is_none() {
         return Err(RelayError::Forbidden);
     }
+    relay.touch(&db, mailbox, &mb, who)?;
     let log_len: i64 = db.query_row(
         "SELECT COALESCE(MAX(idx) + 1, 0) FROM log_entries WHERE mailbox = ?1",
         params![&mailbox[..]],

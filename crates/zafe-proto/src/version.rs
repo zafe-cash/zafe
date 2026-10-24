@@ -88,8 +88,11 @@ pub const LOG_CACHE: u16 = 1;
 pub const BACKUP: u16 = 2;
 /// The relay's SQLite schema (`PRAGMA user_version`). 2: storage quota counters on
 /// `mailboxes` (migrated from 1 at startup). 3: `mailboxes.threshold` for moving a lost
-/// member's seat (migrated from 1 and 2).
-pub const RELAY_DB: u16 = 3;
+/// member's seat (migrated from 1 and 2). 4 (2026-10-25): `mailboxes.vault_id` (a mailbox id
+/// is a label that may differ from the vault id its entries carry), `last_seen_day`,
+/// `created_day` and `shared` for expiry (migrated from 1-3; existing rows get
+/// `vault_id = id`, today as last seen, and count as shared).
+pub const RELAY_DB: u16 = 4;
 /// Share repair envelope payloads (RTS deltas and sigmas). 2 (2026-10-01): both carry the
 /// repair attempt.
 pub const REPAIR: u16 = 2;

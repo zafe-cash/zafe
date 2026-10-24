@@ -461,3 +461,116 @@ pub struct RegisterPush {
     pub platform: PushPlatform,
     pub token: String,
 }
+
+/// Deletes the signer's push token for `mailbox` (`POST /v1/push/forget`, a newer route: an
+/// older relay answers 404). A phone sends it when its vault leaves this relay. Only the
+/// signer's own registration is touched; an unknown mailbox or no token is not an error,
+/// so this route never answers 404 itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgetPush {
+    pub mailbox: MailboxId,
+    pub timestamp: u64,
+}
+
+/// Appends a log entry to the mailbox `mailbox` names on this relay (`POST
+/// /v1/log/append-labelled`, a newer route: an older relay answers 404 with no body).
+/// Signed by a member of that mailbox, who need not be the entry's author (catching a relay
+/// up copies other members' entries). The mailbox id is this relay's label for the vault and
+/// may differ from the vault id the entry carries (`EntryHeader::mailbox`); the relay keeps
+/// the vault id of the mailbox's first entry and refuses entries of any other vault.
+/// Answers [`AppendResult`], like `/v1/log/append`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LabelledAppend {
+    pub mailbox: MailboxId,
+    /// [`LogEntry::to_bytes`].
+    pub entry: Vec<u8>,
+    pub timestamp: u64,
+}
+
+impl LabelledAppend {
+    pub fn new(mailbox: MailboxId, entry: &LogEntry, timestamp: u64) -> Result<Self, ProtoError> {
+        Ok(Self {
+            mailbox,
+            entry: entry.to_bytes()?,
+            timestamp,
+        })
+    }
+}
+
+/// Request header carrying a private relay's create token (`ZAFE_RELAY_CREATE_TOKEN`), sent
+/// with `/v1/mailbox/create` and `/v1/mailbox/reseed`. A relay that needs one and didn't get
+/// the right one answers 401 with `www-authenticate:` [`CREATE_TOKEN_HEADER`].
+pub const CREATE_TOKEN_HEADER: &str = "zafe-create-token";
+
+/// The body of the relay's 404 for a mailbox it doesn't hold. A 404 without it comes from a
+/// relay (or proxy) that doesn't have the route at all.
+pub const UNKNOWN_MAILBOX: &str = "unknown mailbox";
+
+/// What a relay says about itself (`GET /v1/info`, unauthenticated, a newer route: an older
+/// relay answers 404). Nothing in it is about any mailbox. JSON, not a tagged postcard body,
+/// so fields can be added without a [`version::RELAY_API`] bump: readers ignore unknown
+/// fields and default missing ones.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RelayInfo {
+    /// Versions of the formats the relay reads and writes.
+    pub versions: RelayVersions,
+    pub limits: RelayLimits,
+    /// Whether the relay sends push notifications (it has a push service key).
+    pub push: bool,
+    /// Whether creating or restoring a mailbox needs a create token ([`CREATE_TOKEN_HEADER`]).
+    pub create_token: bool,
+    /// When the relay deletes mailboxes on its own.
+    pub expiry: RelayExpiry,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RelayVersions {
+    pub relay_api: u16,
+    pub envelope: u16,
+    pub log_entry: u16,
+}
+
+impl RelayVersions {
+    /// The versions this build speaks.
+    pub const fn current() -> Self {
+        Self {
+            relay_api: version::RELAY_API,
+            envelope: version::ENVELOPE,
+            log_entry: version::LOG_ENTRY,
+        }
+    }
+}
+
+/// A relay's limits. `None` is unlimited.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RelayLimits {
+    /// Largest request body (bytes).
+    pub max_body_bytes: u64,
+    /// Most members one mailbox may have.
+    pub max_members: u16,
+    /// Bytes of vault log one mailbox may keep.
+    pub log_bytes: Option<u64>,
+    /// Bytes of undelivered envelopes one mailbox may keep.
+    pub delivery_bytes: Option<u64>,
+    /// Undelivered envelopes one member may have in one mailbox.
+    pub envelopes_per_recipient: Option<u64>,
+    /// Mailboxes one signing key may create.
+    pub mailboxes_per_key: Option<u64>,
+    /// Requests per minute per signing key.
+    pub requests_per_minute: Option<u32>,
+    /// Days an undelivered envelope is kept.
+    pub delivery_retention_days: u32,
+}
+
+/// When a relay deletes a mailbox (and everything stored for it) on its own. `None`: never.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RelayExpiry {
+    /// Days without any member request.
+    pub idle_days: Option<u32>,
+    /// Days after creation within which a member other than the creator must make a request.
+    pub unused_days: Option<u32>,
+}

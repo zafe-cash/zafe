@@ -34,6 +34,7 @@ pasta_curves = "0.5"
 group = "0.13"
 ff = "0.13"
 blake2b_simd = "1"
+subtle = "2.6"
 blake3 = "1"
 rand = "0.8"
 # The Zcash stack (librustzcash pre-releases for NU7) moved to rand_core 0.10; our own crypto

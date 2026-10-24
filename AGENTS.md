@@ -200,7 +200,8 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     update before a seat move); 5 `RepairRetry`/`RepairDone`; 6 one-tap per fully covered group
     (gate by tag); 7 `Broadcast` must carry the PCZT's txid (gate); 8 `PoolReset` (gate);
     9 highest-version replay + parseable PCZT check (gate).
-  - `BACKUP` 2 (signer names; v1 still restores), `RELAY_DB` 3 (migrated from 1 and 2),
+  - `BACKUP` 2 (signer names; v1 still restores), `RELAY_DB` 4 (vault id + expiry columns;
+    migrated from 1-3, old rows get `vault_id = id`, seen today, shared),
     `REPAIR` 2, `INVITE` 2 (safety words), `NONCES`/`POOL_NONCE` 2 (encrypted; v1 still read),
     `DKG_ROUND1` 3, `LOG_CACHE` 1.
 
@@ -233,6 +234,17 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   `relay.waiters.signal(&mailbox)`.
 - **Inbox ack** (`POST /v1/inbox/ack`): delete by cursor, never by range (an inbox mixes
   requests and leader shares); clients always read from cursor 0.
+- **Labels** (`docs/relay-move.md` §4.6): a relay mailbox id is a label; `mailboxes.vault_id`
+  (from the first entry) must match every entry's `EntryHeader.mailbox` (appends and reseed).
+  `/v1/log/append` only reaches label == vault id; labelled vaults use `/v1/log/append-labelled`
+  (`RelayClient::append_log_to`). New routes answer 404 only for "unknown mailbox"
+  (`UNKNOWN_MAILBOX`): a bare 404 is an old relay (`RelayClientError::RelayTooOld`).
+- **Expiry** (`zafe_relay::expiry`, off in `Relay::new()`): every authenticated mailbox
+  request calls `relay.touch` after its membership check (writes at most once a day), except
+  leaving (`/v1/push/forget`). Deletion goes through `delete_mailbox`: add any new
+  per-mailbox table there. `GET /v1/info` is JSON so fields can be added without a bump.
+- **Create token** (`ZAFE_RELAY_CREATE_TOKEN`): header `zafe-create-token`, checked only in
+  `charge_creation` (create, reseed's create branch), after the per-IP creation bucket.
 - **Performance**: the bridge pools relay (`RelayClient::pooled`) and lightwalletd
   (`wallet::connect_pooled`) connections; CLI/tests use `RelayClient::new` (pools are per
   runtime). Run independent requests together (`tokio::join!`, wrapped in `Box::pin` in deep

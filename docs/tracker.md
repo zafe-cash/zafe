@@ -543,6 +543,12 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       per-relay mailbox labels against squatting; first loads anchored everywhere (backup
       log copy, head hash in seat recovery); spec §6/§14 and audit scope. Review in §8-9.
       Push from other relays (UnifiedPush) deferred, see §10
+      - [x] Relay side (2026-10-25, branch `relay-labels`, not deployed): labelled mailboxes
+            (`vault_id` from the first entry, `/v1/log/append-labelled`), `/v1/push/forget`,
+            `GET /v1/info`, expiry (1 year idle, 30 days unused), create token, `RELAY_DB` 4;
+            `relay_client` methods + `RelayTooOld` / `CreateTokenRefused`. Details in
+            `docs/relay-move.md` §7. Left: node/app use them (labels for new vaults, picker,
+            map the new errors in the bridge), promote the relay before an app needs it
 - [ ] Relay URL per vault: the invite carries the vault's relay URL and the app stores it
       with the vault (today one relay setting per network for the whole app), so vaults on
       a self-hosted relay and on ours coexist in one app. Bumps the invite version

@@ -17,7 +17,10 @@ by CI (`.github/workflows/relay-deploy.yml`, `relay-mainnet.yml`). Two paths:
 
 Runtime contract (both paths):
 
-- `GET /health` returns `200 ok` when the database answers.
+- `GET /health` returns `200 ok` when the database answers. `GET /v1/info` (JSON,
+  unauthenticated, nothing about any mailbox) gives the versions, limits, whether the
+  relay sends pushes and whether it needs a create token: what the app's relay picker
+  checks.
 - `ZAFE_RELAY_LISTEN` (address) or `PORT` (then `0.0.0.0:$PORT`), default `127.0.0.1:8787`.
 - `ZAFE_RELAY_DB`: SQLite path. It runs in WAL mode, so the `-wal`/`-shm` files sit next
   to it: the whole directory must be on persistent storage.
@@ -51,10 +54,22 @@ Runtime contract (both paths):
   256 MiB of undelivered envelopes and 512 MiB of vault log. A write over a quota is
   refused whole with `507 Insufficient Storage`, and the app says the relay's storage for
   the vault is full. Undelivered envelopes expire after 30 days (hourly pruning), which
-  frees their share; the log is kept forever. Tune with `ZAFE_RELAY_MAX_INBOX` (envelopes),
+  frees their share; the log is kept while the vault is in use. Tune with `ZAFE_RELAY_MAX_INBOX` (envelopes),
   `ZAFE_RELAY_MAX_DELIVERY_MB` / `ZAFE_RELAY_MAX_LOG_MB` (MiB), `0` = that quota off, or
   `ZAFE_RELAY_QUOTAS=off`. A database from schema 1 gets the quota counters added at
   startup (one scan); keep a backup before upgrading as usual.
+- Expiry (on by default): every phone keeps the vault's history, so the relay deletes
+  what nobody uses: a vault with no member request for a year, and a mailbox where no
+  member but its creator made a request within 30 days of its creation (an abandoned
+  setup, restore or move). Members' background checks keep a vault in use alive. Only the
+  day of the last request is kept. Tune with `ZAFE_RELAY_IDLE_DAYS` /
+  `ZAFE_RELAY_UNUSED_DAYS` (`0` = that rule off) or `ZAFE_RELAY_EXPIRY=off`. Upgrading
+  from schema 3 counts every existing vault as seen on the day of the upgrade.
+- Private relay (optional): `ZAFE_RELAY_CREATE_TOKEN=<secret>` makes creating or restoring
+  a vault need that token (header `zafe-create-token`; otherwise `401` with
+  `www-authenticate: zafe-create-token`). Wrong tokens count against the per-IP creation
+  limit. Everything else (joining, signing, reading) needs no token. Rotate it if a member
+  leaks it; it is never logged.
 - SIGTERM shuts down gracefully.
 - Exactly **one** instance per database. Don't scale out.
 

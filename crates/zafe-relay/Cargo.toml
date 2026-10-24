@@ -16,6 +16,9 @@ thiserror.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Create token: hashed, compared in constant time.
+blake2b_simd.workspace = true
+subtle.workspace = true
 # FCM: HTTPS to Google and the service-account OAuth flow (RS256 JWT).
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 jsonwebtoken = "9"
