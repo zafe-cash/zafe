@@ -124,7 +124,7 @@ class SyncFailure {
     SyncFailureKind.lightwalletdUnreachable =>
       'Can\'t reach the Zcash server. Zafe keeps trying; if it lasts, check its address in Settings.',
     SyncFailureKind.relayUnreachable =>
-      'Can\'t reach the relay, so payments and votes can\'t update. Zafe keeps trying; if it lasts, check its address in Settings.',
+      'Payments can\'t be approved until the relay is back. Your funds are safe.',
     SyncFailureKind.tls =>
       'The server\'s security certificate isn\'t valid. Check its address in Settings.',
     SyncFailureKind.timeout =>
@@ -292,6 +292,23 @@ String formatLastSuccess(DateTime? at, {DateTime? now}) {
   final mm = at.minute.toString().padLeft(2, '0');
   return '${at.day} ${_months[at.month - 1]}, $hh:$mm';
 }
+
+/// When the relay became unreachable, for `Can't reach relay · since 09:14`: the time
+/// today, else the date.
+String formatSince(DateTime at, {DateTime? now}) {
+  final today = now ?? DateTime.now();
+  if (at.year == today.year && at.month == today.month && at.day == today.day) {
+    final hh = at.hour.toString().padLeft(2, '0');
+    final mm = at.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+  return '${at.day} ${_months[at.month - 1]}';
+}
+
+/// A Unix time from Rust (seconds) as a local time.
+DateTime? fromUnixSeconds(BigInt? secs) => secs == null
+    ? null
+    : DateTime.fromMillisecondsSinceEpoch(secs.toInt() * 1000);
 
 /// Title of the confirmation before this phone follows the relay's history.
 const followRelayTitle = 'Follow the relay\'s history?';

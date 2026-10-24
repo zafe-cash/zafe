@@ -19,7 +19,10 @@ import '../../providers/payment_sounds_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/theme_mode_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../providers/vault_names_provider.dart';
+import '../../providers/vault_relay.dart';
 import 'endpoint_sheet.dart';
+import 'vault_relay_sheet.dart';
 import 'diagnostics_sheet.dart';
 import 'tor_setting_row.dart';
 import '../../core/widgets/app_segmented.dart';
@@ -49,6 +52,7 @@ class SettingsScreen extends ConsumerWidget {
     final appLock = ref.watch(appLockDelayProvider);
     final hasScreenLock = ref.watch(hasScreenLockProvider).value;
     final endpoints = ref.watch(endpointsProvider);
+    final vaultRelay = ref.watch(activeVaultRelayProvider);
     if (summary == null) return const SizedBox.shrink();
 
     final rowStyle = AppTypography.labelLarge.copyWith(
@@ -136,6 +140,46 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   _Group(
+                    title: 'Servers',
+                    rows: [
+                      // The vault's relay is the whole group's; the Zcash server and
+                      // the relay for new vaults are this phone's.
+                      row(
+                        icon: AppIcons.users,
+                        label: vaultRelayTitle(
+                          ref.watch(activeVaultNameProvider) ?? summary.name,
+                        ),
+                        value: vaultRelay == null
+                            ? null
+                            : endpointHost(vaultRelay.url),
+                        chevron: true,
+                        onTap: () => showVaultRelaySheet(context),
+                      ),
+                      row(
+                        icon: AppIcons.endpoint,
+                        label: 'Zcash server · this phone',
+                        value: endpointHost(endpoints.lightwalletdUrl),
+                        chevron: true,
+                        onTap: () => showEndpointSheet(
+                          context,
+                          ref,
+                          EndpointKind.lightwalletd,
+                        ),
+                      ),
+                      row(
+                        icon: AppIcons.endpoint,
+                        label: 'Relay for new vaults',
+                        value: endpoints.relayIsPlaceholder
+                            ? 'Not configured'
+                            : endpointHost(endpoints.relayUrl),
+                        chevron: true,
+                        onTap: () =>
+                            showEndpointSheet(context, ref, EndpointKind.relay),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _Group(
                     title: 'System',
                     rows: [
                       MobileListRow(
@@ -170,27 +214,6 @@ class SettingsScreen extends ConsumerWidget {
                           semanticsLabel: 'Payment sounds',
                           onChanged: (_) =>
                               ref.read(paymentSoundsProvider.notifier).toggle(),
-                        ),
-                      ),
-                      row(
-                        icon: AppIcons.endpoint,
-                        label: 'Relay',
-                        value: endpoints.relayIsPlaceholder
-                            ? 'Not configured'
-                            : endpointHost(endpoints.relayUrl),
-                        chevron: true,
-                        onTap: () =>
-                            showEndpointSheet(context, ref, EndpointKind.relay),
-                      ),
-                      row(
-                        icon: AppIcons.endpoint,
-                        label: 'Zcash server',
-                        value: endpointHost(endpoints.lightwalletdUrl),
-                        chevron: true,
-                        onTap: () => showEndpointSheet(
-                          context,
-                          ref,
-                          EndpointKind.lightwalletd,
                         ),
                       ),
                       row(

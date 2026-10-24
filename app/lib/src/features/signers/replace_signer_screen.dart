@@ -4,13 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pretty_qr_code/pretty_qr_code.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/widgets/action_button.dart';
+import '../../core/widgets/app_button.dart';
+import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/confirm_option.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -18,7 +23,9 @@ import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/proposals_provider.dart';
+import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../providers/vault_relay.dart';
 import '../../rust/api/repair.dart' as rust;
 
 /// A co-signer approves moving a lost signer's seat to their new phone (spec §10.1):
@@ -149,6 +156,18 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
     final who = _signer == null
         ? 'them'
         : memberLabel(_signer!, me: me, names: names);
+    final relayUrl =
+        ref.watch(activeVaultRelayProvider)?.url ??
+        ref.watch(endpointsProvider).relayUrl;
+    String? seatLink;
+    try {
+      seatLink = vault.material == null
+          ? null
+          : rust.seatLink(
+              material: vault.material!,
+              defaultRelayUrl: ref.watch(endpointsProvider).relayUrl,
+            );
+    } catch (_) {}
     return ZafeScreen(
       title: 'Replace lost phone',
       bottom: ActionButton(
@@ -263,6 +282,21 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
             ),
           ),
         ],
+        // The new phone finds the vault's relay and mailbox from this link.
+        if (seatLink case final link? when _words == null) ...[
+          const SizedBox(height: AppSpacing.md),
+          SeatLinkCard(
+            host: Uri.tryParse(relayUrl)?.authority ?? relayUrl,
+            onShare: () => SharePlus.instance.share(
+              ShareParams(
+                text:
+                    'Add this vault link on your new phone\'s "Recover your seat" '
+                    'screen:\n\n$link',
+              ),
+            ),
+            onShowQr: () => showSeatLinkQr(context, link),
+          ),
+        ],
         if (parsed != null) ...[
           const SizedBox(height: AppSpacing.md),
           SafetyWordsCard(
@@ -362,3 +396,91 @@ class SafetyWordsCard extends StatelessWidget {
     );
   }
 }
+
+/// The co-signer's vault link for the new phone (relay and mailbox, not secret): shared
+/// or shown as a QR code.
+class SeatLinkCard extends StatelessWidget {
+  const SeatLinkCard({
+    super.key,
+    required this.host,
+    this.onShare,
+    this.onShowQr,
+  });
+
+  final String host;
+  final VoidCallback? onShare;
+  final VoidCallback? onShowQr;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MobileSurfaceCard(
+      cornerRadius: AppRadii.large,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Vault link for their new phone',
+            style: AppTypography.labelLarge.copyWith(
+              color: colors.text.secondary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            'Relay · $host',
+            style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
+            children: [
+              AppButton(
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.medium,
+                leading: const AppIcon(AppIcons.share, size: 18),
+                onPressed: onShare,
+                child: const Text('Share'),
+              ),
+              AppButton(
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.medium,
+                leading: const AppIcon(AppIcons.qr, size: 18),
+                onPressed: onShowQr,
+                child: const Text('Show QR'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The vault link as a QR code, for the new phone to scan.
+Future<void> showSeatLinkQr(BuildContext context, String link) =>
+    showAppMobileSheet<void>(
+      context: context,
+      builder: (c) => MobileModalScaffold(
+        title: 'Vault link',
+        onClose: () => Navigator.of(c).pop(),
+        child: Center(
+          child: Container(
+            width: 232,
+            height: 232,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: c.colors.background.darkCard,
+              borderRadius: BorderRadius.circular(AppRadii.xLarge),
+              border: Border.all(color: c.colors.border.subtleOpacity),
+            ),
+            child: PrettyQrView.data(
+              data: link,
+              decoration: PrettyQrDecoration(
+                shape: DotQrShape(color: c.colors.text.darkCard),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );

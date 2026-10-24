@@ -22,28 +22,58 @@ import '../../providers/proposals_provider.dart';
 import '../../providers/server_failover_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/endpoints.dart' as rust;
+import 'relay_picker.dart';
 
-/// Edits the relay or lightwalletd URL: checks the format, tries a connection, then saves
-/// (for every vault on this phone). "Reset to default" goes back to the build's URL.
-/// The Zcash server opens on the list of public servers first ([kLightwalletdPresets]),
-/// with a custom URL one tap away.
+/// Edits the app-wide relay (the default for new vaults, [showRelayPicker]) or the Zcash
+/// server (this phone's, for every vault): the public servers first
+/// ([kLightwalletdPresets]), with a custom URL one tap away that is checked before it is
+/// saved.
 Future<void> showEndpointSheet(
   BuildContext context,
   WidgetRef ref,
   EndpointKind kind,
 ) async {
-  final changed = await showAppMobileSheet<bool>(
-    context: context,
-    builder: (_) => kind == EndpointKind.lightwalletd
-        ? const _LightwalletdSheet()
-        : const _EndpointSheet(kind: EndpointKind.relay),
-  );
+  final changed = kind == EndpointKind.relay
+      ? await _pickDefaultRelay(context, ref)
+      : await showAppMobileSheet<bool>(
+          context: context,
+          builder: (_) => const _LightwalletdSheet(),
+        );
   if (changed == true) {
     if (kind == EndpointKind.relay) unawaited(reregisterPush());
     // Pick up the new server right away.
     await ref.read(proposalsProvider.notifier).refreshFresh();
     await ref.read(vaultProvider.notifier).sync();
   }
+}
+
+/// The app-wide relay: where new vaults are created by default (each vault keeps its own
+/// relay in its material), and the relay of vaults from before per-vault relays. Picked
+/// from the relay list; true when it changed.
+Future<bool> _pickDefaultRelay(BuildContext context, WidgetRef ref) async {
+  final current = ref.read(endpointsProvider).relayUrl;
+  final choice = await showRelayPicker(
+    context,
+    title: 'Relay for new vaults',
+    selectedUrl: current,
+    askToken: false,
+  );
+  if (choice == null || choice.url == current || !context.mounted) {
+    return false;
+  }
+  // Vaults from before per-vault relays follow this setting: ask the owner.
+  if (ref.read(vaultProvider).vaults.isNotEmpty &&
+      !await confirmUnlock(
+        context,
+        ref,
+        reason: 'Confirm it\'s you to change the relay',
+      )) {
+    return false;
+  }
+  await ref
+      .read(endpointsProvider.notifier)
+      .set(EndpointKind.relay, choice.url);
+  return true;
 }
 
 /// The relay and Zcash server, before any vault exists (Settings is only reachable from
@@ -91,16 +121,9 @@ class _ServerSettingsSheet extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Every vault on this phone uses these.',
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.secondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.s),
           row(
             EndpointKind.relay,
-            'Relay',
+            'Relay for new vaults',
             endpoints.relayIsPlaceholder
                 ? 'Not configured'
                 : endpointHost(endpoints.relayUrl),
@@ -338,8 +361,6 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
   bool _busy = false;
   String? _error;
 
-  bool get _relay => widget.kind == EndpointKind.relay;
-
   @override
   void dispose() {
     _url.dispose();
@@ -393,21 +414,12 @@ class _EndpointSheetState extends ConsumerState<_EndpointSheet> {
     final isDefault = ref.watch(endpointsProvider).isDefault(widget.kind);
     final defaultUrl = ZafeEndpoints.defaults.url(widget.kind);
     return MobileModalScaffold(
-      title: _relay ? 'Relay' : 'Zcash server',
+      title: 'Zcash server',
       onClose: () => Navigator.of(context).pop(),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_relay) ...[
-            Text(
-              'All members of a vault must use the same relay.',
-              style: AppTypography.bodyMedium.copyWith(
-                color: colors.text.secondary,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-          ],
           MobileTextField(
             controller: _url,
             focusNode: _focus,

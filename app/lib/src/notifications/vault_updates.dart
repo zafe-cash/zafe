@@ -1,3 +1,4 @@
+import '../core/errors/sync_failure.dart' show formatSince;
 import '../core/formatting/member_label.dart';
 import '../core/formatting/zec_amount.dart';
 import '../core/privacy/amount_display.dart';
@@ -54,6 +55,24 @@ const kUnapprovedPrefix = 'sp:';
 
 String unapprovedKey(String txid) => '$kUnapprovedPrefix$txid';
 
+/// What the unapproved-spend card and notification say. `fromCopyAt`: the relay couldn't
+/// be reached, so the check ran on this phone's copy of the history, last matched then
+/// (a newer entry may explain the spend).
+String unapprovedSpendText({
+  DateTime? fromCopyAt,
+  bool notification = false,
+  DateTime? now,
+}) {
+  // The card's title already says money left without approval.
+  final base = notification
+      ? 'A transaction spent this vault\'s funds with no approved payment. '
+            'Open Zafe and check with the other members now.'
+      : 'Check with the other members now.';
+  return fromCopyAt == null
+      ? base
+      : '$base Based on this phone\'s history from ${formatSince(fromCopyAt, now: now)}.';
+}
+
 /// Present while this member has to approve a proposal again (its signature went into an
 /// unfinished signing round), so the request is announced once.
 String reapprovalKey(String proposalId) => 're:$proposalId';
@@ -78,6 +97,7 @@ List<VaultUpdate> vaultUpdates({
   Map<String, String> names = const {},
   List<rust.SeatMove> seatMoves = const [],
   List<rust.UnapprovedSpendInfo> unapprovedSpends = const [],
+  DateTime? unapprovedFromCopyAt,
   String? me,
 }) {
   // A name with the member's short key: names are chosen by the members themselves.
@@ -95,9 +115,10 @@ List<VaultUpdate> vaultUpdates({
       VaultUpdate(
         proposalId: unapprovedKey(s.txid),
         title: '$vaultName: money left without approval',
-        body:
-            'A transaction spent this vault\'s funds with no approved payment. '
-            'Open Zafe and check with the other members now.',
+        body: unapprovedSpendText(
+          fromCopyAt: unapprovedFromCopyAt,
+          notification: true,
+        ),
       ),
     );
   }

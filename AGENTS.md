@@ -360,6 +360,11 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - Secure storage only through `ZafeSecureStore` (`_PatientStorage`): plugin calls can hang on
   Android while a background engine uses it. Endpoints only via `endpointsProvider` /
   `ZafeEndpoints.fromPrefs` (after `prefs.reload()`), never the build consts.
+- **Relays in Dart**: `endpointsProvider.relayUrl` is only the default for new vaults (and
+  the fallback the bridge uses for pre-per-vault vaults); show a vault's relay from
+  `activeVaultRelayProvider`. The creator's create token lives in `ZafeSecureStore` with
+  the invite until the material is saved; `stepSetup` passes it on every step. The relay
+  picker checks only the selected relay, never the list.
 - Never drop a refresh request because work is running (`CoalescedRun`, `refreshSoon`).
 - Gated actions call `confirmUnlock` first; background checks act only on approvals already given.
 - UX rules (user): minimal text, exact values, no toasts (`ActionButton` + `appNoticesProvider`),

@@ -50,6 +50,35 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   5 min, never away from a custom URL, and the app toasts the move. Background checks
   don't fail over. Re-probe the list (`grpcurl ... GetLightdInfo`) before adding hosts:
   Stardust eu2/jp and two community servers were dead or had broken TLS.
+- **Relay picker** (2026-10-25, `docs/relay-move.md` §4.1): `core/config/relay_presets.dart`
+  lists the relays per network (`RelayPreset`: operator + URL; community relays are added
+  by PR) and parses typed/pasted/scanned input (`relay.example.org#token` → URL + create
+  token). `features/settings/relay_picker.dart` (`showRelayPicker`) checks **only the
+  selected relay** (`check_relay`, through Tor when on), never the list: "Needs an update"
+  (greyed, `too_old`), "No notifications" (`push` false), a create-token field when the
+  relay needs one. Used by Create > More options > Relay and Settings > "Relay for new
+  vaults". Scan is `/scan-relay`, which the router lets open with or without a vault.
+  "Run your own relay →" opens `https://zafe.cash/relay`.
+- **Per-vault relay** lives in the vault's material (phase 2a); Dart reads it with
+  `activeVaultRelayProvider` (`vault_relay_settings`; `usesDefault` = a vault from before
+  per-vault relays, which follows the app-wide setting). Settings > Servers: "Relay ·
+  everyone in <vault>" (`vault_relay_sheet.dart`: address, status, "No notifications",
+  create token saved into the material with `set_vault_create_token` after an unlock),
+  "Zcash server · this phone", "Relay for new vaults" (the app-wide setting). The sync
+  sheet names the vault's relay, not the app-wide one.
+- **Create token storage**: the creator's token goes into `ZafeSecureStore` with the invite
+  (`zafe_vault_<id>_createToken`, `add(createToken:)`), `stepSetup` reads it on **every**
+  step (background ones too), and it is deleted once the material (which then holds it) is
+  saved. Never in the invite. Cancel setup keeps it in `CreatePrefill` for the retry.
+- **Outage** (§5): Home reads `Can't reach relay · since 09:14` from `vault_relay_status`
+  (date when not today, `formatSince`); the unapproved-spend card and notification add
+  "Based on this phone's history from 09:14" when `from_copy_at` is set. A background
+  check whose relay read fails still announces those spends before giving up.
+- **Seat link**: the co-signer's "Replace lost phone" shows "Vault link for their new
+  phone" (Share, Show QR) until the safety words appear; the new phone's "Recover your
+  seat" takes it by Paste/Scan (`/scan-seat-link`), keeps it in `ZafeSecureStore` with the
+  recovery identity (`zafe_recovery_seat_link`) and passes its relay and label to
+  `check_recovery`. Without a link it searches the default relay (older vaults).
 - **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
   task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
   leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,

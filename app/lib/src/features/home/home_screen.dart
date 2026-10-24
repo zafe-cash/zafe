@@ -26,6 +26,8 @@ import '../vaults/vault_switcher_sheet.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import 'needs_you.dart';
+import '../../core/errors/sync_failure.dart';
+import '../../notifications/vault_updates.dart' show unapprovedSpendText;
 import 'sync_status_sheet.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/received_provider.dart';
@@ -165,6 +167,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (summary == null) return const SizedBox.shrink();
     final needsBackup = ref.watch(backupStatusProvider).value == false;
     final funded = (vault.balance?.totalZat ?? BigInt.zero) > BigInt.zero;
+    final unapproved = ref.watch(unapprovedSpendsProvider);
 
     // A failure stays on screen while the next attempt runs, so the status doesn't
     // flicker between "Syncing..." and the error on every poll.
@@ -176,7 +179,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (torLabel != null) {
       syncLabel = torLabel;
     } else if (failure != null) {
-      syncLabel = failure.statusLabel;
+      syncLabel = homeStatusLabel(
+        failure,
+        relayDownSince: failure.kind == SyncFailureKind.relayUnreachable
+            ? relayUnreachableSince(vault.activeId!)
+            : null,
+      );
     } else if (vault.syncing) {
       syncLabel = vault.firstSync ? 'First sync...' : 'Syncing...';
     } else if (vault.balance != null) {
@@ -308,12 +316,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ],
                       ),
                     const SizedBox(height: AppSpacing.md),
-                    if (ref.watch(unapprovedSpendsProvider).isNotEmpty) ...[
+                    if (unapproved.spends.isNotEmpty) ...[
                       NoticeCard(
                         title: 'Money left without approval',
-                        body:
-                            'A transaction spent this vault\'s funds with no '
-                            'approved payment. Check with the other members now.',
+                        body: unapprovedSpendText(
+                          fromCopyAt: fromUnixSeconds(unapproved.fromCopyAt),
+                        ),
                         onTap: () => context.go('/activity'),
                       ),
                       const SizedBox(height: AppSpacing.md),

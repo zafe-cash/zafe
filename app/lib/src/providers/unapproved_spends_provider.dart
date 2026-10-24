@@ -12,20 +12,19 @@ import '../core/storage/wallet_key.dart';
 /// Vault spends the log doesn't account for (spec §10.4.4): money that left without an
 /// approved payment, so keys were used outside Zafe. Empty when all is well. Reloads after
 /// every wallet sync (a new balance or height) and when another vault becomes active.
-class UnapprovedSpendsNotifier
-    extends Notifier<List<rust.UnapprovedSpendInfo>> {
+class UnapprovedSpendsNotifier extends Notifier<rust.UnapprovedSpends> {
   bool _loading = false;
   bool _again = false;
 
   @override
-  List<rust.UnapprovedSpendInfo> build() {
+  rust.UnapprovedSpends build() {
     ref.watch(vaultProvider.select((v) => v.activeId));
     ref.listen(
       vaultProvider.select((v) => v.balance),
       (_, _) => refresh(),
       fireImmediately: true,
     );
-    return const [];
+    return const rust.UnapprovedSpends(spends: []);
   }
 
   Future<void> refresh() async {
@@ -41,17 +40,18 @@ class UnapprovedSpendsNotifier
     _loading = true;
     try {
       final paths = await ZafePaths.get();
-      // `fromCopyAt` (relay unreachable, checked from this phone's history) is shown by
-      // phase 2b's outage status.
-      final items = (await rust.unapprovedSpends(
+      // While the relay is down the check runs on this phone's copy of the history
+      // (`fromCopyAt`), and the alert says so.
+      final result = await rust.unapprovedSpends(
         relayUrl: ref.read(endpointsProvider).relayUrl,
         dbDir: paths.dbDir,
         dbKey: walletKeyFor(seeds, vaultId),
         seeds: seeds,
         material: material,
-      )).spends;
+      );
+      final items = result.spends;
       if (ref.read(vaultProvider).activeId == vaultId) {
-        state = items;
+        state = result;
         // Seen on screen: the background check doesn't announce it again.
         if (WidgetsBinding.instance.lifecycleState ==
             AppLifecycleState.resumed) {
@@ -72,6 +72,6 @@ class UnapprovedSpendsNotifier
 }
 
 final unapprovedSpendsProvider =
-    NotifierProvider<UnapprovedSpendsNotifier, List<rust.UnapprovedSpendInfo>>(
+    NotifierProvider<UnapprovedSpendsNotifier, rust.UnapprovedSpends>(
       UnapprovedSpendsNotifier.new,
     );

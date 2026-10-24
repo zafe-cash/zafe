@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
@@ -47,6 +48,11 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   /// A finished recovery waiting for the member to confirm the vault.
   rust.RecoveryProgress? _found;
 
+  /// The vault link a co-signer sent: the vault's relay and mailbox. Without one the
+  /// default relay is searched (a vault from before per-vault relays).
+  rust.SeatLinkInfo? _link;
+  String? _linkError;
+
   @override
   void initState() {
     super.initState();
@@ -65,8 +71,11 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       seeds = rust_vault.generateIdentity().seeds;
       await _store.writeRecoveryIdentity(seeds);
     }
+    // Kept on "Start over" (same vault); dropped with the identity when rejected.
+    final link = await _store.readRecoveryLink();
     if (!mounted) return;
     setState(() {
+      _link = link == null ? null : _tryLink(link);
       _seeds = seeds;
       _code = rust.recoveryCode(seeds: seeds!);
       _progress = null;
@@ -83,9 +92,11 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     if (seeds == null || _checking || _saving) return;
     _checking = true;
     try {
+      final link = _link;
       final progress = await rust.checkRecovery(
-        relayUrl: ref.read(endpointsProvider).relayUrl,
+        relayUrl: link?.relayUrl ?? ref.read(endpointsProvider).relayUrl,
         seeds: seeds,
+        label: link?.label,
       );
       if (!mounted) return;
       setState(() {
@@ -101,6 +112,44 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     } finally {
       _checking = false;
     }
+  }
+
+  static rust.SeatLinkInfo? _tryLink(String text) {
+    try {
+      return rust.parseSeatLink(text: text);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _useLink(String? text) async {
+    if (text == null || text.trim().isEmpty || !mounted) return;
+    final link = _tryLink(text);
+    if (link == null) {
+      setState(
+        () => _linkError =
+            'That isn\'t a vault link. It starts with "zafe-seat-v1:".',
+      );
+      return;
+    }
+    await _store.writeRecoveryLink(text.trim());
+    if (!mounted) return;
+    setState(() {
+      _link = link;
+      _linkError = null;
+      _error = null;
+    });
+    unawaited(_check());
+  }
+
+  Future<void> _pasteLink() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    await _useLink(data?.text);
+  }
+
+  Future<void> _scanLink() async {
+    final scanned = await context.push<String>('/scan-seat-link');
+    await _useLink(scanned);
   }
 
   Future<void> _save(rust.RecoveryProgress p) async {
@@ -204,8 +253,8 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                   // message can't make both phones show the same words.
                   text:
                       'Please move my Zafe seat to my new phone: in Zafe, open Signers, '
-                      '"Replace a lost phone", and paste this code. I\'ll call to '
-                      'compare safety words.\n\n${code.code}',
+                      '"Replace a lost phone", paste this code and send me the vault '
+                      'link it shows. I\'ll call to compare safety words.\n\n${code.code}',
                 ),
               ),
               child: const Text('Send code to a co-signer'),
@@ -225,11 +274,17 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                     fallback: 'Can\'t reach the relay.',
                   ),
             onStartOver: _startOver,
+            linkHost: _link == null ? null : _host(_link!.relayUrl),
+            linkError: _linkError,
+            onPasteLink: _pasteLink,
+            onScanLink: _scanLink,
           ),
       ],
     );
   }
 }
+
+String _host(String url) => Uri.tryParse(url)?.authority ?? url;
 
 /// The recovery screen's content from plain data (rendered without Rust in previews).
 class RecoverBody extends StatelessWidget {
@@ -242,9 +297,19 @@ class RecoverBody extends StatelessWidget {
     this.needed = 0,
     this.error,
     this.onStartOver,
+    this.linkHost,
+    this.linkError,
+    this.onPasteLink,
+    this.onScanLink,
   });
 
   final String code;
+
+  /// The relay named by the co-signer's vault link, once pasted or scanned.
+  final String? linkHost;
+  final String? linkError;
+  final VoidCallback? onPasteLink;
+  final VoidCallback? onScanLink;
 
   /// Each co-signer's words, once that co-signer opened the code.
   final List<rust.CosignerWords> checks;
@@ -269,7 +334,7 @@ class RecoverBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Send this code to your co-signers. Once enough approve, their phones rebuild your key here.',
+          'Send this code to a co-signer and add the vault link they send back. Once enough approve, their phones rebuild your key here.',
           style: AppTypography.bodyMedium.copyWith(
             color: colors.text.secondary,
           ),
@@ -301,6 +366,13 @@ class RecoverBody extends StatelessWidget {
             size: AppButtonSize.medium,
             expand: false,
           ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        SeatLinkField(
+          host: linkHost,
+          error: linkError,
+          onPaste: onPasteLink,
+          onScan: onScanLink,
         ),
         // The safety words, once a co-signer has opened the code.
         if (checks.isNotEmpty) ...[
@@ -366,6 +438,72 @@ class RecoverBody extends StatelessWidget {
             onPressed: onStartOver,
             child: const Text('Start over with a new code'),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The new phone's vault link: pasted or scanned from the co-signer, it names the
+/// vault's relay (shown once set).
+class SeatLinkField extends StatelessWidget {
+  const SeatLinkField({
+    super.key,
+    this.host,
+    this.error,
+    this.onPaste,
+    this.onScan,
+  });
+
+  final String? host;
+  final String? error;
+  final VoidCallback? onPaste;
+  final VoidCallback? onScan;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Vault link',
+          style: AppTypography.labelLarge.copyWith(
+            color: colors.text.secondary,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xxs),
+        if (host != null)
+          Text(
+            'Relay · $host',
+            style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
+          ),
+        if (error != null)
+          Text(
+            error!,
+            style: AppTypography.bodySmall.copyWith(
+              color: colors.text.destructive,
+            ),
+          ),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            AppButton(
+              variant: AppButtonVariant.secondary,
+              size: AppButtonSize.medium,
+              onPressed: onPaste,
+              child: Text(host == null ? 'Paste link' : 'Paste another'),
+            ),
+            AppButton(
+              variant: AppButtonVariant.secondary,
+              size: AppButtonSize.medium,
+              leading: const AppIcon(AppIcons.qr, size: 18),
+              onPressed: onScan,
+              child: const Text('Scan'),
+            ),
+          ],
         ),
       ],
     );

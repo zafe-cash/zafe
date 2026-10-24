@@ -13,7 +13,9 @@ import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile_text_field.dart';
+import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../settings/relay_picker.dart' show relayHost;
 import '../../rust/api/vault.dart' as rust;
 import 'invite_link.dart';
 import 'onboarding_art.dart';
@@ -181,7 +183,15 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
         const SizedBox(height: AppSpacing.md),
         if (info != null)
           Text(
-            '"${info.name}": ${info.threshold} of ${info.members} signatures needed.',
+            inviteFact(
+              name: info.name,
+              threshold: info.threshold,
+              members: info.members,
+              // An invite from an older app runs on this phone's default relay.
+              relayHost: relayHost(
+                info.relayUrl ?? ref.watch(endpointsProvider).relayUrl,
+              ),
+            ),
             style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
           )
         else if (_invite.text.trim().isNotEmpty)
@@ -219,3 +229,11 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
     );
   }
 }
+
+/// What an invite is, as a fact: `Grants · 2 of 3 · relay.dao.org`.
+String inviteFact({
+  required String name,
+  required int threshold,
+  required int members,
+  required String relayHost,
+}) => '$name · $threshold of $members · $relayHost';

@@ -12,6 +12,7 @@ import 'package:workmanager/workmanager.dart';
 
 import '../core/config/endpoints.dart';
 import '../core/diagnostics/crash_log.dart';
+import '../core/errors/sync_failure.dart' show fromUnixSeconds;
 import '../core/errors/zafe_error_copy.dart';
 import '../rust/api/error.dart' show ZafeError, ZafeErrorKind;
 import '../core/network/tor_setting.dart';
@@ -498,22 +499,49 @@ Future<void> _checkVault(
       );
     } catch (_) {}
     List<rust_spends.UnapprovedSpendInfo>? unapproved;
+    DateTime? unapprovedFromCopyAt;
     try {
-      unapproved = (await rust_spends.unapprovedSpends(
+      final found = await rust_spends.unapprovedSpends(
         relayUrl: endpoints.relayUrl,
         dbDir: paths.dbDir,
         dbKey: dbKey,
         seeds: seeds,
         material: material,
-      )).spends;
+      );
+      unapproved = found.spends;
+      unapprovedFromCopyAt = fromUnixSeconds(found.fromCopyAt);
     } catch (_) {}
-    var list = await rust.listProposals(
-      relayUrl: endpoints.relayUrl,
-      stateDir: stateDir,
-      seeds: seeds,
-      material: material,
-      tipHeight: height,
+    final vaultName = VaultName.display(
+      summary.name,
+      await VaultName.read(v.id),
     );
+    rust.ProposalList list;
+    try {
+      list = await rust.listProposals(
+        relayUrl: endpoints.relayUrl,
+        stateDir: stateDir,
+        seeds: seeds,
+        material: material,
+        tipHeight: height,
+      );
+    } catch (_) {
+      // The relay is down: the spend alert still runs, from this phone's history.
+      final alerts = vaultUpdates(
+        previous: await _readSeen(v.id),
+        proposals: const [],
+        vaultName: vaultName,
+        hideAmounts: hideAmounts,
+        unapprovedSpends: unapproved ?? const [],
+        unapprovedFromCopyAt: unapprovedFromCopyAt,
+      ).where((u) => u.proposalId.startsWith(kUnapprovedPrefix));
+      for (final u in alerts) {
+        await _notifySetup(v.id, u.proposalId, u.title, u.body);
+      }
+      if (unapproved != null) {
+        await recordSeen(v.id, null, unapprovedSpends: unapproved);
+      }
+      rethrow;
+    }
     var proposals = list.items;
     // A signer's seat moved: keep this device's copy of the membership current.
     if (list.updatedMaterial case final updated?) {
@@ -572,11 +600,12 @@ Future<void> _checkVault(
     final updates = vaultUpdates(
       previous: await _readSeen(v.id),
       proposals: proposals,
-      vaultName: VaultName.display(summary.name, await VaultName.read(v.id)),
+      vaultName: vaultName,
       hideAmounts: hideAmounts,
       received: received ?? const [],
       seatMoves: list.seatMoves,
       unapprovedSpends: unapproved ?? const [],
+      unapprovedFromCopyAt: unapprovedFromCopyAt,
       me: rust_vault.identityPublicKey(seeds: seeds),
       // Read here: this may run in a background isolate without the app's providers.
       names: MemberNames.merge({

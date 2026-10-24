@@ -49,6 +49,8 @@ import 'package:zafe/src/notifications/notification_primer.dart';
 import 'package:zafe/src/rust/api/received.dart' show ReceivedInfo;
 import 'package:zafe/src/rust/api/repair.dart' show CosignerWords;
 
+import 'relay_render_test.dart' show relayCases;
+
 Future<void> _loadFonts() async {
   final families = <String, List<String>>{
     'DM Sans': ['Regular', 'Medium', 'SemiBold'],
@@ -271,6 +273,9 @@ final _cases = <(String, String?, Widget)>[
     ),
   ),
   ('sheet_primer', null, const NotificationPrimerSheet()),
+  // The relay picker, the vault's relay in Settings, Create > Relay, the join line,
+  // the seat-recovery vault link and Home during an outage.
+  ...relayCases(),
   (
     'backup_words',
     null,

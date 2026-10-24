@@ -10,9 +10,12 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
+import '../../core/widgets/mobile/mobile_list_row.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
+import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../settings/relay_picker.dart';
 import 'onboarding_art.dart';
 
 class CreateVaultScreen extends ConsumerStatefulWidget {
@@ -36,6 +39,11 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   int _expiryDays = 7;
   static const _expiryChoices = [1, 3, 7, 14];
 
+  /// More options: the vault's relay (null: the default relay) and its create token.
+  bool _more = false;
+  String? _relayUrl;
+  String? _createToken;
+
   @override
   void initState() {
     super.initState();
@@ -53,6 +61,11 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
       if (_expiryChoices.contains(prefill.expiryDays)) {
         _expiryDays = prefill.expiryDays;
       }
+      _relayUrl = prefill.relayUrl;
+      _createToken = prefill.createToken;
+      _more =
+          _relayUrl != null &&
+          _relayUrl != ref.read(endpointsProvider).relayUrl;
       // Cleared after the first frame: Riverpod forbids changing a provider while the
       // widget tree is building.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -81,6 +94,8 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
             members: _members,
             expiryDays: _expiryDays,
             myName: _myName.text,
+            relayUrl: _relayUrl,
+            createToken: _createToken,
           );
       if (mounted) context.go('/setup');
     } finally {
@@ -88,9 +103,24 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
     }
   }
 
+  Future<void> _pickRelay(String current) async {
+    final choice = await showRelayPicker(
+      context,
+      title: 'Relay',
+      selectedUrl: current,
+      token: _createToken,
+    );
+    if (choice == null || !mounted) return;
+    setState(() {
+      _relayUrl = choice.url;
+      _createToken = choice.token;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final relayUrl = _relayUrl ?? ref.watch(endpointsProvider).relayUrl;
     final valid =
         _name.text.trim().isNotEmpty &&
         _threshold >= 2 &&
@@ -210,7 +240,47 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
           'day${_expiryDays == 1 ? '' : 's'}. This can\'t be changed later.',
           style: AppTypography.bodySmall.copyWith(color: colors.text.secondary),
         ),
+        const SizedBox(height: AppSpacing.md),
+        if (!_more)
+          Center(
+            child: AppButton(
+              variant: AppButtonVariant.ghost,
+              size: AppButtonSize.small,
+              onPressed: () => setState(() => _more = true),
+              child: const Text('More options'),
+            ),
+          )
+        else
+          CreateRelayRow(
+            host: relayHost(relayUrl),
+            onTap: _busy ? null : () => _pickRelay(relayUrl),
+          ),
       ],
+    );
+  }
+}
+
+/// Create > More options: the relay everyone in the new vault will use.
+class CreateRelayRow extends StatelessWidget {
+  const CreateRelayRow({super.key, required this.host, this.onTap});
+
+  final String host;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MobileSurfaceCard(
+      cornerRadius: AppRadii.large,
+      child: MobileListRow(
+        leading: AppIcon(AppIcons.endpoint, size: 20, color: colors.icon.muted),
+        label: 'Relay',
+        value: host,
+        valueColor: colors.text.secondary,
+        showChevron: true,
+        minRowHeight: 48,
+        onTap: onTap,
+      ),
     );
   }
 }

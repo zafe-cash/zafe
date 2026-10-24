@@ -9,6 +9,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart'
     show openAppSettings;
 
+import '../../core/config/relay_presets.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
@@ -55,6 +56,40 @@ class ScanRecoveryScreen extends StatelessWidget {
     accept: (raw) {
       try {
         rust_repair.parseRecoveryCode(code: raw);
+        return raw.trim();
+      } catch (_) {
+        return null;
+      }
+    },
+  );
+}
+
+/// Scans a relay's address (`relay.example.org`, an https URL, either with
+/// `#<create token>`). Pops the scanned text; the picker checks the relay.
+class ScanRelayScreen extends StatelessWidget {
+  const ScanRelayScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => QrScanScreen(
+    title: 'Scan relay',
+    rejected: 'That QR code isn\'t a relay address.',
+    accept: (raw) => parseRelayInput(raw).url == null ? null : raw.trim(),
+  );
+}
+
+/// Scans the vault link a co-signer shows (seat recovery). Pops the link text.
+class ScanSeatLinkScreen extends StatelessWidget {
+  const ScanSeatLinkScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => QrScanScreen(
+    title: 'Scan vault link',
+    rejected:
+        'That QR code isn\'t a vault link. Scan the one on your co-signer\'s '
+        '"Replace lost phone" screen.',
+    accept: (raw) {
+      try {
+        rust_repair.parseSeatLink(text: raw);
         return raw.trim();
       } catch (_) {
         return null;

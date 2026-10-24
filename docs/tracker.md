@@ -555,12 +555,20 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
             (`SEAT_LINK` 1), spend alert from the copy, relay status per vault, relay route
             `/v1/mailbox/replace-labelled`, bridge errors `RelayOutdated` /
             `CreateTokenRefused`. Details: `docs/relay-move.md` §7
-      - [ ] Phase 2b (app): relay picker (Create > Relay, `check_relay` info), relay shown
-            on join (`InviteInfo.relay_url`), Settings split (`vault_relay_settings`), create
-            token field (pass it to `create_vault` and **every** `setup_step`; keep it with
-            the invite), seat link share/scan (`seat_link`, `parse_seat_link`,
-            `check_recovery(label)`), "Can't reach relay · since" (`vault_relay_status`),
-            "based on this phone's history from" (`UnapprovedSpends.from_copy_at`)
+      - [x] Phase 2b (app, 2026-10-25, branch `relay-client`): relay picker
+            (`relay_presets.dart`, `relay_picker.dart`; selected relay checked only,
+            "Needs an update", "No notifications", create token incl. `host#token`),
+            Create > More options > Relay (token kept with the invite, passed to every
+            `setup_step`), relay on join (`Grants · 2 of 3 · relay.dao.org`), Settings >
+            Servers split (vault relay sheet with create token, Zcash server · this phone,
+            relay for new vaults), "Can't reach relay · since", spend alert "based on this
+            phone's history from", seat link share/QR + paste/scan. Notes:
+            `docs/app-notes.md`. Left: emulator end-to-end after phase 3 (picker against a
+            live relay, private relay with a token, seat recovery through a link)
+      - [ ] **Site page `zafe.cash/relay`** ("Run your own relay →" in the picker opens it):
+            Compose + Caddy, backups, `ZAFE_RELAY_CREATE_TOKEN` and how to hand it out
+            (`relay.example.org#token`), expiry settings, how to get listed in
+            `relay_presets.dart` by PR
 - [x] Relay URL per vault (Rust side 2026-10-25, see above): the invite carries the vault's
       relay URL and the vault keeps it in its material, so vaults on a self-hosted relay and
       on ours coexist in one app. UI in phase 2b

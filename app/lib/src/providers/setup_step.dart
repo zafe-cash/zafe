@@ -36,6 +36,8 @@ Future<rust.SetupProgress> stepSetup({
     );
   }
   final stateDir = await (await ZafePaths.get()).stateDir(vaultId);
+  // The creator's token for a private relay: needed on every step, background ones too.
+  final createToken = await ZafeSecureStore.instance.setupCreateToken(vaultId);
   final progress = await rust.setupStep(
     relayUrl: endpoints.relayUrl,
     lightwalletdUrl: endpoints.lightwalletdUrl,
@@ -48,10 +50,12 @@ Future<rust.SetupProgress> stepSetup({
     expiryDays: (await SharedPreferences.getInstance()).getInt(
       expiryDaysKey(vaultId),
     ),
+    createToken: createToken,
   );
   final material = progress.material;
   if (material != null) {
     await ZafeSecureStore.instance.writeMaterial(vaultId, material);
+    await ZafeSecureStore.instance.forgetSetupCreateToken(vaultId);
     await rust.forgetKeygen(stateDir: stateDir);
   }
   return progress;

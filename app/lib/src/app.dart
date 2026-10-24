@@ -236,6 +236,8 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ].any(loc.startsWith);
       // Picks its own vault, so it also opens while another one is being added.
       if (loc == '/payment-request') return null;
+      // The relay picker scans from Create (no vault on screen) and from Settings.
+      if (loc == '/scan-relay') return null;
       if (vault.hasVault && !inVault) return '/home';
       if (!vault.hasVault && inVault) {
         return vault.isSettingUp ? '/setup' : '/welcome';
@@ -264,6 +266,14 @@ final _routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/scan-invite',
         pageBuilder: (_, _) => page(const ScanInviteScreen()),
+      ),
+      GoRoute(
+        path: '/scan-relay',
+        pageBuilder: (_, _) => page(const ScanRelayScreen()),
+      ),
+      GoRoute(
+        path: '/scan-seat-link',
+        pageBuilder: (_, _) => page(const ScanSeatLinkScreen()),
       ),
       GoRoute(
         path: '/scan-recovery',

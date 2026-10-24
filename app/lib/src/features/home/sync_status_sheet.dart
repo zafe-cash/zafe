@@ -14,6 +14,8 @@ import '../../providers/endpoints_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/tor_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../providers/vault_relay.dart';
+import '../../rust/api/vault.dart' as rust_vault;
 
 /// The failure Home shows for the active vault, if any.
 SyncFailure? currentSyncFailure(WidgetRef ref) {
@@ -21,6 +23,28 @@ SyncFailure? currentSyncFailure(WidgetRef ref) {
   final relayError = ref.watch(proposalsProvider.select((p) => p.error));
   return homeSyncFailure(syncError: syncError, relayError: relayError);
 }
+
+/// Since when this phone can't reach vault `vaultId`'s relay (`vault_relay_status`,
+/// written by every relay request), or null.
+DateTime? relayUnreachableSince(String vaultId) {
+  try {
+    return fromUnixSeconds(
+      rust_vault.vaultRelayStatus(vaultId: vaultId).unreachableSince,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+/// The status at the top of Home: `Can't reach relay · since 09:14` while the relay is
+/// down (the date when it wasn't today).
+String homeStatusLabel(
+  SyncFailure failure, {
+  DateTime? relayDownSince,
+  DateTime? now,
+}) => relayDownSince == null
+    ? failure.statusLabel
+    : '${failure.statusLabel} · since ${formatSince(relayDownSince, now: now)}';
 
 /// Why syncing fails: the reason, the server, when it last worked, and "Try again".
 Future<void> showSyncStatusSheet(
@@ -168,9 +192,10 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
       body.add(
         DetailRow(
           label: endpoint == SyncEndpoint.relay ? 'Relay' : 'Zcash server',
+          // The relay is the vault's own (its material), the Zcash server this phone's.
           value: _host(
             endpoint == SyncEndpoint.relay
-                ? endpoints.relayUrl
+                ? ref.watch(activeVaultRelayProvider)?.url ?? endpoints.relayUrl
                 : endpoints.lightwalletdUrl,
           ),
         ),

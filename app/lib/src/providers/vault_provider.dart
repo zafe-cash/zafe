@@ -268,18 +268,29 @@ class VaultNotifier extends Notifier<VaultState> {
     required int members,
     int expiryDays = 7,
     String myName = '',
+    String? relayUrl,
+    String? createToken,
   }) async {
     // A fresh member identity per vault, so the relay can't link memberships.
     final id = rust.generateIdentity();
+    final token = createToken?.trim();
     final invite = await rust.createVault(
-      relayUrl: _endpoints.relayUrl,
+      relayUrl: relayUrl ?? _endpoints.relayUrl,
       seeds: id.seeds,
       name: name,
       threshold: threshold,
       members: members,
+      createToken: token == null || token.isEmpty ? null : token,
     );
     final vaultId = rust.parseInvite(invite: invite).vaultId;
-    await _store.add(id: vaultId, identity: id.seeds, invite: invite);
+    // The invite names the relay; the token stays here (never in the invite) for every
+    // setup step until the material holds it.
+    await _store.add(
+      id: vaultId,
+      identity: id.seeds,
+      invite: invite,
+      createToken: token == null || token.isEmpty ? null : token,
+    );
     await MyName.setPending(vaultId, myName);
     // Carried to the others by the creator's round-1 message (`stepSetup`).
     final prefs = await SharedPreferences.getInstance();
@@ -358,6 +369,8 @@ class VaultNotifier extends Notifier<VaultState> {
               threshold: info.threshold,
               members: info.members,
               expiryDays: prefs.getInt(expiryDaysKey(id)) ?? 7,
+              relayUrl: info.relayUrl,
+              createToken: await _store.setupCreateToken(id),
             ),
           );
       try {
@@ -611,12 +624,18 @@ class CreatePrefill {
     required this.threshold,
     required this.members,
     required this.expiryDays,
+    this.relayUrl,
+    this.createToken,
   });
 
   final String name;
   final int threshold;
   final int members;
   final int expiryDays;
+
+  /// The relay picked under More options (null: the default relay).
+  final String? relayUrl;
+  final String? createToken;
 }
 
 class CreatePrefillNotifier extends Notifier<CreatePrefill?> {

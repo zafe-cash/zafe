@@ -78,20 +78,35 @@ class ZafeSecureStore {
     for (final id in await vaultIds()) await read(id),
   ];
 
-  /// Adds a vault (identity and invite; material comes after key generation).
+  /// Adds a vault (identity and invite; material comes after key generation). The
+  /// creator of a vault on a private relay keeps its `createToken` with the invite until
+  /// the material (which then holds it) is saved: every setup step needs it.
   Future<void> add({
     required String id,
     required List<int> identity,
     required String invite,
+    String? createToken,
   }) async {
     await _writeBytes(_key(id, 'identity'), identity);
     await _storage.write(key: _key(id, 'invite'), value: invite);
+    if (createToken != null) {
+      await _storage.write(key: _key(id, 'createToken'), value: createToken);
+    }
     final ids = await vaultIds();
     if (!ids.contains(id)) await _writeIds([...ids, id]);
   }
 
   Future<void> writeMaterial(String id, List<int> material) =>
       _writeBytes(_key(id, 'material'), material);
+
+  /// The create token the creator made vault `id` with (see [add]); null on an open relay
+  /// and for joiners.
+  Future<String?> setupCreateToken(String id) =>
+      _storage.read(key: _key(id, 'createToken'));
+
+  /// The vault's material holds the token now.
+  Future<void> forgetSetupCreateToken(String id) =>
+      _storage.delete(key: _key(id, 'createToken'));
 
   static const _recoveryKey = 'zafe_recovery_identity';
 
@@ -102,7 +117,20 @@ class ZafeSecureStore {
   Future<void> writeRecoveryIdentity(List<int> seeds) =>
       _writeBytes(_recoveryKey, seeds);
 
-  Future<void> deleteRecoveryIdentity() => _storage.delete(key: _recoveryKey);
+  Future<void> deleteRecoveryIdentity() async {
+    await _storage.delete(key: _recoveryKey);
+    await _storage.delete(key: _recoveryLinkKey);
+  }
+
+  static const _recoveryLinkKey = 'zafe_recovery_seat_link';
+
+  /// The vault link (`zafe-seat-v1:...`) a co-signer gave the recovering phone: which
+  /// relay and mailbox to recover on. Kept with the recovery identity.
+  Future<String?> readRecoveryLink() => _storage.read(key: _recoveryLinkKey);
+
+  Future<void> writeRecoveryLink(String? link) => link == null
+      ? _storage.delete(key: _recoveryLinkKey)
+      : _storage.write(key: _recoveryLinkKey, value: link);
 
   /// Last known balance in zatoshis, for the vault switcher (kept here rather than in
   /// the summary file so it isn't readable outside the keystore-backed storage).
@@ -122,6 +150,7 @@ class ZafeSecureStore {
       'material',
       'walletKey',
       'balance',
+      'createToken',
     ]) {
       await _storage.delete(key: _key(id, field));
     }
