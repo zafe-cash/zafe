@@ -533,6 +533,16 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       with latency in Settings, custom URL, automatic failover between listed servers
       (`docs/app-notes.md` "Zcash server list"). Not done: switching back to the chosen server when
       it recovers, failover in background checks
+- [ ] **No relay lock-in** (designed 2026-10-25, `docs/relay-move.md`; reopens part of the
+      decision above). Order: per-vault relay URL (next item) + `INVITE` carries it +
+      `BACKUP` carries it and the log copy; relay picker + "Run your own relay" page +
+      private-relay create token (travels sealed, in backups); move like an invite (one
+      member moves and shares a link, each member taps to follow, sealed arrivals, switch at
+      m = max(t, n−t+1) as one `VaultMoved` entry, nothing connects before the tap); relay
+      expiry by member activity; standby relay; spend alert from the log copy; random
+      per-relay mailbox labels against squatting; first loads anchored everywhere (backup
+      log copy, head hash in seat recovery); spec §6/§14 and audit scope. Review in §8-9.
+      Push from other relays (UnifiedPush) deferred, see §10
 - [ ] Relay URL per vault: the invite carries the vault's relay URL and the app stores it
       with the vault (today one relay setting per network for the whole app), so vaults on
       a self-hosted relay and on ours coexist in one app. Bumps the invite version
