@@ -1,0 +1,218 @@
+name: iOS build
+
+# Builds the app for iOS on a macOS runner: an unsigned device build (arm64) and a simulator
+# build. No signing secrets are used; this only proves the app, the Rust bridge and the
+# CocoaPods plugins compile for iOS. Signed IPAs / TestFlight come later (docs/tracker.md).
+#
+# Run it by hand (Actions > iOS build > Run workflow) or by touching app/ios, the bridge or
+# this file on a pull request.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ios.yml'
+      - 'app/ios/**'
+      - 'app/rust/**'
+      - 'app/rust_builder/**'
+      - 'app/pubspec.yaml'
+      - 'app/pubspec.lock'
+      - 'crates/**'
+      - 'Cargo.lock'
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ios:
+    name: Build for iOS (${{ matrix.name }})
+    runs-on: macos-26
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: device (unsigned)
+            rust_target: aarch64-apple-ios
+            build_args: --release --no-codesign
+          - name: simulator
+            rust_target: aarch64-apple-ios-sim
+            build_args: --debug --simulator
+    steps:
+      - uses: actions/checkout@v5
+
+      # workmanager_apple uses BGContinuedProcessingTask, which only exists in the iOS 26 SDK.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build for each pod build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> app/build/rust_lib_zafe/build'
+          key: ios-${{ matrix.rust_target }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+          cache: true
+
+      # Same bundle id as the profile you sign with (repository variable IOS_BUNDLE_ID, default
+      # xyz.zafe.zafe; the Android testnet app uses xyz.zafe.zafe.testnet).
+      - name: Bundle id
+        env:
+          IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          id="${IOS_BUNDLE_ID:-xyz.zafe.zafe}"
+          case "$id" in *[!A-Za-z0-9.-]*|'') echo "::error::Bad IOS_BUNDLE_ID"; exit 1;; esac
+          sed -i '' -E "s/PRODUCT_BUNDLE_IDENTIFIER = xyz\.zafe\.zafe;/PRODUCT_BUNDLE_IDENTIFIER = $id;/" \
+            app/ios/Runner.xcodeproj/project.pbxproj
+          grep -n "PRODUCT_BUNDLE_IDENTIFIER" app/ios/Runner.xcodeproj/project.pbxproj | sort -u
+
+      - name: Build
+        working-directory: app
+        env:
+          ZAFE_RELAY_URL: ${{ vars.ZAFE_RELAY_URL }}
+          ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+          # Firebase iOS app identifiers (GoogleService-Info.plist values; not secrets). Push
+          # stays off without them. Needs the APNs key uploaded in the Firebase console.
+          ZAFE_FIREBASE_IOS_API_KEY: ${{ vars.ZAFE_FIREBASE_IOS_API_KEY }}
+          ZAFE_FIREBASE_IOS_APP_ID: ${{ vars.ZAFE_FIREBASE_IOS_APP_ID }}
+          ZAFE_FIREBASE_IOS_SENDER_ID: ${{ vars.ZAFE_FIREBASE_IOS_SENDER_ID }}
+          ZAFE_FIREBASE_IOS_PROJECT_ID: ${{ vars.ZAFE_FIREBASE_IOS_PROJECT_ID }}
+          IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+        run: |
+          flutter pub get
+          # An empty define would replace the build's default, so only pass what is set.
+          defines=(--dart-define=ZAFE_NETWORK=test)
+          [ -z "$ZAFE_RELAY_URL" ] || defines+=(--dart-define=ZAFE_RELAY_URL="$ZAFE_RELAY_URL")
+          [ -z "$ZAFE_LINK_HOST" ] || defines+=(--dart-define=ZAFE_LINK_HOST="$ZAFE_LINK_HOST")
+          for name in API_KEY APP_ID SENDER_ID PROJECT_ID; do
+            var="ZAFE_FIREBASE_IOS_$name"
+            [ -z "${!var}" ] || defines+=(--dart-define="$var=${!var}")
+          done
+          defines+=(--dart-define=ZAFE_FIREBASE_IOS_BUNDLE_ID="${IOS_BUNDLE_ID:-xyz.zafe.zafe}")
+          flutter build ios ${{ matrix.build_args }} "${defines[@]}" \
+            --build-name=0.0.0 --build-number=${{ github.run_number }}
+
+      - name: Package the device build
+        if: matrix.rust_target == 'aarch64-apple-ios'
+        run: |
+          mkdir dist
+          ditto -c -k --keepParent app/build/ios/iphoneos/Runner.app dist/Zafe-unsigned.app.zip
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.rust_target == 'aarch64-apple-ios'
+        with:
+          name: zafe-ios-unsigned
+          path: dist/Zafe-unsigned.app.zip
+          retention-days: 7
+
+  # Re-signs the unsigned device build into an IPA you can install on your own iPhone.
+  # Needs the secrets of the GitHub environment `ios-signing` (restrict that environment to
+  # this branch / main so no other workflow can read them). Without them this job is skipped.
+  #   IOS_CERT_P12_BASE64      base64 of an Apple Development (or Distribution) certificate .p12
+  #   IOS_CERT_PASSWORD        its password
+  #   IOS_PROFILE_BASE64       base64 of a provisioning profile for xyz.zafe.zafe that lists
+  #                            your iPhone's UDID (development or ad-hoc)
+  sign:
+    name: Sign the IPA
+    needs: ios
+    runs-on: macos-26
+    timeout-minutes: 20
+    environment: ios-signing
+    env:
+      CERT_P12: ${{ secrets.IOS_CERT_P12_BASE64 }}
+      CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
+      ZAFE_LINK_HOST: ${{ vars.ZAFE_LINK_HOST }}
+    steps:
+      - name: Check secrets
+        id: check
+        run: |
+          if [ -n "$CERT_P12" ] && [ -n "$CERT_PASSWORD" ] && [ -n "$PROFILE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Signing secrets are not set in the ios-signing environment; skipping."
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          name: zafe-ios-unsigned
+
+      - name: Sign and package
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          unzip -q Zafe-unsigned.app.zip
+          app=Runner.app
+
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kcpass=$(uuidgen)
+          echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kcpass" "$kc"
+          security set-keychain-settings -lut 1200 "$kc"
+          security unlock-keychain -p "$kcpass" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpass" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          identity=$(security find-identity -v -p codesigning "$kc" | awk 'NR==1 {print $2}')
+          [ -n "$identity" ] || { echo "::error::No signing identity in the .p12"; exit 1; }
+
+          echo "$PROFILE" | base64 -d > "$RUNNER_TEMP/profile.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")
+          echo "Profile app id: $appid"
+          bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          case "$appid" in *."$bundle") ;; *) echo "::error::Profile $appid does not match bundle id $bundle"; exit 1;; esac
+          /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$RUNNER_TEMP/profile.plist" > "$RUNNER_TEMP/entitlements.plist"
+          # Universal links: a profile with the Associated Domains capability lists "*"; the app
+          # must name its domain itself. Without the capability the app has no universal links
+          # (zafe:// links still work).
+          if /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains' "$RUNNER_TEMP/entitlements.plist" > /dev/null 2>&1; then
+            if [ -n "$ZAFE_LINK_HOST" ]; then
+              /usr/libexec/PlistBuddy -c 'Delete :com.apple.developer.associated-domains' "$RUNNER_TEMP/entitlements.plist"
+              /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.associated-domains array' "$RUNNER_TEMP/entitlements.plist"
+              /usr/libexec/PlistBuddy -c "Add :com.apple.developer.associated-domains:0 string applinks:$ZAFE_LINK_HOST" "$RUNNER_TEMP/entitlements.plist"
+            else
+              /usr/libexec/PlistBuddy -c 'Delete :com.apple.developer.associated-domains' "$RUNNER_TEMP/entitlements.plist"
+              echo "::warning::Profile has Associated Domains but ZAFE_LINK_HOST is not set; no universal links"
+            fi
+          fi
+          echo "Entitlements:"; /usr/libexec/PlistBuddy -c 'Print' "$RUNNER_TEMP/entitlements.plist" | sed -E 's/(team-identifier|application-identifier) = .*/\1 = (hidden)/'
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$app/embedded.mobileprovision"
+
+          # Nested code first, then the app itself.
+          find "$app" \( -name '*.framework' -o -name '*.dylib' -o -name '*.appex' \) -prune -print0 |
+            xargs -0 -I{} codesign --force --sign "$identity" --keychain "$kc" {}
+          codesign --force --sign "$identity" --keychain "$kc" \
+            --entitlements "$RUNNER_TEMP/entitlements.plist" "$app"
+          codesign --verify --deep --strict "$app"
+
+          mkdir Payload && cp -R "$app" Payload/
+          zip -qry Zafe-signed.ipa Payload
+          ls -lh Zafe-signed.ipa
+
+      - name: Remove the keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/profile.mobileprovision"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          name: zafe-ios-signed
+          path: Zafe-signed.ipa
+          retention-days: 3

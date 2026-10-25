@@ -11,12 +11,14 @@ import 'package:flutter/services.dart';
 enum PaymentMoment { approve, ready, sent, received, failed }
 
 /// Plays payment moments through `xyz.zafe/payment_feedback` (Android: SoundPool for
-/// the sound, silenced on silent/vibrate; view haptics in the sound's tempo).
+/// the sound, silenced on silent/vibrate; view haptics in the sound's tempo. iOS:
+/// AVAudioPlayer on an ambient session, silenced by the silent switch, and impact
+/// haptics; sounds are `assets/sounds/*.m4a`).
 abstract final class PaymentFeedback {
   static const _channel = MethodChannel('xyz.zafe/payment_feedback');
 
   /// Haptic taps per moment (ms), matching the native handler: the fallback where the
-  /// platform has no handler (iOS until it gets one).
+  /// platform has no handler (tests).
   @visibleForTesting
   static const taps = <PaymentMoment, List<int>>{
     PaymentMoment.approve: [0],
@@ -38,7 +40,7 @@ abstract final class PaymentFeedback {
     } on PlatformException {
       // Fall through to haptics alone.
     } on MissingPluginException {
-      // No native handler (iOS for now, tests): haptics alone.
+      // No native handler (tests): haptics alone.
     }
     var last = 0;
     for (final at in taps[moment]!) {

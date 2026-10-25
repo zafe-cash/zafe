@@ -10,13 +10,13 @@ const _channel = MethodChannel('xyz.zafe/clipboard');
 
 /// Copies a secret (an invite, backup text, a recovery code, the viewing key). On
 /// Android it is flagged sensitive, so the system hides it from the copy preview and
-/// keyboard suggestions; everywhere it is cleared after [kSecretClipboardLifetime]
+/// keyboard suggestions, and on iOS it stays off Universal Clipboard and expires; everywhere it is cleared after [kSecretClipboardLifetime]
 /// unless something else was copied since.
 Future<void> copySecret(String text) async {
   try {
     await _channel.invokeMethod<void>('copySensitive', {'text': text});
   } on MissingPluginException {
-    // No handler (tests, iOS for now): a plain copy.
+    // No handler (tests): a plain copy.
     await Clipboard.setData(ClipboardData(text: text));
   }
   Timer(kSecretClipboardLifetime, () => unawaited(_clearIfUnchanged(text)));

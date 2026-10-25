@@ -153,7 +153,8 @@ impl FcmNotifier {
         Ok(resp.access_token)
     }
 
-    /// The FCM message: data only, no vault information, high priority, one collapse key.
+    /// The FCM message: data only, no vault information, high priority (Android) or a silent
+    /// background push (iOS), one collapse key.
     /// An installation ID goes in `fid`, an older registration token in `token`.
     pub fn message(platform: PushPlatform, target: &str) -> serde_json::Value {
         let field = if platform == PushPlatform::FcmFid {
@@ -165,7 +166,18 @@ impl FcmNotifier {
             "message": {
                 field: target,
                 "data": { "t": "vault" },
-                "android": { "priority": "high", "collapse_key": "zafe" }
+                "android": { "priority": "high", "collapse_key": "zafe" },
+                // iOS: FCM hands this to APNs as a silent (background) push, which wakes
+                // the app to read the log itself. Priority 5 is what Apple allows for it
+                // (10 is for alerts); the system may still delay or drop silent pushes.
+                "apns": {
+                    "headers": {
+                        "apns-push-type": "background",
+                        "apns-priority": "5",
+                        "apns-collapse-id": "zafe"
+                    },
+                    "payload": { "aps": { "content-available": 1 } }
+                }
             }
         })
     }
@@ -240,5 +252,18 @@ mod tests {
         assert!(token["message"].get("fid").is_none());
         // No vault information either way.
         assert_eq!(fid["message"]["data"], serde_json::json!({ "t": "vault" }));
+    }
+
+    #[test]
+    fn the_ios_push_is_silent_and_carries_nothing_visible() {
+        let m = FcmNotifier::message(PushPlatform::FcmFid, "f1");
+        let apns = &m["message"]["apns"];
+        assert_eq!(apns["headers"]["apns-push-type"], "background");
+        assert_eq!(
+            apns["payload"]["aps"],
+            serde_json::json!({ "content-available": 1 })
+        );
+        // No alert, sound or badge: the app decides what to show after reading the log.
+        assert!(apns["payload"]["aps"].get("alert").is_none());
     }
 }
