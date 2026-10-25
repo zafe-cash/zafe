@@ -46,6 +46,7 @@ Future<RelayChoice?> showRelayPicker(
   required String selectedUrl,
   String? token,
   bool askToken = true,
+  String confirmLabel = 'Use this relay',
 }) => showAppMobileSheet<RelayChoice>(
   context: context,
   builder: (_) => RelayPickerSheet(
@@ -53,6 +54,7 @@ Future<RelayChoice?> showRelayPicker(
     initialUrl: selectedUrl,
     initialToken: token,
     askToken: askToken,
+    confirmLabel: confirmLabel,
   ),
 );
 
@@ -82,12 +84,14 @@ class RelayPickerSheet extends ConsumerStatefulWidget {
     required this.initialUrl,
     this.initialToken,
     this.askToken = true,
+    this.confirmLabel = 'Use this relay',
   });
 
   final String title;
   final String initialUrl;
   final String? initialToken;
   final bool askToken;
+  final String confirmLabel;
 
   @override
   ConsumerState<RelayPickerSheet> createState() => _RelayPickerSheetState();
@@ -211,6 +215,7 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
           Uri.parse(kRunYourOwnRelayUrl),
           mode: LaunchMode.externalApplication,
         ),
+        confirmLabel: widget.confirmLabel,
       ),
     );
   }

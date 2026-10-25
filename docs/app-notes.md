@@ -79,6 +79,24 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   seat" takes it by Paste/Scan (`/scan-seat-link`), keeps it in `ZafeSecureStore` with the
   recovery identity (`zafe_recovery_seat_link`) and passes its relay and label to
   `check_recovery`. Without a link it searches the default relay (older vaults).
+- **Relay move** (2026-10-25, `docs/relay-move.md` §4.2-4.5, `features/relay_move/`,
+  `providers/relay_move_provider.dart`): Settings > vault Relay sheet and the outage sheet
+  (`SyncFailure.canMoveRelay`) open `/relay-move`: pick (the relay picker, "Move to"),
+  Move (unlock) → share sheet with "I'm moving our Zafe vault Grants to relay.dao.org.
+  Open this to move too: https://zafe.cash/move#…" (`move_share_text`), then the list
+  ("✓ You", "not yet", "Payments switch when m of n have moved.", Share link, Cancel move).
+  Page titles are "Relay" with the sentence as a wrapping heading (long hosts truncated in
+  the one-line title). Follow screen `/relay-move/follow?link=` from the link
+  (`moveLinks` in `services/invite_links.dart`, switches to the link's vault first) or the
+  Home card (`RelayMoveCard`, after NeedsYou; "Not now" hides it until the next start);
+  "No notifications on this relay" for a non-Zafe relay, "<host> will see your IP address.
+  Tor hides it." for an unlisted relay with Tor off. **Nothing connects to the new relay
+  before Move** (`relay_move_notice` reads the vault's own relay; `relay_move_status`
+  reaches the new relay only once this phone moved). After the switch `list_proposals`
+  returns `updated_material` (new relay) and the refresh re-registers push. Payment
+  screen: "Payments resume when 1 more member moves to <host>." while the relay is down
+  and the move is short of m. Activity: "Grants moved to <host>" (`RelayMovedActivity`).
+  Renders: `tool/screens/relay_move_render_test.dart` (in the size sweep).
 - **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
   task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
   leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,

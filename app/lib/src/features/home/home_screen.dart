@@ -28,6 +28,7 @@ import '../../providers/vault_names_provider.dart';
 import 'needs_you.dart';
 import '../../core/errors/sync_failure.dart';
 import '../../notifications/vault_updates.dart' show unapprovedSpendText;
+import '../relay_move/relay_move_screen.dart' show RelayMoveCard;
 import 'sync_status_sheet.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/received_provider.dart';
@@ -328,6 +329,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ],
                     // What the group is waiting on this member for, before any notice.
                     NeedsYou(height: vault.balance?.height),
+                    // A relay move another member started, or one that switched
+                    // without this phone (docs/relay-move.md §4.3).
+                    const RelayMoveCard(),
                     // Things that happened on their own (a link expired, the server
                     // changed): tap to dismiss.
                     const AppNoticeCards(gap: AppSpacing.md),

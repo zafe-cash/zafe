@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/widgets/app_icon.dart';
+import '../../core/widgets/mobile/mobile_list_row.dart';
 import '../../rust/api/proposals.dart' as rust;
 import '../../rust/api/received.dart' as rust;
 import '../received/received_row.dart';
@@ -37,6 +39,20 @@ class ReceivedActivity extends ActivityItem {
       : DateTime.fromMillisecondsSinceEpoch(received.blockTimeSecs * 1000);
 }
 
+/// The vault switched to another relay: "Grants moved to relay.dao.org".
+class RelayMovedActivity extends ActivityItem {
+  const RelayMovedActivity({required this.vaultName, required this.record});
+  final String vaultName;
+  final rust.RelayMoveRecord record;
+
+  String get label => '$vaultName moved to ${record.host}';
+
+  @override
+  DateTime? get time => record.at == BigInt.zero
+      ? null
+      : DateTime.fromMillisecondsSinceEpoch(record.at.toInt() * 1000);
+}
+
 /// Sort key, newest largest: pending receipts first, then by time; unknown times last.
 int _key(ActivityItem item) {
   if (item is ReceivedActivity && item.pending) return 1 << 62;
@@ -47,8 +63,9 @@ int _key(ActivityItem item) {
 /// each keeps its own order (ties go to the proposal).
 List<ActivityItem> mergeActivity(
   List<rust.ProposalInfo> proposals,
-  List<rust.ReceivedInfo> received,
-) {
+  List<rust.ReceivedInfo> received, {
+  List<RelayMovedActivity> moves = const [],
+}) {
   final a = [for (final p in proposals) ProposalActivity(p)];
   final b = [for (final r in received) ReceivedActivity(r)];
   final out = <ActivityItem>[];
@@ -63,6 +80,11 @@ List<ActivityItem> mergeActivity(
   out
     ..addAll(a.skip(i))
     ..addAll(b.skip(j));
+  // Moves are rare: each goes before the first item older than it.
+  for (final m in moves) {
+    final at = out.indexWhere((x) => _key(x) < _key(m));
+    at < 0 ? out.add(m) : out.insert(at, m);
+  }
   return out;
 }
 
@@ -92,6 +114,11 @@ class ActivityRow extends StatelessWidget {
       received: received,
       hideAmount: hideAmount,
       onTap: () => context.push('/received/${received.txid}'),
+    ),
+    final RelayMovedActivity moved => MobileListRow(
+      leading: const AppIcon(AppIcons.endpoint, size: 20),
+      label: moved.label,
+      minRowHeight: 56,
     ),
   };
 }

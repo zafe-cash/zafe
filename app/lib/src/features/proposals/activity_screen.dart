@@ -20,6 +20,7 @@ import '../../providers/endpoints_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/received_provider.dart';
+import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
 import '../../rust/api/history.dart' as rust_history;
@@ -94,8 +95,19 @@ class ActivityScreen extends ConsumerWidget {
     final received = ref.watch(receivedProvider);
     final hide = ref.watch(privacyModeProvider);
     final height = ref.watch(vaultProvider.select((v) => v.balance?.height));
+    final vaultName =
+        ref.watch(activeVaultNameProvider) ??
+        ref.watch(vaultProvider.select((v) => v.summary?.name)) ??
+        'The vault';
     final sections = activitySections(
-      mergeActivity(proposals.items, received.items),
+      mergeActivity(
+        proposals.items,
+        received.items,
+        moves: [
+          for (final m in proposals.relayMoves)
+            RelayMovedActivity(vaultName: vaultName, record: m),
+        ],
+      ),
     );
     return Scaffold(
       backgroundColor: colors.background.window,

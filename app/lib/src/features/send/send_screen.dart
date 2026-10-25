@@ -30,6 +30,7 @@ import '../../providers/proposals_provider.dart';
 import '../../core/privacy/amount_display.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../providers/vault_provider.dart';
+import '../relay_move/relay_move_screen.dart' show PaymentsResumeLine;
 import '../../rust/api/proposals.dart' as rust;
 import '../proposals/proposal_parts.dart' show RecipientsCard;
 import 'recipients_csv.dart';
@@ -383,6 +384,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
           child: Column(
             children: [
               MobileTopNav.back(title: _title, onBack: _busy ? null : _back),
+              const PaymentsResumeLine(),
               Expanded(
                 child: switch (_step) {
                   _Step.recipient => _recipientStep(),

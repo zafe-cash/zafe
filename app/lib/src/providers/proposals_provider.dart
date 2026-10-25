@@ -17,6 +17,7 @@ import '../rust/api/proposals.dart' as rust;
 import '../rust/api/relay_log.dart' as rust_relay_log;
 import '../rust/api/repair.dart' as rust_repair;
 import 'endpoints_provider.dart';
+import 'relay_move_provider.dart';
 import 'vault_provider.dart';
 import '../core/storage/wallet_key.dart';
 import 'respond_policy.dart';
@@ -50,6 +51,7 @@ class ProposalsState {
     this.backedUp = const {},
     this.seatMoves = const [],
     this.repairs = const [],
+    this.relayMoves = const [],
   });
 
   final List<rust.ProposalInfo> items;
@@ -79,6 +81,9 @@ class ProposalsState {
   /// Moved seats whose key isn't rebuilt on the new phone yet.
   final List<rust.RepairInfo> repairs;
 
+  /// The vault's switches to other relays (Activity: "Grants moved to relay.dao.org").
+  final List<rust.RelayMoveRecord> relayMoves;
+
   rust.ProposalInfo? byId(String id) {
     for (final p in items) {
       if (p.id == id) return p;
@@ -98,6 +103,7 @@ class ProposalsState {
     Set<String>? backedUp,
     List<rust.SeatMove>? seatMoves,
     List<rust.RepairInfo>? repairs,
+    List<rust.RelayMoveRecord>? relayMoves,
   }) => ProposalsState(
     items: items ?? this.items,
     loaded: loaded ?? this.loaded,
@@ -109,6 +115,7 @@ class ProposalsState {
     backedUp: backedUp ?? this.backedUp,
     seatMoves: seatMoves ?? this.seatMoves,
     repairs: repairs ?? this.repairs,
+    relayMoves: relayMoves ?? this.relayMoves,
   );
 }
 
@@ -203,15 +210,19 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         backedUp: list.backedUp.toSet(),
         seatMoves: list.seatMoves,
         repairs: list.repairs,
+        relayMoves: list.moves,
       );
-      // A signer's seat moved to a new phone: keep this device's copy of the
-      // membership current.
+      // A signer's seat moved to a new phone, or this phone followed the vault to
+      // another relay: keep this device's copy of the material current (and push
+      // registered on the vault's relay).
       final updated = list.updatedMaterial;
       if (updated != null) {
         await ref
             .read(vaultProvider.notifier)
             .replaceMaterial(vault.activeId!, updated);
+        unawaited(reregisterPush());
       }
+      unawaited(ref.read(relayMoveProvider.notifier).refresh());
       if (!list.backedUp.contains(vault.myKeyHex)) {
         unawaited(_attestIfBackedUp(vault.activeId!));
       }

@@ -49,6 +49,7 @@ import 'package:zafe/src/notifications/notification_primer.dart';
 import 'package:zafe/src/rust/api/received.dart' show ReceivedInfo;
 import 'package:zafe/src/rust/api/repair.dart' show CosignerWords;
 
+import 'relay_move_render_test.dart' show relayMoveCases, relayMoveScreens;
 import 'relay_render_test.dart' show relayCases;
 
 Future<void> _loadFonts() async {
@@ -276,6 +277,9 @@ final _cases = <(String, String?, Widget)>[
   // The relay picker, the vault's relay in Settings, Create > Relay, the join line,
   // the seat-recovery vault link and Home during an outage.
   ...relayCases(),
+  // Moving the vault to another relay: the vault relay sheet, outage sheet, Home cards,
+  // Activity row, picker.
+  ...relayMoveCases(),
   (
     'backup_words',
     null,
@@ -329,6 +333,9 @@ final _screens = <(String, Widget, {bool column, bool art})>[
   // Over the router, in its own column.
   ('lock', const LockScreen(onUnlock: _noop), column: false, art: false),
   ('tabs', const _Tabs(), column: true, art: false),
+  // The relay move pages with their pinned buttons.
+  for (final (name, screen) in relayMoveScreens())
+    ('move_$name', screen, column: true, art: false),
   // A pushed page with its pinned actions (they scroll with it in a short window).
   (
     'page_actions',

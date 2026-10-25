@@ -26,6 +26,7 @@ import 'features/proposals/activity_screen.dart';
 import 'features/proposals/proposal_screen.dart';
 import 'features/proposals/sending_screen.dart';
 import 'features/receive/receive_screen.dart';
+import 'features/relay_move/relay_move_screen.dart';
 import 'features/received/received_screen.dart';
 import 'features/send/payment_link.dart';
 import 'features/send/payment_request_screen.dart';
@@ -49,6 +50,7 @@ import 'providers/app_notices_provider.dart';
 import 'providers/vault_provider.dart';
 import 'services/app_update.dart';
 import 'services/invite_links.dart';
+import 'rust/api/relay_move.dart' as rust_move;
 
 final _routerProvider = Provider<GoRouter>((ref) {
   final vault = ref.read(vaultProvider);
@@ -140,6 +142,56 @@ final _routerProvider = Provider<GoRouter>((ref) {
     );
   }
 
+  // Move links open the follow screen of the vault they name; nothing connects to the
+  // new relay until Move there. A link waits while the app is locked or a setup or a
+  // send runs.
+  void openMoveLink() {
+    final link = moveLinks.value;
+    if (link == null) return;
+    if (ref.read(appLockedProvider)) return;
+    final vaults = ref.read(vaultProvider);
+    if (vaults.isSettingUp) return;
+    if (ref.read(proposalsProvider).sends.values.any((s) => s.running)) return;
+    final here = router.routerDelegate.currentConfiguration.uri.path;
+    if (here == '/backup-prompt') return;
+    moveLinks.value = null;
+    String? vaultId;
+    try {
+      vaultId = rust_move.parseMoveLink(text: link).vaultId;
+    } catch (_) {}
+    final target = vaults.vaults.where((v) => v.id == vaultId && v.ready);
+    if (target.isEmpty) {
+      ref
+          .read(appNoticesProvider.notifier)
+          .show(
+            const AppNotice(
+              id: 'move-link',
+              title: 'Move link',
+              body: 'This link is for a vault that isn\'t on this phone.',
+            ),
+          );
+      return;
+    }
+    unawaited(() async {
+      await ref.read(vaultProvider.notifier).switchTo(vaultId!);
+      router.push(
+        Uri(
+          path: '/relay-move/follow',
+          queryParameters: {'link': link},
+        ).toString(),
+      );
+    }());
+  }
+
+  moveLinks.addListener(openMoveLink);
+  ref.onDispose(() => moveLinks.removeListener(openMoveLink));
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    void retry() => scheduleMicrotask(openMoveLink);
+    router.routerDelegate.addListener(retry);
+    ref.onDispose(() => router.routerDelegate.removeListener(retry));
+    openMoveLink();
+  });
+
   inviteLinks.addListener(openInviteLink);
   ref.onDispose(() => inviteLinks.removeListener(openInviteLink));
   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -187,6 +239,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
   ref.listen(appLockedProvider, (_, _) {
     scheduleMicrotask(openPaymentLink);
     scheduleMicrotask(openInviteLink);
+    scheduleMicrotask(openMoveLink);
   });
   // Sync moved to another listed Zcash server: say so once.
   ref.listen(serverFailoverProvider, (_, moved) {
@@ -233,6 +286,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
         '/backup-prompt',
         '/scan-recipient',
         '/scan-recovery',
+        '/relay-move',
       ].any(loc.startsWith);
       // Picks its own vault, so it also opens while another one is being added.
       if (loc == '/payment-request') return null;
@@ -340,6 +394,18 @@ final _routerProvider = Provider<GoRouter>((ref) {
           final args = state.extra as (String, String)?;
           return page(ReplaceSignerScreen(signer: args?.$1, code: args?.$2));
         },
+      ),
+      GoRoute(
+        path: '/relay-move',
+        pageBuilder: (_, _) => page(const RelayMoveScreen()),
+        routes: [
+          GoRoute(
+            path: 'follow',
+            pageBuilder: (_, state) => page(
+              FollowMoveScreen(link: state.uri.queryParameters['link'] ?? ''),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/vaults',

@@ -170,6 +170,18 @@ class SyncFailure {
       kind == SyncFailureKind.relayForked ||
       kind == SyncFailureKind.logCopyInvalid;
 
+  /// Moving the vault to another relay is a way out (the relay is down, lost or rewound
+  /// the vault, or can't be trusted): docs/relay-move.md §5.
+  bool get canMoveRelay => switch (kind) {
+    SyncFailureKind.relayUnreachable ||
+    SyncFailureKind.relayRolledBack ||
+    SyncFailureKind.relayLostVault ||
+    SyncFailureKind.relayForked ||
+    SyncFailureKind.relayMembership ||
+    SyncFailureKind.relayOutdated => true,
+    _ => false,
+  };
+
   /// Whether changing a server address in Settings could fix it.
   bool get suggestsSettings => switch (kind) {
     SyncFailureKind.lightwalletdUnreachable ||

@@ -78,9 +78,25 @@ String zafeErrorMessage(
           'Settings.',
     ZafeErrorKind.vaultNotOnRelay =>
       'This vault isn\'t on this relay. Check the relay address in server settings; all members must use the same one.',
+    ZafeErrorKind.vaultMoved =>
+      'The vault moved to ${_host(error.message)}. Move to continue.',
+    ZafeErrorKind.moveInProgress =>
+      'You\'re already moving this vault. Cancel that move first.',
+    ZafeErrorKind.membersMustUpdate =>
+      error.members.length == 1
+          ? 'A member must update Zafe before the vault can move.'
+          : '${error.members.length} members must update Zafe before the vault can move.',
+    ZafeErrorKind.moveNotFound =>
+      'No member has moved to that relay with this link. Ask for a new one.',
+    ZafeErrorKind.moveExpired => 'This move expired. Ask for a new link.',
+    ZafeErrorKind.moveStale =>
+      'This link is from an earlier move. Ask for a new one.',
+    ZafeErrorKind.twoMoves => 'Two moves found: ask your group.',
     ZafeErrorKind.other => fallback,
   };
 }
+
+String _host(String url) => Uri.tryParse(url)?.authority ?? url;
 
 String _server(ZafeEndpoint endpoint) => switch (endpoint) {
   ZafeEndpoint.relay => 'relay',

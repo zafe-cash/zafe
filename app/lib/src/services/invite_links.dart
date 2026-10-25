@@ -18,6 +18,25 @@ final inviteLinks = ValueNotifier<String?>(null);
 /// link replaces one still waiting. Links never pay by themselves.
 final paymentLinks = ValueNotifier<PendingPaymentLink?>(null);
 
+/// The latest relay move link (`https://zafe.cash/move#…`, docs/relay-move.md §4.3), for
+/// the router to show on the follow screen. Opening it contacts nothing: following takes
+/// a tap there.
+final moveLinks = ValueNotifier<String?>(null);
+
+/// A move link: `https://zafe.cash/move#…` (or on this build's link host), or
+/// `zafe://move#…`.
+bool isMoveLink(String link) {
+  final uri = Uri.tryParse(link.trim());
+  if (uri == null || !uri.hasFragment) return false;
+  final scheme = uri.scheme.toLowerCase();
+  final host = uri.host.toLowerCase();
+  if (scheme == 'zafe' || scheme == 'zafe-testnet') return host == 'move';
+  return scheme == 'https' &&
+      (host == 'zafe.cash' ||
+          (kZafeLinkHost.isNotEmpty && host == kZafeLinkHost.toLowerCase())) &&
+      (uri.path == '/move' || uri.path == '/move/');
+}
+
 StreamSubscription<String>? _subscription;
 
 /// Listens for invite and payment links. The stream also delivers the link that
@@ -28,6 +47,10 @@ void initInviteLinks() {
     final link = raw.trim();
     if (isPaymentLink(link)) {
       paymentLinks.value = PendingPaymentLink(link, DateTime.now());
+      return;
+    }
+    if (isMoveLink(link)) {
+      moveLinks.value = link;
       return;
     }
     final uri = Uri.tryParse(link);

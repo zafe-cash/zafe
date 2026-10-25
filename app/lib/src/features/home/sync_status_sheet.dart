@@ -258,6 +258,20 @@ class _SyncStatusSheetState extends ConsumerState<_SyncStatusSheet> {
           onPressed: _follow,
         ),
       ],
+      // Docs/relay-move.md §5: a way off a relay that is down or can't be trusted.
+      if (failure?.canMoveRelay ?? false) ...[
+        const SizedBox(height: AppSpacing.xs),
+        AppButton(
+          expand: true,
+          variant: AppButtonVariant.secondary,
+          onPressed: () {
+            final router = GoRouter.of(context);
+            Navigator.of(context).pop();
+            router.push('/relay-move');
+          },
+          child: const Text('Move to another relay'),
+        ),
+      ],
       if (_repaired != null) ...[
         const SizedBox(height: AppSpacing.xs),
         Text(

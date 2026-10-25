@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/config/relay_presets.dart';
 import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/action_button.dart';
+import '../../core/widgets/app_button.dart';
 import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../core/widgets/mobile_text_field.dart';
+import '../../providers/relay_move_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/vault_relay.dart';
@@ -16,8 +19,8 @@ import '../../rust/api/vault.dart' as rust;
 import 'relay_picker.dart';
 
 /// Settings > "Relay · everyone in `vault`": the vault's own relay (every member uses
-/// it), what it says about itself, and its create token when it is private. Moving the
-/// vault to another relay comes with phase 3 (docs/relay-move.md §4.2).
+/// it), what it says about itself, its create token when it is private, and **Move to
+/// another relay** (docs/relay-move.md §4.2).
 Future<void> showVaultRelaySheet(BuildContext context) =>
     showAppMobileSheet<void>(
       context: context,
@@ -83,6 +86,8 @@ class _VaultRelaySheetState extends ConsumerState<_VaultRelaySheet> {
         ref.watch(vaultProvider.select((v) => v.summary?.name)) ??
         '';
     if (relay == null) return const SizedBox.shrink();
+    final moving = ref.watch(relayMoveProvider.select((m) => m.moving));
+    final movingTo = ref.watch(relayMoveProvider.select((m) => m.status?.host));
     return MobileModalScaffold(
       title: vaultRelayTitle(name),
       titleMaxLines: 2,
@@ -95,6 +100,12 @@ class _VaultRelaySheetState extends ConsumerState<_VaultRelaySheet> {
         tokenFocus: _tokenFocus,
         onTokenChanged: (_) => setState(() {}),
         onSaveToken: _token.text.trim().isEmpty ? null : _saveToken,
+        movingTo: moving ? movingTo : null,
+        onMove: () {
+          final router = GoRouter.of(context);
+          Navigator.of(context).pop();
+          router.push('/relay-move');
+        },
       ),
     );
   }
@@ -111,6 +122,8 @@ class VaultRelayBody extends StatelessWidget {
     required this.tokenFocus,
     this.onTokenChanged,
     this.onSaveToken,
+    this.onMove,
+    this.movingTo,
   });
 
   final String url;
@@ -120,6 +133,10 @@ class VaultRelayBody extends StatelessWidget {
   final FocusNode tokenFocus;
   final ValueChanged<String>? onTokenChanged;
   final Future<void> Function()? onSaveToken;
+
+  /// Opens the move: "Move to another relay", or "Moving to relay.dao.org" while one runs.
+  final VoidCallback? onMove;
+  final String? movingTo;
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +204,19 @@ class VaultRelayBody extends StatelessWidget {
             enabled: onSaveToken != null,
             errorFallback: 'Couldn\'t save the token.',
             onPressed: onSaveToken ?? () async {},
+          ),
+        ],
+        if (onMove != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          AppButton(
+            expand: true,
+            variant: AppButtonVariant.secondary,
+            onPressed: onMove,
+            child: Text(
+              movingTo == null
+                  ? 'Move to another relay'
+                  : 'Moving to $movingTo',
+            ),
           ),
         ],
       ],

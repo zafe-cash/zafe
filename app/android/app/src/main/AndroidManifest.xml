@@ -80,6 +80,27 @@
                 <data android:host="${zafeLinkHost}"/>
                 <data android:path="/join"/>
                 <data android:path="/join/"/>
+                <data android:path="/move"/>
+                <data android:path="/move/"/>
+            </intent-filter>
+            <!-- Relay move links: https://zafe.cash/move#<fragment> (docs/relay-move.md
+                 §4.2; the fragment never reaches the site) and zafe://move#... Opens the
+                 follow screen; nothing connects to the new relay before Move there.
+                 Not auto-verified until zafe.cash serves assetlinks.json for the app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/>
+                <data android:host="zafe.cash"/>
+                <data android:path="/move"/>
+                <data android:path="/move/"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="${zafeScheme}" android:host="move"/>
             </intent-filter>
             <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
         </activity>

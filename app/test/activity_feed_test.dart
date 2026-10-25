@@ -41,6 +41,7 @@ ReceivedInfo receipt(String txid, int time, {int height = 10}) => ReceivedInfo(
 String id(ActivityItem item) => switch (item) {
   ProposalActivity(:final proposal) => proposal.id,
   ReceivedActivity(:final received) => received.txid,
+  final RelayMovedActivity m => 'moved-${m.record.logIndex}',
 };
 
 void main() {
