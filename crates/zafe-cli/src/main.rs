@@ -46,6 +46,11 @@ struct Cli {
     /// host and an emulator); the vault's own relay URL is recorded but not followed.
     #[arg(long, env = "ZAFE_RELAY", default_value = "http://127.0.0.1:8787")]
     relay: String,
+    /// `FROM=TO` (comma-separated): connect to `TO` whenever a relay move names relay
+    /// `FROM` (one relay, two addresses: the emulator's `10.0.2.2` is the host's
+    /// `127.0.0.1`). Development only.
+    #[arg(long, env = "ZAFE_RELAY_ALIAS")]
+    relay_alias: Option<String>,
     /// A private relay's create token (`ZAFE_RELAY_CREATE_TOKEN` there): sent when
     /// creating or restoring a vault. Restores fall back to the vault's own token.
     #[arg(long, env = "ZAFE_CREATE_TOKEN")]
@@ -122,6 +127,23 @@ enum Command {
     Respond,
     /// Leader: aggregate shares, prove, broadcast.
     Finalize { proposal: String },
+    /// Move the vault to another relay (`docs/relay-move.md` §4.2): prints the link for the
+    /// others. `--status` shows the move (and switches when enough members moved);
+    /// `--cancel` withdraws this member from it.
+    Move {
+        /// The new relay's URL (as every member should reach it; see `--relay-alias`).
+        url: Option<String>,
+        /// The new relay's create token, if it is private.
+        #[arg(long)]
+        create_token: Option<String>,
+        #[arg(long)]
+        cancel: bool,
+        #[arg(long)]
+        status: bool,
+    },
+    /// Follow a move from its link (`https://zafe.cash/move#…`): checks it on the new relay
+    /// and sends this member's arrival.
+    Follow { link: String },
     /// Moving a signer's seat to a new device (a lost phone; spec §10.1).
     #[command(subcommand)]
     Seat(SeatCmd),
@@ -309,7 +331,17 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&home.0)?;
     // Keep a copy of the vault log: a relay that loses or rewinds it is then refused.
     zafe_core::log_cache::configure(home.path(LOG_DIR));
+    for pair in cli.relay_alias.iter().flat_map(|a| a.split(',')) {
+        if let Some((from, to)) = pair.split_once('=') {
+            zafe_core::relay_client::set_relay_alias(from, to);
+        }
+    }
     let relay = RelayClient::new(&cli.relay).with_create_token(cli.create_token.as_deref());
+    // After a relay move, the vault's own relay wins over `--relay` (through the alias).
+    let relay = match home.material() {
+        Ok(m) => followed(&home, &relay, m)?,
+        Err(_) => relay,
+    };
     let mut rng = OsRng;
 
     match cli.command {
@@ -381,7 +413,14 @@ async fn main() -> Result<()> {
         }
         Command::Proposals => {
             let material = home.material()?;
-            let (_, state) = node::load_state(&relay, &home.identity()?, &material).await?;
+            let me = home.identity()?;
+            let (mut chain, mut state) = node::load_state(&relay, &me, &material).await?;
+            // Like the app's refresh: announce this app's version once, move a move on.
+            node::announce_version(&relay, &me, &material, &mut chain, &mut state, &mut rng)
+                .await?;
+            if let Some(s) = node::move_progress(&relay, &me, &material, &mut rng).await? {
+                print_move(&s);
+            }
             for p in state.proposals.values() {
                 let total: u64 = p.payments.iter().map(|x| x.amount_zat).sum();
                 println!(
@@ -482,7 +521,63 @@ async fn main() -> Result<()> {
                 &mut rng,
             )
             .await?;
+            let me = home.identity()?;
+            let (mut chain, mut state) = node::load_state(&relay, &me, &material).await?;
+            node::announce_version(&relay, &me, &material, &mut chain, &mut state, &mut rng)
+                .await?;
             println!("published {n} commitment(s)");
+        }
+        Command::Move {
+            url,
+            create_token,
+            cancel,
+            status,
+        } => {
+            let material = home.material()?;
+            let me = home.identity()?;
+            if cancel {
+                node::cancel_move(&relay, &me, &material, &mut rng).await?;
+                println!("move cancelled");
+            } else if status {
+                match node::move_progress(&relay, &me, &material, &mut rng).await? {
+                    Some(s) => print_move(&s),
+                    None => match node::move_notice(&relay, &me, &material).await? {
+                        Some(n) => println!(
+                            "move notice: {} is moving the vault to {}{}\nlink {}",
+                            hex::encode(n.mover),
+                            n.target.relay,
+                            if n.moved { " (switched)" } else { "" },
+                            zafe_core::moves::MoveLink::of(&n.target).encode()
+                        ),
+                        None => println!("no move"),
+                    },
+                }
+            } else {
+                let url = url.ok_or_else(|| anyhow!("give the new relay's URL"))?;
+                let started = node::move_vault(
+                    &relay,
+                    &me,
+                    &material,
+                    &url,
+                    create_token.as_deref(),
+                    &mut rng,
+                )
+                .await?;
+                println!("{}", started.link);
+                eprintln!(
+                    "moving to {}; notices left for {} member(s)",
+                    started.target.relay,
+                    started.notified.len()
+                );
+            }
+        }
+        Command::Follow { link } => {
+            let material = home.material()?;
+            let me = home.identity()?;
+            let link = zafe_core::moves::MoveLink::decode(&link)?;
+            let s = node::follow_move(&relay, &me, &material, &link, &mut rng).await?;
+            print_move(&s);
+            followed(&home, &relay, home.material()?)?;
         }
         Command::Send { proposal } => {
             let material = home.material()?;
@@ -893,6 +988,8 @@ async fn vault(
             let mut pool =
                 FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
             let n = node::top_up_pool(relay, &me, &material, &mut pool, false, None, rng).await?;
+            let (mut chain, mut state) = node::load_state(relay, &me, &material).await?;
+            node::announce_version(relay, &me, &material, &mut chain, &mut state, rng).await?;
             println!("published {n} commitment(s)");
         }
         VaultCmd::Show => {
@@ -912,6 +1009,43 @@ async fn vault(
         }
     }
     Ok(())
+}
+
+/// The relay for the vault in `home`: once this member's phone verified a relay move,
+/// its material follows the new relay (saved here) and so does the client.
+fn followed(home: &Home, base: &RelayClient, material: VaultMaterial) -> Result<RelayClient> {
+    let mut material = material;
+    if let Some(relay) = node::followed_relay(&material) {
+        material.relay = relay;
+        fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
+    }
+    Ok(match node::move_state(base, &material) {
+        Some(ms) if ms.switched && ms.target.label == material.relay.label => base
+            .at(&ms.target.relay)
+            .with_create_token(material.relay.create_token.as_deref()),
+        _ => base.clone(),
+    })
+}
+
+fn print_move(s: &node::MoveStatus) {
+    let state = if s.switched {
+        "switched"
+    } else if s.moved_elsewhere {
+        "moved (follow to continue)"
+    } else if s.cancelled {
+        "cancelled"
+    } else if s.expired {
+        "expired"
+    } else {
+        "moving"
+    };
+    println!(
+        "move to {}: {state}, {} of {} moved, switches at {}",
+        s.target.relay,
+        s.arrived.len(),
+        s.members,
+        s.needed
+    );
 }
 
 fn hex_txid(txid: &[u8; 32]) -> String {

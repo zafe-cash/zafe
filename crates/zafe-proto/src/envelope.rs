@@ -56,6 +56,13 @@ pub enum Kind {
     SafetyCommit,
     /// Setup safety words, step 2: the value itself, sent once every commitment is in.
     SafetyReveal,
+    /// A relay move, on the vault's current relay: where the vault is moving, with the
+    /// mover's arrival; later also the `VaultMoved` entry (sealed, never acknowledged).
+    MoveNotice,
+    /// A relay move, on the new relay: a member's signed arrival (sealed per recipient).
+    Arrival,
+    /// A relay move: the sender withdraws its arrival (the mover: the whole move).
+    MoveCancelled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

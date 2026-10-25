@@ -9,6 +9,7 @@ pub mod price;
 pub mod proposals;
 pub mod received;
 pub mod relay_log;
+pub mod relay_move;
 pub mod repair;
 pub mod spends;
 pub mod tor;

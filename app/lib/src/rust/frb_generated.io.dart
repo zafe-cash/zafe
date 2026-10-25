@@ -14,6 +14,7 @@ import 'api/price.dart';
 import 'api/proposals.dart';
 import 'api/received.dart';
 import 'api/relay_log.dart';
+import 'api/relay_move.dart';
 import 'api/repair.dart';
 import 'api/spends.dart';
 import 'api/tor.dart';
@@ -68,6 +69,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ApproveResult dco_decode_box_autoadd_approve_result(dynamic raw);
+
+  @protected
+  RelayMoveNotice dco_decode_box_autoadd_relay_move_notice(dynamic raw);
+
+  @protected
+  RelayMoveStatus dco_decode_box_autoadd_relay_move_status(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
@@ -127,6 +134,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ReceivedInfo> dco_decode_list_received_info(dynamic raw);
 
   @protected
+  List<RelayMoveRecord> dco_decode_list_relay_move_record(dynamic raw);
+
+  @protected
   List<RepairInfo> dco_decode_list_repair_info(dynamic raw);
 
   @protected
@@ -148,6 +158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MempoolStatus dco_decode_mempool_status(dynamic raw);
 
   @protected
+  MoveLinkInfo dco_decode_move_link_info(dynamic raw);
+
+  @protected
   MyVote dco_decode_my_vote(dynamic raw);
 
   @protected
@@ -155,6 +168,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ApproveResult? dco_decode_opt_box_autoadd_approve_result(dynamic raw);
+
+  @protected
+  RelayMoveNotice? dco_decode_opt_box_autoadd_relay_move_notice(dynamic raw);
+
+  @protected
+  RelayMoveStatus? dco_decode_opt_box_autoadd_relay_move_status(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
@@ -206,6 +225,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RelayCheck dco_decode_relay_check(dynamic raw);
+
+  @protected
+  RelayMoveNotice dco_decode_relay_move_notice(dynamic raw);
+
+  @protected
+  RelayMoveRecord dco_decode_relay_move_record(dynamic raw);
+
+  @protected
+  RelayMoveStarted dco_decode_relay_move_started(dynamic raw);
+
+  @protected
+  RelayMoveStatus dco_decode_relay_move_status(dynamic raw);
 
   @protected
   RelayStatusInfo dco_decode_relay_status_info(dynamic raw);
@@ -324,6 +355,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RelayMoveNotice sse_decode_box_autoadd_relay_move_notice(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RelayMoveStatus sse_decode_box_autoadd_relay_move_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -389,6 +430,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<RelayMoveRecord> sse_decode_list_relay_move_record(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<RepairInfo> sse_decode_list_repair_info(SseDeserializer deserializer);
 
   @protected
@@ -414,6 +460,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MempoolStatus sse_decode_mempool_status(SseDeserializer deserializer);
 
   @protected
+  MoveLinkInfo sse_decode_move_link_info(SseDeserializer deserializer);
+
+  @protected
   MyVote sse_decode_my_vote(SseDeserializer deserializer);
 
   @protected
@@ -421,6 +470,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ApproveResult? sse_decode_opt_box_autoadd_approve_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RelayMoveNotice? sse_decode_opt_box_autoadd_relay_move_notice(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RelayMoveStatus? sse_decode_opt_box_autoadd_relay_move_status(
     SseDeserializer deserializer,
   );
 
@@ -476,6 +535,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RelayCheck sse_decode_relay_check(SseDeserializer deserializer);
+
+  @protected
+  RelayMoveNotice sse_decode_relay_move_notice(SseDeserializer deserializer);
+
+  @protected
+  RelayMoveRecord sse_decode_relay_move_record(SseDeserializer deserializer);
+
+  @protected
+  RelayMoveStarted sse_decode_relay_move_started(SseDeserializer deserializer);
+
+  @protected
+  RelayMoveStatus sse_decode_relay_move_status(SseDeserializer deserializer);
 
   @protected
   RelayStatusInfo sse_decode_relay_status_info(SseDeserializer deserializer);
@@ -607,6 +678,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_relay_move_notice(
+    RelayMoveNotice self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_relay_move_status(
+    RelayMoveStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -688,6 +771,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_relay_move_record(
+    List<RelayMoveRecord> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_repair_info(
     List<RepairInfo> self,
     SseSerializer serializer,
@@ -721,6 +810,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_mempool_status(MempoolStatus self, SseSerializer serializer);
 
   @protected
+  void sse_encode_move_link_info(MoveLinkInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_my_vote(MyVote self, SseSerializer serializer);
 
   @protected
@@ -729,6 +821,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_approve_result(
     ApproveResult? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_relay_move_notice(
+    RelayMoveNotice? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_relay_move_status(
+    RelayMoveStatus? self,
     SseSerializer serializer,
   );
 
@@ -800,6 +904,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_relay_check(RelayCheck self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_relay_move_notice(
+    RelayMoveNotice self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_relay_move_record(
+    RelayMoveRecord self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_relay_move_started(
+    RelayMoveStarted self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_relay_move_status(
+    RelayMoveStatus self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_relay_status_info(

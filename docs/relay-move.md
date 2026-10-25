@@ -254,7 +254,7 @@ clean up after themselves on a relay:
 | Area | Change |
 |---|---|
 | App storage | Per vault: relay URL, relay mailbox id, create token if any; Settings relay is the default for new vaults |
-| Formats | `INVITE`: relay URL + mailbox id. `BACKUP`: URL, mailbox id, token, log copy. `REPAIR`: log length + head hash; the seat-recovery code carries the relay URL and label. Move notices and arrivals padded to a vote envelope's size. `envelope::Kind::MoveNotice`, `Arrival`, `MoveCancelled` appended, payloads versioned. `VaultEvent::VaultMoved` appended (`VAULT_EVENT` 10, gate). Record bumps in `AGENTS.md` |
+| Formats | `INVITE`: relay URL + mailbox id. `BACKUP`: URL, mailbox id, token, log copy. `REPAIR`: log length + head hash; the seat-recovery code carries the relay URL and label. Move notices and arrivals padded (1 KiB buckets, see below). `envelope::Kind::MoveNotice`, `Arrival`, `MoveCancelled` appended, payloads versioned. `VaultEvent::VaultMoved` appended (`VAULT_EVENT` 10, gate). Record bumps in `AGENTS.md` |
 | Core | `node::move_vault`, `node::follow_move`, arrival counting and verification, `VaultMoved` replay rule (m distinct current members, unexpired, one move), rules 1-3 of §4.5 in `append_event`, `NodeError::VaultMoved { url }`, notices never acknowledged, first loads anchored (backup copy, recovery head hash), spend alert from the log copy |
 | Relay | Labelled mailboxes: a labelled `log_append` route and reseed checks the stored vault id (`lib.rs:1055`, `:1375`; the other routes already take the mailbox from the payload). `/v1/push/forget`. `GET /v1/info` (version, limits, notifications). Expiry across all tables (1 year idle; 30 days for unused labels; last-seen at most once a day). Create token. `RELAY_DB` bump (vault id, last-seen day) |
 | App | Picker (selected relay checked only), Create > Relay, relay on join, Settings split, move / follow / list screens, `zafe.cash/move#` link, Home card, no connection before the tap, status "since" |
@@ -336,6 +336,80 @@ bridge; no screens).** What it refines:
   bridge's long-poll watch, at most once a minute while reachable.
 - **CLI:** `--relay` always wins (one relay has different addresses from the host and an
   emulator); `--create-token`; `zafe seat link`; `zafe recover --link`.
+
+**Moves built (2026-10-25, branch `relay-client`, phase 3: core, CLI, bridge, app).** What
+it refines:
+- **Formats.** `envelope::Kind::MoveNotice`, `Arrival`, `MoveCancelled` (appended). Their
+  payload is `moves::MoveMessage` (`MOVE_MESSAGE` 1: `Arrival { target, signature,
+  create_token }`, `Notice { target, mover, signature, create_token, moved }`, `Cancelled {
+  move_id }`), length-prefixed and **padded to a multiple of 1 KiB**: a 2-of-3 signing
+  request for one spend is ~0.7 KB, so a move message is one size bucket with the signing
+  traffic rather than "the size of a vote" exactly (votes are log entries, not envelopes).
+  `VaultEvent::VaultMoved { target, arrivals, at }` (`VAULT_EVENT` 10); `MoveTarget` is
+  what every arrival signs (vault id, move id, normalized relay URL, label, base index +
+  hash, expiry = start + 14 days). The link is `https://zafe.cash/move#<hex>` (`MOVE_LINK`
+  1: vault id, relay URL, label, move id; never the token).
+- **Replay** (`VaultState::check_move`): m distinct **current** members, every arrival
+  valid (one bad or duplicate arrival voids the entry), the base entry's hash is the one at
+  that index in this log, the move starts at or after the last switch, the move id is new,
+  and the switching phone's clock `at` lies within the move's 14 days. Expiry can't be
+  checked against a phone's own clock in replay (phones replaying later would disagree),
+  so the clock check is at follow and switch time; `at` keeps replay deterministic.
+  `VaultState::moves` lists every switch (Activity rows); the last is where the vault is.
+- **The gate.** There was no "every member updated" mechanism before (earlier gates were
+  "update together"). `VaultState::member_versions` records the highest event version
+  each author wrote; Move is offered only when every current member wrote a version 10
+  event. An updated app writes one once (`node::announce_version`: an idempotent `Name`
+  re-stating its current name) on its first refresh (bridge `list_proposals`, CLI
+  `proposals`, `pool`, keygen). The mover names who must update ("Bob must update Zafe
+  first."), from the relay or, if it's down, from its copy.
+- **Where a move lives on a phone:** `moves::MoveState` in `<vault id>.move` next to the
+  log copy (encrypted with a key derived from the vault secret, so the create token can be
+  in it): target, mover, arrived, token, who got notices, cancelled, `moved_seen` (a
+  verified `VaultMoved` seen), `switched` (verified on the new relay). One open move per
+  phone. The material follows a switch through `node::with_followed_relay` (the bridge
+  applies it in `material()`, so every call uses the new relay at once; `list_proposals`
+  returns `updated_material` for Dart to save, then push re-registers there).
+- **Write rules** are in `append_event` (`relay_move::write_target`): rule 1 refuses an
+  event on the new relay's label before the switch; rule 2 (a phone that sent its arrival)
+  reads the new relay's log, verified on its own and compared with this phone's copy,
+  before each write to the old relay, and **writes the same event bytes to the new relay
+  itself** once `VaultMoved` is there (chain and state become the new relay's), rather
+  than refusing and leaving the re-send to every caller: the bytes are never rebuilt and
+  no caller can drop them. `NodeError::VaultMoved { url }` is for rule 3: a phone that saw
+  the switch only in a notice and hasn't followed.
+- **Follow** (`node::follow_move`): checks the new relay's whole log on its own (signatures,
+  chain, membership incl. threshold) and against this phone's copy (`RelayForked` if they
+  differ where both have entries), refuses `MoveNotFound` (no current member's arrival for
+  that move id there, the mailbox missing, or the mover's cancel), `MoveExpired`,
+  `MoveStale` (base before the last switch, or a move already superseded), `TwoMoves`
+  (from the old relay's notices), then copies the entries the new relay lacks and sends its
+  arrival. If the new relay already holds `VaultMoved` for the move, that entry (m signed
+  arrivals) is the proof and the phone just switches (a phone that was off, a restore).
+- **Counting and the switch** (`node::move_progress`, run on each refresh while this phone
+  is in a move): arrivals are read from this member's inbox on the new relay; the mover's
+  arrival carries the create token sealed. At m, `switch_relay` does a last catch-up from
+  the old relay if it answers, catches the new relay up, appends `VaultMoved`, leaves it in
+  move notices on the old relay (a `Notice` with `moved`), and forgets push there.
+- **Notices** (`node::move_notice`, the Home card) read only the current relay. A notice's
+  `VaultMoved` is verified offline against this phone's copy (author, signature, m valid
+  arrivals, base where the copy reaches it); once it verifies, the phone stops writing to
+  the old relay. A `MoveCancelled` from the mover hides the card.
+- **Cancel** voids the sender's arrival (on the new relay) and, from the mover, the notice.
+  Tested: with the cancel withheld from one phone, that phone can still switch with the
+  stale arrival; everyone then acts on that one entry (the others see it in the notice).
+- **Detection of a double move:** a verified `VaultMoved` notice with the same base as
+  another one, or as a switch this vault already made, is `TwoMoves` (Home: "Two moves
+  found"). A phone that already switched no longer reads the old relay, so detection is by
+  stragglers and followers (§9 limit stands).
+- **Relay compatibility:** relays decode envelope kinds, so a relay older than this build
+  rejects move messages (400): notices to an old relay fail until it is updated (moves
+  away from an old relay still work by the link). Promote the relay first.
+- **CLI:** `zafe move <url> [--create-token]`, `zafe move --status`, `zafe move --cancel`,
+  `zafe follow <link>`; `--relay-alias FROM=TO` (dev: one relay, two addresses). After a
+  switch the CLI follows the vault's relay instead of `--relay`. `scripts/move-e2e.sh`.
+- **Not built:** the `zafe.cash/move` site page (the fragment link opens the app through
+  an unverified intent filter; `zafe://move#…` too); iOS universal links.
 
 ## 8. Review: each part on its own
 

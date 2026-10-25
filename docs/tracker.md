@@ -563,8 +563,25 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
             Servers split (vault relay sheet with create token, Zcash server · this phone,
             relay for new vaults), "Can't reach relay · since", spend alert "based on this
             phone's history from", seat link share/QR + paste/scan. Notes:
-            `docs/app-notes.md`. Left: emulator end-to-end after phase 3 (picker against a
-            live relay, private relay with a token, seat recovery through a link)
+            `docs/app-notes.md`. Left: emulator end-to-end (picker against a live relay,
+            private relay with a token, seat recovery through a link, a move)
+      - [x] Phase 3, moving a vault (2026-10-25, branch `relay-client`): `VaultMoved`
+            (`VAULT_EVENT` 10, gated on every member's app via `member_versions` +
+            `announce_version`), sealed padded arrivals / notices / cancels
+            (`MOVE_MESSAGE` 1), move state per phone (`MOVE_STATE` 1), move link
+            (`MOVE_LINK` 1), `node::{move_vault, follow_move, move_progress, cancel_move,
+            move_notice}`, write rules in `append_event`, CLI `move`/`follow`, bridge
+            `relay_move.rs`, app move/follow screens, Home card, outage sheet button,
+            Activity row, payments-resume line. Tests: `tests/relay_move.rs` (14),
+            replay rules in `tests/vault.rs`, `scripts/move-e2e.sh` (payment across the
+            switch, payment after it). Details: `docs/relay-move.md` §7. Left: emulator
+            end to end (app as member A, harness B and C), the relay must be promoted
+            before the app (relays decode envelope kinds), and the items below
+      - [ ] Site page `zafe.cash/move` (opens the app with the fragment, explains a move
+            for someone without Zafe) + assetlinks/universal links for `/move`
+      - [ ] Two-move detection after the switch: a phone that switched no longer reads
+            the old relay's notices, so only stragglers and followers see `TwoMoves`
+            *(limit stated in docs/relay-move.md §9)*
       - [ ] **Site page `zafe.cash/relay`** ("Run your own relay →" in the picker opens it):
             Compose + Caddy, backups, `ZAFE_RELAY_CREATE_TOKEN` and how to hand it out
             (`relay.example.org#token`), expiry settings, how to get listed in

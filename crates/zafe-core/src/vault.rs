@@ -72,6 +72,10 @@ pub enum VaultError {
     /// every member's one-tap pool.
     #[error("entry {0}: proposal with a transaction members can't use")]
     BadProposal(u64),
+    /// A `VaultMoved` without m distinct current members' valid arrivals for one move, for
+    /// a point not in this log, or older than the vault's last switch.
+    #[error("entry {0}: not a valid switch to another relay")]
+    BadMove(u64),
 }
 
 /// Most commitments one `Commitments` event may carry.
@@ -355,6 +359,30 @@ pub enum VaultEvent {
     /// them one by one. Proposals already assigned keep theirs (re-propose those). Event
     /// version 8.
     PoolReset,
+    /// The vault switched to another relay (`docs/relay-move.md` §4.4): `arrivals` are
+    /// `(member sig_pk, signature over target)` of at least m = max(t, n − t + 1) current
+    /// members. Written by the first phone holding m arrivals, as the first new entry on
+    /// the new relay; from it on the vault lives at `target.relay` under `target.label`.
+    /// Event version 10.
+    VaultMoved {
+        target: crate::moves::MoveTarget,
+        arrivals: Vec<([u8; 32], Vec<u8>)>,
+        /// Author's clock, unix seconds: must fall within the move's lifetime.
+        at: u64,
+    },
+}
+
+/// A switch to another relay that the log accepted ([`VaultEvent::VaultMoved`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    /// Index of the `VaultMoved` entry.
+    pub index: u64,
+    pub target: crate::moves::MoveTarget,
+    pub author: [u8; 32],
+    /// The members whose arrivals it carries.
+    pub arrived: Vec<[u8; 32]>,
+    /// Author's clock (display only).
+    pub at: u64,
 }
 
 /// Approvals collected so far for moving `old`'s seat to `new`.
@@ -536,6 +564,13 @@ pub struct VaultState {
     /// member can't skip a rule (e.g. the version 7 broadcast txid check) by tagging an
     /// event with an old version. Logs without a version 9 entry replay as before.
     pub max_event_version: u16,
+    /// The highest event version each author's app wrote: whether every member's app can
+    /// take part in something newer (a relay move needs version 10 everywhere).
+    pub member_versions: BTreeMap<[u8; 32], u16>,
+    /// Switches to other relays, in log order; the last one is where the vault lives.
+    pub moves: Vec<Moved>,
+    /// Hash of every entry replayed (by index): a move names the entry it starts from.
+    pub entry_hashes: Vec<[u8; 32]>,
 }
 
 impl VaultState {
@@ -546,7 +581,7 @@ impl VaultState {
     /// recorded in `ignored` and skipped deterministically.
     pub fn replay(entries: &[LogEntry], key: &LogKey) -> Result<Self, VaultError> {
         let (first, rest) = entries.split_first().ok_or(VaultError::NotCreatedFirst)?;
-        let event = VaultEvent::from_bytes(
+        let (event, first_version) = VaultEvent::from_bytes_versioned(
             &first
                 .decrypt(key)
                 .map_err(|_| VaultError::Undecryptable(first.header.index))?,
@@ -575,7 +610,11 @@ impl VaultState {
             replacements: Vec::new(),
             former_members: Vec::new(),
             max_event_version: 0,
+            member_versions: BTreeMap::from([(first.header.author, first_version)]),
+            moves: Vec::new(),
+            entry_hashes: Vec::new(),
         };
+        state.record_hash(first);
         for entry in rest {
             state.apply_entry(entry, key);
         }
@@ -585,6 +624,7 @@ impl VaultState {
     /// Applies one more log entry, recording it in `ignored` if it is invalid.
     pub fn apply_entry(&mut self, entry: &LogEntry, key: &LogKey) {
         let index = entry.header.index;
+        self.record_hash(entry);
         let result = entry
             .decrypt(key)
             .map_err(|_| VaultError::Undecryptable(index))
@@ -592,12 +632,46 @@ impl VaultState {
             .and_then(|(event, found)| {
                 let effective = self.effective_version(found);
                 self.max_event_version = self.max_event_version.max(found);
+                let seen = self.member_versions.entry(entry.header.author).or_default();
+                *seen = (*seen).max(found);
                 self.apply_versioned(index, entry.header.author, event, effective)
             });
         if let Err(e) = result {
             self.ignored.push((index, e));
         }
         self.applied = index + 1;
+    }
+
+    fn record_hash(&mut self, entry: &LogEntry) {
+        if entry.header.index == self.entry_hashes.len() as u64 {
+            if let Ok(hash) = entry.hash() {
+                self.entry_hashes.push(hash);
+            }
+        }
+    }
+
+    /// Where the vault lives now, if it ever switched relays.
+    pub fn moved(&self) -> Option<&Moved> {
+        self.moves.last()
+    }
+
+    /// m for a relay move: members who must have moved before the vault switches.
+    pub fn switch_threshold(&self) -> usize {
+        crate::moves::switch_threshold(
+            self.descriptor.members.len(),
+            usize::from(self.descriptor.threshold),
+        )
+    }
+
+    /// Current members whose app hasn't written a version 10 event yet (it may be older
+    /// than relay moves): moving waits for them.
+    pub fn members_needing_update(&self) -> Vec<[u8; 32]> {
+        self.descriptor
+            .members
+            .iter()
+            .map(|m| m.identity.sig_pk)
+            .filter(|pk| self.member_versions.get(pk).copied().unwrap_or(0) < MOVE_FROM)
+            .collect()
     }
 
     /// The version whose rules apply to an event tagged `found` (see `max_event_version`).
@@ -938,12 +1012,72 @@ impl VaultState {
                     pool.reset();
                 }
             }
+            VaultEvent::VaultMoved {
+                target,
+                arrivals,
+                at,
+            } => {
+                if event_version < MOVE_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                let arrived = self.check_move(index, &target, &arrivals, at)?;
+                self.moves.push(Moved {
+                    index,
+                    target,
+                    author,
+                    arrived,
+                    at,
+                });
+            }
         }
         Ok(())
     }
 }
 
 impl VaultState {
+    /// The arrivals' members if `VaultMoved { target, arrivals, at }` at `index` is valid:
+    /// a target for this vault and a point of this log after the last switch, a time within
+    /// the move's lifetime, and at least m distinct current members' valid arrivals (any
+    /// invalid or duplicate one makes the whole entry invalid).
+    pub fn check_move(
+        &self,
+        index: u64,
+        target: &crate::moves::MoveTarget,
+        arrivals: &[([u8; 32], Vec<u8>)],
+        at: u64,
+    ) -> Result<Vec<[u8; 32]>, VaultError> {
+        let bad = || VaultError::BadMove(index);
+        if target.vault_id != self.descriptor.vault_id
+            || target.base_index >= index
+            || self.entry_hashes.get(target.base_index as usize) != Some(&target.base_hash)
+            || at > target.expiry
+            || at.saturating_add(crate::moves::MOVE_LIFETIME_SECS) < target.expiry
+            || crate::moves::normalize_relay_url(&target.relay).as_deref()
+                != Some(target.relay.as_str())
+        {
+            return Err(bad());
+        }
+        if self
+            .moves
+            .iter()
+            .any(|m| m.target.move_id == target.move_id || target.base_index < m.index)
+        {
+            return Err(bad());
+        }
+        let mut seen = Vec::with_capacity(arrivals.len());
+        for (pk, signature) in arrivals {
+            let member = self.descriptor.member(pk).ok_or_else(bad)?;
+            if seen.contains(pk) || !target.verify(&member.identity, signature) {
+                return Err(bad());
+            }
+            seen.push(*pk);
+        }
+        if seen.len() < self.switch_threshold() {
+            return Err(bad());
+        }
+        Ok(seen)
+    }
+
     /// The current members' identities (after any seat moves).
     pub fn member_identities(&self) -> Vec<IdentityPublic> {
         self.descriptor.members.iter().map(|m| m.identity).collect()
@@ -1018,6 +1152,8 @@ impl VaultState {
             }
         }
         self.pools.remove(&old);
+        // The new device's app announces its own version.
+        self.member_versions.remove(&old);
         if let Some(name) = self.names.remove(&old) {
             self.names.insert(new.sig_pk, name);
         }
@@ -1131,6 +1267,9 @@ const BROADCAST_CHECKED_FROM: u16 = 7;
 
 /// First `VAULT_EVENT` version that has [`VaultEvent::PoolReset`].
 const POOL_RESET_FROM: u16 = 8;
+
+/// First `VAULT_EVENT` version that has [`VaultEvent::VaultMoved`] (relay moves).
+pub const MOVE_FROM: u16 = 10;
 
 /// First `VAULT_EVENT` version after which versions only go up (see
 /// `VaultState::max_event_version`), and proposals must carry a usable PCZT.

@@ -405,8 +405,11 @@ pub struct ProposalList {
     pub seat_moves: Vec<SeatMove>,
     /// Moved seats whose key isn't rebuilt yet (a helper may have stalled).
     pub repairs: Vec<RepairInfo>,
+    /// The vault's switches to other relays, in log order.
+    pub moves: Vec<RelayMoveRecord>,
     /// This member's vault material with the current membership, when a seat moved since
-    /// the stored copy: save it in place of the old one.
+    /// the stored copy, or on the vault's new relay after a move: save it in place of the
+    /// old one (and register push on the new relay).
     pub updated_material: Option<Vec<u8>>,
 }
 
@@ -490,6 +493,19 @@ pub fn list_proposals(
             let _ = std::fs::remove_file(&reset_marker);
         }
         watch.lap("pool");
+        // This app's event version, once, so the others can see it supports relay moves.
+        if let Err(e) =
+            node::announce_version(&relay, &me, &m, &mut chain, &mut state, &mut OsRng).await
+        {
+            eprintln!("announce version: {e}");
+        }
+        // A relay move this phone takes part in: count arrivals, switch at m (connects only
+        // to a relay this member chose: the mover's pick, or one it tapped Move for).
+        if node::move_state(&relay, &m).is_some_and(|ms| ms.arrived && !ms.switched) {
+            if let Err(e) = Box::pin(node::move_progress(&relay, &me, &m, &mut OsRng)).await {
+                eprintln!("relay move: {e}");
+            }
+        }
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
@@ -522,11 +538,44 @@ pub fn list_proposals(
         backed_up: backed_up(&state),
         seat_moves: seat_moves(&state),
         repairs: repairs(&state),
-        updated_material: repair::current_material(&m, &state)
-            .map(|m| m.to_bytes())
-            .transpose()
-            .map_err(|e| ZafeError::new(ZafeErrorKind::Other, e.to_string()))?,
+        moves: state
+            .moves
+            .iter()
+            .map(|mv| RelayMoveRecord {
+                relay_url: mv.target.relay.clone(),
+                host: mv.target.host(),
+                at: mv.at,
+                log_index: mv.index,
+            })
+            .collect(),
+        updated_material: updated_material(&material, &m, &state)?,
     })
+}
+
+/// A switch of the vault to another relay, for Activity ("Grants moved to relay.dao.org").
+pub struct RelayMoveRecord {
+    pub relay_url: String,
+    pub host: String,
+    /// The switching phone's clock, unix seconds (display only).
+    pub at: u64,
+    pub log_index: u64,
+}
+
+/// The material to save in place of `stored`, when the membership changed (a seat move)
+/// or this phone followed the vault to another relay since it was stored.
+fn updated_material(
+    stored: &[u8],
+    m: &VaultMaterial,
+    state: &VaultState,
+) -> Result<Option<Vec<u8>>, ZafeError> {
+    let other = |e: zafe_core::node::NodeError| ZafeError::new(ZafeErrorKind::Other, e.to_string());
+    let current = repair::current_material(m, state);
+    let relay_changed = VaultMaterial::from_bytes(stored).is_ok_and(|s| s.relay != m.relay);
+    match current {
+        Some(c) => Ok(Some(c.to_bytes().map_err(other)?)),
+        None if relay_changed => Ok(Some(m.to_bytes().map_err(other)?)),
+        None => Ok(None),
+    }
 }
 
 fn repairs(state: &VaultState) -> Vec<RepairInfo> {
@@ -1488,9 +1537,17 @@ pub fn send_with_progress(
         let txid = runtime().block_on(async {
             let mut client = connect(&lightwalletd_url).await?;
             Ok::<_, ZafeError>({
-                let sent =
-                    node::send_ready(&relay, &me, &m, &net, tip, id, &mut client, &mut OsRng)
-                        .await?;
+                let sent = Box::pin(node::send_ready(
+                    &relay,
+                    &me,
+                    &m,
+                    &net,
+                    tip,
+                    id,
+                    &mut client,
+                    &mut OsRng,
+                ))
+                .await?;
                 sent_txs(&db_dir, &m).put(&sent);
                 sent
             })
@@ -1521,7 +1578,7 @@ pub fn send_with_progress(
                 Ok(bytes) => node::decode_used_commitments(&bytes)?,
                 Err(_) => BTreeSet::new(),
             };
-            let sent = runtime().block_on(node::request_signatures(
+            let sent = runtime().block_on(Box::pin(node::request_signatures(
                 &relay,
                 &me,
                 &m,
@@ -1531,7 +1588,7 @@ pub fn send_with_progress(
                 &used,
                 &silent.load(),
                 &mut OsRng,
-            ))?;
+            )))?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(leader_dir(&state_dir)).map_err(io)?;
             // Atomic: a torn file would block sending (or, for the used set, fail closed
@@ -1561,8 +1618,10 @@ pub fn send_with_progress(
             Ok(bytes) => Some(node::decode_own_shares(&bytes)?),
             Err(_) => {
                 let mut store = nonce_store(&state_dir, &seeds, &m);
-                let own =
-                    node::sign_own_shares(&relay, &me, &m, &net, tip, &request, &mut store).await?;
+                let own = Box::pin(node::sign_own_shares(
+                    &relay, &me, &m, &net, tip, &request, &mut store,
+                ))
+                .await?;
                 if let Some(own) = &own {
                     durable::write(&own_path, &node::encode_own_shares(own)?).map_err(io)?;
                 }
@@ -1570,7 +1629,7 @@ pub fn send_with_progress(
             }
         };
         let mut client = connect(&lightwalletd_url).await?;
-        let finalized = node::finalize(
+        let finalized = Box::pin(node::finalize(
             &relay,
             &me,
             &m,
@@ -1588,7 +1647,7 @@ pub fn send_with_progress(
                 });
             },
             &mut OsRng,
-        )
+        ))
         .await;
         let signers: Vec<_> = request.signers.iter().copied().collect();
         let sent = match finalized {
@@ -1599,7 +1658,9 @@ pub fn send_with_progress(
             Err(e @ node::NodeError::Timeout(_)) => {
                 // Remember who never answered, so the next round (after "Start over")
                 // asks someone else first.
-                if let Ok(quiet) = node::unanswered_signers(&relay, &me, &m, &request).await {
+                if let Ok(quiet) =
+                    Box::pin(node::unanswered_signers(&relay, &me, &m, &request)).await
+                {
                     let answered: Vec<_> = signers
                         .iter()
                         .filter(|s| !quiet.contains(s))

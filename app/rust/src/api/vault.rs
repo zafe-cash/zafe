@@ -76,10 +76,12 @@ pub(crate) fn invite_relay(
         .with_create_token(create_token)
 }
 
-/// Vault material as stored by the app (`VaultMaterial::to_bytes`, versioned).
+/// Vault material as stored by the app (`VaultMaterial::to_bytes`, versioned). Once this
+/// phone verified a relay move, the material follows the new relay (`node::followed_relay`)
+/// even before the app saved it (`list_proposals` returns it to save).
 pub(crate) fn material(bytes: &[u8]) -> Result<VaultMaterial, ZafeError> {
     match VaultMaterial::from_bytes(bytes) {
-        Ok(m) => Ok(m),
+        Ok(m) => Ok(node::with_followed_relay(&m)),
         Err(e @ node::NodeError::UnsupportedVersion(_)) => Err(e.into()),
         Err(_) => Err(ZafeError::invalid("invalid vault material")),
     }

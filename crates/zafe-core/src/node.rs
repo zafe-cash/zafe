@@ -100,6 +100,33 @@ pub enum NodeError {
     /// [`UnsupportedVersion::is_newer`]: newer means "update the app").
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
+    /// The vault moved to the relay at `url` (`docs/relay-move.md` §4.5): this phone hasn't
+    /// followed, so it no longer writes to its old relay. "Grants moved to relay.dao.org.
+    /// Move to continue."
+    #[error("the vault moved to {url}: move to continue")]
+    VaultMoved { url: String },
+    /// This phone already takes part in another relay move (one at a time per phone): it
+    /// can start or follow another once that one switched, expired or was cancelled.
+    #[error("this phone is already moving the vault to another relay")]
+    MoveInProgress,
+    /// A relay move needs every member's app to support it: these members (signing keys)
+    /// must update Zafe first.
+    #[error("{} member(s) must update Zafe before the vault can move", .0.len())]
+    MembersMustUpdate(Vec<[u8; 32]>),
+    /// The new relay holds no current member's arrival for this move (a link alone, or a
+    /// forged one, is never enough), or the move was cancelled.
+    #[error("no member has moved to that relay with this link")]
+    MoveNotFound,
+    /// The move is past its 14 days.
+    #[error("this move expired")]
+    MoveExpired,
+    /// The move is older than this vault's last switch of relay (a replayed link).
+    #[error("this move is older than the vault's last move")]
+    MoveStale,
+    /// Two different moves from the same point of the history both switched (a member
+    /// signed both): neither is followed. "Two moves found: ask your group."
+    #[error("two moves found for the same history: ask your group")]
+    TwoMoves,
 }
 
 fn proto(e: impl core::fmt::Debug) -> NodeError {
@@ -425,6 +452,9 @@ impl VaultMaterial {
         self.descriptor.members.iter().map(|m| m.identity).collect()
     }
 }
+
+mod relay_move;
+pub use relay_move::*;
 
 // --- Setup: create, join, seal, safety number ------------------------------------------
 
@@ -2058,6 +2088,13 @@ async fn catch_relay_up(
 /// against the current state first (so members don't write entries everyone will ignore);
 /// on a conflict, only the new entries are fetched, the check is repeated, and the append
 /// is retried.
+///
+/// During a relay move (`docs/relay-move.md` §4.5) it also keeps the history whole: no new
+/// entry on the new relay before `VaultMoved` (rule 1); a phone that sent its arrival
+/// checks the new relay for `VaultMoved` before writing to the old one and, once it is
+/// there, writes the same event bytes to the new relay instead, with `chain` and `state`
+/// becoming the new relay's (rule 2); a phone that only learned of the switch from a move
+/// notice refuses with [`NodeError::VaultMoved`] (rule 3).
 pub async fn append_event<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -2067,9 +2104,40 @@ pub async fn append_event<R: RngCore + CryptoRng>(
     event: &VaultEvent,
     rng: &mut R,
 ) -> Result<u64, NodeError> {
+    match Box::pin(relay_move::write_target(relay, me, material, chain, state)).await? {
+        Some((new, ids)) => {
+            Box::pin(append_on(&new, me, material, ids, chain, state, event, rng)).await
+        }
+        None => {
+            Box::pin(append_on(
+                relay,
+                me,
+                material,
+                material.ids(),
+                chain,
+                state,
+                event,
+                rng,
+            ))
+            .await
+        }
+    }
+}
+
+/// [`append_event`] on `relay` under `ids`, without the move rules.
+#[allow(clippy::too_many_arguments)]
+async fn append_on<R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    ids: VaultIds,
+    chain: &mut Chain,
+    state: &mut VaultState,
+    event: &VaultEvent,
+    rng: &mut R,
+) -> Result<u64, NodeError> {
     let bytes = event.to_bytes().map_err(proto)?;
     let key = material.log_key();
-    let ids = material.ids();
     for _ in 0..10 {
         state
             .check(me.public().sig_pk, event)

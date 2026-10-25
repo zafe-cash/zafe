@@ -71,6 +71,21 @@ pub enum ZafeErrorKind {
     /// The relay is private: creating or restoring a vault there needs its create token,
     /// and none or the wrong one was given (ask whoever runs it).
     CreateTokenRefused,
+    /// The vault moved to another relay and this phone hasn't followed: "Grants moved to
+    /// relay.dao.org. Move to continue." (`message` names the relay URL.)
+    VaultMoved,
+    /// This phone already takes part in another relay move.
+    MoveInProgress,
+    /// Moving needs every member's app to support it; `members` must update first.
+    MembersMustUpdate,
+    /// No member's arrival for this move on that relay (a bad link, or cancelled).
+    MoveNotFound,
+    /// The move is past its 14 days.
+    MoveExpired,
+    /// The move is older than the vault's last move.
+    MoveStale,
+    /// Two moves switched from the same history: "Two moves found: ask your group."
+    TwoMoves,
 }
 
 /// Which server an error came from, when it came from one.
@@ -199,15 +214,28 @@ impl From<NodeError> for ZafeError {
             | NodeError::SafetyNumberMismatch { .. }
             | NodeError::EchoMismatch => ZafeErrorKind::Verification,
             NodeError::BadInvite => ZafeErrorKind::InvalidInput,
+            NodeError::VaultMoved { .. } => ZafeErrorKind::VaultMoved,
+            NodeError::MoveInProgress => ZafeErrorKind::MoveInProgress,
+            NodeError::MembersMustUpdate(_) => ZafeErrorKind::MembersMustUpdate,
+            NodeError::MoveNotFound => ZafeErrorKind::MoveNotFound,
+            NodeError::MoveExpired => ZafeErrorKind::MoveExpired,
+            NodeError::MoveStale => ZafeErrorKind::MoveStale,
+            NodeError::TwoMoves => ZafeErrorKind::TwoMoves,
             _ => ZafeErrorKind::Other,
         };
         let members = match &e {
             NodeError::KeygenStalled { missing, .. } => missing.iter().map(hex::encode).collect(),
+            NodeError::MembersMustUpdate(behind) => behind.iter().map(hex::encode).collect(),
             _ => Vec::new(),
+        };
+        let message = match &e {
+            // The relay the vault moved to, for the "Move to continue" screen.
+            NodeError::VaultMoved { url } => url.clone(),
+            e => e.to_string(),
         };
         Self {
             members,
-            ..Self::new(kind, e.to_string()).at(endpoint)
+            ..Self::new(kind, message).at(endpoint)
         }
     }
 }

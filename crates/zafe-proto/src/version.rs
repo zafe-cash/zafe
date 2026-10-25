@@ -43,7 +43,12 @@ pub const LOG_ENTRY: u16 = 1;
 /// A version 9 `Proposal` must carry a PCZT that parses and declare no more spends to sign
 /// than it has (audit L5: unusable proposals drained every one-tap pool). An older app
 /// skips version 9 events, so members update together; logs without one replay as before.
-pub const VAULT_EVENT: u16 = 9;
+/// 10 (2026-10-25): `VaultEvent::VaultMoved` (appended): the vault switched to another
+/// relay (`docs/relay-move.md` §4.4), valid only with m = max(t, n - t + 1) current
+/// members' arrivals for one move. Moving is offered only once every current member has
+/// written a version 10 event (`VaultState::member_versions`; each app announces itself
+/// once, `node::announce_version`).
+pub const VAULT_EVENT: u16 = 10;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).
@@ -119,6 +124,15 @@ pub const SEAT_LINK: u16 = 1;
 /// When this phone last reached a vault's relay (`relay_status`, `<vault id>.status` next
 /// to the log copy; a display hint, unreadable counts as unknown).
 pub const RELAY_STATUS: u16 = 1;
+/// Messages of a relay move (`moves::MoveMessage`: arrivals, move notices, cancels; the
+/// payload of `Kind::Arrival`, `Kind::MoveNotice`, `Kind::MoveCancelled`), 2026-10-25.
+pub const MOVE_MESSAGE: u16 = 1;
+/// This phone's part in a relay move (`moves::MoveState`, `<vault id>.move` next to the
+/// log copy, encrypted), 2026-10-25.
+pub const MOVE_STATE: u16 = 1;
+/// The move link's fragment (`https://zafe.cash/move#<hex>`: vault id, relay URL, label,
+/// move id), 2026-10-25.
+pub const MOVE_LINK: u16 = 1;
 
 /// Each versioned format. [`Format::current`] is the version this build writes and reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -148,6 +162,9 @@ pub enum Format {
     LogKeyMessage,
     SeatLink,
     RelayStatus,
+    MoveMessage,
+    MoveState,
+    MoveLink,
 }
 
 impl Format {
@@ -178,6 +195,9 @@ impl Format {
             Format::LogKeyMessage => LOG_KEY_MESSAGE,
             Format::SeatLink => SEAT_LINK,
             Format::RelayStatus => RELAY_STATUS,
+            Format::MoveMessage => MOVE_MESSAGE,
+            Format::MoveState => MOVE_STATE,
+            Format::MoveLink => MOVE_LINK,
         }
     }
 
@@ -208,6 +228,9 @@ impl Format {
             Format::LogKeyMessage => "log key message",
             Format::SeatLink => "seat recovery link",
             Format::RelayStatus => "relay status",
+            Format::MoveMessage => "relay move message",
+            Format::MoveState => "relay move state",
+            Format::MoveLink => "move link",
         }
     }
 }

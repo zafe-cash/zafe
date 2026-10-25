@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `visible_text`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `updated_material`, `visible_text`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Proposed`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
@@ -599,8 +599,12 @@ class ProposalList {
   /// Moved seats whose key isn't rebuilt yet (a helper may have stalled).
   final List<RepairInfo> repairs;
 
+  /// The vault's switches to other relays, in log order.
+  final List<RelayMoveRecord> moves;
+
   /// This member's vault material with the current membership, when a seat moved since
-  /// the stored copy: save it in place of the old one.
+  /// the stored copy, or on the vault's new relay after a move: save it in place of the
+  /// old one (and register push on the new relay).
   final Uint8List? updatedMaterial;
 
   const ProposalList({
@@ -610,6 +614,7 @@ class ProposalList {
     required this.backedUp,
     required this.seatMoves,
     required this.repairs,
+    required this.moves,
     this.updatedMaterial,
   });
 
@@ -621,6 +626,7 @@ class ProposalList {
       backedUp.hashCode ^
       seatMoves.hashCode ^
       repairs.hashCode ^
+      moves.hashCode ^
       updatedMaterial.hashCode;
 
   @override
@@ -634,6 +640,7 @@ class ProposalList {
           backedUp == other.backedUp &&
           seatMoves == other.seatMoves &&
           repairs == other.repairs &&
+          moves == other.moves &&
           updatedMaterial == other.updatedMaterial;
 }
 
@@ -681,6 +688,37 @@ class ProposeOutcome {
           approved == other.approved &&
           approveError == other.approveError &&
           items == other.items;
+}
+
+/// A switch of the vault to another relay, for Activity ("Grants moved to relay.dao.org").
+class RelayMoveRecord {
+  final String relayUrl;
+  final String host;
+
+  /// The switching phone's clock, unix seconds (display only).
+  final BigInt at;
+  final BigInt logIndex;
+
+  const RelayMoveRecord({
+    required this.relayUrl,
+    required this.host,
+    required this.at,
+    required this.logIndex,
+  });
+
+  @override
+  int get hashCode =>
+      relayUrl.hashCode ^ host.hashCode ^ at.hashCode ^ logIndex.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RelayMoveRecord &&
+          runtimeType == other.runtimeType &&
+          relayUrl == other.relayUrl &&
+          host == other.host &&
+          at == other.at &&
+          logIndex == other.logIndex;
 }
 
 /// A moved seat whose key the helpers are still rebuilding on the new phone.

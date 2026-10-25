@@ -9,6 +9,7 @@ pub mod keygen;
 pub mod keys;
 pub mod log_cache;
 pub mod mempool;
+pub mod moves;
 pub mod net;
 pub mod node;
 pub mod nonce_store;

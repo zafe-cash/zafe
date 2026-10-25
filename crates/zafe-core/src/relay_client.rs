@@ -63,6 +63,31 @@ pub enum RelayClientError {
     CreateTokenRefused,
 }
 
+/// Development only: connect to `to` whenever a relay move names `from`. One relay can have
+/// different addresses for different members (the emulator reaches the host's
+/// `127.0.0.1:18900` as `10.0.2.2:18900`), while every member signs the same URL; the
+/// CLI's `--relay-alias` sets this. The app never does.
+pub fn set_relay_alias(from: &str, to: &str) {
+    let mut map = ALIASES.lock().expect("lock");
+    map.insert(
+        from.trim().trim_end_matches('/').to_ascii_lowercase(),
+        to.trim().to_owned(),
+    );
+}
+
+static ALIASES: std::sync::Mutex<std::collections::BTreeMap<String, String>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn relay_alias(url: &str) -> String {
+    let key = url.trim().trim_end_matches('/').to_ascii_lowercase();
+    ALIASES
+        .lock()
+        .expect("lock")
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| url.to_owned())
+}
+
 /// Largest response body read from a relay. A page is at most 500 envelopes or log
 /// entries, almost all a few KB, so this is far above anything real while bounding the
 /// memory a hostile relay can make the app allocate.
@@ -292,6 +317,18 @@ impl RelayClient {
     /// The relay's base URL.
     pub fn base_url(&self) -> &str {
         &self.base
+    }
+
+    /// A client for another relay (`url`) like this one: same connection pool, log copy
+    /// and network path; no create token. A relay move talks to the new relay this way.
+    /// The URL goes through [`set_relay_alias`] (development: one relay, two addresses).
+    pub fn at(&self, url: &str) -> Self {
+        Self {
+            base: relay_alias(url).trim_end_matches('/').to_owned(),
+            http: self.http.clone(),
+            log_cache: self.log_cache.clone(),
+            create_token: None,
+        }
     }
 
     pub fn log_cache(&self) -> Option<&crate::log_cache::LogCache> {

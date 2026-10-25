@@ -1366,3 +1366,106 @@ fn version_9_proposals_need_a_usable_pczt() {
     ));
     assert_eq!(available(&state), before, "no commitments taken");
 }
+
+fn move_target(log: &Log, base: u64, move_id: u8) -> zafe_core::moves::MoveTarget {
+    zafe_core::moves::MoveTarget {
+        vault_id: MAILBOX,
+        move_id: [move_id; 16],
+        relay: "https://relay.dao.org".into(),
+        label: [7; 16],
+        base_index: base,
+        base_hash: log.chain.entries()[base as usize].hash().unwrap(),
+        expiry: 2_000_000_000,
+    }
+}
+
+fn moved(log: &Log, target: &zafe_core::moves::MoveTarget, signers: &[usize]) -> VaultEvent {
+    VaultEvent::VaultMoved {
+        target: target.clone(),
+        arrivals: signers
+            .iter()
+            .map(|i| (log.ids[*i].public().sig_pk, target.sign(&log.ids[*i])))
+            .collect(),
+        at: target.expiry - 100,
+    }
+}
+
+/// `VaultMoved` switches the vault only with m = max(t, n − t + 1) distinct current
+/// members' arrivals for one move, from a point of this log, after the last switch.
+#[test]
+fn a_switch_needs_m_current_members_arrivals() {
+    let mut log = Log::new();
+    log.push_v(0, &log.created(&[0, 1, 2]), 10);
+    log.push_v(1, &name("Bob"), 10);
+    let target = move_target(&log, 1, 1);
+    // m − 1 arrivals (2-of-3: m = 2).
+    log.push_v(0, &moved(&log, &target, &[0]), 10);
+    // A non-member's arrival in place of a member's.
+    log.push_v(0, &moved(&log, &target, &[0, 3]), 10);
+    // The same member twice.
+    log.push_v(0, &moved(&log, &target, &[0, 0]), 10);
+    // A signature over another target.
+    let other = move_target(&log, 1, 2);
+    let mut forged = moved(&log, &target, &[0, 1]);
+    if let VaultEvent::VaultMoved { arrivals, .. } = &mut forged {
+        arrivals[1].1 = other.sign(&log.ids[1]);
+    }
+    log.push_v(0, &forged, 10);
+    // A point that isn't in this log.
+    let mut elsewhere = move_target(&log, 1, 3);
+    elsewhere.base_hash = [0; 32];
+    log.push_v(0, &moved(&log, &elsewhere, &[0, 1]), 10);
+    let state = log.replay().unwrap();
+    assert_eq!(state.moved(), None);
+    assert!(state
+        .ignored
+        .iter()
+        .all(|(i, e)| *e == VaultError::BadMove(*i)));
+    assert_eq!(
+        state.ignored.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+        vec![2, 3, 4, 5, 6]
+    );
+    // An older tag (in a log with no version 10 event yet) is no switch either.
+    let mut old = Log::new();
+    old.push_v(0, &old.created(&[0, 1, 2]), 9);
+    let t = move_target(&old, 0, 1);
+    old.push_v(0, &moved(&old, &t, &[0, 1]), 9);
+    assert_eq!(old.replay().unwrap().moved(), None);
+    log.push_v(0, &name("Alice"), 10);
+
+    // m valid arrivals: the vault lives on the new relay from here on.
+    log.push_v(1, &moved(&log, &target, &[0, 1]), 10);
+    let state = log.replay().unwrap();
+    let m = state.moved().expect("switched");
+    assert_eq!((m.index, &m.target), (8, &target));
+    assert_eq!(state.switch_threshold(), 2);
+    // The same move again, or one from before the switch, is ignored.
+    log.push_v(1, &moved(&log, &target, &[0, 1]), 10);
+    let older = move_target(&log, 1, 4);
+    log.push_v(1, &moved(&log, &older, &[0, 1]), 10);
+    let newer = move_target(&log, 8, 5);
+    log.push_v(2, &moved(&log, &newer, &[1, 2]), 10);
+    let state = log.replay().unwrap();
+    assert_eq!(state.moves.len(), 2);
+    assert_eq!(state.moved().unwrap().target, newer);
+    assert_eq!(
+        state.ignored.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+        vec![2, 3, 4, 5, 6, 9, 10]
+    );
+}
+
+/// Each author's app version is known from the events it wrote; moving waits for every
+/// current member's app to have written a version 10 event.
+#[test]
+fn members_needing_an_update_are_the_ones_without_a_version_10_event() {
+    let mut log = Log::new();
+    log.push_v(0, &log.created(&[0, 1, 2]), 9);
+    log.push_v(1, &name("Bob"), 10);
+    let state = log.replay().unwrap();
+    let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
+    let mut behind = state.members_needing_update();
+    behind.sort();
+    let mut want = vec![pk[0], pk[2]];
+    want.sort();
+    assert_eq!(behind, want);
+}

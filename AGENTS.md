@@ -28,6 +28,7 @@ python3 scripts/check_zip2005_vectors.py
 # Live regtest (Docker + `ths`): in-process end-to-end spend
 cargo test -p zafe-core --test regtest_e2e -- --ignored --nocapture
 scripts/m0-e2e.sh                       # three `zafe` CLI processes through the relay
+scripts/move-e2e.sh                     # the same three move the vault between two relays
 cargo test -p rust_lib_zafe --test bridge_e2e -- --ignored --nocapture   # app flow via the bridge
 
 # Cross-check against frost-tools zcash-sign (build it from ZcashFoundation/frost-tools)
@@ -199,7 +200,9 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   - `VAULT_EVENT`: 2 `Name`, 3 `BackupVerified` (no gate); 4 `ReplaceApproval` (gate: all
     update before a seat move); 5 `RepairRetry`/`RepairDone`; 6 one-tap per fully covered group
     (gate by tag); 7 `Broadcast` must carry the PCZT's txid (gate); 8 `PoolReset` (gate);
-    9 highest-version replay + parseable PCZT check (gate).
+    9 highest-version replay + parseable PCZT check (gate); 10 `VaultMoved` (gate: Move is
+    offered only once every current member wrote a v10 event, `VaultState::member_versions`;
+    each app announces once with `node::announce_version`, an idempotent `Name`).
   - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 4 (vault
     id + expiry columns; migrated from 1-3, old rows get `vault_id = id`, seen today, shared),
     `REPAIR` 3 (sigma carries the helper's `LogAnchor` + create token; v2 still read),
@@ -207,7 +210,9 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     id on the default relay), `VAULT_MATERIAL` 2 (`relay`; v1 reads as legacy),
     `NONCES`/`POOL_NONCE` 2 (encrypted; v1 still read), `DKG_ROUND1` 3, `LOG_CACHE` 1,
     `LOG_KEY_MESSAGE` 1 (setup log key + create token; the untagged 36-byte payload still
-    reads), `SEAT_LINK` 1 (`zafe-seat-v1:`), `RELAY_STATUS` 1.
+    reads), `SEAT_LINK` 1 (`zafe-seat-v1:`), `RELAY_STATUS` 1, `MOVE_MESSAGE` 1 (arrival /
+    notice / cancel payloads, padded to 1 KiB), `MOVE_STATE` 1 (`<vault id>.move`,
+    encrypted with a key from the vault secret), `MOVE_LINK` 1 (`zafe.cash/move#` fragment).
 
 ### Relay and client
 - **Relay is blind**: it sees public keys, ciphertext, metadata. Clients drop envelopes for
@@ -222,6 +227,20 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   `LogCopyInvalid`, never a silent first load. `log_cache::configure` once per process/isolate (bridge `identity()` fails closed
   otherwise). Restore with `reseed_relay`; leave a fork only via `node::follow_relay` (behind a
   dialog + unlock). Don't build anything that changes replay of existing entries without a gate.
+- **Relay moves** (`docs/relay-move.md` §4, `node/relay_move.rs`, `moves.rs`): the vault
+  switches only by a `VaultMoved` entry carrying m = max(t, n − t + 1) distinct current
+  members' arrivals (signatures over `MoveTarget`: vault id, move id, relay URL, label, base
+  index + hash, expiry 14 days); replay checks every arrival, the base hash and that the move
+  is after the last switch. Write rules live in `append_event` (`write_target`): **no new
+  entry on the new relay before `VaultMoved`** (catch-up copies existing entries via
+  `catch_relay_up`); a phone that sent its arrival checks the new relay before each write to
+  the old one and, once switched, writes the same event bytes there; a phone that only saw a
+  verified `VaultMoved` in a notice refuses (`NodeError::VaultMoved`). **Nothing connects to
+  a new relay before the member's tap** (`follow_move` only; notices come from the current
+  relay). **One move per phone** (`MoveState::open`). Arrivals and notices are sealed per
+  recipient and padded; **move notices are never acked** (`respond` skips unknown kinds).
+  Two switches from one base = `TwoMoves`, follow neither. The bridge's `material()` applies
+  a verified switch (`with_followed_relay`) before anything is built from the material.
 - **Relay membership check**: `reseed` lets the restorer pick members, so
   `node::check_relay_membership` compares the relay's list with the replayed log (`RelayMembership`).
 - **Relay hardening**: client reads at most 64 MiB per response; `log_append` verifies and
@@ -343,7 +362,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   `curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zcashlabs/thus-spoke-zakura/main/install.sh | THS_VERSION=0.4.0 sh`.
 - `up.sh` runs ths under `setsid nohup` (pid + log in `~/.cache/zafe-regtest/`). Ports: RPC
   18232, lightwalletd 9067, + offset (multiple of 10). Offsets: harness 0, `regtest_e2e`
-  30000, `bridge_e2e` 30100, `m0-e2e.sh` 30200. `down.sh` stops it.
+  30000, `bridge_e2e` 30100, `m0-e2e.sh` 30200, `move-e2e.sh` 30300. `down.sh` stops it.
 - Fund with `fund.sh <ua> [notes]` (5 ZEC each, + 12 blocks); one note per concurrently open
   proposal. Mine with `ths --name <name> mine N`. Every start is a fresh chain
   (`app-harness.sh resume` refunds). Restarting the node rewinds the last ~100 blocks.

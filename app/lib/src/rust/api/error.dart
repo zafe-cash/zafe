@@ -131,4 +131,26 @@ enum ZafeErrorKind {
   /// The relay is private: creating or restoring a vault there needs its create token,
   /// and none or the wrong one was given (ask whoever runs it).
   createTokenRefused,
+
+  /// The vault moved to another relay and this phone hasn't followed: "Grants moved to
+  /// relay.dao.org. Move to continue." (`message` names the relay URL.)
+  vaultMoved,
+
+  /// This phone already takes part in another relay move.
+  moveInProgress,
+
+  /// Moving needs every member's app to support it; `members` must update first.
+  membersMustUpdate,
+
+  /// No member's arrival for this move on that relay (a bad link, or cancelled).
+  moveNotFound,
+
+  /// The move is past its 14 days.
+  moveExpired,
+
+  /// The move is older than the vault's last move.
+  moveStale,
+
+  /// Two moves switched from the same history: "Two moves found: ask your group."
+  twoMoves,
 }

@@ -42,6 +42,11 @@ impl NonceKey {
         Self(*hasher.finalize().as_bytes())
     }
 
+    /// A key derived elsewhere (e.g. `moves::MoveState`'s, from the vault secret).
+    pub(crate) fn from_raw(key: [u8; 32]) -> Self {
+        Self(key)
+    }
+
     /// `nonce || ciphertext`, bound to `name` (the file name).
     pub(crate) fn seal(&self, name: &str, plain: &[u8]) -> Vec<u8> {
         let mut nonce = [0u8; 24];
