@@ -197,6 +197,17 @@ Uint8List setVaultCreateToken({required List<int> material, String? token}) =>
       token: token,
     );
 
+/// A vault from before per-vault relays (no relay of its own) with `relay_url` saved as
+/// its relay: the app-wide relay setting is gone, so each such vault keeps the relay it
+/// used. `None` when the vault already has its own relay (nothing to save).
+Uint8List? pinVaultRelay({
+  required List<int> material,
+  required String relayUrl,
+}) => RustLib.instance.api.crateApiVaultPinVaultRelay(
+  material: material,
+  relayUrl: relayUrl,
+);
+
 RelayStatusInfo vaultRelayStatus({required String vaultId}) =>
     RustLib.instance.api.crateApiVaultVaultRelayStatus(vaultId: vaultId);
 

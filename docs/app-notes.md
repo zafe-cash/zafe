@@ -56,21 +56,23 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   token). `features/settings/relay_picker.dart` (`showRelayPicker`) checks **only the
   selected relay** (`check_relay`, through Tor when on), never the list: "Needs an update"
   (greyed, `too_old`), "No notifications" (`push` false), a create-token field when the
-  relay needs one. Used by Create > More options > Relay and Settings > "Relay for new
-  vaults". Scan is `/scan-relay`, which the router lets open with or without a vault.
-  "Run your own relay →" opens `https://zafe.cash/relay`.
+  relay needs one. A full screen (`/pick-server`, `RelayPickerScreen`; buttons pinned:
+  "Use this server" checks a typed address first, so closing the keyboard without Done
+  still counts), used by Create > More options > Server and Move. Scan is `/scan-relay`;
+  both open with or without a vault. "Run your own server →" opens
+  `https://zafe.cash/relay`.
 - **Per-vault relay** lives in the vault's material (phase 2a); Dart reads it with
   `activeVaultRelayProvider` (`vault_relay_settings`; `usesDefault` = a vault from before
-  per-vault relays, which follows the app-wide setting). Settings > Servers: "Relay ·
-  everyone in <vault>" (`vault_relay_sheet.dart`: address, status, "No notifications",
-  create token saved into the material with `set_vault_create_token` after an unlock),
-  "Zcash server · this phone", "Relay for new vaults" (the app-wide setting). The sync
-  sheet names the vault's relay, not the app-wide one.
+  per-vault relays; Home saves the app-wide value into them once, `pinLegacyRelays`).
+  Settings > <vault> > Server opens `/vault-server` (`vault_server_screen.dart`: address,
+  run by, status, notifications, create token saved into the material with
+  `set_vault_create_token` after an unlock, "Move to another server"). There is no
+  app-wide relay row any more.
 - **Create token storage**: the creator's token goes into `ZafeSecureStore` with the invite
   (`zafe_vault_<id>_createToken`, `add(createToken:)`), `stepSetup` reads it on **every**
   step (background ones too), and it is deleted once the material (which then holds it) is
   saved. Never in the invite. Cancel setup keeps it in `CreatePrefill` for the retry.
-- **Outage** (§5): Home reads `Can't reach relay · since 09:14` from `vault_relay_status`
+- **Outage** (§5): Home reads `Can't reach server · since 09:14` from `vault_relay_status`
   (date when not today, `formatSince`); the unapproved-spend card and notification add
   "Based on this phone's history from 09:14" when `from_copy_at` is set. A background
   check whose relay read fails still announces those spends before giving up.
@@ -79,24 +81,39 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   seat" takes it by Paste/Scan (`/scan-seat-link`), keeps it in `ZafeSecureStore` with the
   recovery identity (`zafe_recovery_seat_link`) and passes its relay and label to
   `check_recovery`. Without a link it searches the default relay (older vaults).
-- **Relay move** (2026-10-25, `docs/relay-move.md` §4.2-4.5, `features/relay_move/`,
-  `providers/relay_move_provider.dart`): Settings > vault Relay sheet and the outage sheet
-  (`SyncFailure.canMoveRelay`) open `/relay-move`: pick (the relay picker, "Move to"),
-  Move (unlock) → share sheet with "I'm moving our Zafe vault Grants to relay.dao.org.
-  Open this to move too: https://zafe.cash/move#…" (`move_share_text`), then the list
-  ("✓ You", "not yet", "Payments switch when m of n have moved.", Share link, Cancel move).
-  Page titles are "Relay" with the sentence as a wrapping heading (long hosts truncated in
-  the one-line title). Follow screen `/relay-move/follow?link=` from the link
-  (`moveLinks` in `services/invite_links.dart`, switches to the link's vault first) or the
-  Home card (`RelayMoveCard`, after NeedsYou; "Not now" hides it until the next start);
-  "No notifications on this relay" for a non-Zafe relay, "<host> will see your IP address.
-  Tor hides it." for an unlisted relay with Tor off. **Nothing connects to the new relay
+- **Relay move** (2026-10-25, reworked 2026-10-26 after research on Matrix room
+  upgrades, Mastodon/Bluesky moves, Delta Chat and SimpleX relay changes, Zashi's server
+  screen; `docs/relay-move.md` §4.2-4.5): one place, `/vault-server`. "Move to another
+  server" → the server list ("Move to", the current one shown as Current, never picked)
+  → unlock → the same screen becomes a waiting room like setup's ("Moving Grants to
+  relay.dao.org", each member ✓ Moved or **Nudge**, which shares the link with
+  `move_share_text`; "Grants switches when m of n have moved."; Cancel move). No share
+  sheet by default: the old server delivers the notice. Other members get a **Needs you**
+  card ("Move Grants to relay.dao.org", "Alice asked · 1 of 4 moved · your funds don't
+  move", Move = unlock + follow on the card, Not now), or "Grants moved to <host>" with
+  Move only after a missed switch (`moveRequest`). Home keeps `RelayMoveCard` for the
+  mover's own progress and "Two moves found". The Status screen (`/status`, from Home's
+  status line) suggests a listed server after 6 h of outage (`suggestedServer`: the first
+  preset that answers, asked one by one): "Move Grants to relay2.zafe.cash?" Move / Pick
+  another. The follow screen `/vault-server/follow?link=` stays for links (`moveLinks`
+  switches to the link's vault first); "No notifications on this server" for a non-Zafe
+  server, "<host> will see your IP address. Tor hides it." for an unlisted one with Tor
+  off. **Nothing connects to the new relay
   before Move** (`relay_move_notice` reads the vault's own relay; `relay_move_status`
   reaches the new relay only once this phone moved). After the switch `list_proposals`
   returns `updated_material` (new relay) and the refresh re-registers push. Payment
   screen: "Payments resume when 1 more member moves to <host>." while the relay is down
   and the move is short of m. Activity: "Grants moved to <host>" (`RelayMovedActivity`).
   Renders: `tool/screens/relay_move_render_test.dart` (in the size sweep).
+- **Settings and sheets** (2026-10-26, research: Apple HIG Sheets/Modality, Material
+  bottom sheets, NN/g "do not stack bottom sheets", Zashi/Signal/Safe/Rainbow settings):
+  Settings' first level is Privacy (Use Tor first, Hide amounts), Security (Lock app, an
+  `AppMenu` on the row), <vault> (Back up, Viewing key, How it's protected, Server), This
+  phone (Zcash server, Notifications), App (Theme, Payment sounds, Diagnostic report,
+  licenses). Zcash server is a screen (`/zcash-server`; presets with live checks, "Custom
+  server" opens a field in place, Test and save), also from Welcome's cog. Diagnostic
+  report and Status are screens. Confirmations use `showAppConfirm` (themed dialog);
+  Manage vaults' ⋯ is an `AppMenu`. Home has pull to refresh (sync now).
 - **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
   task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
   leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,

@@ -48,7 +48,7 @@ const String kTestnetLightwalletdUrl = 'https://testnet.zec.rocks:443';
 /// beta relay on the same VPS as testnet (`infra/relay/README.md`, "Mainnet"):
 /// deployed by `.github/workflows/relay-mainnet.yml` once the user has done the one-time
 /// setup (DNS, bucket, environment); until then this name doesn't resolve and a mainnet
-/// build shows "Can't reach relay".
+/// build shows "Can't reach server".
 const NetworkPreset kMainnetPreset = NetworkPreset(
   network: 'main',
   relayUrl: kMainnetRelayUrl,

@@ -7,7 +7,6 @@ import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/errors/zafe_error_copy.dart';
-import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/layout/app_column.dart';
@@ -15,6 +14,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
+import '../../core/widgets/app_confirm.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/dot_qr_shape.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -148,7 +148,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       } else if (confirmed != null) {
         rethrow;
       } else {
-        setState(() => _error = 'Can\'t reach the relay. Retrying...');
+        setState(() => _error = 'Can\'t reach the server. Retrying...');
       }
     }
   }
@@ -159,48 +159,16 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   Future<void> _cancel({required bool creator, bool confirm = true}) async {
     if (_leaving) return;
     if (confirm) {
-      final go = await showAppMobileSheet<bool>(
-        context: context,
-        builder: (sheet) {
-          final colors = sheet.colors;
-          return MobileModalScaffold(
-            title: creator ? 'Cancel this setup?' : 'Leave this setup?',
-            onClose: () => Navigator.of(sheet).pop(false),
-            constrainBody: true,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    creator
-                        ? 'The invite stops working and those who joined see that you cancelled. You can set it up again.'
-                        : 'You\'ll need a new invite to join again.',
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: colors.text.accent,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  AppButton(
-                    expand: true,
-                    variant: AppButtonVariant.destructive,
-                    onPressed: () => Navigator.of(sheet).pop(true),
-                    child: Text(creator ? 'Cancel setup' : 'Leave'),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  AppButton(
-                    expand: true,
-                    variant: AppButtonVariant.ghost,
-                    onPressed: () => Navigator.of(sheet).pop(false),
-                    child: const Text('Keep waiting'),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
+      final go = await showAppConfirm(
+        context,
+        title: creator ? 'Cancel this setup?' : 'Leave this setup?',
+        body: creator
+            ? 'The invite stops working and those who joined see that you cancelled. You can set it up again.'
+            : 'You\'ll need a new invite to join again.',
+        confirmLabel: creator ? 'Cancel setup' : 'Leave',
+        cancelLabel: 'Keep waiting',
       );
-      if (go != true || !mounted) return;
+      if (!go || !mounted) return;
     }
     setState(() => _leaving = true);
     _poll?.cancel();
@@ -221,46 +189,14 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// differ, or the group gave up). The creator's cancels it for everyone.
   Future<void> _abandon() async {
     if (_leaving) return;
-    final go = await showAppMobileSheet<bool>(
-      context: context,
-      builder: (sheet) {
-        final colors = sheet.colors;
-        return MobileModalScaffold(
-          title: 'Abandon this setup?',
-          onClose: () => Navigator.of(sheet).pop(false),
-          constrainBody: true,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'No keys or funds exist yet. Start over with a new invite.',
-                  style: AppTypography.bodyMedium.copyWith(
-                    color: colors.text.accent,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                AppButton(
-                  expand: true,
-                  variant: AppButtonVariant.destructive,
-                  onPressed: () => Navigator.of(sheet).pop(true),
-                  child: const Text('Abandon setup'),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                AppButton(
-                  expand: true,
-                  variant: AppButtonVariant.ghost,
-                  onPressed: () => Navigator.of(sheet).pop(false),
-                  child: const Text('Keep waiting'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    final go = await showAppConfirm(
+      context,
+      title: 'Abandon this setup?',
+      body: 'No keys or funds exist yet. Start over with a new invite.',
+      confirmLabel: 'Abandon setup',
+      cancelLabel: 'Keep waiting',
     );
-    if (go != true || !mounted) return;
+    if (!go || !mounted) return;
     setState(() => _leaving = true);
     _poll?.cancel();
     await ref.read(vaultProvider.notifier).abandonSetup();
@@ -355,7 +291,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           if (_gone && !sealed) ...[
             _Hint(
               text: isCreator
-                  ? 'This setup is no longer on the relay.'
+                  ? 'This setup is no longer on the server.'
                   : 'The creator cancelled this setup. Ask them for a new invite.',
             ),
             const SizedBox(height: AppSpacing.md),

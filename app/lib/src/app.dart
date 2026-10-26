@@ -31,7 +31,12 @@ import 'features/received/received_screen.dart';
 import 'features/send/payment_link.dart';
 import 'features/send/payment_request_screen.dart';
 import 'features/send/send_screen.dart';
+import 'features/settings/relay_picker.dart';
+import 'features/home/sync_status_screen.dart';
+import 'features/settings/diagnostics_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'features/settings/vault_server_screen.dart';
+import 'features/settings/zcash_server_screen.dart';
 import 'features/recover/recover_screen.dart';
 import 'features/settings/vault_protection_screen.dart';
 import 'features/signers/replace_signer_screen.dart';
@@ -176,7 +181,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
       await ref.read(vaultProvider.notifier).switchTo(vaultId!);
       router.push(
         Uri(
-          path: '/relay-move/follow',
+          path: '/vault-server/follow',
           queryParameters: {'link': link},
         ).toString(),
       );
@@ -261,6 +266,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
     openPaymentLink();
   });
 
+  const serverRoutes = ['/pick-server', '/zcash-server'];
   return router = GoRouter(
     initialLocation: initial,
     // Ignore the platform's start route: on Android any app can start this activity
@@ -286,12 +292,17 @@ final _routerProvider = Provider<GoRouter>((ref) {
         '/backup-prompt',
         '/scan-recipient',
         '/scan-recovery',
-        '/relay-move',
+        '/vault-server',
+        '/status',
+        '/diagnostics',
       ].any(loc.startsWith);
       // Picks its own vault, so it also opens while another one is being added.
       if (loc == '/payment-request') return null;
-      // The relay picker scans from Create (no vault on screen) and from Settings.
-      if (loc == '/scan-relay') return null;
+      // The server screens and the relay scanner open from Create and Welcome (no vault
+      // on screen) and from a vault.
+      if (loc == '/scan-relay' || serverRoutes.any(loc.startsWith)) {
+        return null;
+      }
       if (vault.hasVault && !inVault) return '/home';
       if (!vault.hasVault && inVault) {
         return vault.isSettingUp ? '/setup' : '/welcome';
@@ -324,6 +335,29 @@ final _routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/scan-relay',
         pageBuilder: (_, _) => page(const ScanRelayScreen()),
+      ),
+      GoRoute(
+        path: '/zcash-server',
+        pageBuilder: (_, _) => page(const ZcashServerScreen()),
+      ),
+      // Server screens open with or without a vault (Create and Welcome use them too).
+      GoRoute(
+        path: '/pick-server',
+        pageBuilder: (_, state) {
+          final args = state.extra as RelayPickerArgs?;
+          return page(
+            args == null
+                ? const RelayPickerScreen(title: 'Server', initialUrl: '')
+                : RelayPickerScreen(
+                    title: args.title,
+                    initialUrl: args.selectedUrl,
+                    currentUrl: args.currentUrl,
+                    initialToken: args.token,
+                    askToken: args.askToken,
+                    confirmLabel: args.confirmLabel,
+                  ),
+          );
+        },
       ),
       GoRoute(
         path: '/scan-seat-link',
@@ -396,8 +430,16 @@ final _routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
-        path: '/relay-move',
-        pageBuilder: (_, _) => page(const RelayMoveScreen()),
+        path: '/diagnostics',
+        pageBuilder: (_, _) => page(const DiagnosticsScreen()),
+      ),
+      GoRoute(
+        path: '/status',
+        pageBuilder: (_, _) => page(const SyncStatusScreen()),
+      ),
+      GoRoute(
+        path: '/vault-server',
+        pageBuilder: (_, _) => page(const VaultServerScreen()),
         routes: [
           GoRoute(
             path: 'follow',

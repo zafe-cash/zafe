@@ -9,10 +9,10 @@ import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/config/network_upgrade.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/action_button.dart';
+import '../../core/widgets/app_confirm.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_loading_icon.dart';
-import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/payment_sounds_provider.dart';
@@ -163,52 +163,17 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
   }
 
   Future<void> _cancel(rust.ProposalInfo p) async {
-    final cancel = await showAppMobileSheet<bool>(
-      context: context,
-      builder: (sheet) {
-        final colors = sheet.colors;
-        return MobileModalScaffold(
-          title: 'Cancel this payment?',
-          onClose: () => Navigator.of(sheet).pop(false),
-          leading: AppIcon(
-            AppIcons.warning,
-            size: 20,
-            color: colors.icon.destructive,
-            patina: colors.icon.destructive,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                p.ready
-                    ? 'Its funds become free for new payments. All signatures are in, so it can still be sent until it expires, unless a new payment uses the same funds.'
-                    : 'Signers stop working on it and its funds become available for new '
-                          'payments. This can\'t be undone.',
-                style: AppTypography.bodyMedium.copyWith(
-                  color: colors.text.accent,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              AppButton(
-                expand: true,
-                variant: AppButtonVariant.destructive,
-                onPressed: () => Navigator.of(sheet).pop(true),
-                child: const Text('Cancel payment'),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              AppButton(
-                expand: true,
-                variant: AppButtonVariant.ghost,
-                onPressed: () => Navigator.of(sheet).pop(false),
-                child: const Text('Keep it'),
-              ),
-            ],
-          ),
-        );
-      },
+    final cancel = await showAppConfirm(
+      context,
+      title: 'Cancel this payment?',
+      body: p.ready
+          ? 'Its funds become free for new payments. All signatures are in, so it can still be sent until it expires, unless a new payment uses the same funds.'
+          : 'Signers stop working on it and its funds become available for new '
+                'payments. This can\'t be undone.',
+      confirmLabel: 'Cancel payment',
+      cancelLabel: 'Keep it',
     );
-    if (cancel != true || !mounted) throw const ActionCancelled();
+    if (!cancel || !mounted) throw const ActionCancelled();
     await ref.read(proposalsProvider.notifier).cancel(widget.id);
     // Leave from here, not from the button's onDone: cancelling refreshes the payment,
     // the page rebuilds as "Cancelled" without this button, and its onDone never ran.

@@ -39,7 +39,7 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   int _expiryDays = 7;
   static const _expiryChoices = [1, 3, 7, 14];
 
-  /// More options: the vault's relay (null: the default relay) and its create token.
+  /// More options: the vault's server (null: the default one) and its create token.
   bool _more = false;
   String? _relayUrl;
   String? _createToken;
@@ -106,7 +106,7 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   Future<void> _pickRelay(String current) async {
     final choice = await showRelayPicker(
       context,
-      title: 'Relay',
+      title: 'Server',
       selectedUrl: current,
       token: _createToken,
     );
@@ -260,7 +260,7 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   }
 }
 
-/// Create > More options: the relay everyone in the new vault will use.
+/// Create > More options: the server everyone in the new vault will use.
 class CreateRelayRow extends StatelessWidget {
   const CreateRelayRow({super.key, required this.host, this.onTap});
 
@@ -274,7 +274,7 @@ class CreateRelayRow extends StatelessWidget {
       cornerRadius: AppRadii.large,
       child: MobileListRow(
         leading: AppIcon(AppIcons.endpoint, size: 20, color: colors.icon.muted),
-        label: 'Relay',
+        label: 'Server',
         value: host,
         valueColor: colors.text.secondary,
         showChevron: true,

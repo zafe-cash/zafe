@@ -71,8 +71,8 @@ class ScanRelayScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => QrScanScreen(
-    title: 'Scan relay',
-    rejected: 'That QR code isn\'t a relay address.',
+    title: 'Scan server',
+    rejected: 'That QR code isn\'t a server address.',
     accept: (raw) => parseRelayInput(raw).url == null ? null : raw.trim(),
   );
 }

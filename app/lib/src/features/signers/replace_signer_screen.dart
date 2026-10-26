@@ -307,7 +307,7 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
                 ? null
                 : zafeErrorMessage(
                     _wordsError!,
-                    fallback: 'Can\'t reach the relay. Retrying...',
+                    fallback: 'Can\'t reach the server. Retrying...',
                   ),
             confirmed: _confirmed,
             onConfirm: () => setState(() => _confirmed = !_confirmed),
@@ -427,7 +427,7 @@ class SeatLinkCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xxs),
           Text(
-            'Relay · $host',
+            'Server · $host',
             style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
           ),
           const SizedBox(height: AppSpacing.sm),

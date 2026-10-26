@@ -384,11 +384,22 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - Secure storage only through `ZafeSecureStore` (`_PatientStorage`): plugin calls can hang on
   Android while a background engine uses it. Endpoints only via `endpointsProvider` /
   `ZafeEndpoints.fromPrefs` (after `prefs.reload()`), never the build consts.
-- **Relays in Dart**: `endpointsProvider.relayUrl` is only the default for new vaults (and
-  the fallback the bridge uses for pre-per-vault vaults); show a vault's relay from
-  `activeVaultRelayProvider`. The creator's create token lives in `ZafeSecureStore` with
-  the invite until the material is saved; `stepSetup` passes it on every step. The relay
-  picker checks only the selected relay, never the list.
+- **Relays in Dart**: the UI says **server** (relay only in help and docs). No app-wide
+  relay setting is shown: a new vault's server is picked in Create > More options;
+  `endpointsProvider.relayUrl` is only that default and the bridge fallback, and Home
+  saves it into pre-per-vault vaults once (`pinLegacyRelays`, bridge `pin_vault_relay`).
+  Show a vault's relay from `activeVaultRelayProvider`. The vault's server and its moves
+  live on one screen (`/vault-server`: facts, Move, waiting room with per-member Nudge);
+  a move another member started is a Needs you card (`moveRequest`), never a link step;
+  the Status screen (`/status`) suggests a listed server after `kSuggestMoveAfter` down.
+  The creator's create token lives in `ZafeSecureStore` with the invite until the
+  material is saved; `stepSetup` passes it on every step. The server list checks only
+  the selected server, never the list.
+- **Sheets** (user: no sheet on a sheet): a pushed screen for typing, a list with live
+  status or more than one step; `AppMenu` for a few short choices; `showAppConfirm` for
+  what can't be undone (the only surface over a sheet or screen); sheets only for a quick
+  pick, info, or one short field opened from the screen it changes. Settings' first
+  level keeps discoverable features (Tor first).
 - Never drop a refresh request because work is running (`CoalescedRun`, `refreshSoon`).
 - Gated actions call `confirmUnlock` first; background checks act only on approvals already given.
 - UX rules (user): minimal text, exact values, no toasts (`ActionButton` + `appNoticesProvider`),

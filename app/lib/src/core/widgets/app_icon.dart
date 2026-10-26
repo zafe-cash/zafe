@@ -20,6 +20,7 @@ abstract final class AppIcons {
   static const arrowDownCircle = 'arrow_down_circle';
   static const arrowUpRight = 'arrow_up_right';
   static const more = 'more';
+  static const bell = 'bell';
   static const book = 'book';
   static const cameraDenied = 'camera_denied';
   static const cancel = 'cancel';
@@ -51,6 +52,7 @@ abstract final class AppIcons {
   static const plus = 'plus';
   static const qr = 'qr';
   static const renew = 'renew';
+  static const server = 'server';
   static const share = 'share';
   static const shieldKeyhole = 'shield_keyhole';
   static const sound = 'sound';

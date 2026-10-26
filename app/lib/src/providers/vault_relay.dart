@@ -20,3 +20,22 @@ final activeVaultRelayProvider = Provider<rust.VaultRelaySettings?>((ref) {
     return null;
   }
 });
+
+/// Vaults from before per-vault relays follow the app-wide relay setting, which is no
+/// longer shown: each such vault gets the relay it uses saved into its material, once
+/// (Home calls this after start). A vault that already has its own relay is left as is.
+Future<void> pinLegacyRelays(WidgetRef ref) async {
+  final url = ref.read(endpointsProvider).relayUrl;
+  for (final v in ref.read(vaultProvider).vaults) {
+    final material = v.material;
+    if (material == null) continue;
+    try {
+      final pinned = rust.pinVaultRelay(material: material, relayUrl: url);
+      if (pinned != null) {
+        await ref.read(vaultProvider.notifier).replaceMaterial(v.id, pinned);
+      }
+    } catch (_) {
+      // Unreadable material or a placeholder relay: leave it on the fallback.
+    }
+  }
+}

@@ -11,9 +11,7 @@ import '../home/home_screen.dart' show AppNoticeCards;
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
-import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
-import '../settings/endpoint_sheet.dart';
 import 'onboarding_art.dart';
 import 'welcome_art.dart';
 import '../../core/widgets/line_icon.dart';
@@ -30,11 +28,7 @@ class WelcomeScreen extends ConsumerWidget {
     final colors = context.colors;
     // Adding another vault: offer the way back to the one that was on screen.
     final adding = ref.watch(vaultProvider.select((v) => v.isAdding));
-    // A build without a relay URL can't create or join until one is set here.
-    final noRelay = ref.watch(
-      endpointsProvider.select((e) => e.relayIsPlaceholder),
-    );
-    void servers() => showServerSettingsSheet(context, ref);
+    void servers() => context.push('/zcash-server');
     Future<void> cancel() async {
       await ref.read(vaultProvider.notifier).cancelAddVault();
       if (context.mounted) context.go('/home');
@@ -75,10 +69,6 @@ class WelcomeScreen extends ConsumerWidget {
           const _InfoCard(),
           const SizedBox(height: AppSpacing.md),
           const AppNoticeCards(),
-          if (noRelay) ...[
-            _NoRelayNote(onTap: servers),
-            const SizedBox(height: AppSpacing.s),
-          ],
           AppButton(
             expand: true,
             onPressed: () => context.push('/create'),
@@ -193,7 +183,7 @@ class WelcomeScreen extends ConsumerWidget {
                 _CornerButton(
                   alignment: Alignment.topRight,
                   icon: AppIcons.cog,
-                  label: 'Server settings',
+                  label: 'Zcash server',
                   onTap: servers,
                 ),
               ],
@@ -373,49 +363,6 @@ class _CornerButton extends StatelessWidget {
 }
 
 /// This build has no relay URL, so creating or joining would fail.
-class _NoRelayNote extends StatelessWidget {
-  const _NoRelayNote({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return AppTappable(
-      onTap: onTap,
-      semanticsLabel: 'No relay set. Open server settings',
-      child: Row(
-        children: [
-          AppIcon(
-            AppIcons.warning,
-            size: 16,
-            color: colors.icon.warning,
-            patina: colors.icon.warning,
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Text.rich(
-              TextSpan(
-                text: 'No relay set. ',
-                children: [
-                  TextSpan(
-                    text: 'Add one',
-                    style: TextStyle(
-                      decoration: TextDecoration.underline,
-                      decorationColor: colors.text.warning,
-                    ),
-                  ),
-                ],
-              ),
-              style: AppTypography.bodySmall.copyWith(
-                color: colors.text.warning,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _InfoCard extends StatelessWidget {
   const _InfoCard();

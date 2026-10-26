@@ -42,33 +42,33 @@ String zafeErrorMessage(
     ZafeErrorKind.updateRequired =>
       'This needs a newer version of Zafe. Update the app, then try again.',
     ZafeErrorKind.relayOutdated =>
-      'The relay server runs an older version of Zafe than this app. '
+      'The server runs an older version of Zafe than this app. '
           'Ask whoever runs it to update it.',
     ZafeErrorKind.createTokenRefused =>
-      'This relay is private: it needs its create token. Ask whoever runs it.',
+      'This server is private: it needs its create token. Ask whoever runs it.',
     ZafeErrorKind.relayStorageFull =>
-      'The relay\'s storage for this vault is full. Old messages expire after 30 days; if it keeps happening, ask the relay\'s operator for more space.',
+      'The server\'s storage for this vault is full. Old messages expire after 30 days; if it keeps happening, ask the server\'s operator for more space.',
     ZafeErrorKind.relayRolledBack =>
-      'The relay lost part of this vault\'s history, so Zafe ignores it. A member with the full history can restore it from the sync status on Home.',
+      'The server lost part of this vault\'s history, so Zafe ignores it. A member with the full history can restore it from the sync status on Home.',
     ZafeErrorKind.relayLostVault =>
-      'The relay no longer has this vault. A member can restore it from the sync '
+      'The server no longer has this vault. A member can restore it from the sync '
           'status on Home.',
     ZafeErrorKind.relayForked =>
-      'The relay shows a different history than this phone saw, so Zafe ignores it. Check with the other members first.',
+      'The server shows a different history than this phone saw, so Zafe ignores it. Check with the other members first.',
     ZafeErrorKind.logCopyInvalid =>
-      'This phone\'s saved history is damaged. Check with the other members, then follow the relay.',
+      'This phone\'s saved history is damaged. Check with the other members, then follow the server.',
     ZafeErrorKind.relayMembership =>
-      'The relay\'s members or approval rule don\'t match this vault, so Zafe ignores it. Your funds are safe. Agree on a new relay with the others.',
+      'The server\'s members or approval rule don\'t match this vault, so Zafe ignores it. Your funds are safe. Agree on a new server with the others.',
     ZafeErrorKind.tls =>
       'Couldn\'t connect securely to the ${_server(error.endpoint)}. '
-          'Check its address in server settings.',
+          'Check its address in Settings.',
     ZafeErrorKind.networkTimeout =>
       'The ${_server(error.endpoint)} didn\'t answer in time. Try again.',
     ZafeErrorKind.serverBehind =>
       'The Zcash server is behind this wallet. Wait a moment, or pick another '
-          'one in server settings.',
+          'one in Settings.',
     ZafeErrorKind.wrongNetwork =>
-      'The Zcash server is on another network. Pick another one in server settings.',
+      'The Zcash server is on another network. Pick another one in Settings.',
     ZafeErrorKind.walletDatabase =>
       'This phone couldn\'t read the vault\'s wallet data. Try again.',
     ZafeErrorKind.torConnecting =>
@@ -77,7 +77,7 @@ String zafeErrorMessage(
       'Tor couldn\'t connect, so nothing was sent. Try again, or turn off Tor in '
           'Settings.',
     ZafeErrorKind.vaultNotOnRelay =>
-      'This vault isn\'t on this relay. Check the relay address in server settings; all members must use the same one.',
+      'This vault isn\'t on this server. Ask the others which server the vault is on.',
     ZafeErrorKind.vaultMoved =>
       'The vault moved to ${_host(error.message)}. Move to continue.',
     ZafeErrorKind.moveInProgress =>
@@ -87,7 +87,7 @@ String zafeErrorMessage(
           ? 'A member must update Zafe before the vault can move.'
           : '${error.members.length} members must update Zafe before the vault can move.',
     ZafeErrorKind.moveNotFound =>
-      'No member has moved to that relay with this link. Ask for a new one.',
+      'No member has moved to that server with this link. Ask for a new one.',
     ZafeErrorKind.moveExpired => 'This move expired. Ask for a new link.',
     ZafeErrorKind.moveStale =>
       'This link is from an earlier move. Ask for a new one.',
@@ -99,7 +99,7 @@ String zafeErrorMessage(
 String _host(String url) => Uri.tryParse(url)?.authority ?? url;
 
 String _server(ZafeEndpoint endpoint) => switch (endpoint) {
-  ZafeEndpoint.relay => 'relay',
+  ZafeEndpoint.relay => 'vault\'s server',
   ZafeEndpoint.lightwalletd => 'Zcash server',
   ZafeEndpoint.none => 'server',
 };

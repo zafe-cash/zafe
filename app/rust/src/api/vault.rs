@@ -731,6 +731,21 @@ pub fn set_vault_create_token(
     Ok(m.to_bytes()?)
 }
 
+/// A vault from before per-vault relays (no relay of its own) with `relay_url` saved as
+/// its relay: the app-wide relay setting is gone, so each such vault keeps the relay it
+/// used. `None` when the vault already has its own relay (nothing to save).
+#[flutter_rust_bridge::frb(sync)]
+pub fn pin_vault_relay(material: Vec<u8>, relay_url: String) -> Result<Option<Vec<u8>>, ZafeError> {
+    let mut m = self::material(&material)?;
+    if m.relay.url.is_some() {
+        return Ok(None);
+    }
+    let url = zafe_core::moves::normalize_relay_url(&relay_url)
+        .ok_or_else(|| ZafeError::invalid("not a relay address"))?;
+    m.relay.url = Some(url);
+    Ok(Some(m.to_bytes()?))
+}
+
 /// When this phone last reached the vault's relay (Unix seconds), and since when it
 /// can't: for "Can't reach relay · since 09:14". Both `None` before the first request.
 pub struct RelayStatusInfo {

@@ -12,6 +12,7 @@ import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/app_confirm.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/copy_button.dart';
 import '../../core/widgets/app_button.dart';
@@ -177,26 +178,14 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   }
 
   Future<void> _startOver() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Start over?'),
-        content: const Text(
+    final ok = await showAppConfirm(
+      context,
+      title: 'Start over?',
+      body:
           'This phone makes a new code. Send it to your co-signers; approvals of the old one won\'t count.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Start over'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Start over',
     );
-    if (ok == true) {
+    if (ok) {
       setState(() => _found = null);
       await _start(fresh: true);
     }
@@ -271,7 +260,7 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
                 ? null
                 : zafeErrorMessage(
                     _error!,
-                    fallback: 'Can\'t reach the relay.',
+                    fallback: 'Can\'t reach the server.',
                   ),
             onStartOver: _startOver,
             linkHost: _link == null ? null : _host(_link!.relayUrl),
@@ -475,7 +464,7 @@ class SeatLinkField extends StatelessWidget {
         const SizedBox(height: AppSpacing.xxs),
         if (host != null)
           Text(
-            'Relay · $host',
+            'Server · $host',
             style: AppTypography.bodyMedium.copyWith(color: colors.text.accent),
           ),
         if (error != null)

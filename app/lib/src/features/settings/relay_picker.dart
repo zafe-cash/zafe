@@ -7,12 +7,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/relay_presets.dart';
 import '../../core/errors/sync_failure.dart';
 import '../../core/errors/zafe_error_copy.dart';
-import '../../core/layout/mobile/app_mobile_sheet.dart';
+import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile/mobile_list_row.dart';
+import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../rust/api/endpoints.dart' as rust;
 
@@ -38,9 +39,29 @@ class RelayCheckResult {
   bool get usable => info != null && !info!.tooOld;
 }
 
-/// Shows the relay picker. Pops the choice on "Use this relay", null on close.
-/// `askToken`: offer the create-token field when the relay needs one (creating a vault).
-/// `currentUrl`: the relay the vault is on (moving it), shown but never chosen.
+/// What the server list opens with (the `/pick-server` route's extra).
+class RelayPickerArgs {
+  const RelayPickerArgs({
+    required this.title,
+    required this.selectedUrl,
+    this.currentUrl,
+    this.token,
+    this.askToken = true,
+    this.confirmLabel = 'Use this server',
+  });
+
+  final String title;
+  final String selectedUrl;
+  final String? currentUrl;
+  final String? token;
+  final bool askToken;
+  final String confirmLabel;
+}
+
+/// Opens the server list as a full screen. Returns the choice on "Use this server",
+/// null on Back. `askToken`: offer the create-token field when the server needs one
+/// (creating a vault). `currentUrl`: the server the vault is on (moving it), shown but
+/// never chosen.
 Future<RelayChoice?> showRelayPicker(
   BuildContext context, {
   required String title,
@@ -48,14 +69,14 @@ Future<RelayChoice?> showRelayPicker(
   String? currentUrl,
   String? token,
   bool askToken = true,
-  String confirmLabel = 'Use this relay',
-}) => showAppMobileSheet<RelayChoice>(
-  context: context,
-  builder: (_) => RelayPickerSheet(
+  String confirmLabel = 'Use this server',
+}) => context.push<RelayChoice>(
+  '/pick-server',
+  extra: RelayPickerArgs(
     title: title,
-    initialUrl: selectedUrl,
+    selectedUrl: selectedUrl,
     currentUrl: currentUrl,
-    initialToken: token,
+    token: token,
     askToken: askToken,
     confirmLabel: confirmLabel,
   ),
@@ -75,20 +96,22 @@ Future<RelayCheckResult> checkRelayAt(String url) async {
       SyncFailureKind.updateRequired ||
       SyncFailureKind.torConnecting ||
       SyncFailureKind.torFailed => zafeErrorMessage(e),
-      _ => 'Not a Zafe relay.',
+      _ => 'Not a Zafe server.',
     });
   }
 }
 
-class RelayPickerSheet extends ConsumerStatefulWidget {
-  const RelayPickerSheet({
+/// The server list: Zafe's servers, "Other address" (typed, pasted or scanned), what the
+/// selected one says about itself, and its create token when it needs one.
+class RelayPickerScreen extends ConsumerStatefulWidget {
+  const RelayPickerScreen({
     super.key,
     required this.title,
     required this.initialUrl,
     this.currentUrl,
     this.initialToken,
     this.askToken = true,
-    this.confirmLabel = 'Use this relay',
+    this.confirmLabel = 'Use this server',
     this.check = checkRelayAt,
   });
 
@@ -103,10 +126,10 @@ class RelayPickerSheet extends ConsumerStatefulWidget {
   final String confirmLabel;
 
   @override
-  ConsumerState<RelayPickerSheet> createState() => _RelayPickerSheetState();
+  ConsumerState<RelayPickerScreen> createState() => _RelayPickerScreenState();
 }
 
-class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
+class _RelayPickerScreenState extends ConsumerState<RelayPickerScreen> {
   late String _url = widget.initialUrl;
   RelayCheckResult _result = const RelayCheckResult.checking();
   late final _other = TextEditingController(
@@ -120,7 +143,7 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
   late bool _otherOpen = relayPresetFor(widget.initialUrl) == null;
   String? _otherError;
 
-  /// "Use this relay" was tapped with an unchecked typed address: confirm once it checks out.
+  /// "Use this server" was tapped with an unchecked typed address: confirm once it checks out.
   bool _confirmWhenChecked = false;
 
   /// Bumped on every selection, so a slow answer for an earlier one is dropped.
@@ -227,30 +250,13 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return MobileModalScaffold(
+    return ZafeScreen(
       title: widget.title,
-      onClose: () => Navigator.of(context).pop(),
-      child: RelayPickerBody(
-        presets: kRelayPresets,
-        selectedUrl: _url,
-        selectedIsCurrent: _isCurrent,
-        result: _result,
-        otherOpen: _otherOpen,
-        other: _other,
-        otherFocus: _otherFocus,
-        otherError: _otherError,
-        token: _needsToken ? _token : null,
-        tokenFocus: _tokenFocus,
-        onSelect: _pickPreset,
-        onOther: () => setState(() {
-          _otherOpen = true;
-          _otherFocus.requestFocus();
-        }),
-        onOtherSubmit: _submitOther,
-        onOtherPaste: _paste,
-        onScan: _scan,
-        onTokenChanged: (_) => setState(() {}),
-        onRetry: _result.error != null ? _check : null,
+      bottom: RelayPickerActions(
+        confirmLabel: widget.confirmLabel,
+        onRetry: _result.error != null && !_otherPending && !_isCurrent
+            ? _check
+            : null,
         onConfirm: _otherPending
             ? () {
                 _confirmWhenChecked = true;
@@ -263,15 +269,82 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
           Uri.parse(kRunYourOwnRelayUrl),
           mode: LaunchMode.externalApplication,
         ),
-        confirmLabel: widget.confirmLabel,
       ),
+      children: [
+        RelayPickerBody(
+          presets: kRelayPresets,
+          selectedUrl: _url,
+          selectedIsCurrent: _isCurrent,
+          result: _result,
+          otherOpen: _otherOpen,
+          other: _other,
+          otherFocus: _otherFocus,
+          otherError: _otherError,
+          token: _needsToken ? _token : null,
+          tokenFocus: _tokenFocus,
+          onSelect: _pickPreset,
+          onOther: () => setState(() {
+            _otherOpen = true;
+            _otherFocus.requestFocus();
+          }),
+          onOtherSubmit: _submitOther,
+          onOtherPaste: _paste,
+          onScan: _scan,
+          onTokenChanged: (_) => setState(() {}),
+        ),
+      ],
     );
   }
 }
 
-/// The picker's content from plain data (rendered without Rust in previews): the listed
-/// relays, "Other address" (typed, pasted or scanned), what the selected relay said, the
-/// create token when it needs one, and the way to run one's own.
+/// The server list's buttons: use the selected one (or try it again when it didn't
+/// answer), and the way to run one's own.
+class RelayPickerActions extends StatelessWidget {
+  const RelayPickerActions({
+    super.key,
+    required this.confirmLabel,
+    this.onConfirm,
+    this.onRetry,
+    this.onRunYourOwn,
+  });
+
+  final String confirmLabel;
+  final VoidCallback? onConfirm;
+  final VoidCallback? onRetry;
+  final VoidCallback? onRunYourOwn;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (onRetry != null)
+        AppButton(
+          expand: true,
+          variant: AppButtonVariant.secondary,
+          onPressed: onRetry,
+          child: const Text('Try again'),
+        )
+      else
+        AppButton(
+          expand: true,
+          onPressed: onConfirm,
+          child: Text(confirmLabel),
+        ),
+      const SizedBox(height: AppSpacing.xs),
+      AppButton(
+        expand: true,
+        variant: AppButtonVariant.ghost,
+        onPressed: onRunYourOwn,
+        child: const Text('Run your own server →'),
+      ),
+    ],
+  );
+}
+
+/// The server list's content from plain data (rendered without Rust in previews): the
+/// listed servers and "Other address" in one card, the typed address, what the selected
+/// server said, and the create token when it needs one.
 class RelayPickerBody extends StatelessWidget {
   const RelayPickerBody({
     super.key,
@@ -291,10 +364,6 @@ class RelayPickerBody extends StatelessWidget {
     this.onOtherPaste,
     this.onScan,
     this.onTokenChanged,
-    this.onRetry,
-    this.onConfirm,
-    this.onRunYourOwn,
-    this.confirmLabel = 'Use this relay',
   });
 
   final List<RelayPreset> presets;
@@ -317,10 +386,6 @@ class RelayPickerBody extends StatelessWidget {
   final VoidCallback? onOtherPaste;
   final VoidCallback? onScan;
   final ValueChanged<String>? onTokenChanged;
-  final VoidCallback? onRetry;
-  final VoidCallback? onConfirm;
-  final VoidCallback? onRunYourOwn;
-  final String confirmLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -350,33 +415,40 @@ class RelayPickerBody extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final preset in presets)
-          MobileListRow(
-            leading: mark(preset.url == selectedUrl),
-            label: relayHost(preset.url),
-            value: preset.url == selectedUrl
-                ? status(preset.operator)
-                : preset.operator,
-            valueColor: preset.url == selectedUrl
-                ? statusColor()
-                : colors.text.secondary,
-            labelColor: preset.url == selectedUrl && result.tooOld
-                ? colors.text.muted
-                : null,
-            minRowHeight: 48,
-            onTap: onSelect == null ? null : () => onSelect!(preset),
+        MobileSurfaceCard(
+          cornerRadius: AppRadii.large,
+          child: Column(
+            children: [
+              for (final preset in presets)
+                MobileListRow(
+                  leading: mark(preset.url == selectedUrl),
+                  label: relayHost(preset.url),
+                  value: preset.url == selectedUrl
+                      ? status(preset.operator)
+                      : preset.operator,
+                  valueColor: preset.url == selectedUrl
+                      ? statusColor()
+                      : colors.text.secondary,
+                  labelColor: preset.url == selectedUrl && result.tooOld
+                      ? colors.text.muted
+                      : null,
+                  minRowHeight: 48,
+                  onTap: onSelect == null ? null : () => onSelect!(preset),
+                ),
+              MobileListRow(
+                leading: mark(custom),
+                label: 'Other address',
+                value: custom ? status(relayHost(selectedUrl)) : null,
+                valueColor: custom ? statusColor() : colors.text.secondary,
+                labelColor: custom && result.tooOld ? colors.text.muted : null,
+                minRowHeight: 48,
+                onTap: onOther,
+              ),
+            ],
           ),
-        MobileListRow(
-          leading: mark(custom),
-          label: 'Other address',
-          value: custom ? status(relayHost(selectedUrl)) : null,
-          valueColor: custom ? statusColor() : colors.text.secondary,
-          labelColor: custom && result.tooOld ? colors.text.muted : null,
-          minRowHeight: 48,
-          onTap: onOther,
         ),
         if (otherOpen) ...[
-          const SizedBox(height: AppSpacing.xxs),
+          const SizedBox(height: AppSpacing.xs),
           MobileTextField(
             controller: other,
             focusNode: otherFocus,
@@ -420,17 +492,23 @@ class RelayPickerBody extends StatelessWidget {
             _Line(otherError!, color: colors.text.destructive),
           ],
         ],
-        if (result.tooOld) ...[
+        // The current server is never picked: what it answered doesn't matter here.
+        if (selectedIsCurrent)
+          ...[]
+        else if (result.tooOld) ...[
           const SizedBox(height: AppSpacing.xs),
           _Line(
-            'It runs an older Zafe relay and can\'t hold new vaults.',
+            'It runs an older Zafe server and can\'t hold new vaults.',
             color: colors.text.secondary,
           ),
         ] else if (result.error != null) ...[
           const SizedBox(height: AppSpacing.xs),
           _Line(result.error!, color: colors.text.destructive),
         ],
-        if (info != null && !info.tooOld && !info.push) ...[
+        if (!selectedIsCurrent &&
+            info != null &&
+            !info.tooOld &&
+            !info.push) ...[
           const SizedBox(height: AppSpacing.xs),
           _Line('No notifications', color: colors.text.secondary),
         ],
@@ -447,33 +525,12 @@ class RelayPickerBody extends StatelessWidget {
             secret: true,
             controller: token!,
             focusNode: tokenFocus ?? FocusNode(),
-            hintText: 'From the relay\'s operator',
+            hintText: 'From the server\'s operator',
             textInputAction: TextInputAction.done,
             inputFormatters: [LengthLimitingTextInputFormatter(200)],
             onChanged: onTokenChanged,
           ),
         ],
-        const SizedBox(height: AppSpacing.md),
-        if (onRetry != null)
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.secondary,
-            onPressed: onRetry,
-            child: const Text('Try again'),
-          )
-        else
-          AppButton(
-            expand: true,
-            onPressed: onConfirm,
-            child: Text(confirmLabel),
-          ),
-        const SizedBox(height: AppSpacing.xs),
-        AppButton(
-          expand: true,
-          variant: AppButtonVariant.ghost,
-          onPressed: onRunYourOwn,
-          child: const Text('Run your own relay →'),
-        ),
       ],
     );
   }

@@ -6,7 +6,6 @@ import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/app_tappable.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
@@ -59,17 +58,7 @@ class ManageVaultsScreen extends ConsumerWidget {
         }
         if (context.mounted) context.go(v.ready ? '/home' : '/setup');
       },
-      trailing: AppTappable(
-        semanticsLabel: 'More',
-        onTap: () => showVaultActions(context, ref, v.id),
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Center(
-            child: AppIcon(AppIcons.more, size: 20, color: colors.icon.muted),
-          ),
-        ),
-      ),
+      trailing: VaultActionsMenu(vaultId: v.id),
     );
     return ZafeScreen(
       title: 'Vaults',

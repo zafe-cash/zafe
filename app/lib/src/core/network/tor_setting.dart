@@ -75,10 +75,10 @@ class TorSetting {
 
   /// What the setting does in its current state, for the Tor sheet.
   String get explanation => !enabled
-      ? 'Off: the relay and Zcash server see your IP address.'
+      ? 'Off: the servers Zafe uses see your IP address.'
       : switch (connection) {
           TorConnection.connected =>
-            'On: the relay and Zcash server can\'t see your IP address.',
+            'On: the servers Zafe uses can\'t see your IP address.',
           TorConnection.failed =>
             'Tor couldn\'t connect, so nothing is sent. Try again, or turn Tor off.',
           _ =>

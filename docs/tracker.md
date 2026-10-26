@@ -587,6 +587,15 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
             straggler's first write forked the old relay (writes now read the notices);
             the picker ignored an address typed without Done; the finished-move screen
             blocked the next move
+      - [x] UX rework (2026-10-27, after research: Matrix/Mastodon/Bluesky/Delta Chat/
+            SimpleX moves, Zashi/Signal/Safe settings, Apple HIG and Material sheets):
+            "server" in the UI; no app-wide relay row (Create > More options picks it,
+            older vaults get theirs saved once); one Server screen per vault with Move and
+            a waiting room (Nudge per member); moves reach members as Needs you cards; the
+            Status screen suggests a listed server after 6 h down; Settings first level
+            (Privacy with Tor first, Security, <vault>, This phone, App); full screens
+            for the server list, Zcash server, diagnostics and status; `AppMenu`,
+            `showAppConfirm`; Home pull to refresh; the live watch follows a switch
       - [ ] Leaving a fork after a move: a write that races the switch forks the old relay
             and `follow_move` then fails with `RelayForked`; no screen offers
             `node::follow_relay` for the new relay (the design's "existing fork flow")
@@ -754,8 +763,11 @@ needs a device check.
 
 ### UX issues found while testing on a phone (2026-10-12, v0.1.10)
 
-- [ ] (requested 2026-10-26) Home: pull to resync; then decide whether tapping the sync
-      status still needs its bottom sheet; "Synced" reads greyed out (check it's meant)
+- [x] (requested 2026-10-26, done 2026-10-27) Home: pull to resync; the sync status opens
+      a Status screen, not a sheet (technical detail goes to the diagnostic report).
+      "Synced" is gold by design; failures use 50% grey (`AppSyncColors.textError`)
+- [ ] Android Back with the keyboard open pops a pushed screen (seen on Send and the server
+      list over adb; check with a real gesture before changing anything)
 - [x] (done 2026-10-13) Amount screen "available" now follows the wallet; "Proposal not found" flash fixed
       (`ProposalsNotifier.refreshFresh`: actions wait for a running refresh instead of returning early, which also
       kept the page stale after cancelling); Signers copy reworded (your labels stay on your phone, members' own names

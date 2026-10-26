@@ -19,6 +19,8 @@ import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/privacy_mode_provider.dart';
 import '../../providers/proposals_provider.dart';
+import '../../providers/relay_move_provider.dart';
+import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
 import '../proposals/proposal_status.dart';
@@ -107,6 +109,41 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
   /// requests remain.
   bool _open = false;
 
+  /// A move being followed from its card, and why the last try failed.
+  bool _following = false;
+  String? _followError;
+
+  /// Move, on a move card: the unlock, then the first contact with the new server
+  /// (nothing connects to it before this tap). The card leaves once the phone moved.
+  Future<void> _follow(String link, String vaultName, String host) async {
+    if (_following) return;
+    if (!await confirmUnlock(
+      context,
+      ref,
+      reason: 'Move $vaultName to $host',
+    )) {
+      return;
+    }
+    setState(() {
+      _following = true;
+      _followError = null;
+    });
+    try {
+      await ref.read(relayMoveProvider.notifier).follow(link);
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _followError = zafeErrorMessage(
+            e,
+            fallback: 'Couldn\'t move. Try again.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _following = false);
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -124,7 +161,13 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
     final names = ref.watch(signerNamesProvider);
     final hide = ref.watch(privacyModeProvider);
     final declines = ref.watch(declinesProvider);
+    final vaultName =
+        ref.watch(activeVaultNameProvider) ??
+        ref.watch(vaultProvider.select((v) => v.summary?.name)) ??
+        '';
+    final move = moveRequest(ref.watch(relayMoveProvider));
     final waiting =
+        (move == null ? 0 : 1) +
         proposals.items
             .where(
               (p) =>
@@ -189,6 +232,35 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
                 : null,
             error: declines.failed[p.id],
           ),
+      // A move another member started, or a switch this phone hasn't followed: the same
+      // card as a request, Move instead of Approve. Your funds don't move.
+      if (move != null)
+        RequestCard(
+          key: ValueKey('move:${move.link}'),
+          tileKey: move.moverHex,
+          who: move.moved
+              ? '$vaultName moved to ${move.host}'
+              : 'Move $vaultName to ${move.host}',
+          detail: move.moved
+              ? 'Move to continue · your funds don\'t move'
+              : '${memberLabel(move.moverHex, me: me, names: names)} asked · '
+                    '${move.arrived} of ${move.members} moved · your funds don\'t move',
+          action: _following ? 'Moving...' : 'Move',
+          onTap: tap(
+            () => context.push(
+              Uri(
+                path: '/vault-server/follow',
+                queryParameters: {'link': move.link},
+              ).toString(),
+            ),
+          ),
+          onAction: () => _follow(move.link, vaultName, move.host),
+          onDecline: move.moved
+              ? null
+              : () => ref.read(relayMoveProvider.notifier).notNow(move.link),
+          declineLabel: 'Not now',
+          error: _followError,
+        ),
       for (final m in proposals.seatMoves)
         if (m.oldKeyHex != me && !m.approvals.contains(me))
           RequestCard(
@@ -393,6 +465,7 @@ class RequestCard extends StatelessWidget {
     required this.onTap,
     this.onAction,
     this.onDecline,
+    this.declineLabel = 'Decline',
     this.error,
   });
 
@@ -407,8 +480,9 @@ class RequestCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onAction;
 
-  /// Shows "Decline" next to the action (a vote), done right on the card.
+  /// Shows [declineLabel] next to the action (a vote, "Not now"), done right on the card.
   final VoidCallback? onDecline;
+  final String declineLabel;
 
   /// Why the last attempt on this card failed, shown under its buttons.
   final String? error;
@@ -491,7 +565,7 @@ class RequestCard extends StatelessWidget {
                     variant: AppButtonVariant.ghost,
                     size: AppButtonSize.medium,
                     onPressed: onDecline,
-                    child: const Text('Decline'),
+                    child: Text(declineLabel),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.xs),
@@ -523,4 +597,52 @@ class RequestCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A move for the Needs you card, from what this phone knows.
+class MoveRequest {
+  const MoveRequest({
+    required this.link,
+    required this.host,
+    required this.moverHex,
+    required this.arrived,
+    required this.members,
+    required this.moved,
+  });
+
+  final String link;
+  final String host;
+  final String moverHex;
+  final int arrived;
+  final int members;
+
+  /// The vault already switched there: this phone must move to continue.
+  final bool moved;
+}
+
+/// The move waiting on this member: one another member started (from the notice on the
+/// current server, unless put off with Not now), or a switch this phone hasn't
+/// followed. Null when there is none.
+MoveRequest? moveRequest(RelayMoveView view) {
+  final status = view.status;
+  if (status != null && status.movedElsewhere) {
+    return MoveRequest(
+      link: status.link,
+      host: status.host,
+      moverHex: status.moverHex,
+      arrived: status.arrived.length,
+      members: status.members,
+      moved: true,
+    );
+  }
+  final n = view.card;
+  if (n == null || view.twoMoves) return null;
+  return MoveRequest(
+    link: n.link,
+    host: n.host,
+    moverHex: n.moverHex,
+    arrived: n.arrived,
+    members: n.members,
+    moved: n.moved,
+  );
 }

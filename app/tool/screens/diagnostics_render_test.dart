@@ -14,7 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/diagnostics/crash_log.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
-import 'package:zafe/src/features/settings/diagnostics_sheet.dart';
+import 'package:zafe/src/features/settings/diagnostics_screen.dart';
 
 Future<void> _loadFonts() async {
   final families = <String, List<String>>{
@@ -85,15 +85,7 @@ void main() {
                 debugShowCheckedModeBanner: false,
                 builder: (context, child) =>
                     AppTheme(data: data, child: child!),
-                home: Builder(
-                  builder: (context) => Scaffold(
-                    backgroundColor: context.colors.background.window,
-                    body: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: DiagnosticsSheet(log: log),
-                    ),
-                  ),
-                ),
+                home: DiagnosticsScreen(log: log),
               ),
             ),
           ),

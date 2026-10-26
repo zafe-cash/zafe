@@ -1,13 +1,14 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 
-import '../../core/config/endpoints.dart';
 import '../../core/platform/system_settings.dart';
-import '../../core/layout/mobile/app_mobile_sheet.dart';
 import '../../core/layout/mobile/mobile_top_nav.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/app_button.dart';
+import '../../core/widgets/app_menu.dart';
 import '../../core/widgets/app_icon.dart';
 import '../../core/widgets/mobile/mobile_list_row.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
@@ -20,10 +21,12 @@ import '../../providers/privacy_mode_provider.dart';
 import '../../providers/theme_mode_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/vault_names_provider.dart';
+import '../../providers/relay_move_provider.dart';
 import '../../providers/vault_relay.dart';
-import 'endpoint_sheet.dart';
-import 'vault_relay_sheet.dart';
-import 'diagnostics_sheet.dart';
+import '../../notifications/notification_primer.dart';
+import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
+import '../vaults/vault_actions.dart' show openViewingKey;
+import 'zcash_server_screen.dart' show endpointHost;
 import 'tor_setting_row.dart';
 import '../../core/widgets/app_segmented.dart';
 import '../../core/widgets/app_switch.dart';
@@ -53,7 +56,11 @@ class SettingsScreen extends ConsumerWidget {
     final hasScreenLock = ref.watch(hasScreenLockProvider).value;
     final endpoints = ref.watch(endpointsProvider);
     final vaultRelay = ref.watch(activeVaultRelayProvider);
+    final moving = ref.watch(relayMoveProvider.select((m) => m.moving));
+    final backedUp = ref.watch(backupStatusProvider).value;
+    final notifications = ref.watch(notificationsEnabledProvider).value;
     if (summary == null) return const SizedBox.shrink();
+    final vaultName = ref.watch(activeVaultNameProvider) ?? summary.name;
 
     final rowStyle = AppTypography.labelLarge.copyWith(
       fontWeight: FontWeight.w400,
@@ -97,25 +104,11 @@ class SettingsScreen extends ConsumerWidget {
                   112,
                 ),
                 children: [
-                  _Group(
-                    title: 'Security',
-                    rows: [
-                      row(
-                        icon: appLock == AppLockDelay.off
-                            ? AppIcons.unlock
-                            : AppIcons.lock,
-                        label: 'Lock app',
-                        value: appLock.label,
-                        chevron: true,
-                        onTap: () => _pickAppLock(context, ref, appLock),
-                      ),
-                      if (hasScreenLock == false) const _NoScreenLockNote(),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.md),
+                  // What people come looking for first: privacy.
                   _Group(
                     title: 'Privacy',
                     rows: [
+                      TorSettingRow(rowStyle: rowStyle),
                       row(
                         icon: hideAmounts ? AppIcons.eyeClosed : AppIcons.eye,
                         label: 'Hide amounts',
@@ -128,59 +121,115 @@ class SettingsScreen extends ConsumerWidget {
                               ref.read(privacyModeProvider.notifier).toggle(),
                         ),
                       ),
-                      TorSettingRow(rowStyle: rowStyle),
-                      row(
-                        icon: AppIcons.help,
-                        label: 'Diagnostic report',
-                        value: 'Stays on this phone',
-                        chevron: true,
-                        onTap: () => showDiagnosticsSheet(context),
-                      ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
                   _Group(
-                    title: 'Servers',
+                    title: 'Security',
                     rows: [
-                      // The vault's relay is the whole group's; the Zcash server and
-                      // the relay for new vaults are this phone's.
-                      row(
-                        icon: AppIcons.users,
-                        label: vaultRelayTitle(
-                          ref.watch(activeVaultNameProvider) ?? summary.name,
+                      AppMenu(
+                        items: [
+                          for (final d in AppLockDelay.values)
+                            AppMenuItem(
+                              icon: d == AppLockDelay.off
+                                  ? AppIcons.unlock
+                                  : AppIcons.lock,
+                              label: d.label,
+                              selected: d == appLock,
+                              onTap: () =>
+                                  _setAppLock(context, ref, appLock, d),
+                            ),
+                        ],
+                        builder: (context, open) => row(
+                          icon: appLock == AppLockDelay.off
+                              ? AppIcons.unlock
+                              : AppIcons.lock,
+                          label: 'Lock app',
+                          value: appLock.label,
+                          chevron: true,
+                          onTap: open,
                         ),
-                        value: vaultRelay == null
+                      ),
+                      if (hasScreenLock == false) const _NoScreenLockNote(),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  // The open vault's own settings, by its name.
+                  _Group(
+                    title: vaultName,
+                    rows: [
+                      row(
+                        icon: AppIcons.lock,
+                        label: 'Back up',
+                        value: switch (backedUp) {
+                          true => 'Saved',
+                          false => 'Not yet',
+                          null => null,
+                        },
+                        chevron: true,
+                        onTap: () => context.push('/export'),
+                      ),
+                      row(
+                        icon: AppIcons.key,
+                        label: 'Viewing key',
+                        chevron: true,
+                        onTap: () => openViewingKey(context, ref),
+                      ),
+                      row(
+                        icon: AppIcons.shieldKeyhole,
+                        label: 'How it\'s protected',
+                        chevron: true,
+                        onTap: () => context.push('/vault-protection'),
+                      ),
+                      row(
+                        icon: AppIcons.server,
+                        label: 'Server',
+                        value: moving
+                            ? 'Moving...'
+                            : vaultRelay == null
                             ? null
                             : endpointHost(vaultRelay.url),
                         chevron: true,
-                        onTap: () => showVaultRelaySheet(context),
-                      ),
-                      row(
-                        icon: AppIcons.endpoint,
-                        label: 'Zcash server · this phone',
-                        value: endpointHost(endpoints.lightwalletdUrl),
-                        chevron: true,
-                        onTap: () => showEndpointSheet(
-                          context,
-                          ref,
-                          EndpointKind.lightwalletd,
-                        ),
-                      ),
-                      row(
-                        icon: AppIcons.endpoint,
-                        label: 'Relay for new vaults',
-                        value: endpoints.relayIsPlaceholder
-                            ? 'Not configured'
-                            : endpointHost(endpoints.relayUrl),
-                        chevron: true,
-                        onTap: () =>
-                            showEndpointSheet(context, ref, EndpointKind.relay),
+                        onTap: () => context.push('/vault-server'),
                       ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
                   _Group(
-                    title: 'System',
+                    title: 'This phone',
+                    rows: [
+                      row(
+                        icon: AppIcons.globe,
+                        label: 'Zcash server',
+                        value: endpointHost(endpoints.lightwalletdUrl),
+                        chevron: true,
+                        onTap: () => context.push('/zcash-server'),
+                      ),
+                      row(
+                        icon: AppIcons.bell,
+                        label: 'Notifications',
+                        value: switch (notifications) {
+                          true => 'On',
+                          false => 'Off',
+                          null => null,
+                        },
+                        chevron: true,
+                        onTap: () async {
+                          // Off: the system prompt (or the app's settings); on, only
+                          // the system settings can turn them off.
+                          if (notifications == true) {
+                            await openAppSettings();
+                          } else {
+                            await enableNotifications(ref);
+                          }
+                          ref.invalidate(notificationsEnabledProvider);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _Group(
+                    title: 'App',
                     rows: [
                       MobileListRow(
                         leading: AppIcon(
@@ -217,6 +266,13 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                       ),
                       row(
+                        icon: AppIcons.help,
+                        label: 'Diagnostic report',
+                        value: 'Stays on this phone',
+                        chevron: true,
+                        onTap: () => context.push('/diagnostics'),
+                      ),
+                      row(
                         icon: AppIcons.book,
                         label: 'Open-source licenses',
                         chevron: true,
@@ -247,30 +303,15 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  /// The viewing key reveals the vault's whole history, so it asks for an unlock first.
   /// Turning the app lock off or making it wait longer needs an unlock; making it
   /// stricter doesn't.
-  Future<void> _pickAppLock(
+  Future<void> _setAppLock(
     BuildContext context,
     WidgetRef ref,
     AppLockDelay current,
+    AppLockDelay selected,
   ) async {
-    final selected = await showAppMobileSheet<AppLockDelay>(
-      context: context,
-      builder: (_) => _OptionsSheet<AppLockDelay>(
-        title: 'Lock app',
-        current: current,
-        options: [
-          for (final d in AppLockDelay.values)
-            (
-              d,
-              d == AppLockDelay.off ? AppIcons.unlock : AppIcons.lock,
-              d.label,
-            ),
-        ],
-      ),
-    );
-    if (selected == null || selected == current || !context.mounted) return;
+    if (selected == current) return;
     if (current.weakenedBy(selected) &&
         !await confirmUnlock(
           context,
@@ -397,125 +438,6 @@ class _Group extends StatelessWidget {
             ),
           ),
           ...rows,
-        ],
-      ),
-    );
-  }
-}
-
-/// Theme picker: option cards with a radio mark, committed with Update.
-/// Pick one of a few options (theme, app lock); pops the chosen value on "Update".
-class _OptionsSheet<T> extends StatefulWidget {
-  const _OptionsSheet({
-    required this.title,
-    required this.options,
-    required this.current,
-  });
-  final String title;
-  final List<(T, String, String)> options;
-  final T current;
-
-  @override
-  State<_OptionsSheet<T>> createState() => _OptionsSheetState<T>();
-}
-
-class _OptionsSheetState<T> extends State<_OptionsSheet<T>> {
-  late T _selected = widget.current;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return MobileModalScaffold(
-      title: widget.title,
-      onClose: () => Navigator.of(context).pop(),
-      bodyGap: AppSpacing.md,
-      bottomPadding: AppSpacing.base,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final (mode, icon, label) in widget.options) ...[
-            Semantics(
-              button: true,
-              selected: mode == _selected,
-              label: label,
-              excludeSemantics: true,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _selected = mode),
-                child: Container(
-                  height: 64,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colors.background.ground,
-                    borderRadius: BorderRadius.circular(AppRadii.medium),
-                    border: Border.all(
-                      color: mode == _selected
-                          ? colors.border.strong
-                          : colors.border.subtle,
-                      width: mode == _selected ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Opacity(
-                        opacity: mode == _selected ? 1 : 0.5,
-                        child: AppIcon(
-                          icon,
-                          size: 20,
-                          color: colors.icon.accent,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.s),
-                      Expanded(
-                        child: Text(
-                          label,
-                          style: AppTypography.bodyMediumStrong.copyWith(
-                            color: colors.text.accent,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: mode == _selected
-                              ? colors.background.inverse
-                              : colors.background.raised,
-                        ),
-                        child: mode == _selected
-                            ? Center(
-                                child: AppIcon(
-                                  AppIcons.check,
-                                  size: 14,
-                                  color: colors.text.inverse,
-                                ),
-                              )
-                            : null,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-          ],
-          const SizedBox(height: AppSpacing.sm),
-          AppButton(
-            expand: true,
-            onPressed: () => Navigator.of(context).pop(_selected),
-            child: const Text('Update'),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          AppButton(
-            expand: true,
-            variant: AppButtonVariant.ghost,
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
         ],
       ),
     );

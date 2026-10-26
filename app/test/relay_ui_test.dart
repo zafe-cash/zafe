@@ -5,7 +5,7 @@ import 'package:zafe/src/core/config/network_config.dart';
 import 'package:zafe/src/core/config/relay_presets.dart';
 import 'package:zafe/src/core/errors/sync_failure.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
-import 'package:zafe/src/features/home/sync_status_sheet.dart'
+import 'package:zafe/src/features/home/sync_status_screen.dart'
     show homeStatusLabel;
 import 'package:zafe/src/features/onboarding/join_vault_screen.dart'
     show inviteFact;
@@ -104,11 +104,11 @@ void main() {
           relayDownSince: DateTime(2026, 10, 25, 9, 14),
           now: now,
         ),
-        'Can\'t reach relay · since 09:14',
+        'Can\'t reach server · since 09:14',
       );
-      expect(homeStatusLabel(f), 'Can\'t reach relay');
+      expect(homeStatusLabel(f), 'Can\'t reach server');
       expect(f.explanation, contains('funds are safe'));
-      expect(f.explanation, contains('until the relay is back'));
+      expect(f.explanation, contains('until the server is back'));
     });
 
     test('the spend alert says when it ran from this phone\'s history', () {
@@ -149,16 +149,11 @@ void main() {
                         MaterialPageRoute(
                           builder: (_) => AppTheme(
                             data: AppThemeData.dark,
-                            child: Material(
-                              child: SingleChildScrollView(
-                                child: RelayPickerSheet(
-                                  title: 'Move to',
-                                  initialUrl: current,
-                                  currentUrl: current,
-                                  check: (_) async =>
-                                      RelayCheckResult.ok(_check()),
-                                ),
-                              ),
+                            child: RelayPickerScreen(
+                              title: 'Move to',
+                              initialUrl: current,
+                              currentUrl: current,
+                              check: (_) async => RelayCheckResult.ok(_check()),
                             ),
                           ),
                         ),
@@ -177,10 +172,10 @@ void main() {
       return popped;
     }
 
-    testWidgets('the current relay is shown but never chosen', (tester) async {
+    testWidgets('the current server is shown but never chosen', (tester) async {
       final popped = await open(tester, 'https://relay-a.example.org');
       expect(find.text('Current'), findsOneWidget);
-      await tester.tap(find.text('Use this relay'));
+      await tester.tap(find.text('Use this server'));
       await tester.pumpAndSettle();
       expect(popped, isEmpty);
     });
@@ -191,7 +186,7 @@ void main() {
       final popped = await open(tester, 'https://relay-a.example.org');
       await tester.enterText(find.byType(TextField), 'relay-b.example.org');
       await tester.pump();
-      await tester.tap(find.text('Use this relay'));
+      await tester.tap(find.text('Use this server'));
       await tester.pumpAndSettle();
       expect(popped.single?.url, 'https://relay-b.example.org');
     });

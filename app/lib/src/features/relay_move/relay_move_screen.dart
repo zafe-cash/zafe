@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../core/config/relay_presets.dart';
 import '../../core/formatting/member_label.dart';
@@ -10,25 +9,21 @@ import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
-import '../../core/widgets/app_icon.dart';
-import '../../core/widgets/mobile/mobile_list_row.dart';
-import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../providers/endpoints_provider.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/relay_move_provider.dart';
 import '../../providers/tor_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
-import '../../providers/vault_relay.dart';
 import '../../rust/api/relay_move.dart' as rust;
 import '../../core/errors/sync_failure.dart';
 import '../home/home_screen.dart' show NoticeCard;
-import '../home/sync_status_sheet.dart' show currentSyncFailure;
-import '../settings/relay_picker.dart';
+import '../home/sync_status_screen.dart' show currentSyncFailure;
 
-/// "Payments switch when 3 of 4 have moved."
-String paymentsSwitchText(int needed, int members) =>
-    'Payments switch when $needed of $members have moved.';
+/// "Grants switches when 3 of 4 have moved." (the move's m, which can be more than a
+/// payment's t: the move screens never show it as a payment threshold).
+String switchesWhenText(String vaultName, int needed, int members) =>
+    '$vaultName switches when $needed of $members have moved.';
 
 /// "Payments resume when 1 more member moves to relay.dao.org." (old relay dead, fewer
 /// than m moved: nobody can pay until enough members move).
@@ -48,15 +43,15 @@ String mustUpdateText(List<String> names) {
   return '$who must update Zafe first.';
 }
 
-/// The relay sends no notifications: only Zafe's own relays can (docs/relay-move.md §10).
+/// The server sends no notifications: only Zafe's own servers can (docs/relay-move.md §10).
 bool relayHasNoPush(String url) => relayPresetFor(url)?.operator != 'Zafe';
 
-/// A relay that isn't on the built-in list learns this phone's IP address unless Tor is on.
+/// A server that isn't on the built-in list learns this phone's IP address unless Tor is on.
 bool relaySeesIp(String url, {required bool tor}) =>
     !tor && relayPresetFor(url) == null;
 
-/// The relay move pages' title: short, so it fits one line; the sentence is the heading.
-const kRelayMoveTitle = 'Relay';
+/// The move pages' title: short, so it fits one line; the sentence is the heading.
+const kRelayMoveTitle = 'Server';
 
 /// A move page's heading ("Move Grants to relay.dao.org?"), wrapping as needed.
 class MoveHeading extends StatelessWidget {
@@ -75,276 +70,6 @@ class MoveHeading extends StatelessWidget {
   );
 }
 
-/// Settings > Relay > Move to another relay: pick the relay, Move (unlock), share the
-/// link; then who has moved, until the vault switches.
-class RelayMoveScreen extends ConsumerStatefulWidget {
-  const RelayMoveScreen({super.key});
-
-  @override
-  ConsumerState<RelayMoveScreen> createState() => _RelayMoveScreenState();
-}
-
-class _RelayMoveScreenState extends ConsumerState<RelayMoveScreen> {
-  RelayChoice? _choice;
-  List<String>? _blockers;
-
-  /// This visit showed the move in progress: its switch is then shown once, with Done.
-  /// Opened later, the screen starts the next move.
-  bool _sawMoving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    ref
-        .read(relayMoveProvider.notifier)
-        .blockers()
-        .then(
-          (b) {
-            if (mounted) setState(() => _blockers = b);
-          },
-          onError: (_) {
-            if (mounted) setState(() => _blockers = const []);
-          },
-        );
-    ref.read(relayMoveProvider.notifier).refresh();
-  }
-
-  String get _vaultName =>
-      ref.read(activeVaultNameProvider) ??
-      ref.read(vaultProvider).summary?.name ??
-      'the vault';
-
-  Future<void> _pick() async {
-    final current = ref.read(activeVaultRelayProvider)?.url ?? '';
-    final choice = await showRelayPicker(
-      context,
-      title: 'Move to',
-      selectedUrl: _choice?.url ?? current,
-      currentUrl: current,
-      token: _choice?.token,
-      confirmLabel: 'Use this relay',
-    );
-    if (choice != null && mounted) setState(() => _choice = choice);
-  }
-
-  Future<void> _share(String host, String link) => SharePlus.instance.share(
-    ShareParams(
-      text: rust.moveShareText(vaultName: _vaultName, host: host, link: link),
-    ),
-  );
-
-  Future<void> _move() async {
-    final choice = _choice!;
-    if (!await confirmUnlock(
-      context,
-      ref,
-      reason: 'Move $_vaultName to ${relayHost(choice.url)}',
-    )) {
-      throw const ActionCancelled();
-    }
-    final started = await ref
-        .read(relayMoveProvider.notifier)
-        .start(choice.url, token: choice.token);
-    if (mounted) await _share(started.host, started.link);
-  }
-
-  Future<void> _cancel() async {
-    await ref.read(relayMoveProvider.notifier).cancel();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final view = ref.watch(relayMoveProvider);
-    final vault = ref.watch(vaultProvider);
-    final names = ref.watch(signerNamesProvider);
-    final me = vault.myKeyHex;
-    final name =
-        ref.watch(activeVaultNameProvider) ?? vault.summary?.name ?? '';
-    final status = view.status;
-    if (status != null && view.moving) {
-      _sawMoving = true;
-      final members = vault.summary?.members ?? const <String>[];
-      return ZafeScreen(
-        title: kRelayMoveTitle,
-        children: [
-          MoveHeading('Moving to ${status.host}'),
-          MoveProgressBody(
-            members: [
-              for (final m in [?me, ...members.where((m) => m != me)])
-                (
-                  memberLabel(m, me: me, names: names),
-                  status.arrived.contains(m),
-                ),
-            ],
-            needed: status.needed,
-            total: status.members,
-            onShare: () => _share(status.host, status.link),
-            onCancel: _cancel,
-          ),
-        ],
-      );
-    }
-    if (status != null && status.switched && status.mine && _sawMoving) {
-      return ZafeScreen(
-        title: kRelayMoveTitle,
-        bottom: AppButton(
-          expand: true,
-          onPressed: () => context.pop(),
-          child: const Text('Done'),
-        ),
-        children: [MovedBody(vaultName: name, host: status.host)],
-      );
-    }
-    final blockers = _blockers;
-    return ZafeScreen(
-      title: kRelayMoveTitle,
-      bottom: ActionButton(
-        label: 'Move',
-        enabled: _choice != null && blockers != null && blockers.isEmpty,
-        errorFallback: 'Couldn\'t start the move. Try again.',
-        onPressed: _move,
-      ),
-      children: [
-        MoveHeading('Move $name to another relay'),
-        MoveStartBody(
-          host: _choice == null ? null : relayHost(_choice!.url),
-          onPick: _pick,
-          mustUpdate: blockers == null || blockers.isEmpty
-              ? null
-              : mustUpdateText([
-                  for (final b in blockers)
-                    memberLabel(b, me: me, names: names),
-                ]),
-        ),
-      ],
-    );
-  }
-}
-
-/// Before the move: the relay to move to, how the others follow, who must update.
-class MoveStartBody extends StatelessWidget {
-  const MoveStartBody({
-    super.key,
-    required this.host,
-    this.onPick,
-    this.mustUpdate,
-  });
-
-  /// The picked relay, or null before one is picked.
-  final String? host;
-  final VoidCallback? onPick;
-  final String? mustUpdate;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        MobileSurfaceCard(
-          cornerRadius: AppRadii.large,
-          child: MobileListRow(
-            leading: const AppIcon(AppIcons.endpoint, size: 20),
-            label: 'Relay',
-            value: host ?? 'Choose',
-            showChevron: true,
-            minRowHeight: 44,
-            onTap: onPick,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          'Everyone moves by opening a link you send them.',
-          style: AppTypography.bodyMedium.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        if (mustUpdate != null) ...[
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            mustUpdate!,
-            style: AppTypography.bodyMedium.copyWith(
-              color: colors.text.warning,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// During the move: who has moved, when payments switch, share, cancel.
-class MoveProgressBody extends StatelessWidget {
-  const MoveProgressBody({
-    super.key,
-    required this.members,
-    required this.needed,
-    required this.total,
-    this.resume,
-    this.onShare,
-    this.onCancel,
-  });
-
-  /// (label, moved), this phone first.
-  final List<(String, bool)> members;
-  final int needed;
-  final int total;
-
-  /// "Payments resume when ..." when the old relay is down.
-  final String? resume;
-  final Future<void> Function()? onShare;
-  final Future<void> Function()? onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        MobileSurfaceCard(
-          cornerRadius: AppRadii.large,
-          child: Column(
-            children: [
-              for (final (label, moved) in members)
-                MobileListRow(
-                  leading: AppIcon(
-                    moved ? AppIcons.checkCircle : AppIcons.time,
-                    size: 20,
-                    active: moved,
-                    color: moved ? colors.icon.accent : colors.icon.muted,
-                  ),
-                  label: label,
-                  value: moved ? null : 'not yet',
-                  minRowHeight: 44,
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          resume ?? paymentsSwitchText(needed, total),
-          style: AppTypography.bodyMedium.copyWith(
-            color: colors.text.secondary,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        ActionButton(
-          label: 'Share link',
-          variant: AppButtonVariant.secondary,
-          onPressed: onShare ?? () async {},
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        ActionButton(
-          label: 'Cancel move',
-          variant: AppButtonVariant.ghost,
-          errorFallback: 'Couldn\'t cancel. Try again.',
-          onPressed: onCancel ?? () async {},
-        ),
-      ],
-    );
-  }
-}
-
 /// After the switch, for the mover.
 class MovedBody extends StatelessWidget {
   const MovedBody({super.key, required this.vaultName, required this.host});
@@ -357,7 +82,7 @@ class MovedBody extends StatelessWidget {
     children: [
       MoveHeading('$vaultName moved to $host'),
       Text(
-        'Members who haven\'t moved yet can still open your link.',
+        'Members who haven\'t moved yet see it in Zafe.',
         style: AppTypography.bodyMedium.copyWith(
           color: context.colors.text.secondary,
         ),
@@ -366,8 +91,7 @@ class MovedBody extends StatelessWidget {
   );
 }
 
-/// Following a move, from its link or the Home card. Nothing connects to the new relay
-/// until Move.
+/// Following a move from its link. Nothing connects to the new server until Move.
 class FollowMoveScreen extends ConsumerWidget {
   const FollowMoveScreen({super.key, required this.link});
 
@@ -511,7 +235,7 @@ class FollowMoveBody extends StatelessWidget {
       'Your funds don\'t move.',
     ];
     final facts = <String>[
-      if (noPush) 'No notifications on this relay',
+      if (noPush) 'No notifications on this server',
       if (seesIp) '$host will see your IP address. Tor hides it.',
     ];
     return Column(
@@ -535,9 +259,9 @@ class FollowMoveBody extends StatelessWidget {
   }
 }
 
-/// The Home card for a move: one another member started ("Move Grants to
-/// relay.dao.org?"), or a switch this phone hasn't followed ("Grants moved to ...").
-/// "Not now" on the follow screen hides it until the app starts again.
+/// Home, under Needs you: this phone's own move while it runs ("Moving Grants to
+/// relay.dao.org · 1 of 3 moved", opens the Server screen), or two moves found. A move
+/// another member started is a Needs you card ([NeedsYou]).
 class RelayMoveCard extends ConsumerWidget {
   const RelayMoveCard({super.key, this.gap = AppSpacing.md});
   final double gap;
@@ -546,59 +270,33 @@ class RelayMoveCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final view = ref.watch(relayMoveProvider);
     final vault = ref.watch(vaultProvider);
-    final names = ref.watch(signerNamesProvider);
     final name =
         ref.watch(activeVaultNameProvider) ?? vault.summary?.name ?? '';
-    final status = view.status;
-    (String, String, String)? card;
-    final n = view.card;
-    if (status != null &&
-        status.movedElsewhere &&
-        !view.notNow.contains(status.link)) {
-      card = (
-        'Moved to ${status.host}',
-        movedToText(name, status.host),
-        status.link,
-      );
-    } else if (n != null && n.moved) {
-      card = ('Moved to ${n.host}', movedToText(name, n.host), n.link);
-    } else if (n != null) {
-      final mover = memberLabel(n.moverHex, me: vault.myKeyHex, names: names);
-      card = (
-        'Move to ${n.host}?',
-        '$mover is moving $name. ${n.arrived} of ${n.members} have moved.',
-        n.link,
-      );
-    }
     if (view.twoMoves) {
       return Padding(
         padding: EdgeInsets.only(bottom: gap),
-        child: const NoticeCard(
+        child: NoticeCard(
           title: 'Two moves found',
-          body: 'Ask your group which relay to use.',
+          body: 'Ask your group which server to use.',
+          onTap: () => context.push('/vault-server'),
         ),
       );
     }
-    if (card == null) return const SizedBox.shrink();
-    final (title, body, link) = card;
+    final status = view.status;
+    if (status == null || !view.moving) return const SizedBox.shrink();
     return Padding(
       padding: EdgeInsets.only(bottom: gap),
       child: NoticeCard(
-        title: title,
-        body: body,
+        title: 'Moving $name to ${status.host}',
+        body: '${status.arrived.length} of ${status.members} moved',
         warning: false,
-        onTap: () => context.push(
-          Uri(
-            path: '/relay-move/follow',
-            queryParameters: {'link': link},
-          ).toString(),
-        ),
+        onTap: () => context.push('/vault-server'),
       ),
     );
   }
 }
 
-/// The payment screen's line while the vault's relay is down and a move hasn't reached m
+/// The payment screen's line while the vault's server is down and a move hasn't reached m
 /// yet: "Payments resume when 1 more member moves to relay.dao.org."
 class PaymentsResumeLine extends ConsumerWidget {
   const PaymentsResumeLine({super.key});

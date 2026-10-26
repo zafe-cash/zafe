@@ -13,9 +13,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/config/lightwalletd_presets.dart';
-import 'package:zafe/src/core/layout/mobile/app_mobile_sheet.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
-import 'package:zafe/src/features/settings/endpoint_sheet.dart';
+import 'package:zafe/src/features/settings/zcash_server_screen.dart';
 import 'package:zafe/src/providers/server_failover_provider.dart';
 
 Future<void> _loadFonts() async {
@@ -81,16 +80,12 @@ void main() {
                       padding: const EdgeInsets.all(16),
                       child: Material(
                         type: MaterialType.transparency,
-                        child: MobileModalScaffold(
-                          title: 'Zcash server',
-                          onClose: () {},
-                          child: LightwalletdServerList(
-                            presets: kMainnetLightwalletdPresets,
-                            selectedUrl: 'https://eu.zec.rocks:443',
-                            probes: _probes,
-                            onSelect: (_) {},
-                            onCustom: () {},
-                          ),
+                        child: LightwalletdServerList(
+                          presets: kMainnetLightwalletdPresets,
+                          selectedUrl: 'https://eu.zec.rocks:443',
+                          probes: _probes,
+                          onSelect: (_) {},
+                          onCustom: () {},
                         ),
                       ),
                     ),

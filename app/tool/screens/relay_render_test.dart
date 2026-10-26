@@ -15,7 +15,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/config/relay_presets.dart';
-import 'package:zafe/src/core/layout/mobile/app_mobile_sheet.dart';
 import 'package:zafe/src/core/layout/mobile/mobile_top_nav.dart';
 import 'package:zafe/src/core/layout/mobile/zafe_screen.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
@@ -27,7 +26,6 @@ import 'package:zafe/src/features/onboarding/create_vault_screen.dart';
 import 'package:zafe/src/features/onboarding/join_vault_screen.dart';
 import 'package:zafe/src/features/recover/recover_screen.dart';
 import 'package:zafe/src/features/settings/relay_picker.dart';
-import 'package:zafe/src/features/settings/vault_relay_sheet.dart';
 import 'package:zafe/src/features/signers/replace_signer_screen.dart';
 import 'package:zafe/src/notifications/vault_updates.dart';
 import 'package:zafe/src/rust/api/endpoints.dart';
@@ -73,36 +71,34 @@ Widget picker(
   RelayCheckResult result, {
   bool other = false,
   bool token = false,
-}) => MobileModalScaffold(
-  title: 'Relay',
-  onClose: _noop,
-  child: RelayPickerBody(
-    presets: kMainnetRelayPresets,
-    selectedUrl: selectedUrl,
-    result: result,
-    otherOpen: other,
-    other: TextEditingController(text: other ? relayHost(selectedUrl) : ''),
-    otherFocus: FocusNode(),
-    token: token ? TextEditingController() : null,
-    tokenFocus: FocusNode(),
-    onSelect: (_) {},
-    onOther: _noop,
-    onConfirm: result.usable && !token ? _noop : null,
-    onRetry: result.error != null ? _noop : null,
-    onRunYourOwn: _noop,
-  ),
+}) => Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    RelayPickerBody(
+      presets: kMainnetRelayPresets,
+      selectedUrl: selectedUrl,
+      result: result,
+      otherOpen: other,
+      other: TextEditingController(text: other ? relayHost(selectedUrl) : ''),
+      otherFocus: FocusNode(),
+      token: token ? TextEditingController() : null,
+      tokenFocus: FocusNode(),
+      onSelect: (_) {},
+      onOther: _noop,
+    ),
+  ],
 );
 
 /// (name, page title or null for a sheet, content)
 List<(String, String?, Widget)> relayCases() => [
   (
     'picker_ours',
-    null,
+    'Server',
     picker(kMainnetRelayUrlForPreview, RelayCheckResult.ok(relayInfo())),
   ),
   (
     'picker_other_token',
-    null,
+    'Server',
     picker(
       'https://relay.dao.org',
       RelayCheckResult.ok(relayInfo(push: false, token: true)),
@@ -112,7 +108,7 @@ List<(String, String?, Widget)> relayCases() => [
   ),
   (
     'picker_too_old',
-    null,
+    'Server',
     picker(
       'https://old.relay.example',
       RelayCheckResult.ok(relayInfo(tooOld: true)),
@@ -121,26 +117,10 @@ List<(String, String?, Widget)> relayCases() => [
   ),
   (
     'picker_unreachable',
-    null,
+    'Server',
     picker(
       kMainnetRelayUrlForPreview,
       const RelayCheckResult.failed('Couldn\'t connect.'),
-    ),
-  ),
-  (
-    'vault_relay',
-    null,
-    MobileModalScaffold(
-      title: vaultRelayTitle('Grants committee'),
-      titleMaxLines: 2,
-      onClose: _noop,
-      child: VaultRelayBody(
-        url: 'https://relay.dao.org',
-        hasCreateToken: false,
-        result: RelayCheckResult.ok(relayInfo(push: false, token: true)),
-        token: TextEditingController(),
-        tokenFocus: FocusNode(),
-      ),
     ),
   ),
   (
@@ -150,24 +130,17 @@ List<(String, String?, Widget)> relayCases() => [
       cornerRadius: AppRadii.large,
       child: Column(
         children: [
-          MobileListRow(
-            leading: const AppIcon(AppIcons.users, size: 20),
-            label: vaultRelayTitle('Grants committee'),
+          const MobileListRow(
+            leading: AppIcon(AppIcons.server, size: 20),
+            label: 'Server',
             value: 'relay.dao.org',
             showChevron: true,
             minRowHeight: 44,
           ),
           const MobileListRow(
-            leading: AppIcon(AppIcons.endpoint, size: 20),
-            label: 'Zcash server · this phone',
+            leading: AppIcon(AppIcons.globe, size: 20),
+            label: 'Zcash server',
             value: 'zec.rocks',
-            showChevron: true,
-            minRowHeight: 44,
-          ),
-          const MobileListRow(
-            leading: AppIcon(AppIcons.endpoint, size: 20),
-            label: 'Relay for new vaults',
-            value: 'relay.zafe.cash',
             showChevron: true,
             minRowHeight: 44,
           ),

@@ -7,6 +7,7 @@ import '../../core/layout/mobile/mobile_top_scroll_fade.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/security/unlock_gate.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/app_confirm.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
@@ -159,27 +160,16 @@ Future<void> _takeOver(
   String stalled,
   String name,
 ) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (c) => AlertDialog(
-      title: Text('Help instead of $name?'),
-      content: Text(
+  final ok = await showAppConfirm(
+    context,
+    title: 'Help instead of $name?',
+    body:
         'Your phone takes $name\'s place and the rebuild starts over. Only do this '
         'if $name can\'t open Zafe for a while.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(c, false),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(c, true),
-          child: const Text('Help instead'),
-        ),
-      ],
-    ),
+    confirmLabel: 'Help instead',
+    destructive: false,
   );
-  if (ok != true || !context.mounted) throw const ActionCancelled();
+  if (!ok || !context.mounted) throw const ActionCancelled();
   if (!await confirmUnlock(context, ref, reason: 'Help rebuild a key')) {
     throw const ActionCancelled();
   }

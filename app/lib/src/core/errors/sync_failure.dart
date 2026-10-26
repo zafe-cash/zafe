@@ -73,19 +73,19 @@ class SyncFailure {
   String get statusLabel => switch (kind) {
     SyncFailureKind.offline => 'Offline',
     SyncFailureKind.lightwalletdUnreachable => 'Can\'t reach Zcash server',
-    SyncFailureKind.relayUnreachable => 'Can\'t reach relay',
+    SyncFailureKind.relayUnreachable => 'Can\'t reach server',
     SyncFailureKind.tls => 'Connection not secure',
     SyncFailureKind.timeout => 'Server not responding',
     SyncFailureKind.serverBehind => 'Server behind',
     SyncFailureKind.wrongNetwork => 'Wrong network',
     SyncFailureKind.walletDatabase => 'Storage problem',
     SyncFailureKind.updateRequired => 'Update needed',
-    SyncFailureKind.relayOutdated => 'Relay outdated',
-    SyncFailureKind.relayRolledBack => 'Relay lost data',
-    SyncFailureKind.relayLostVault => 'Relay lost the vault',
-    SyncFailureKind.relayForked => 'Relay not trusted',
+    SyncFailureKind.relayOutdated => 'Server outdated',
+    SyncFailureKind.relayRolledBack => 'Server lost data',
+    SyncFailureKind.relayLostVault => 'Server lost the vault',
+    SyncFailureKind.relayForked => 'Server not trusted',
     SyncFailureKind.logCopyInvalid => 'History damaged',
-    SyncFailureKind.relayMembership => 'Relay not trusted',
+    SyncFailureKind.relayMembership => 'Server not trusted',
     SyncFailureKind.torConnecting => 'Connecting to Tor...',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
@@ -98,19 +98,19 @@ class SyncFailure {
   String get title => switch (kind) {
     SyncFailureKind.offline => 'You seem to be offline',
     SyncFailureKind.lightwalletdUnreachable => 'Can\'t reach the Zcash server',
-    SyncFailureKind.relayUnreachable => 'Can\'t reach the relay',
+    SyncFailureKind.relayUnreachable => 'Can\'t reach the server',
     SyncFailureKind.tls => 'Secure connection failed',
     SyncFailureKind.timeout => 'The server isn\'t responding',
     SyncFailureKind.serverBehind => 'The Zcash server is behind',
     SyncFailureKind.wrongNetwork => 'The Zcash server is on another network',
     SyncFailureKind.walletDatabase => 'Wallet storage problem',
     SyncFailureKind.updateRequired => 'Update Zafe',
-    SyncFailureKind.relayOutdated => 'The relay needs an update',
-    SyncFailureKind.relayRolledBack => 'The relay lost part of the vault',
-    SyncFailureKind.relayLostVault => 'The relay lost the vault',
-    SyncFailureKind.relayForked => 'The relay shows another history',
+    SyncFailureKind.relayOutdated => 'The server needs an update',
+    SyncFailureKind.relayRolledBack => 'The server lost part of the vault',
+    SyncFailureKind.relayLostVault => 'The server lost the vault',
+    SyncFailureKind.relayForked => 'The server shows another history',
     SyncFailureKind.logCopyInvalid => 'This phone\'s saved history is damaged',
-    SyncFailureKind.relayMembership => 'The relay lists other members',
+    SyncFailureKind.relayMembership => 'The server lists other members',
     SyncFailureKind.torConnecting => 'Connecting to Tor',
     SyncFailureKind.torFailed => 'Tor couldn\'t connect',
     SyncFailureKind.other => 'Sync failed',
@@ -119,12 +119,12 @@ class SyncFailure {
   /// What happened and what to do, in a sentence or two.
   String get explanation => switch (kind) {
     SyncFailureKind.offline =>
-      'Neither the Zcash server nor the relay answers. Check this phone\'s '
+      'Neither the Zcash server nor the vault\'s server answers. Check this phone\'s '
           'internet connection. Zafe keeps trying.',
     SyncFailureKind.lightwalletdUnreachable =>
       'Can\'t reach the Zcash server. Zafe keeps trying; if it lasts, check its address in Settings.',
     SyncFailureKind.relayUnreachable =>
-      'Payments can\'t be approved until the relay is back. Your funds are safe.',
+      'Payments can\'t be approved until the server is back. Your funds are safe.',
     SyncFailureKind.tls =>
       'The server\'s security certificate isn\'t valid. Check its address in Settings.',
     SyncFailureKind.timeout =>
@@ -137,20 +137,20 @@ class SyncFailure {
     SyncFailureKind.walletDatabase =>
       'This phone couldn\'t read the vault\'s wallet data. Your keys and funds are safe; the data can be rebuilt.',
     SyncFailureKind.updateRequired =>
-      'The relay or another member uses a newer version of Zafe. Update the app.',
+      'The server or another member uses a newer version of Zafe. Update the app.',
     SyncFailureKind.relayOutdated =>
-      'The relay runs an older version of Zafe than this app. Ask whoever runs it '
+      'The server runs an older version of Zafe than this app. Ask whoever runs it '
           'to update it.',
     SyncFailureKind.relayRolledBack =>
-      'The relay lost part of the vault\'s history, so Zafe ignores it. A member with the full history can restore it.',
+      'The server lost part of the vault\'s history, so Zafe ignores it. A member with the full history can restore it.',
     SyncFailureKind.relayLostVault =>
-      'The relay lost this vault. Your funds are safe: any member can restore it from their phone.',
+      'The server lost this vault. Your funds are safe: any member can restore it from their phone.',
     SyncFailureKind.relayForked =>
-      'The relay shows a different history than this phone saw, so Zafe won\'t use it. Check with the other members. If they agree the relay is right, you can follow it.',
+      'The server shows a different history than this phone saw, so Zafe won\'t use it. Check with the other members. If they agree the server is right, you can follow it.',
     SyncFailureKind.logCopyInvalid =>
-      'This phone\'s saved history is damaged. Your funds are safe. If another member\'s app works normally, follow the relay to replace it.',
+      'This phone\'s saved history is damaged. Your funds are safe. If another member\'s app works normally, follow the server to replace it.',
     SyncFailureKind.relayMembership =>
-      'The relay\'s members or approval rule don\'t match this vault, so Zafe won\'t use it. Your funds are safe. Agree on a new relay with the other members.',
+      'The server\'s members or approval rule don\'t match this vault, so Zafe won\'t use it. Your funds are safe. Agree on a new server with the other members.',
     SyncFailureKind.torConnecting =>
       'Connecting to Tor. Nothing is sent until it connects.',
     SyncFailureKind.torFailed =>
@@ -323,13 +323,13 @@ DateTime? fromUnixSeconds(BigInt? secs) => secs == null
     : DateTime.fromMillisecondsSinceEpoch(secs.toInt() * 1000);
 
 /// Title of the confirmation before this phone follows the relay's history.
-const followRelayTitle = 'Follow the relay\'s history?';
+const followRelayTitle = 'Follow the server\'s history?';
 
 /// What following the relay does, said before the user confirms.
 const followRelayWarning =
-    'This phone replaces its saved history with the relay\'s. Anything only this phone saw is lost. Your keys and funds are not touched. Do it only once the other members confirm the relay is right.';
+    'This phone replaces its saved history with the server\'s. Anything only this phone saw is lost. Your keys and funds are not touched. Do it only once the other members confirm the server is right.';
 
 /// The toast after following: how many entries only this phone had.
 String followRelayDone(int dropped) => dropped == 0
-    ? 'This phone now follows the relay.'
-    : 'This phone now follows the relay. $dropped entries only it had were dropped.';
+    ? 'This phone now follows the server.'
+    : 'This phone now follows the server. $dropped entries only it had were dropped.';
