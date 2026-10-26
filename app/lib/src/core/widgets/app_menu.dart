@@ -50,6 +50,10 @@ class AppMenu extends StatefulWidget {
 class _AppMenuState extends State<AppMenu> {
   final _controller = MenuController();
 
+  /// While open, Back closes the menu instead of leaving the screen (neither
+  /// MenuAnchor nor RawMenuAnchor handles Back).
+  bool _open = false;
+
   static const _shortcuts = <ShortcutActivator, Intent>{
     SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
     SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
@@ -67,6 +71,10 @@ class _AppMenuState extends State<AppMenu> {
   Widget build(BuildContext context) {
     return RawMenuAnchor(
       controller: _controller,
+      onOpen: () => setState(() => _open = true),
+      onClose: () {
+        if (mounted) setState(() => _open = false);
+      },
       overlayBuilder: (context, info) {
         final media = MediaQuery.of(context);
         return Positioned.fill(
@@ -101,7 +109,13 @@ class _AppMenuState extends State<AppMenu> {
           ),
         );
       },
-      builder: (context, controller, _) => widget.builder(context, _toggle),
+      builder: (context, controller, _) => PopScope(
+        canPop: !_open,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _controller.close();
+        },
+        child: widget.builder(context, _toggle),
+      ),
     );
   }
 

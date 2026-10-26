@@ -120,7 +120,8 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   (`AppMenuLayout`, on `RawMenuAnchor`): it hangs from the anchor's trailing edge, 4 px below
   (above when there's no room), at most the screen width less 16 px each side, clamped inside
   those margins, and long labels wrap (MenuAnchor pushed menus past the page margin, or off
-  the left edge of a small phone at 2x text). Tests: `test/app_menu_test.dart`. Home has pull to refresh (sync now).
+  the left edge of a small phone at 2x text). Back closes an open menu before it leaves the
+  screen (`PopScope`; neither Flutter menu handles Back). Tests: `test/app_menu_test.dart`. Home has pull to refresh (sync now).
 
 ## Tor (full notes)
 

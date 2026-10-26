@@ -137,4 +137,57 @@ void main() {
       expect(find.byType(MenuItemButton), findsNothing);
     },
   );
+
+  testWidgets('Back closes an open menu and stays on the screen', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) =>
+            AppTheme(data: AppThemeData.light, child: child!),
+        home: Builder(
+          builder: (context) => GestureDetector(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => Scaffold(
+                  body: Center(
+                    child: AppMenu(
+                      items: [AppMenuItem(label: 'Rename', onTap: () {})],
+                      builder: (context, open) => GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: open,
+                        child: const SizedBox(
+                          key: Key('anchor'),
+                          width: 40,
+                          height: 40,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            child: const ColoredBox(color: Color(0xFFFFFFFF)),
+          ),
+        ),
+      ),
+    );
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('anchor')));
+    await tester.pumpAndSettle();
+    expect(find.text('Rename'), findsOneWidget);
+
+    await tester.binding.handlePopRoute(); // Android Back
+    await tester.pumpAndSettle();
+    expect(find.text('Rename'), findsNothing);
+    expect(
+      find.byKey(const Key('anchor')),
+      findsOneWidget,
+    ); // still on the page
+
+    await tester.binding.handlePopRoute(); // now Back leaves
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('anchor')), findsNothing);
+  });
 }
