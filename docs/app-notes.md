@@ -116,7 +116,11 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   Open-source licenses). Zcash server is a screen (`/zcash-server`; presets with live checks, "Custom
   server" opens a field in place, Test and save), also from Welcome's cog. Diagnostic
   report (`/diagnostics`) and Status (`/status`) are screens too. Confirmations use
-  `showAppConfirm` (themed dialog); Manage vaults' ⋯ is an `AppMenu`. Home has pull to refresh (sync now).
+  `showAppConfirm` (themed dialog); Manage vaults' ⋯ is an `AppMenu`. `AppMenu` places itself
+  (`AppMenuLayout`, on `RawMenuAnchor`): it hangs from the anchor's trailing edge, 4 px below
+  (above when there's no room), at most the screen width less 16 px each side, clamped inside
+  those margins, and long labels wrap (MenuAnchor pushed menus past the page margin, or off
+  the left edge of a small phone at 2x text). Tests: `test/app_menu_test.dart`. Home has pull to refresh (sync now).
 
 ## Tor (full notes)
 
@@ -697,9 +701,8 @@ Learned while studying it:
   `NOTICE` registered in `main.dart` for the licenses page). Other vaults live in **Manage
   vaults** (`/vaults`, `features/vaults/manage_vaults_screen.dart`, opened from the vault sheet
   `showVaultSwitcher`); each vault's ⋯ is an `AppMenu` (`vault_actions.dart` `VaultActionsMenu`):
-  Rename, Back up, Viewing key, How it's protected, Remove (switching to that vault first where
-  needed).
-  "How it's protected" (`/vault-protection`, `VaultProtectionBody` takes plain data;
+  Rename, Back up, Viewing key, Remove (switching to that vault first where needed).
+  "How it's protected" is only in Settings under the vault's name (`/vault-protection`, `VaultProtectionBody` takes plain data;
   preview `flutter test tool/screens/protection_render_test.dart`): the approval rule, full
   view access, what losing too many keys means, and the post-quantum caveat (spec §2.3).
 - **Sync failures** (`core/errors/sync_failure.dart`, pure, `test/sync_failure_test.dart`):

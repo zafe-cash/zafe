@@ -15,8 +15,9 @@ import '../../providers/vault_provider.dart';
 import '../../rust/api/vault.dart' as rust;
 import '../home/rename_sheet.dart';
 
-/// One vault's ⋯ on Manage vaults: a menu of rename, back up, viewing key, how it's
-/// protected and remove. The ones that work on the open vault switch to it first.
+/// One vault's ⋯ on Manage vaults: a menu of rename, back up, viewing key and remove.
+/// The ones that work on the open vault switch to it first. "How it's protected" is in
+/// Settings under the vault's name, not repeated here.
 class VaultActionsMenu extends ConsumerWidget {
   const VaultActionsMenu({super.key, required this.vaultId});
   final String vaultId;
@@ -63,11 +64,6 @@ class VaultActionsMenu extends ConsumerWidget {
             icon: AppIcons.eye,
             label: 'Viewing key',
             onTap: () => onVault(() => openViewingKey(context, ref)),
-          ),
-          AppMenuItem(
-            icon: AppIcons.shieldKeyhole,
-            label: 'How it\'s protected',
-            onTap: () => onVault(() async => context.push('/vault-protection')),
           ),
         ],
         AppMenuItem(

@@ -18,6 +18,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/action_button.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_icon.dart';
+import '../../core/widgets/clipboard_countdown.dart';
 import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/proposals_provider.dart';
@@ -61,6 +62,9 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   /// The words are on screen (false: the check).
   bool _showWords = true;
   rust.ExportedBackup? _done;
+  // When the words / the backup text were last copied: the countdown under the button.
+  DateTime? _wordsCopiedAt;
+  DateTime? _textCopiedAt;
 
   @override
   void dispose() {
@@ -136,6 +140,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
   Future<void> _copyText() async {
     await copySecret(_done!.text);
+    if (mounted) setState(() => _textCopiedAt = DateTime.now());
     await _saved();
   }
 
@@ -168,6 +173,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             variant: AppButtonVariant.secondary,
             onPressed: _copyText,
           ),
+          if (_textCopiedAt != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            ClipboardCountdown(copiedAt: _textCopiedAt!),
+          ],
         ],
       );
     }
@@ -196,8 +205,15 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             doneLabel: 'Copied',
             resetAfterDone: true,
             variant: AppButtonVariant.secondary,
-            onPressed: () => copySecret(_words.join(' ')),
+            onPressed: () async {
+              await copySecret(_words.join(' '));
+              if (mounted) setState(() => _wordsCopiedAt = DateTime.now());
+            },
           ),
+          if (_wordsCopiedAt != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            ClipboardCountdown(copiedAt: _wordsCopiedAt!),
+          ],
           const SizedBox(height: AppSpacing.sm),
           Text(
             'Write them down or keep them in a password manager. Zafe can\'t show them again.',

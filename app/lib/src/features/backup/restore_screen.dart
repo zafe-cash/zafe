@@ -36,6 +36,9 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
   String? _fileName;
   bool _busy = false;
 
+  /// Why Paste filled nothing (an empty clipboard, or text that isn't a backup).
+  String? _pasteProblem;
+
   @override
   void dispose() {
     _text.dispose();
@@ -68,14 +71,21 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
     });
   }
 
+  /// Fills the field only with backup text: an empty clipboard (Zafe clears a copied
+  /// backup after 60 s) or something else on it says so instead of doing nothing, and
+  /// unknown clipboard text never lands in the field.
   Future<void> _pasteText() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data?.text == null) return;
+    final pasted = await pastedBackupText();
+    if (!mounted) return;
     setState(() {
-      _text.text = data!.text!.trim();
+      _pasteProblem = pasted.problem;
+      if (pasted.text == null) return;
+      _text.text = pasted.text!;
       _file = null;
       _fileName = null;
     });
+    // Next: the words.
+    if (pasted.text != null) _passFocus.requestFocus();
   }
 
   Future<void> _restore() async {
@@ -165,6 +175,7 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
             onChanged: (_) => setState(() {
               _file = null;
               _fileName = null;
+              _pasteProblem = null;
             }),
             trailing: GestureDetector(
               onTap: _pasteText,
@@ -185,6 +196,19 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
               ),
             ),
           ),
+          if (_pasteProblem != null)
+            Padding(
+              padding: const EdgeInsets.only(
+                top: AppSpacing.xs,
+                left: AppSpacing.xxs,
+              ),
+              child: Text(
+                _pasteProblem!,
+                style: AppTypography.labelLarge.copyWith(
+                  color: colors.text.destructive,
+                ),
+              ),
+            ),
         ],
         const SizedBox(height: AppSpacing.md),
         Text(
@@ -206,4 +230,32 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       ],
     );
   }
+}
+
+/// The text form's prefix (`zafe_core::backup` `TEXT_PREFIX`, `zafe-backup-v1:`), without
+/// the version so a later format still reads as a backup here.
+const _backupTextPrefix = 'zafe-backup-v';
+
+/// What the restore screen's Paste found on the clipboard: backup [text], or the
+/// [problem] to show instead.
+typedef PastedBackup = ({String? text, String? problem});
+
+@visibleForTesting
+Future<PastedBackup> pastedBackupText() async {
+  final text =
+      (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim() ?? '';
+  if (text.isEmpty) {
+    return (
+      text: null,
+      problem:
+          'Nothing on the clipboard. Copy the backup text again, or choose the file.',
+    );
+  }
+  if (!text.startsWith(_backupTextPrefix)) {
+    return (
+      text: null,
+      problem: 'That isn\'t backup text. It starts with zafe-backup-v1:',
+    );
+  }
+  return (text: text, problem: null);
 }
