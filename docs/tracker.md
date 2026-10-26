@@ -24,9 +24,19 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
 - [ ] Promote the relay to mainnet (`relay-mainnet.yml`) before any build from this branch
       reaches users.
 - [ ] Promote after 24 h on testnet: the testnet relay went live 2026-10-26 21:00 UTC.
-- [ ] Release 0.1.24: `v0.1.24` testnet, phone dry run, then `mainnet-v0.1.24` on the same
-      commit (`docs/releasing.md`). 0.1.23 (testnet only) failed the dry run: one key press
-      veiled the app in grey (Android focus highlight, fixed in the themes).
+- [x] `v0.1.24` testnet dry run passed on a phone (Android 16), 2026-10-27: in-place update,
+      create 2-of-2 with a CLI member, safety words, backup, wipe + restore, receive 1 TAZ,
+      propose 0.1 TAZ with a memo, CLI verifies and approves, Send now, mined (txid
+      `f966e885…`). 0.1.23 had failed it: one key press veiled the app in grey (fixed).
+- [ ] `mainnet-v0.1.24` on the `v0.1.24` commit, after the mainnet relay is promoted.
+- [ ] Restore: **Paste** with an empty clipboard does nothing and the button stays grey
+      with no hint (a dead end once the 60 s secret clipboard has cleared). Say why.
+- [ ] Backup "Copy as text" clears after 60 s (`kSecretClipboardLifetime`): say so on the
+      screen, so nobody copies it and pastes it into a password manager later.
+- [ ] *(upstream)* The Valar testnet faucet pays nobody since 2026-10-23 ("the wallet
+      cannot pay this address" for t- and shielded addresses):
+      https://github.com/valargroup/valar-testnet-faucet/issues/5. Testers need another
+      source of TAZ meanwhile; releasing.md points at this faucet.
 
 Done on the branch:
 - [x] Relay: labelled mailboxes, `GET /v1/info`, `/v1/push/forget`, mailbox expiry,
