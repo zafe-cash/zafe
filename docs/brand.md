@@ -71,20 +71,26 @@ Received money uses the value colour (gold), not green: teal and green are only 
 | window | #080B0B | #F1F5F5 |
 | ground | #111515 | #FFFFFF |
 | raised | #1E2323 | #E5EAE9 |
-| line | #272E2D | #D9DFDF |
-| text muted / secondary / primary | #737F7D / #9DA9A7 / #F1F5F5 | #7E8987 / #55615F / #090E0E |
+| line (`border.subtle`) | #1E2323 | #D9DFDF |
+| text muted / secondary / primary / accent (headings) | #737F7D / #9DA9A7 / #C4CCCB / #FFFFFF | #7E8987 / #55615F / #3C4645 / #090E0E |
 | brand fill (primary button) | #51DDD2, label #001B19 | #00736C, label #FFFFFF |
 | brand accent (icons, "needs you", focus) | #51DDD2 | #00736C |
 | value = received (Zcash gold) | #F3BA3C | #835A00 |
 | sync text (glow): green in sync, orange on failure | #6BD99A (#2E8A57) · #FFAE81 | #1E7A47 (#4CB57D) · #A55115 |
 | warning (orange, hue 50) | #FFAE81 | #A55115 |
 | error (rose, hue 350) | #E96CAD | #A82571 |
-| vault card | ink #091312 | light card #E0F3F1 (see below) |
+| vault card | ground #111515 | ground #FFFFFF (see below) |
 
 Brand ramp (dark, low → high): `#00110F #001B19 #002825 #003633 #004743 #006660 #51DDD2
 #61EADF #70F8ED #8EFFF5 #C7FFF9 #EBFFFD`. Light: `#EBFFFD #BEFFF8 #9EF4EC #84E1D9 #47B9B0
-#00736C #00605A #004D49 #003C38 #002B28 #001B19 #000C0B`. Lowest contrast of any text
-pair above: 4.98:1. The derivation lives in `.claude/skills/brand-palette/oklch.js`.
+#00736C #00605A #004D49 #003C38 #002B28 #001B19 #000C0B`. The derivation lives in
+`.claude/skills/brand-palette/oklch.js`; `scripts/brand/primitives.js` writes
+`app/lib/src/core/theme/primitives.dart`.
+
+Contrast (WCAG, measured 2026-10-27 from the tokens above): on window and ground every
+text colour but muted passes 4.5:1; the lowest is light-mode "Synced" green at 4.87:1.
+Muted text is 4.4-4.8:1 in dark mode and 3.3-3.6:1 in light mode. On raised, light-mode
+brand, warning and sync text drop to 4.4-4.7:1.
 
 ### Vault card
 
@@ -97,7 +103,7 @@ card #E0F3F1 with a dial was decided 2026-10-01). Tokens: `AppVaultCardColors`.
 
 ## Type
 
-**Decision (user, 2026-10-27): six sizes, three families with one job each**, after reading
+**Decision (user, 2026-10-27): six sizes on mobile, three families with one job each**, after reading
 research (legibility and reading studies) and a side-by-side comparison of four directions:
 - **Space Grotesk** for amounts and headings: hero 44/48 (balance, a payment), title 28/34,
   heading 22/28 (screen titles), amount 18/24 (rows, cards). Every amount uses tabular
@@ -122,8 +128,9 @@ body font; corners follow the UI radii.
   accent at ~38% (the "patina").
 - Active (current tab, a payment that needs your vote): solid brand accent.
 - Icon tiles are circles. Received tiles use the value colour.
-- Today's icons are filled Material Symbols everywhere, so the active state is carried by
-  colour only.
+- Built from Phosphor Icons (MIT) by `scripts/brand/patina_icons.py` into
+  `app/assets/icons/patina/<name>{,_active}.svg`; `AppIcons` in
+  `app/lib/src/core/widgets/app_icon.dart` names them.
 
 ## 5. Logo research
 
@@ -158,8 +165,9 @@ colour. Wordmark: "zafe", Space Grotesk SemiBold, lower case.
 
 ## 6. Decisions and deferred ideas
 
-- Adopted: Verdigris palette, Patina icons, Seam icon, light vault card in light mode
-  (user's choice), gold for received money.
+- Adopted: Verdigris palette, Patina icons, Seam icon, gold for received money, a plain
+  vault card (2026-10-27; replaced the light card with a dial), green "Synced" and orange
+  failures in the sync status (2026-10-27).
 - **Kept, not replaced:** the per-vault picture emblems (`features/vaults/vault_emblem.dart`,
   landed 2026-10-01 in another session). The logo study proposed an N-of-M ring emblem for
   the avatar. The threshold already shows as signer dots on the balance card, so the

@@ -64,7 +64,8 @@ feel like it is very unlikely. Most work pending on zips#895 is regarding on how
 participants agree on sk; we plan to use the COCKTAIL-DKG protocol to do the DKG while
 simultaneously agree on sk. But if you have your own system that will also work."* So
 vaults derived per § 4.2.3 from Zafe's own `sk` agreement are expected to stay recoverable.
-Vectors: conradoplg preferred frost-tools; issue frost-tools#609, PR frost-tools#610 (2026-10-04).
+Vectors: conradoplg preferred frost-tools; issue frost-tools#609, PR frost-tools#610 (filed 2026-10-04; both
+still open on 2026-10-27).
 
 **Context checked:**
 - ZIP 2005 (status Proposed; changes since 2026-07 are wording) has a normative "Usage with
@@ -89,7 +90,8 @@ recoverability from seed."* That reads our question as deriving `ask` from `sk`.
 doesn't: `ak` and the `ask` shares come from the DKG and `ask` never exists; `sk` gives
 only `nk`, `qsk`, `rivk_ext` (ZIP 2005 "Usage with FROST"). Every member does hold `qsk`,
 so against a quantum adversary one member could steal (ZIP 2005 says so too; spec §2.3).
-Still unanswered: does the Recovery Protocol accept such vaults as they are.
+Whether the Recovery Protocol accepts such vaults as they are was answered the same day:
+yes (conradoplg above; Daira-Emma Hopwood at the end of this file).
 
 **Asks:** does "blocked on zips#895" apply to keys derived this way, or will such vaults pass
 the Recovery Protocol as they are? Is anything in § 4.2.3 still expected to change? Offer:
@@ -118,15 +120,16 @@ the move, and will it keep the frost-core 3.x `KeyPackage` serialization?
 - **Old Q4, DKG and `sk` agreement:** the zips#895 draft specifies it ("Contributory
   Generation of sk": each member's `sk_i = random_bytes(32)` as a COCKTAIL-DKG payload,
   `sk = H(n ‖ len(payload_1) ‖ payload_1 ‖ …)`). Zafe's own scheme differs; recoverability
-  doesn't depend on it (U1). Align when COCKTAIL-DKG ships with Pallas (frost#1033 open;
-  the WIP frost#1032 has no Pallas ciphersuite; C2SP#216 closed for C2SP#299).
+  doesn't depend on it (U1). Align when COCKTAIL-DKG ships with Pallas (re-checked
+  2026-10-27: frost#1033 and the WIP frost#1032 are open, and frost#1032 has no Pallas
+  ciphersuite; C2SP#216 closed on 2026-07-13, feedback continues in C2SP#299).
 - **Old Q5, FROST book:** `book/src/zcash/technical-details.md` still suggests throwing
   `sk` away and says the key share is the only secret, against ZIP 2005. Send a docs PR
   rather than a question.
-- **Old Q6, frostd store-and-forward/push and repair (frost-tools#311):** not a question;
-  revisit when Zafe implements repair.
+- **Old Q6, frostd store-and-forward/push and repair (frost-tools#311):** not a question.
+  Zafe built repair on its own relay (spec §10.1), so there is nothing to ask.
 
-## Discord pointer (paste after the comment is up)
+## Discord pointer (sent 2026-10-01, after the frost#1094 comment)
 
 > hi FROST folks 👋 I'm building Zafe, a mobile shielded multisig on Ironwood with
 > re-randomized FROST (frost-core 3.0, reddsa 0.5.2, PCZT). Two questions block our
@@ -168,7 +171,7 @@ discard `sk`).
 
 ---
 
-# Upstream ask: zcashlabs/thus-spoke-zakura (local regtest environment)
+## Upstream ask: zcashlabs/thus-spoke-zakura (local regtest environment)
 
 **Where to send:** an issue on `zcashlabs/thus-spoke-zakura`.
 
@@ -180,10 +183,10 @@ The **Zakura node itself supports NU6.3 on regtest**. Started with `"NU5"`, `"NU
 
 **Ask:** activate every NU6.x (including NU6.3) at height 1 by default, or behind a flag (e.g. `ths start --ironwood`). Make the faucet and "send" route through the Ironwood pool, since Orchard stops accepting deposits after NU6.3. That would make `ths` usable for testing Ironwood apps like Zafe. Zebra's own regtest default already activates every NU6.x at height 1.
 
-**Zafe's workaround until then:** run `zakuracore/zakura:1.4.0` and the `ths` lightwalletd image directly with our own NU6.3 config (`infra/regtest/`).
+**Zafe's workaround at the time:** run `zakuracore/zakura:1.4.0` and the `ths` lightwalletd image directly with our own NU6.3 config (`infra/regtest/`).
 
 **Resolved (2026-10-02):** our PR #124 merged and shipped in `ths` v0.3.0 (Zakura 1.6.0, NU6.1-6.3 at height 1, Ironwood wallet). Since 2026-10-04 `infra/regtest/` runs `ths` itself (`ths start`, faucet, `ths mine`); our own Zakura config is gone. Zafe now pins `ths` 0.4.0 (NU5 to NU7 at height 1).
 
 **Filed (2026-10-04):** issue [#145](https://github.com/zcashlabs/thus-spoke-zakura/issues/145), fix in PR [#146](https://github.com/zcashlabs/thus-spoke-zakura/pull/146). In 0.3.0, `ths --name X stop` from another shell deletes the environment but leaves the foreground `ths start` launcher running (it only exits on a signal). `infra/regtest/down.sh` sends SIGINT instead. **Resolved:** merged 2026-10-11, shipped in v0.4.0 (Zafe pins it since 2026-10-19).
 
-**Asked (2026-10-04):** an opt-in `ths start --detach` for scripts and CI ([#147](https://github.com/zcashlabs/thus-spoke-zakura/issues/147)); offered to send the PR. PR [#308](https://github.com/zcashlabs/thus-spoke-zakura/pull/308) open since 2026-10-14 (conflicts with v0.4.0 resolved 2026-10-19), awaiting review.
+**Asked (2026-10-04):** an opt-in `ths start --detach` for scripts and CI ([#147](https://github.com/zcashlabs/thus-spoke-zakura/issues/147)); offered to send the PR. PR [#308](https://github.com/zcashlabs/thus-spoke-zakura/pull/308) open since 2026-10-14 (conflicts with v0.4.0 resolved 2026-10-19), still awaiting review on 2026-10-27.

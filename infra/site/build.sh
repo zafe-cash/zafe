@@ -6,9 +6,8 @@
 #                              comma-separated (AA:BB:... or plain hex). Without them
 #                              there is no assetlinks.json, so App Links can't verify.
 #   ZAFE_IOS_APP_IDS           optional: <TeamID>.xyz.zafe.zafe, comma-separated
-#   ZAFE_DOWNLOAD_URL          optional: where "Get Zafe" points. Unset until there is an
-#                              APK testers can use: the hero then links to the source and
-#                              the footer has no Android link
+#   ZAFE_DOWNLOAD_URL          optional: where "Get Zafe" points (the site workflow sets it
+#                              to the newest release); unset, it falls back to config.ts
 #   ZAFE_SOURCE_URL            optional: where "Read the source" points
 #                              (default: the GitHub repository)
 set -euo pipefail

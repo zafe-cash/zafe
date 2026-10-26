@@ -1,9 +1,44 @@
-# Zafe landing page: design research and brief
+# Zafe site: decisions, history and research
 
-The landing page (`infra/site/src/pages/index.astro`) follows this brief. Keep it current
-when the page changes.
+How `zafe.cash` got to where it is. The rules the pages follow today live elsewhere:
+- design system: `infra/site/DESIGN.md`; audience, claims and voice:
+  `infra/site/PRODUCT.md`;
+- pages, build and deploy: `infra/site/README.md`; SEO: `docs/seo.md`.
 
-## Round 14 (2026-10-23): the showcase, one story, smooth on a laptop
+Add a section at the top of "History" when a round changes the site.
+
+## The site on 2026-10-27
+
+- **Pages**: home (`/`), `/download`, `/support`, `/privacy`, the docs (`/docs` and 17
+  pages), `/showcase` (the 3D story), `/join` (invite page), the waitlist pages and a 404.
+  `/relay` redirects permanently to `/docs/run-a-server`.
+- **Nav**: one on every page: Docs, Security | mark | Support, Get Zafe. The mark is the
+  way home. `/showcase` keeps a small light nav.
+- **Home**: hero (Google Play badge, H1 "The Zcash multisig nobody can see", one Get Zafe
+  button), four illustrated loops (sign, sent, setup, live; §6), a feature list, the close
+  (Google Play and the iPhone waitlist), a six-question FAQ.
+- **Docs** (2026-10-27, branch `relay-client`, not deployed): tasks in the reader's words,
+  the app's real button names in bold (checked by `scripts/check_docs_sync.py`), crops of
+  the app's renders, no script. The pages describe the app built from `relay-client`, so
+  they go live with that release.
+- **Scripts**: the home page has one (`loops.js`), `/join` one (`join.js`), `/showcase`
+  its bundled modules; nothing else.
+
+## History (newest first)
+
+### Docs and one nav (2026-10-27)
+
+- `/docs`: 17 pages in sections (Start, Payments, Phones, Servers, Run a server, Privacy &
+  security, Help), registered in `infra/site/src/docs/pages.ts`. Sidebar on wide screens; breadcrumb and
+  Related on phones; `/docs` doubles as the phone menu. `/support` keeps the contacts and
+  links to `/docs/troubleshooting`.
+- `/relay` redirects permanently to `/docs/run-a-server`: unreleased app builds from
+  `relay-client` (since `d9dbbde`) link it.
+- The site says "server" everywhere, as the app does.
+- One nav for every page (Docs, Security | mark | Support, Get Zafe) instead of per-page
+  section links.
+
+### Round 14 (2026-10-23): the showcase, one story, smooth on a laptop
 
 - **Islands cut, folded into the story** (user: "cut the islands and fold them into the
   story"): they were a detour to abstract props after "Sent", repeated the home page, and
@@ -19,7 +54,7 @@ when the page changes.
   (screens on the GPU, baked shadows, resolution-first quality levels, warm-up).
 - **Cursor**: OS-drawn dart (see the cursor entry below).
 
-## Round 13 (2026-10-22): one payment, several phones (impeccable + tasteskill)
+### Round 13 (2026-10-22): one payment, several phones (impeccable + tasteskill)
 
 Critique first (impeccable dual review + tasteskill inspector, 22/36): the page was the
 category template (badge over H1, facts strip, 01/02/03 zigzag, bento, icon rows,
@@ -48,7 +83,7 @@ in `infra/site/PRODUCT.md`):
   diagnostic report, contacts), `/waitlist` and `/waitlist-error` (noindex).
 - Kept the app's fonts on purpose: the page shows screenshots set in them.
 
-## Round 12d: the minor items too
+### Round 12d: the minor items too
 
 "Fix the minor issues too, also update the skill accordingly." Fixed the three 12c left:
 "Single-key" sits in a `.nowrap` span (the font subset has no U+2011, so a non-breaking
@@ -58,7 +93,7 @@ other section; on phones the wide 3D shots are pulled back ×1.42 instead of ×1
 says minor issues get fixed in the round that finds them, and the root README is current
 (versioned formats, phone features, website, layout, links).
 
-## Round 12c (critique pass): nothing above minor, loop stopped
+### Round 12c (critique pass): nothing above minor, loop stopped
 
 Checked both pages again at 1440×900 and 390×844 (showcase with the world, its stills
 fallback and no-JS), plus nav clicks live. Only minor items left: "Single-key wallet"
@@ -66,7 +101,7 @@ breaks at its hyphen on phones (the font subset has no non-breaking hyphen); the
 comparison is the one section without a tag; the world's mid-story framings are small on
 phones (world.js, untouched on purpose).
 
-## Round 12b (critique pass): the hero phones, the share image, phone details
+### Round 12b (critique pass): the hero phones, the share image, phone details
 
 Found (ranked): at 1200 px the two hero phones stood side by side (the back one was
 placed from the left edge, so the overlap changed with the width: a rejected look); the
@@ -78,7 +113,7 @@ tilted -4°), so they overlap the same at every width; `og.png` is now the home 
 1200×630 (`stills.sh` captures it from `/` after the intro); teaser 440 px on phones;
 comparison label column 40% wide, competitors' "Yes" in text colour.
 
-## Round 12a (critique pass): spacing and the showcase entrance
+### Round 12a (critique pass): spacing and the showcase entrance
 
 Found (ranked): the showcase's scroll cue sat on the right phone's pedestal; on phones
 the showcase title hugged the nav with a ~250 px hole above the world; ~170 px of dead
@@ -88,7 +123,7 @@ paper between the home call to action and the footer; the cue was 28 px off cent
 space above the world; the call to action ends the page with only the footer's lip
 below. Minor, left: `og.png` still has the old showcase copy (needs Pillow for `stills.sh`).
 
-## Decisions (2026-10-01, twelfth round): two pages that don't look alike
+### Decisions (2026-10-01, twelfth round): two pages that don't look alike
 
 The user: "their is no showcase in the top nav, the home doesn't take me to / route, same
 with clicking logo. we have mostly used the same background with stills on /, on
@@ -121,7 +156,7 @@ showcase it's the replica of the main site."
   shows the previous showcase hero copy; re-render it with `stills.sh` when Pillow is at
   hand.
 
-## Decisions (2026-10-01, eleventh round): a calm home page, the 3D on /showcase
+### Decisions (2026-10-01, eleventh round): a calm home page, the 3D on /showcase
 
 The user, mid-way through the fallback work: "for a multisig website having such
 animations looks a bit odd", then "migrate the 3d animation to another page like showcase
@@ -148,7 +183,7 @@ one click away.
 - `vercel-output.sh` now serves every top-level page at its clean path (it only knew
   `/join`; `/showcase` would have 404'd on Vercel).
 
-## Decisions (2026-10-01, tenth round): the static fallback in the new design, and SEO
+### Decisions (2026-10-01, tenth round): the static fallback in the new design, and SEO
 
 "Update the static fallback to match the new design." Visitors without the world (no
 GPU, reduced motion, **no JavaScript**: Tor Browser "Safest", a real share of this
@@ -177,7 +212,7 @@ audience) saw the old dark/light phone split.
 - **Open**: the hero still appears only after the CSS intro (~1.5 s), which delays LCP;
   a custom domain (then change `site` in `astro.config.mjs`).
 
-## Decisions (2026-10-01, ninth round): performance
+### Decisions (2026-10-01, ninth round): performance
 
 The user asked to "optimize the website a bit for performance". Measured first (bundle
 sizes, headers, renderer settings, rAF rate in headless Chrome).
@@ -200,7 +235,7 @@ sizes, headers, renderer settings, rAF rate in headless Chrome).
   renderer); backdrop blur on the cards isn't a measurable cost; fallback stills are lazy.
 - **Open**: the stills fallback still uses the older dark/light phone split.
 
-## Decisions (2026-10-01, eighth round): islands, the view from above, pointer and text
+### Decisions (2026-10-01, eighth round): islands, the view from above, pointer and text
 
 - **Features are islands in the same world** (the dark feature panel, the "idea" line
   and the closing card are gone). After "Sent." the camera follows floor channels on to
@@ -223,7 +258,7 @@ sizes, headers, renderer settings, rAF rate in headless Chrome).
   approvals") rolls as the shards seat. Custom splitter, not SplitText: no plugin, and
   it only sets transforms and text through the DOM, which the CSP allows.
 
-## Decisions (2026-10-01, seventh round): the Seam Vault world
+### Decisions (2026-10-01, seventh round): the Seam Vault world
 
 Feedback on round six: make the whole site canvas-like, bigger phones, the dark/light
 split may not make sense, the lock should be a vault, the phones should hold key shards
@@ -252,7 +287,7 @@ tooling routes) fed the plan; the user then allowed loading files (`connect-src 
   ScrollTrigger (one scrubbed timeline), Lenis 1.3 advanced by GSAP's ticker and feeding
   ScrollTrigger. Phone screens redraw only when their state changes.
 
-## Decisions (2026-10-01, sixth round): the scroll story
+### Decisions (2026-10-01, sixth round): the scroll story
 
 User feedback: the pillar-like step columns were still there, and the two-phone demo was
 "half-assed" because it rebuilt the UI instead of using the app's screens. Wanted: scroll
@@ -283,7 +318,7 @@ of a multisig gets the idea without reading a flow.
 - Without scroll timelines (Firefox today) or with reduced motion: one screen showing the
   end (Bob approved, you sent, vault open, last caption).
 
-## Decisions (2026-10-01, fifth round)
+### Decisions (2026-10-01, fifth round)
 
 - The flow cards went. In their place, after headnote.in's animated product mockups (they
   animate real HTML UI, not video): **two phones playing one payment**, "Two phones. One
@@ -296,7 +331,7 @@ of a multisig gets the idea without reading a flow.
   percentages per beat); the still frame for reduced motion is your review sheet open.
   On phones the stage is scaled with `zoom`.
 
-## Decisions (2026-10-01, fourth round)
+### Decisions (2026-10-01, fourth round)
 
 - The pillars are now the **one-tap flow** (Notified, One tap, Sent) as live HTML cards:
   the app's real notification wording ("<vault>: payment needs your approval"), the
@@ -309,7 +344,7 @@ of a multisig gets the idea without reading a flow.
   live cards (a vote dot fills, switches flip, "encrypted" shimmers); hover lifts. All off
   with `prefers-reduced-motion`; without scroll timelines everything is simply shown.
 
-## Decisions (2026-10-01, third round)
+### Decisions (2026-10-01, third round)
 
 - **Light only.** No dark mode anywhere on the site (`color-scheme: light`); `assets.py`
   makes light crops only, except the closing card's vault art, which is dark by design.
@@ -323,7 +358,7 @@ of a multisig gets the idea without reading a flow.
 - **Less copy.** One line per idea; "Zcash" only in the meta description. H1 "The
   multisig nobody can see".
 
-## Decisions (2026-10-01, second round)
+### Decisions (2026-10-01, second round)
 
 The user rejected direction A below ("nah, sucks") and asked for inspiration from
 vizor.cash. The page now follows Vizor's structure, studied section by section: centred
@@ -339,7 +374,7 @@ shipped claims, the real dry-run transaction, no JS, strict CSP. Not taken from 
 the testimonial wall (we have none) and the scroll-driven letter reveal (needs JS).
 Zafe keeps its own type (Space Grotesk, not a serif) and Verdigris colours.
 
-## Decisions (2026-10-01, first round, superseded)
+### Decisions (2026-10-01, first round, superseded)
 
 - **Direction A, "The approval"**, with C's mechanism diagram as the "How a payment moves"
   section and B only as the automatic dark theme (§5.3). H1 option 1 (§5.1).
@@ -358,9 +393,12 @@ Zafe keeps its own type (Space Grotesk, not a serif) and Verdigris colours.
 
 ---
 
-Research date: 2026-10-01, by a research agent. Screenshots of the 24 reference pages
-were kept locally, not committed; the file names below (`<name>-1.png` = hero at
-1280×800, `-2`/`-3` = the next two scrolls) are for reference. Items marked
+## Research (2026-10-01)
+
+Done by a research agent for the first redesign. "The current page" below is the page as
+it was then, and the brief in §5 was superseded by the rounds above. Screenshots of the 24
+reference pages were kept locally, not committed; the file names below (`<name>-1.png` =
+hero at 1280×800, `-2`/`-3` = the next two scrolls) are for reference. Items marked
 **[unverified]** come from secondary sources or search snippets not checked against a
 primary source.
 

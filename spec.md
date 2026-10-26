@@ -1,8 +1,8 @@
-# Zafe — Shielded Multisig for Zcash
+# Zafe: Shielded Multisig for Zcash
 
 **Spec version:** 1.0-draft
-**Date:** 2026-09-29
-**Status:** Draft for implementation. Items marked **[VERIFY]** depend on upstream behaviour that must be confirmed before the code that depends on them is written.
+**Date:** 2026-09-29; checked against the code 2026-10-27
+**Status:** Design spec, largely built (Android app, relay, CLI). Sections say when something is planned rather than built. The rules the code enforces today are in `AGENTS.md` ("Protocol invariants"); what's left is in `docs/tracker.md`.
 **Supersedes:** `spec.v0.md`. See `spec-review.md` for why it was rewritten.
 
 ---
@@ -11,7 +11,7 @@
 
 Zafe is a **Safe-style multisig for shielded ZEC**. A group of members jointly controls a shielded Zcash address. Any member can see the balance and history, propose payments, and approve them. A payment goes out only when at least **t of the N** members sign.
 
-It is a mobile app (iOS and Android, with desktop from the same codebase), plus a small hosted relay that forwards encrypted messages between members' devices.
+It is a mobile app (Android today; iOS and desktop from the same codebase later), plus a small relay that forwards encrypted messages between members' devices. Zafe hosts one; a group can run its own.
 
 ### 1.1 How it differs from Safe on Ethereum
 
@@ -40,7 +40,7 @@ Zcash's shielded pools have no scripts or contracts, so there is no on-chain mul
 - Hiding members from each other or roles with less than full view access (every member sees everything; §2.3).
 - Transparent-pool (t-address) multisig.
 - Rules enforced on-chain (impossible in the shielded pool).
-- Hardware-wallet members (Phase 3; §17).
+- Hardware-wallet members (M4; §16).
 - Custodial recovery by Zafe.
 
 ---
@@ -52,13 +52,14 @@ Zcash's shielded pools have no scripts or contracts, so there is no on-chain mul
 | Term | Meaning |
 |---|---|
 | **Vault** | A shielded account controlled by a FROST group: one Ironwood/Orchard receiver and one unified full viewing key (UFVK) |
-| **Member** | A person with a Zafe device that holds one FROST share of a vault, plus the vault's shared secret. Member = signer; there are no other roles in v1 |
-| **t / N** | Signing threshold / number of members. `2 ≤ t ≤ N ≤ 15` in v1 |
-| **Identity key** | Per-device, per-member long-term keypair used to authenticate and encrypt messages. Separate from any Zcash key |
+| **Member** | A person with a Zafe device that holds one FROST share of a vault, plus the vault's shared secret. Member = signer (the app says "signer"); there are no other roles in v1 |
+| **t / N** | Signing threshold / number of members. `2 ≤ t ≤ N ≤ 15` in v1 (`keygen::MAX_MEMBERS`) |
+| **Identity key** | Per-vault, per-member long-term keypair used to authenticate and encrypt messages. Separate from any Zcash key |
 | **Vault secret `sk`** | The ZIP 2005 shared secret that every member holds. It derives `nk`, `qsk`, `qk` and `rivk` |
-| **Proposal** | A request to perform a vault action (payment, address-book change, rule change, and so on) |
-| **Session leader** | The member device that runs a FROST signing round for a proposal. Always a member, never the relay |
-| **Relay** | Zafe-hosted, open-source store-and-forward server for encrypted envelopes and push notifications |
+| **Proposal** | A request to perform a vault action. Built today: payments (the app calls a proposal a "payment"). Planned: address-book, rule and membership changes |
+| **Session leader** | The member device that runs an interactive FROST signing round for a proposal. Always a member, never the relay |
+| **Relay** | Open-source store-and-forward server for encrypted envelopes, the encrypted vault log and push notifications. The app calls it the **server**. Each vault lives on one relay at a time, chosen at creation (Zafe hosts one; anyone can run one) and movable later (§6.4) |
+| **Vault id / label** | The vault id (16 random bytes) binds keys, the descriptor and log entries. The **label** is the vault's mailbox id on its relay; new vaults get a random label different from the vault id (§6.4) |
 | **Vault log** | Hash-chained, member-signed, encrypted log of every vault event (§6.3) |
 
 ### 2.2 Keys held by each member device
@@ -70,7 +71,7 @@ Zcash's shielded pools have no scripts or contracts, so there is no on-chain mul
 | FROST key package (share of `ask`) | FROST DKG | **No**, unique per member | Spend authorization (t of N) | Yes, via share refresh (§10.2) |
 | Vault secret `sk` | Joint agreement at creation (§7.4) | **Yes**, all members | Derives `nk`, `qsk`, `qk`, `rivk` per ZIP 2005 | **No** (fixed for the address) |
 | UFVK (`ak`, `nk`, `rivk`) | `ak` from DKG + `sk` | Yes, all members | Scan chain, build PCZTs, verify outputs | **No** |
-| Vault log key | Random, rotated on membership change | Yes, current members | Encrypts vault log entries | Yes |
+| Vault log key | Random, from the creator at setup (rotation on membership change is planned, M3) | Yes, current members | Encrypts vault log entries | Yes, once rotation is built |
 
 ### 2.3 Consequences of ZIP 2005 you can't design around
 
@@ -87,6 +88,7 @@ Zcash's shielded pools have no scripts or contracts, so there is no on-chain mul
 | Reference | What Zafe uses it for |
 |---|---|
 | ZIP 258: NU6.3 deployment | Ironwood pool, active since block 3,428,143 (2026-07-28); Orchard is withdrawal-only |
+| NU7 | Branch id `0x77190AD9`: testnet since block 4,465,026, mainnet at 3,543,405 (about 2026-11-05). Blocks go from 75 s to 25 s (ZIP 218), so expiry windows scale by 3 (§9.6). Status and guards: `AGENTS.md` "Upstream status" |
 | ZIP 229: v6 transaction format | Transaction format and sighash (includes the Ironwood digest); anchors are in authorizing data, so a transaction can be re-anchored after signing |
 | ZIP 2005: Ironwood quantum recoverability | Key derivation for FROST vaults (`use_qsk = true`, shared `sk`); note plaintext lead byte `0x03` |
 | ZIP 312: FROST for spend authorization | Re-randomized FROST over RedPallas; signers must verify the sighash |
@@ -107,23 +109,23 @@ Zafe vaults hold funds in the **Ironwood pool**. The receiver is an Orchard-type
  │                     │ flutter_rust_bridge           │
  │  zafe-core (Rust)                                   │
  │    wallet   zcash_client_backend + _sqlite          │
- │             (view-only account from vault UFVK)     │
+ │             (vault UFVK, no spending key)           │
  │    pczt     build · prove · verify · sign · extract │
  │    frost    reddsa frost::redpallas (rerandomized)  │
  │    vault    DKG · sk agreement · repair · refresh   │
  │    comms    identity keys · HPKE · vault log        │
- │    rules    signer-side rule engine                 │
+ │    rules    signer-side rules (planned)             │
  │  Secure storage (iOS Keychain / Android Keystore)   │
  └───────┬─────────────────────────────┬───────────────┘
          │ encrypted envelopes         │ compact blocks,
-         │ (HTTPS / WebSocket)         │ tx broadcast (gRPC/TLS)
+         │ (HTTPS, long polls)         │ tx broadcast (gRPC/TLS)
          ▼                             ▼
  ┌─────────────────┐            ┌───────────────┐
  │  Zafe Relay     │            │  lightwalletd │──► Zcash network
  │  (blind)        │            │  (public or   │    (Ironwood)
  │  mailboxes      │            │   self-host)  │
  │  vault log store│            └───────────────┘
- │  push (APNs/FCM)│
+ │  push (FCM)     │
  └─────────────────┘
 ```
 
@@ -133,7 +135,7 @@ Zodl and Vizor already support **Keystone** accounts: the phone holds only a vie
 
 Each device therefore:
 
-1. Imports the vault UFVK as a **view-only account** with the vault's birthday height.
+1. Imports the vault UFVK as an account with **no spending key** (§8), from the vault's birthday height.
 2. Syncs with lightwalletd (Spend-before-Sync) to show balance and history locally.
 3. Builds PCZTs for proposals from its own wallet state.
 4. Contributes FROST signature shares and, as leader, injects the aggregate signature into the PCZT.
@@ -192,9 +194,9 @@ All crates come from crates.io. **No git forks.**
 
 ### 5.1 Identity keys
 
-- Generated on first launch. One identity per member per vault. This avoids linking a member's vaults at the relay.
+- Generated when the member creates or joins a vault. One identity per member per vault, so the relay can't link a member's vaults.
 - `IdentityPublic = { sigPk: Ed25519, encPk: X25519 }`, published to the relay.
-- The FROST `Identifier` for a member is `Identifier::derive(sigPk || vaultId)`, which binds the share to the identity.
+- The FROST `Identifier` for a member is `Identifier::derive("Zafe member identifier v1" || vaultId || sigPk)`, which binds the share to the identity.
 
 ### 5.2 Envelope format
 
@@ -203,7 +205,7 @@ Every message between members goes through the relay as an `Envelope`:
 ```typescript
 interface Envelope {
   v: 1
-  mailbox: string              // opaque relay mailbox id for this vault
+  mailbox: string              // the vault's label: its mailbox id on the relay (§6.4)
   from: string                 // sender sigPk (hex)
   to: string[] | "all"         // recipient sigPks, or all current members
   seq: number                  // per-sender monotonic
@@ -215,13 +217,13 @@ interface Envelope {
 
 - Direct messages (DKG round 2, `sk` contributions, FROST signing packages and shares): **HPKE** (RFC 9180, X25519 + HKDF-SHA256 + ChaCha20-Poly1305), sealed per recipient.
 - Vault log entries: XChaCha20-Poly1305 under the vault log key.
-- Recipients drop any envelope whose signature fails, whose sender isn't a current member, or whose `seq` was already seen.
+- Recipients drop any envelope for another mailbox, whose signature fails, whose sender isn't a current member, or whose `seq` isn't higher than the last one seen from that sender. `seq` is a microsecond clock that never goes below the last value the process issued (`node::SeqCounter`).
 
 ### 5.3 Safety words
 
 The **safety words** are four BIP-39 words that every member compares out of band. All members must confirm the same words **before the DKG starts** (§7.2). This is the only defence against a malicious relay impersonating members during setup.
 
-They come from a commit-then-reveal exchange after membership is locked (2026-10-15, replacing a 12-digit hash of the member keys, which a relay could grind in days on one core). Each member derives a secret value from a signature by its identity key over the mailbox id, sends a commitment to it (`SafetyCommit` envelope), and sends the value (`SafetyReveal`) only once it holds every other member's commitment. The words hash the mailbox id and every member's key and value. A relay that shows two members different member lists must commit to its own values before it learns the honest members' values, so a match is a one-shot guess: 2^-44.
+They come from a commit-then-reveal exchange after membership is locked (`zafe_core::sas`, since 2026-10-15; before that a 12-digit hash of the member keys, which a relay could grind in days on one core). Each member derives a secret value from a signature by its identity key over the vault id (which the invite carries), sends a commitment to it (`SafetyCommit` envelope), and sends the value (`SafetyReveal`) only once it holds every other member's commitment. The words hash the vault id and every member's key and value. A relay that shows two members different member lists must commit to its own values before it learns the honest members' values, so a match is a one-shot guess: 2^-44.
 
 ---
 
@@ -230,10 +232,12 @@ They come from a commit-then-reveal exchange after membership is locked (2026-10
 ### 6.1 Responsibilities
 
 - Create vault mailboxes. Register member identity public keys (as a mailbox access list).
-- Store and forward envelopes. Delete them after every recipient acknowledges, or after 30 days.
+- Store and forward envelopes. Delete them after every recipient acknowledges, or after 30 days (`DELIVERY_RETENTION_SECS`).
 - Store the **encrypted vault log** (append-only) so new or restored devices can catch up.
-- Send push notifications through APNs and FCM with **no content**: just "vault activity" (FCM only so far; APNs is not implemented).
-- Authenticate every request by identity-key signature. Rate-limit.
+- Send push notifications with **no content**: just "vault activity". FCM only; APNs tokens are accepted but not yet sent to.
+- Authenticate every request by identity-key signature. Rate-limit per key and IP, and cap storage per mailbox (`zafe_relay::{limits, quota}`).
+- Delete mailboxes nobody uses (`zafe_relay::expiry`; hosted relays: no member request for a year, or no member but the creator within 30 days). Each phone keeps its own copy of the log, so the relay's copy is a cache.
+- Optionally require a **create token** (`ZAFE_RELAY_CREATE_TOKEN`) to create or restore a mailbox, so a private relay serves only its own groups.
 
 ### 6.2 What the relay can see and do
 
@@ -243,10 +247,11 @@ They come from a commit-then-reveal exchange after membership is locked (2026-10
 
 | Can do (and the mitigation) | Cannot do |
 |---|---|
-| Censor or delay messages (members see stalled sessions and can switch relay; relay is self-hostable) | Spend |
+| Censor or delay messages (members see stalled sessions and can move the vault to another relay, §6.4; relays are self-hostable) | Spend |
 | Withhold or reorder log entries (hash chain and member signatures detect gaps and forks) | Forge member messages or votes |
 | Serve an older log (restore an old database, or lose data), or a different history (each device keeps its own copy of the log and refuses a relay that no longer holds its last entry, §6.3) | Make a device accept a log shorter than the one it already saw |
 | Impersonate members during setup **if the safety words are skipped** (the UI blocks the DKG until they are confirmed) | Read content |
+| Refuse service or delete a vault's mailbox | Move a vault to another relay (a switch needs members' signed arrivals, §6.4) |
 
 ### 6.3 Vault log
 
@@ -262,24 +267,45 @@ interface LogEntry {
   sig: Uint8Array              // author's Ed25519 over (vaultId, index, prevHash, H(body))
 }
 
-type VaultEvent =
-  | { type: "VAULT_CREATED"; descriptor: VaultDescriptor; memberSigs: Record<string, Uint8Array> }
-  | { type: "PROPOSAL"; proposal: Proposal }
-  | { type: "VOTE"; proposalId: string; pcztHash: Uint8Array; vote: "approve" | "reject"; commitments?: Uint8Array[] }
-  | { type: "PROPOSAL_CANCELLED"; proposalId: string }
-  | { type: "TX_BROADCAST"; proposalId: string; txid: string }
+type VaultEvent =                     // Rust variant (zafe_core::vault::VaultEvent), event version
+  | { type: "VAULT_CREATED"; descriptor: VaultDescriptor; memberSigs: Record<string, Uint8Array> }  // Created
+  | { type: "PROPOSAL"; proposal: Proposal }                                    // Proposal
+  | { type: "VOTE"; proposalId: string; pcztHash: Uint8Array; vote: "approve" | "reject";
+      commitments?: Uint8Array[]; shares?: GroupShares[] }                      // Vote (§9.4, §9.5.2)
+  | { type: "COMMITMENTS"; batch: Uint8Array[] }                                // Commitments (§9.5.2)
+  | { type: "PROPOSAL_CANCELLED"; proposalId: string }                          // Cancelled
+  | { type: "TX_BROADCAST"; proposalId: string; txid: string }                  // Broadcast
+  | { type: "NAME"; name: string }                                              // Name, v2
+  | { type: "BACKUP_VERIFIED"; epoch: number; at: number }                      // BackupVerified, v3 (§12.2)
+  | { type: "REPLACE_APPROVAL"; old: string; new: IdentityPublic; signature: Uint8Array }  // ReplaceApproval, v4 (§10.1)
+  | { type: "REPAIR_RETRY"; replacement: number; helpers: string[] }            // RepairRetry, v5
+  | { type: "REPAIR_DONE"; replacement: number }                                // RepairDone, v5
+  | { type: "POOL_RESET" }                                                      // PoolReset, v8 (§12.3)
+  | { type: "VAULT_MOVED"; target: MoveTarget; arrivals: Record<string, Uint8Array>; at: number }  // VaultMoved, v10 (§6.4)
+  // Planned (M3), not built:
   | { type: "MEMBERSHIP_CHANGED"; descriptor: VaultDescriptor; memberSigs: Record<string, Uint8Array> }
   | { type: "LOG_KEY_ROTATED"; epoch: number }
 ```
 
+The current event version is 10 (`zafe_proto::version::VAULT_EVENT`). `AGENTS.md` ("Vault log and versions") records what each version changed and how it is gated: members on different event versions would compute different states, so each new rule is gated, either on the version the author's app wrote or on every member having updated.
+
 - The relay assigns `index`. Clients reject an entry if `prevHash` doesn't match their local head. On a fork, the app stops and warns: "relay inconsistency".
-- **Every device keeps its own copy of the log** (§14). A load re-verifies the copy and then asks the relay for the copy's **last entry**: the relay must still hold it, and it must be the same entry (same hash). Otherwise the app refuses the relay with a typed error and shows nothing from it: `RelayRolledBack` (the relay has fewer entries than this device saw: an older database was restored, or data was lost), `RelayForked` (another entry at a position this device saw) or `RelayLostVault` (the relay doesn't know the vault). This closes the rollback attack: a relay that serves an older log could otherwise bring back a cancelled proposal whose one-tap shares are already complete. It cannot protect a device that has no copy yet: the first load after joining, restoring a backup or reinstalling trusts what the relay serves, once, and anchors from then on (backups do not carry the copy).
-- **Restoring a relay from members' copies.** A relay that lost the vault is recreated by any member with `POST /v1/mailbox/reseed` (`Reseed`): the first request creates the mailbox with the vault's current members and threshold (as of the end of the copy's log), each request appends a batch of entries (the relay checks index, mailbox, hash chain and each author's signature, not that the author is a *current* member, since seats move), and the last one opens it. Until then only its maker can continue it, and it can't be joined. A relay that holds only an older part of the log is caught up by ordinary appends from the member's copy, and only if the relay's entries are the copy's (otherwise `RelayForked`). The same operation moves a vault to another relay (point every member at the new URL, then restore from the member whose copy is longest). In-flight envelopes (signing requests, repair messages) and push tokens are not restored: members ask again and the apps register their tokens again. A member whose copy is shorter than the restored log simply catches up on its next load.
+- **Every device keeps its own copy of the log** (§14). A load re-verifies the copy and then asks the relay for the copy's **last entry**: the relay must still hold it, and it must be the same entry (same hash). Otherwise the app refuses the relay with a typed error and shows nothing from it: `RelayRolledBack` (the relay has fewer entries than this device saw: an older database was restored, or data was lost), `RelayForked` (another entry at a position this device saw) or `RelayLostVault` (the relay doesn't know the vault). This closes the rollback attack: a relay that serves an older log could otherwise bring back a cancelled proposal whose one-tap shares are already complete. A device with no copy yet gets an anchor instead: a restore installs the backup's log copy (backup version 3) before its first relay load, and a phone recovering a seat checks the log anchor each helper sends (§10.1). Only a restore from a version 1 or 2 backup, which has no copy, trusts its first load.
+- **Restoring a relay from members' copies.** A relay that lost the vault is recreated by any member with `POST /v1/mailbox/reseed` (`node::reseed_relay`): the first request creates the mailbox with the vault's current members and threshold (as of the end of the copy's log), each request appends a batch of entries (the relay checks index, mailbox, hash chain and each author's signature, not that the author is a *current* member, since seats move), and the last one opens it. Until then only its maker can continue it, and it can't be joined. A relay that holds only an older part of the log is caught up by ordinary appends from the member's copy, and only if the relay's entries are the copy's (otherwise `RelayForked`). In-flight envelopes (signing requests, repair messages) and push tokens are not restored: members ask again and the apps register their tokens again. A member whose copy is shorter than the restored log catches up on its next load. Moving to a *different* relay is a relay move (§6.4).
 - **Broadcast txid (event version 7).** `TX_BROADCAST` is valid only if its `txid` equals the txid the proposal's PCZT fixes. A v6 txid excludes spend-auth signatures and the proof, so it is the shielded sighash members already compute; vaults have no transparent inputs, so no other part differs. Without the check any member could log any txid for an approved proposal, releasing the note reservation and making that txid count as "logged as sent" for the unapproved-spend alert. Events written with versions 1-6 replay unchanged; a PCZT that does not parse (members reject it, so it can never be signed) skips the comparison.
 - **Relay membership check.** The relay cannot read the log, so it cannot verify the members and threshold a restorer gives `reseed`. Every load compares `POST /v1/mailbox/info` (members, threshold; at most once a minute per relay and mailbox) with the membership the replayed log ends with, tolerating a seat move the relay has not applied yet. A difference is `RelayMembership`: the relay is not used (funds were never at risk; the relay could lock members out or move seats on fewer approvals). Members agree on a fresh relay and restore there. A relay without the route is checked on its member list only.
 - **Leaving a fork.** `RelayForked` is not final for the minority device: after the other members agree the relay's history is right, the user can discard the device's copy and follow the relay (`follow_relay`). The relay's whole log is verified from entry 0 first; entries only this device had are dropped and counted; it refuses when there is no fork.
-- Anything that changes the vault (address book, rules, membership) is valid only after it passes as a proposal with t approvals. Clients check that when replaying the log.
-- FROST signing packages and shares are **not** logged. They go as direct HPKE messages.
+- Anything that changes the vault is valid only with enough member signatures, and clients check them when replaying the log: a seat move needs t approvals (§10.1), a relay move m arrivals (§6.4), and the planned address-book, rule and membership proposals t approvals.
+- Interactive FROST signing packages and shares are **not** logged. They go as direct HPKE messages. (One-tap shares travel in `VOTE` entries, §9.5.2.)
+
+### 6.4 Per-vault relay, labels and moves
+
+Design and security review: `docs/relay-move.md`. The rules the code enforces: `AGENTS.md` ("Relay moves", "Labels", "Per-vault relay").
+
+- **Per-vault relay.** Each vault records its relay in its material (`VaultMaterial.relay`: URL, label, create token). The creator picks the relay, and the invite carries its URL and the label (invite version 3). Vaults created before 2026-10-25 have no URL and use the app-wide setting.
+- **Labels.** The vault id binds keys, FROST ids, `sk` commitments, safety words, the descriptor and every log entry (`EntryHeader.mailbox`). The relay files the vault under a label: random for new vaults, equal to the vault id for older ones. The relay checks that every entry in a mailbox carries the same vault id. Every move gets a fresh label, created on the new relay before anyone else learns it, so someone who knows the vault id can't take the vault's mailbox on another relay first.
+- **Create token.** A relay may require a token to create or restore a mailbox (§6.1). Members get it only sealed (with the log key at setup, in repair sigmas) and in backups, never in invites or seat links.
+- **Moves.** One member starts a move and shares a link (`https://zafe.cash/move#…`) through the group's own chat. Each member taps to follow; nothing connects to the new relay before that tap. A member's **arrival** is a signature over the move target: vault id, move id, relay URL, label, base log index and hash, and an expiry 14 days after the start. The vault switches when one `VAULT_MOVED` entry carries arrivals from **m = max(t, N − t + 1)** distinct current members: at least t, so payments work on the new relay, and more than the members who could be left behind, so they can never reach t on the old one. Replay checks every arrival, the base hash, and that the move comes after the last switch. Two switches from one base are followed by nobody (`TwoMoves`). Move is offered only once every current member's app writes event version 10.
 
 ---
 
@@ -287,15 +313,16 @@ type VaultEvent =
 
 ### 7.1 Inputs
 
-Name, network (`test` / `main`), `N`, `t`, and optional initial rules and address book. The UI warns that losing more than `N − t` members' keys permanently locks the funds, and blocks `t = N` unless the creator explicitly confirms.
+Name, network (`test` / `main`), `N`, `t`, the approval window (§9.6) and the relay (§6.4). Initial rules and address book are planned (§11). The UI warns that losing more than `N − t` members' keys permanently locks the funds, with an extra warning for `t = N`.
 
 ### 7.2 Flow
 
 ```text
 1  Creator: create vault draft on relay → mailbox + invite
-2  Invite:  link (remote) or QR (in person); carries mailbox id,
-            creator sigPk fingerprint, one-time join token; new members can
-            join for 72 h after it was issued or renewed by the creator
+2  Invite:  link (remote) or QR (in person); carries the vault id, the
+            relay URL and label, the creator's sigPk, a join token, t, N
+            and the vault name; new members can join for 72 h after it was
+            issued or renewed by the creator
 3  Members join, publish IdentityPublic
    (the creator's phone locks membership itself once every seat is taken)
 4  ALL members confirm the safety words
@@ -321,8 +348,9 @@ Name, network (`test` / `main`), `N`, `t`, and optional initial rules and addres
 7  Derive UFVK from (ak, sk) per ZIP 2005; derive unified address
 8  Build VaultDescriptor; every member signs H(descriptor)
    → VAULT_CREATED logged with all N signatures
-9  Each device: import UFVK as view-only account, birthday = current
-   tip − small margin; start sync
+9  Each device: import the UFVK (§8) with the descriptor's birthday
+   (the creator's chain tip + 1; joiners refuse one more than 10 blocks
+   above their own server's tip); start sync
 10 Prompt each member to make an encrypted backup (§12.2)
 ```
 
@@ -331,11 +359,11 @@ Every member's app displays the resulting address, and the address is part of th
 ### 7.3 Vault descriptor
 
 ```typescript
-interface VaultDescriptor {
+interface VaultDescriptor {        // zafe_core::vault::VaultDescriptor
   vaultId: string                  // random 16 bytes
-  version: 1
+  version: 1                       // zafe_proto::version::DESCRIPTOR
   name: string
-  network: "test" | "main"
+  network: "test" | "main" | "regtest"
   threshold: number                // t
   members: {
     identity: IdentityPublic
@@ -347,7 +375,9 @@ interface VaultDescriptor {
   address: string                  // unified address, Ironwood/Orchard receiver
   useQsk: true
   birthdayHeight: number
-  epoch: number                    // increments on every membership change
+  proposalExpiryBlocks: number     // approval window, §9.6
+  epoch: number                    // will increment on every membership change (M3)
+  transcriptHash: Uint8Array       // binds the descriptor to the DKG run
 }
 ```
 
@@ -357,8 +387,8 @@ The descriptor contains the UFVK, so it is only ever stored or sent encrypted (l
 
 ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a contribution scheme so no single device's random number generator determines it:
 
-1. Each member i generates 32 random bytes `r_i` and, in DKG round 1, broadcasts the commitment `c_i = BLAKE2b-256("Zafe_SkCommit___", vaultId || sigPk_i || r_i)`. Members fold every commitment into the round-2 echo they compare (`echo_with_commitments`), so a member can't show different commitments to different members. Then each member HPKE-seals `r_i` to every other member, and each recipient aborts unless `r_j` matches `c_j`. Without the commitment the last member to send could wait for everyone else's `r` and grind its own (fixed 2026-10-01, `DKG_ROUND1` 3; the issue str4d raised on zips#895).
-2. `sk = BLAKE2b-256("Zafe_vault_sk" || vaultId || H(DKG transcript) || r_1 || … || r_N)`, with contributions ordered by `frostId`.
+1. Each member i generates 32 random bytes `r_i` and, in DKG round 1, broadcasts the commitment `c_i = BLAKE2b-256("Zafe_SkCommit___", vaultId || sigPk_i || r_i)` (the string is the BLAKE2b personalization). Every commitment goes into the second echo members compare (the round-1 echo extended with all commitments, `echo_with_commitments`), so a member can't show different commitments to different members. Then each member HPKE-seals `r_i` to every other member, and each recipient aborts unless `r_j` matches `c_j`. Without the commitment the last member to send could wait for everyone else's `r` and grind its own (fixed 2026-10-01, `DKG_ROUND1` 3; the issue str4d raised on zips#895).
+2. `sk = BLAKE2b-256("Zafe_VaultSecret", vaultId || H(DKG transcript) || r_1 || … || r_N)` (personalization, then input), with contributions ordered by `frostId` (`keygen::combine_vault_secret`).
 3. Derive the key components (ZIP 2005 § "Changes to the Protocol Specification", § 4.2.3, `use_qsk = true`):
 
    ```text
@@ -377,10 +407,10 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
 - **No upstream library implements ZIP 2005 FROST key derivation yet.** `orchard` 0.15.5 on crates.io and `main` (as of 2026-09-28) have no `qsk`/`use_qsk` code. The `unstable-frost` feature only makes `SpendValidatingKey::{to_bytes, from_bytes}` public.
 - **frost-tools derives FROST viewing keys the old way.** `zcash-sign/src/generate.rs` uses `FullViewingKey::from_sk_ak_incompatible_with_quantum_recoverability_and_will_be_removed`, from an `orchard` fork (`conradoplg/orchard@42015f1`, the not-yet-merged orchard#475). The comment says ZF "directed us to keep this non-quantum-recoverable constructor for now (frost-tools#591) … Quantum recoverability is deferred." It sets `nk` and `rivk` from `sk` the old way (`rivk = H^rivk(sk)`) with no `qsk`. **Vaults created that way (including by Konclave and other tools built on frost-tools) are spendable today but not recoverable under ZIP 2005.** The Recovery Protocol would check `ak` against `H^ask(sk)`, which doesn't match a DKG-generated `ak`. frost-tools#591 was closed on 2026-08-15 after Ironwood signing merged, but it kept this non-recoverable derivation.
 - **ZF has confirmed this is blocked upstream** (frost#1094, reply from conradoplg on 2026-09-21): FVK derivation for FROST under ZIP 2005 *"is blocked on zcash/zips#895 being finished and integrated with ZIP 2005, and then implemented. Yes, if you use `from_sk_ak_incompatible_with_quantum_recoverability_and_will_be_removed` you are giving up on quantum recoverability and would need to migrate to a new wallet then that is supported."* zips#895 ("[ZIP 312] Specify key generation, change randomizer handling", open, last updated 2026-08-28) now has a "Contributory Generation of sk" section (re-checked 2026-10-01): each participant's `sk_i = random_bytes(32)` is a COCKTAIL-DKG payload and `sk = H(n ‖ len(payload_1) ‖ payload_1 ‖ …)`. Zafe's agreement (§7.4) differs; align when COCKTAIL-DKG ships with Pallas (§7.5).
-- **What this means for Zafe:** the derivations *from* `sk` (`nk`, `qsk`, `qk`, `rivk_ext`) are already normative in ZIP 2005 § 4.2.3, which is deployed with NU6.3. What's still open is *how participants agree on `sk`* and *how the DKG is run*. Zafe's reading is that the Recovery Protocol checks `rivk_ext = H^rivk_ext_qk(ak, nk)`, `qk = H^qk(qsk)`, `nk = H^nk(sk)` and a signature under `ak`, and never checks how `sk` was agreed. If so, a vault built as in §7.4 steps 1–4 is recoverable whatever agreement method #895 eventually standardizes. ZIP 2005's normative "Usage with FROST" section supports it: participants "MUST privately agree on a value `sk`", with no method required. **ZF confirmed it (U1, 2026-10-01):** conradoplg on frost#1094: a change is *"very unlikely"*; the pending zips#895 work is about how participants agree on `sk` (COCKTAIL-DKG), *"but if you have your own system that will also work."* The mainnet beta has shipped (hosted relay, dry run done); the external audit is still open (M2).
-- **What Zafe does:** implement the four derivations above in `zafe-core` (about 40 lines using `blake2b_simd`, `blake3` and `pasta_curves`), then build the FVK with the public `from_bytes`. This is the one place Zafe writes key-derivation code itself, so:
+- **What this means for Zafe:** the derivations *from* `sk` (`nk`, `qsk`, `qk`, `rivk_ext`) are already normative in ZIP 2005 § 4.2.3, which is deployed with NU6.3. What's still open is *how participants agree on `sk`* and *how the DKG is run*. Zafe's reading is that the Recovery Protocol checks `rivk_ext = H^rivk_ext_qk(ak, nk)`, `qk = H^qk(qsk)`, `nk = H^nk(sk)` and a signature under `ak`, and never checks how `sk` was agreed. If so, a vault built as in §7.4 steps 1–4 is recoverable whatever agreement method #895 eventually standardizes. ZIP 2005's normative "Usage with FROST" section supports it: participants "MUST privately agree on a value `sk`", with no method required. **ZF confirmed it (U1, 2026-10-01):** conradoplg on frost#1094: a change is *"very unlikely"*; the pending zips#895 work is about how participants agree on `sk` (COCKTAIL-DKG), *"but if you have your own system that will also work."*
+- **What Zafe does:** implements the four derivations above in `zafe-core` (`keys.rs`, using `blake2b_simd`, `blake3` and `pasta_curves`), then builds the FVK with the public `from_bytes`. This is the one place Zafe writes key-derivation code itself, so:
   - **Check the shared building blocks against `orchard`:** for random `sk`, compute `H^nk(sk)` and the legacy `H^rivk(sk)` with Zafe's code and confirm they give byte-identical results to `orchard::keys::FullViewingKey::from(&SpendingKey::from_bytes(sk))`. That confirms the `PRF^expand`, `ToBase` and `ToScalar` code.
-  - **The new parts** (`0x0C`, BLAKE3 `qk`, `0x0D` `rivk_ext`) have no official test vectors. Write vectors, propose them to `zcash-test-vectors`, and ask ZF/ECC to cross-check (see frost-tools#591 and orchard#475).
+  - **The new parts** (`0x0C`, BLAKE3 `qk`, `0x0D` `rivk_ext`) have no official test vectors. Zafe's own are in `crates/zafe-core/test-vectors/zip2005_use_qsk.json` (from `tests/zip2005_vectors.rs`, checked independently by `scripts/check_zip2005_vectors.py`); they are offered upstream in frost-tools#609 / #610 (open as of 2026-10-27).
   - **Switch to the upstream API** once `orchard` (or `zcash_keys`) ships a ZIP 2005 constructor. Replace Zafe's code and keep the vectors as regression tests.
 - **ZIP 326 wallet rules for `use_qsk = true` accounts** (vault birthday is after NU6.3):
   - Never scan the Orchard pool for the vault; scan only the Ironwood pool, from the birthday height.
@@ -396,8 +426,8 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
   - it encrypts shares pairwise with ECDH, so the coordinator can relay them
   - its final CertEq round has all participants sign a canonical transcript, which catches a coordinator showing different messages to different participants
   - it identifies which participant misbehaved
-- **Status:** zips#895 is weighing whether to specify FROST key generation for Zcash on top of it (nuttycom, 2026-08-24: v0.2 "has now landed … can now be reassessed"). ZF's production implementation (frost#1033) is waiting on C2SP issue #216 and the spec being finalized. There's a WIP PR (frost#1032). **No production Rust crate exists yet.**
-- **Zafe v1 decision:** use `frost-core` 3.0.0 DKG (`reddsa` 0.5.2 redpallas `dkg`) with Zafe's own versions of COCKTAIL's protections: HPKE-sealed round 2 (§5.2), the echo check, and all-member transcript signatures (§7.2 steps 5 and 8). Keep the DKG code behind a `VaultKeygen` trait so it can switch to COCKTAIL-DKG, plus the standardized `sk` agreement from zips#895, once a production crate exists. A switch only affects **new** vaults. Existing vaults keep their keys.
+- **Status (2026-10-27):** zips#895 is weighing whether to specify FROST key generation for Zcash on top of it (nuttycom, 2026-08-24: v0.2 "has now landed … can now be reassessed"). ZF's production implementation (frost#1033, open) says it is blocked on C2SP#216 (closed 2026-07-13; feedback on v0.2.1 continues in C2SP#299) and possibly on the spec being finalized. There's a WIP PR (frost#1032, open). **No production Rust crate exists yet.**
+- **Zafe v1 decision:** use `frost-core` 3.0.0 DKG (`reddsa` 0.5.2 redpallas `dkg`) with Zafe's own versions of COCKTAIL's protections: HPKE-sealed round 2 (§5.2), the echo check, and all-member transcript signatures (§7.2 steps 5 and 8). The DKG code lives in `keygen.rs`, so it can switch to COCKTAIL-DKG, plus the standardized `sk` agreement from zips#895, once a production crate exists. A switch only affects **new** vaults. Existing vaults keep their keys.
 - The DKG choice doesn't change the key material a vault ends up with (`ak`, shares, `sk`). It only changes how that material is agreed. So existing vaults stay valid.
 
 ---
@@ -407,7 +437,7 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
 - Each device syncs independently from lightwalletd using `zcash_client_backend` (Spend-before-Sync) into a local `zcash_client_sqlite` database.
 - **Account type:** the vault UFVK is imported with `AccountPurpose::Spending { derivation: None }`, as Zodl and Vizor do for Keystone accounts. A `ViewOnly` account does not track note witnesses, so it could never build a spend. No spending key is stored; spend authorization always comes from FROST.
 - **Birthday height ≥ 2:** sync downloads the chain state at (scan range start − 1), and lightwalletd reads height 0 as "unspecified". This only matters on regtest.
-- **Proposals:** built with `propose_transfer` and `create_pczt_from_proposal`, using change to the Ironwood pool and `OvkPolicy::Sender` (the vault's external OVK for payments, internal for change), which §9.3 verification requires.
+- **Proposals:** built with `propose_transfer` and `create_pczt_from_proposal`, using change to the Ironwood pool and `OvkPolicy::Sender` (the vault's external OVK for payments, internal for change), which §9.3 verification requires. A vault never pays its own addresses (`node::propose` refuses). While the vault has fewer than 4 spendable notes, change is split into up to 4 notes (`wallet::change_split_policy`), so several proposals can be open at once.
 - Balance, notes, and incoming and outgoing history (with memos) come from the local database, never from the relay.
 - The history UI merges chain data with vault log data: who proposed a payment, who approved it, labels.
 - lightwalletd sees the device IP and broadcast transactions, but not which notes belong to the vault. Zcash community guidance for Ironwood-era light clients recommends network-layer privacy (Tor or Nym), randomizing the start height, and randomizing broadcast delays. Tor is built in (optional, fail-closed, 2026-10); randomized start heights and broadcast delays are not done.
@@ -437,11 +467,11 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
 
 ```typescript
 type ProposalAction =
-  | { kind: "PAYMENT"; payments: Payment[] }           // 1..50 recipients (batch)
-  | { kind: "ADDRESS_BOOK"; add: Contact[]; remove: string[] }
-  | { kind: "RULES"; rules: VaultRules }
-  | { kind: "MEMBERSHIP"; change: MembershipChange }   // §10
-  | { kind: "MIGRATE"; toVault: VaultDescriptor }      // §10.3
+  | { kind: "PAYMENT"; payments: Payment[] }           // 1..50 recipients (batch); built
+  | { kind: "ADDRESS_BOOK"; add: Contact[]; remove: string[] }   // planned
+  | { kind: "RULES"; rules: VaultRules }               // planned
+  | { kind: "MEMBERSHIP"; change: MembershipChange }   // planned, §10
+  | { kind: "MIGRATE"; toVault: VaultDescriptor }      // planned, §10.3
 
 interface Payment {
   address: string       // unified / Orchard-receiver address; transparent
@@ -465,23 +495,25 @@ interface Proposal {
 }
 ```
 
-Proposals that don't move funds (address book, rules) need t approvals and **no** FROST signature. The approvals are the authorization, and every client checks them when replaying the log.
+Proposals that don't move funds (address book, rules) will need t approvals and **no** FROST signature. The approvals are the authorization, and every client checks them when replaying the log.
+
+As built, a proposal is a `PROPOSAL` event with the payments, the PCZT and its hash, the tip it was built against, `signingSpends` and `autoSend` (§9.5.2). Its notes are the PCZT's spends. A proposal with **no payments** is a sweep: it spends a cancelled proposal's notes back to the vault, so that a fully signed cancelled transaction can never be mined (§9.5.2).
 
 ### 9.2 Building a payment proposal (on the author's device)
 
-1. Check the payments against rules and the address book (§11) and warn or block.
+1. Check the payments against rules and the address book (§11, planned) and warn or block.
 2. Select notes from the local wallet, **excluding notes reserved** by other open proposals.
 3. `propose_transfer`, then `create_pczt_from_proposal` (Creator, Constructor, IO Finalizer). Proofs are added later by whoever sends, in parallel with collecting signatures (the proof doesn't depend on them).
-4. Publish a `PROPOSAL` log entry with the PCZT, `pcztHash` and `reservedNotes`.
+4. Publish a `PROPOSAL` log entry with the PCZT and its hash.
 5. In the app the proposer approves in the same step, under the same unlock (2026-10-16); the CLI proposes and approves separately.
 
-**Note reservation:** every client treats notes listed in open, approved or broadcast proposals as unavailable until expiry (wallet locks). In the log, a proposal that spends a note of an earlier open or approved proposal that hasn't expired is ignored by every member (`NotesInUse`); broadcast and cancelled proposals don't block, since a respend is how a cancelled transaction is invalidated.
+**Note reservation** (two layers): every client treats the notes of open, approved or broadcast proposals as unavailable until expiry (wallet locks; a broadcast transaction that is neither mined nor in lightwalletd's mempool releases them, and the app reads the whole mempool rather than looking up one txid). In the log, a proposal that spends a note of an earlier open or approved proposal that hasn't expired is ignored by every member (`NotesInUse`); broadcast and cancelled proposals don't block, since a respend is how a cancelled transaction is invalidated.
 
 ### 9.3 Independent verification (every member, before voting)
 
 Each member's app parses the PCZT locally and refuses to show an Approve button unless **all** of these pass:
 
-1. **Network and version:** v6 transaction, correct consensus branch ID for the current height, network matches the vault.
+1. **Network and version:** v6 transaction, correct consensus branch ID for the current height, network matches the vault, expiry within the vault's window (§9.6).
 2. **Spends:** every spend that needs a signature belongs to this vault (the spend's `ak` equals the vault's `groupPublicKey`, and the nullifier derives from the vault's `nk`). For each spend, `rk == ak + [α]·G`, where `α` is the spend's randomizer from the PCZT.
 3. **Outputs:** every output is exactly one of:
    - a payment in the proposal (same address, amount and memo). **Zafe builds every payment output with the vault's external outgoing viewing key**, and members recover it with that key. Recovery decrypts the real ciphertext and checks it against the note commitment, so the compared recipient, amount and memo are what the recipient actually receives. An output the vault can't recover is rejected.
@@ -490,7 +522,7 @@ Each member's app parses the PCZT locally and refuses to show an Approve button 
    Any other output means rejection. Spends must each be either a vault note (nullifier and `rk` checked against the vault viewing key) or a zero-value padding spend already signed by the IO Finalizer. In v1, transparent, Sapling and Orchard-pool components are rejected outright.
 4. **Value:** inputs − outputs = fee, and the fee must **equal** the ZIP 317 conventional fee (5,000 zat × max(2, number of actions)). No tolerance: overpaying the fee is a way to burn funds.
 5. **Sighash:** compute the v6 sighash locally from the PCZT, and use only this value as the FROST message.
-6. **Rules** (§11) pass, or the proposal carries a rule-override flag that the rules themselves allow.
+6. **Rules** (§11, planned) pass, or the proposal carries a rule-override flag that the rules themselves allow.
 7. **Hash:** `pcztHash` matches the PCZT bytes.
 
 The approval screen shows every recipient, amount, memo, fee, the change amount, and the address-book name or an "unknown address" warning. Only after this does the member choose Approve or Reject.
@@ -506,11 +538,13 @@ This makes approval asynchronous. Members approve whenever they open the notific
 
 ### 9.5 Signing round 2
 
-1. **Session leader** = the proposal author. If the author hasn't acted within a timeout (default 1 hour after t approvals), any approving member may take over.
-2. The leader picks t approvers with unused commitments. For each spend it builds the signing package (commitments plus the sighash as the message), with the randomizer set to that spend's `α` from the PCZT (§9.5.1). It sends the packages by HPKE to those t members.
+This interactive round runs when one-tap signing (§9.5.2) can't.
+
+1. **Session leader** = whichever member sends the approved proposal (any member can). A leader never messages itself; when it is one of the signers it signs its own part locally.
+2. The leader picks t approvers whose commitments no earlier request used: itself first, then the others, and last those it saw leave a round unanswered (`node::order_signers`). For each spend it builds the signing package (commitments plus the sighash as the message), with the randomizer set to that spend's `α` from the PCZT (§9.5.1). It sends the packages by HPKE to those t members. Requests are deterministic, so sending the same request again is safe.
 3. Each of the t members runs the §9.3 checks again. It checks that the package's message equals its locally computed sighash and that each randomizer equals the corresponding spend's `α` in the PCZT. Then it signs with `frost_rerandomized::sign(signing_package, nonces, key_package, Randomizer::from_scalar(α))`, deletes the nonce, and sends the signature share.
-4. The leader verifies each share individually (FROST cheater identification) and aggregates with `RandomizedParams::from_randomizer(ak, α)`. It injects one signature per spend with the pczt `Signer` (`sign_ironwood_with` → `action.apply_signature(sighash, sig)`, which checks the signature against the spend's `rk`). Then it runs the Spend Finalizer, extracts the transaction, broadcasts it through lightwalletd, and logs `TX_BROADCAST`.
-5. If a member in the chosen set doesn't respond within a timeout, the leader starts a new session with a different set of approvers whose commitments are still unused.
+4. The leader verifies each share individually (FROST cheater identification) and aggregates with `RandomizedParams::from_randomizer(ak, α)`. It injects one signature per spend with the pczt `Signer` (`sign_ironwood_with` → `action.apply_signature(sighash, sig)`, which checks the signature against the spend's `rk`). Then it runs the Spend Finalizer, extracts the transaction, broadcasts it through lightwalletd, and logs `TX_BROADCAST`. Proving runs while shares are collected, since the proof doesn't depend on them.
+5. If a member in the chosen set doesn't answer, the leader's user can **start over**: the request is dropped, the silent members go last, and the members who had signed approve again with fresh commitments (a member can re-approve exactly when it holds no nonces for that proposal and PCZT).
 
 **Spends to sign:** every action in the Ironwood bundle where `spend().spend_auth_sig()` is `None` (an unsigned spend in the v6 Orchard bundle is rejected: vaults never hold Orchard-pool notes, ZIP 326). Don't filter by value. The IO Finalizer already signs true dummy spends during PCZT creation, so anything still unsigned belongs to the vault and needs a FROST signature, including zero-value spends the wallet controls. Konclave had a bug from filtering by value. Each pool is signed through its own `Signer` entry point, and asking the wrong one returns no spends rather than an error, so track `(pool, actionIndex)`. This mirrors `zcash-sign/src/sign.rs` in frost-tools.
 
@@ -530,7 +564,7 @@ This makes approval asynchronous. Members approve whenever they open the notific
 
 **Daira-Emma Hopwood on U5 (Discord, 2026-10-01):** *"The security proof in ePrint 2024/436 does not require α to be chosen after the commitments (in fact, when considering security against forgery as opposed to privacy, it allows the adversary to choose α). However, knowing α allows anyone to link the transaction containing rk to the long-term group public key ak."* This confirms the unforgeability reading above for both flows; the linkability caveat is handled as described. **ZF on the ZIP 312 deviation** (conradoplg, frost#1094, 2026-10-01): *"That is fine. That procedure is really to offer an additional layer of protection against a possible weak RNG by the coordinator. But you need to trust the coordinator (and all participants) to keep alpha secret anyway."*
 
-**Earlier ZF statements:** zips#895 changes ZIP 312's randomizer handling *"after I realized that it couldn't possibly be generated using the message as an input"* (conradoplg). In frost#1094 (2026-09-21): *"there will always be a mechanism for feeding an external randomizer since it is required for Zcash."* **API caveat:** in `frost-rerandomized` 3.0.0, the only public way to sign with an externally supplied randomizer is `sign()`, and it is `#[deprecated]` (it points to `sign_with_randomizer_seed`, which can't take a fixed `α`). The `Randomize` trait is private. Zafe calls `sign()` with `#[allow(deprecated)]` in one wrapper function, and switches when ZF either removes the deprecation or adds `sign_with_randomizer` (they've said they might remove it).
+**Earlier ZF statements:** zips#895 changes ZIP 312's randomizer handling *"after I realized that it couldn't possibly be generated using the message as an input"* (conradoplg). In frost#1094 (2026-09-21): *"there will always [be] a mechanism for feeding an external randomizer since it is required for Zcash."* **API caveat:** in `frost-rerandomized` 3.0.0, the only public way to sign with an externally supplied randomizer is `sign()`, and it is `#[deprecated]` (it points to `sign_with_randomizer_seed`, which can't take a fixed `α`). The `Randomize` trait is private. Zafe calls `sign()` with `#[allow(deprecated)]` in one wrapper function, and switches when ZF either removes the deprecation or adds `sign_with_randomizer` (they've said they might remove it).
 
 **Upstream precedent:** frost-tools does exactly this. `zcash-sign` reads `action.spend().alpha()` for every unsigned spend and prints it as "Randomizer #idx". The operator passes it to `frost-client coordinator --randomizer`. The coordinator then uses it verbatim (`RandomizedParams::from_randomizer`) instead of generating one (`coordinator/round_2.rs`). The `frost-rerandomized` API documents `from_randomizer` / `Randomizer::from_scalar` as intended *"for compatibility reasons with specifications on how the randomizer must be generated"*, and requires the value to be uniformly random.
 
@@ -544,15 +578,16 @@ This makes approval asynchronous. Members approve whenever they open the notific
 Implemented 2026-09-29. Approving a payment signs it; the payment can then be sent by any single member.
 
 1. **Pools.** Each member's app publishes `COMMITMENTS` log events: batches of fresh FROST round-1 commitments (FROST's preprocessing round, done ahead of time). The secret nonces are stored on the device **before** the event is appended, under the same rules as §9.4. The app tops the pool up to `pool_target = clamp(16 · C(n−1, t−1), 32, 256)` (16 single-spend proposals' worth), deepened to cover one proposal spending every unspent vault note (notes · C(n−1, t−1), at most 1024, published in batches of 256), when it drops below half.
-2. **Deterministic assignment.** When a `PROPOSAL` event is replayed, every member computes the same assignment from the log: for each signer group (all t-subsets of members, descriptor order), each spend (the proposal declares `signingSpends`, which members check against the PCZT) and each group member, the member's next unused pool commitment. A commitment is assigned at most once, ever. If the vault has more than 64 groups (e.g. 5-of-9), or no group has every member's pool, the proposal falls back to interactive signing (§9.4–9.5). **Event version 6 (2026-10-07):** a group is assigned only when each of its members still has enough commitments (checked in group order against what earlier groups of the same proposal took), so a member with no pool (a new phone after a seat move, a headless member) no longer takes one-tap signing away from the others; the groups it is in simply aren't assigned and it approves interactively. Proposals written with versions 1–5 keep the all-or-nothing rule, so old logs replay exactly as before, and an app that doesn't know version 6 skips those events instead of computing another assignment (`VAULT_EVENT`, gated by construction: the rule applies to the version the author's app wrote).
+2. **Deterministic assignment.** When a `PROPOSAL` event is replayed, every member computes the same assignment from the log: for each signer group (all t-subsets of members, descriptor order), each spend (the proposal declares `signingSpends`, which members check against the PCZT) and each group member, the member's next unused pool commitment. A commitment is assigned at most once, ever. If the vault has more than 64 groups (e.g. 5-of-9), or no group has every member's pool, the proposal falls back to interactive signing (§9.4–9.5). **Event version 6 (2026-10-07):** a group is assigned only when each of its members still has enough commitments (checked in group order against what earlier groups of the same proposal took), so a member with no pool (a new phone after a seat move, a headless member) no longer takes one-tap signing away from the others; the groups it is in aren't assigned and it approves interactively. Proposals written with versions 1–5 keep the all-or-nothing rule, so old logs replay exactly as before, and an app that doesn't know version 6 skips those events instead of computing another assignment (`VAULT_EVENT`, gated by construction: the rule applies to the version the author's app wrote).
 3. **Approve = sign.** The approving member runs the §9.3 checks, then for every group containing it and every spend: builds the signing package from the assigned commitments with its locally computed sighash, checks the commitment is its own and its nonce is present **before consuming any nonce**, takes (deletes) the nonce, and signs with the spend's `α`. The `VOTE` carries the shares per group (`C(n−1, t−1)` groups: 2 for 2-of-3, 6 for 3-of-5, 20 for 4-of-7). **A vote with shares is final**: later votes by that member on that proposal are ignored, because the shares are out.
 4. **Ready.** The first group (in group order) whose members have all posted shares is the ready group. Anyone can aggregate it from the log, verifying every share (cheater identification), prove, broadcast and log `TX_BROADCAST`. No request round and no other member online.
 5. **Auto-send.** The proposer chooses `autoSend` per proposal (the app always sets it since 2026-10-16): the member whose vote completed the ready group sends immediately (from the log order everyone agrees who that is). Otherwise any member sends when they choose. Two members sending the same proposal broadcast the same transaction (same txid; v6 txids exclude authorizing data).
 6. **Cleanup.** When a proposal closes (sent, rejected, cancelled), each device deletes the nonces of its commitments assigned to that proposal.
+7. **Restore.** Backups carry no nonces, so a device restored from a backup logs `POOL_RESET` (event version 8), which retires its commitments that no proposal has been assigned yet. An open proposal that was already assigned the lost commitments has to be proposed again (`node::propose_again`).
 
 **Security.** The unforgeability argument is the one in §9.5.1: the Re-Randomized FROST game lets the adversary choose the message, the signer set and `α` after the honest commitments are public, building on the preprocessing analysis of FROST (Bellare et al., CRYPTO 2022). The requirements are the usual ones, enforced in code: each commitment gets at most one round-2 response; the package (sighash, `α`, group) is fixed before the share is produced; the member verifies the transaction itself. Daira-Emma Hopwood confirmed (2026-10-01) that the proof doesn't need `α` chosen after the commitments and even lets the adversary choose it (U5, §9.5.1); ZF accepts the ZIP 312 deviation (conradoplg, same day).
 
-**Consequences to show in the UI.** Approving can't be withdrawn. A cancelled proposal whose group is complete can still be sent by a member until its expiry height; invalidating it for certain requires spending its notes (tracked in `docs/tracker.md`).
+**Consequences to show in the UI.** Approving can't be withdrawn. A cancelled proposal whose group is complete can still be sent by a member until its expiry height. Invalidating it for certain means spending its notes: a sweep (§9.1), which needs t approvals ("Make it unsendable" in the app).
 
 ### 9.6 Proposal status
 
@@ -562,14 +597,16 @@ side exits: rejected | cancelled (by author, before signing) | conflicted
           | expired (expiryHeight passed) | failed (with reason)
 ```
 
-- **Re-anchoring:** under ZIP 229, anchors are authorizing data, so a proposal whose anchor has gone stale can be re-anchored and re-proved without invalidating the sighash or the collected signatures. **[VERIFY]** the API for this in `pczt` / librustzcash (issue #2529).
-- `expiryHeight` defaults to about 7 days of blocks. After that, the proposal must be rebuilt.
+As built, the log tracks `Open`, `Approved`, `Rejected`, `Cancelled` and `Broadcast` (`vault::ProposalStatus`); mined and expired come from the wallet and the chain tip.
+
+- **Re-anchoring:** under ZIP 229, anchors are authorizing data, so a proposal whose anchor has gone stale can be re-anchored and re-proved without invalidating the sighash or the collected signatures (resolved as V6, §19).
+- **Expiry:** the transaction's expiry height is the target height plus the vault's approval window (`descriptor.proposalExpiryBlocks`: default 7 days, chosen at creation from 1 to 30 days), rounded up to a multiple of 144 blocks so it doesn't reveal when the proposal was made. Members accept the window plus 96 blocks of tip slack plus the rounding. Counts are in 75 s blocks and scale by 3 from NU7 (25 s blocks); expiry is cut short before a known network upgrade. After expiry, the proposal must be rebuilt. Exact rules: `AGENTS.md` ("Notes, expiry, sending").
 
 ---
 
 ## 10. Membership changes
 
-Changing members depends on the group, so Zafe offers two operations and explains the trade-off in the UI.
+Changing members depends on the group, so Zafe offers two operations, rotation (§10.2) and migration (§10.3), and explains the trade-off in the UI. Both are planned (M3). Built today: moving a lost member's seat to a new phone (§10.1).
 
 ### 10.1 Replace a lost device (same member)
 
@@ -578,9 +615,9 @@ The member keeps their seat. Two ways back in (§12): restore from an encrypted 
 **Repair as implemented (2026-10-01; `zafe_core::repair`, `VaultEvent::ReplaceApproval`, event version 4):**
 1. The new phone makes a fresh identity and shows a **recovery code** (`zafe-recover-v1:<hex postcard {identity}>`, shared like an invite). Before approving, each co-signer and the new phone compare four **safety words** by voice or in person (2026-10-15; until then an 8-digit code of the new keys, which someone who swaps the code in transit could match by generating keys for seconds). The words come from a commit-reveal exchange through the relay (`/v1/recovery/put|read`, signed values): the new phone publishes a commitment to a secret, the co-signer then publishes a challenge (derived from its signature over the new key and that commitment), the new phone reveals its secret only once challenged, and both compute `BLAKE2b(new identity, co-signer key, secret, challenge)` as 4 BIP-39 words. A swapped code is committed before the challenge exists, so a match is a one-shot guess (2^-44). The new phone lists words per co-signer key; approving takes the confirmed words.
 2. Co-signers approve in the log: `ReplaceApproval { old, new, signature }`, where `signature` is the author's Ed25519 signature over `("Zafe replace member v1", vault id, old, new)`. Replay accepts it only from a current member other than `old`, for a current `old` and a `new` that is not and never was a member. At **t approvals** for the same `(old, new)` the seat moves (`VaultState::replacements`): the descriptor's member identity is swapped in the replayed state, and votes, one-tap shares, signer-group slots and the shared name move to the new key. Interactive approvals are voided (their nonces were on the lost device; a proposal approved at exactly t reopens). The old key's pool and backup attestation are dropped. From then on the old key's entries are ignored and chain verification uses the membership as of each entry.
-3. The relay swaps the key (`POST /v1/mailbox/replace`) when shown t valid approval signatures from other current members. It learns t from the creator before sealing (`/v1/mailbox/threshold`; vaults created on an older relay can't move seats). The new phone finds its vault with `/v1/mailboxes`.
-4. The first t approvers are the **helpers**. Each runs RTS part 1 (deltas, saved before anything is sent), seals a delta to every other helper, then part 2, and seals its sigma to the new phone with the public key package, `sk` and the log key (`Kind::RepairDelta` / `RepairSigma`, `Format::Repair`). This runs on every refresh.
-5. The new phone reads the log with the log key, finds its move and the helpers, requires a sigma from every helper with identical vault data, and checks that the repaired verifying share equals the member's share in the public key package, that the group key matches the descriptor, and that `sk` gives the descriptor's UFVK. Its material carries the current membership. Other members' apps save their material with the new membership when they see a move.
+3. The relay swaps the key (`POST /v1/mailbox/replace`, or `/v1/mailbox/replace-labelled` when the label differs from the vault id; the approvals are signed over the vault id) when shown t valid approval signatures from other current members. It learns t from the creator before sealing (`/v1/mailbox/threshold`; vaults created on an older relay can't move seats). A co-signer gives the new phone a **seat link** (`zafe-seat-v1:`: the relay URL and label); without one, the new phone looks through the mailboxes the relay lists for it (`/v1/mailboxes`).
+4. The first t approvers are the **helpers**. Each runs RTS part 1 (deltas, saved before anything is sent), seals a delta to every other helper, then part 2, and seals its sigma to the new phone with the public key package, `sk`, the log key, the relay's create token and its **log anchor** (length and head hash of its log copy) (`Kind::RepairDelta` / `RepairSigma`, `REPAIR` 3). This runs on every refresh.
+5. The new phone reads the log with the log key and checks it against every helper's anchor before trusting it, finds its move and the helpers, requires a sigma from every helper with identical vault data, and checks that the repaired verifying share equals the member's share in the public key package, that the group key matches the descriptor, and that `sk` gives the descriptor's UFVK. Its material carries the current membership. Other members' apps save their material with the new membership when they see a move.
 6. **The member confirms the vault before it is saved**: the new phone shows the vault address's last 8 characters to compare with a co-signer. It can't know in advance which vault to expect, so a dishonest relay could otherwise present a self-made vault (it couldn't steal anything, but money sent to that vault's address would be lost).
 
 **The FROST identifier stays the same** (repair recreates the share at the member's existing identifier), even though the identity key changes. So in this one case the `Identifier` is not re-derived from the new `sigPk` (an exception to §5.1). The replayed state records the mapping (`Replacement::frost_id`).
@@ -612,6 +649,17 @@ Every operation starts as a `MEMBERSHIP` proposal with t approvals, and finishes
 - **Raising t doesn't bind the old group.** Old shares stay shares of the same key, so any old t who kept theirs can still sign at the old threshold (§10.4.4). This is inherent to keeping the key, not a gap in the protocol.
 
 So the UI offers rotation for **friendly** changes (a lost phone, adding someone, raising t as a precaution) and says it trusts everyone to delete old keys; anything **hostile** (removing someone who may not cooperate, raising t because a member isn't trusted) goes to migration.
+
+### 10.3 Migrate (new vault)
+
+Use this for hostile removal, changing t until resharing (§10.4.4) is built, or when rotation isn't supported. It is the only way to revoke old shares.
+
+1. The new member set creates a new vault (§7).
+2. A `MIGRATE` proposal in the old vault moves all funds to the new vault's address. It needs t approvals from the old members, may take several transactions if there are many notes, and costs fees.
+3. The old vault is marked `archived`. Its history stays viewable.
+4. Payers must be told the new address. The UI provides a "share new address" step.
+
+**Late payments (migrate + reshare):** payments keep arriving at the old address for a while. To let the new group sweep them, migration can also reshare the *old* key to the new member set (§10.4.4); the new vault's members then sweep the old address into the new one. Remaining risk: colluding old members who kept their shares can race that sweep for funds that land after the move. It is small and shrinks as payers update.
 
 ### 10.4 FROST mechanics (open item V5, researched 2026-09-29 against `frost-core` 3.0.0)
 
@@ -658,24 +706,15 @@ So the UI offers rotation for **friendly** changes (a lost phone, adding someone
 **What no resharing can do: revoke a kept old share.** An old share is a share of the *same* key, so any old t who kept theirs can still sign at the old threshold, forever. Proactive security only *assumes* deletion; nothing enforces it: phone enclaves can't do Pallas arithmetic, so shares live in app memory and a member who roots their phone can copy one; app attestation proves the app only at the moment it attests; Zcash has no scripts to refuse an old-key signature; and a new key means a new address (it commits to `ak`). So:
 - Raising t never makes things worse: t old members willing to keep and combine shares could already spend before the change. It protects against *honest* members' old shares leaking later (a sold phone, an old backup), not against people already able to collude.
 - Only **migration** (§10.3) revokes.
-- **Unapproved-spend alert** (planned): every member's wallet sees the vault's spends. A spend whose transaction matches no proposal in the vault log means keys were used outside Zafe (old shares, or t compromised devices); the app alerts loudly. It doesn't stop the theft but tells the group at once.
+- **Unapproved-spend alert** (`spend_watch`, built): every member's wallet sees the vault's spends. A spend whose transaction matches no proposal in the vault log means keys were used outside Zafe (old shares, or t compromised devices); the app alerts loudly. It doesn't stop the theft but tells the group at once. Grace: 24 blocks, only for approved or broadcast proposals and the txid their PCZT fixes.
 
 **Forward secrecy of ceremony messages.** Refresh and resharing only help against an attacker who wasn't recording. Today every envelope is HPKE-sealed to the recipient's **long-term** X25519 identity key (the sender's half is ephemeral, the recipient's static), and the relay holds ciphertext until it is acknowledged (≤ 30 days; anyone on the path can keep it). Whoever later gets a member's identity key opens every recorded message to that member: DKG round-2 packages, `sk` contributions, repair sigmas, reshare deals, signing requests (with `alpha`). That gives them the member's *old* shares, and an old share plus another member's share from the same round undoes the refresh (Human Network §2.3, §4.1). Before refresh or resharing ships, each ceremony uses **one-time encryption keys**: every participant publishes a fresh X25519 key signed with its identity key, deals are sealed to it, and the private key is deleted when the ceremony ends (like Signal's pre-keys). Human Network uses forward-secure PKE (CHK03, key-evolving); for a handful of phones and rare ceremonies, one-time keys do the same job. Signing rounds can follow later (they carry `alpha`).
-
-### 10.3 Migrate (new vault)
-
-Use this for hostile removal, changing t until resharing (§10.4.4) is built, or when rotation isn't supported. It is the only way to revoke old shares.
-
-1. The new member set creates a new vault (§7).
-2. A `MIGRATE` proposal in the old vault moves all funds to the new vault's address. It needs t approvals from the old members, may take several transactions if there are many notes, and costs fees.
-3. The old vault is marked `archived`. Its history stays viewable.
-4. Payers must be told the new address. The UI provides a "share new address" step.
-
-**Late payments (migrate + reshare):** payments keep arriving at the old address for a while. To let the new group sweep them, migration can also reshare the *old* key to the new member set (§10.4.4); the new vault's members then sweep the old address into the new one. Remaining risk: colluding old members who kept their shares can race that sweep for funds that land after the move. It is small and shrinks as payers update.
 
 ---
 
 ## 11. Rules and address book (enforced by members' apps)
+
+Rules and the address book are planned, not built (2026-10-27). The CSV export (§11.3) is built.
 
 ### 11.1 Rules
 
@@ -700,7 +739,7 @@ interface VaultRules {
 
 ### 11.3 Export
 
-A CSV export of the vault history. Columns: date, txid, direction, counterparty (address and contact name), amount, fee, memo, proposal id, proposer, approvers. It is generated locally from the wallet database and the vault log, never on a server.
+A CSV export of the vault history (`history::CSV_HEADER`): date, txid, direction, counterparty, contact, amount_zec, fee_zec, memo, proposal_id, proposer, approvers. It is generated locally from the wallet database and the vault log, never on a server.
 
 ---
 
@@ -713,15 +752,15 @@ A CSV export of the vault history. Columns: date, txid, direction, counterparty 
 
 ### 12.2 Encrypted backup
 
-- Contents: identity keys, FROST key package, `sk`, the vault descriptor, the log key, and `useQsk = true`. **Never** FROST nonces.
+- Contents (`backup.rs`, `BACKUP` 3): identity seeds, FROST key package, `sk`, the vault descriptor (with `useQsk = true`), the log key, the vault's relay (URL, label, create token), the invite, the names this member gave the other signers, and this device's copy of the vault log (§6.3). **Never** FROST nonces, pool nonces or the wallet database key.
 - Encryption: a passphrase run through Argon2id (at least 64 MiB, 3 iterations), then XChaCha20-Poly1305. Since 2026-10-16 the app generates the passphrase (12 BIP-39 words, 128 bits) and the member types 3 of the words back before export. A typed passphrase (older backups) must be at least 12 words or pass a zxcvbn score of 4 or more.
-- Destinations: iCloud Drive, Google Drive, or a file export.
+- Destinations: a `.zafebackup` file through the system share sheet (a drive, a password manager, another app), or the same bytes copied as text (`zafe-backup-v1:`).
 - The app tracks who has a verified backup (a member attests to it in the log) and shows the vault's "backup health". Implemented 2026-10-01: `BACKUP_VERIFIED` for the current epoch, logged once the backup has been decrypted again on the device and saved or copied out of the app; the Signers tab shows the count and each signer's status.
 - Warning shown when backing up: the backup plus the passphrase give that member's full capability.
 
 ### 12.3 Restore
 
-Restore the backup, then sync the vault log from the relay, then resync the wallet from the birthday height. If the log key has rotated since the backup was made, another member must send the current key.
+Restore the backup, install its log copy (`node::install_log_copy`, verified), then sync the vault log from the relay, then resync the wallet from the birthday height. The restored device logs `POOL_RESET` (§9.5.2), because its backup holds no nonces. Once log-key rotation exists (M3), a member restoring from before a rotation will need another member to send the current key.
 
 ---
 
@@ -731,7 +770,7 @@ Restore the backup, then sync the vault log from the relay, then resync the wall
 
 | Threat | Result |
 |---|---|
-| Relay compromised | Can censor, delay and analyse metadata. **Cannot** spend, read content, or forge votes. Setup impersonation is blocked by the safety-number check |
+| Relay compromised | Can censor, delay and analyse metadata. **Cannot** spend, read content, or forge votes. Setup impersonation is blocked by the safety words (§5.3). Can't move the vault elsewhere (§6.4) |
 | lightwalletd compromised | Can hide or delay chain data and see IP addresses. Can't spend. A wrong balance can't cause a bad signature, because members verify the PCZT itself |
 | Fewer than t members compromised | Cannot spend. Can see everything (they hold `sk`) |
 | t or more members compromised | Can spend. Rules can be bypassed. This is inherent |
@@ -763,8 +802,8 @@ Restore the backup, then sync the vault log from the relay, then resync the wall
 | Device secure storage | Identity keys, FROST key package, `sk`, log key | Keychain / Keystore, biometric or passcode gate for signing |
 | Device files (nonces) | FROST nonces and pool nonces (this-device-only) | XChaCha20-Poly1305 under a key derived from the identity seeds and vault id; excluded from backups and device transfer |
 | Device app database | Wallet database (notes, transactions), descriptors | SQLCipher, key derived from the identity seeds and vault id (not stored) |
-| Device files | This device's copy of each vault's log (`<vault id>.log`: the entries exactly as the relay holds them, encrypted under the vault log key, which is in secure storage; grows only; it is the anchor against a relay that rolls back, §6.3) | No more than the relay's own storage holds; atomic writes; not carried by backups |
-| Relay (SQLite) | Mailboxes, public identity keys, encrypted envelopes (TTL), encrypted vault log, push tokens | Host disk encryption; no content keys |
+| Device files | This device's copy of each vault's log (`<vault id>.log`: the entries exactly as the relay holds them, encrypted under the vault log key, which is in secure storage; grows only; it is the anchor against a relay that rolls back, §6.3), the relay's last reachability (`<vault id>.status`) and this phone's part in a relay move (`<vault id>.move`, encrypted with a key from the vault secret) | No more than the relay's own storage holds; atomic writes; the log copy is carried by backups (§12.2) |
+| Relay (SQLite, `ZAFE_RELAY_DB`) | Mailboxes (label, vault id, last-seen day), public identity keys, encrypted envelopes (30 days), encrypted vault log, push tokens | Host disk encryption; no content keys; unused mailboxes expire (§6.1) |
 
 ---
 
@@ -776,7 +815,7 @@ zafe/
 │   ├── lib/
 │   └── rust/               # flutter_rust_bridge crate (rust_lib_zafe)
 ├── crates/
-│   ├── zafe-core/          # keys, keygen, signing, PCZT, verify, vault, wallet, relay client
+│   ├── zafe-core/          # keys, keygen, signing, PCZT, verify, vault, wallet, relay client, moves
 │   ├── zafe-relay/         # relay server (axum + SQLite)
 │   ├── zafe-proto/         # envelope + vault log types (serde, versioned)
 │   └── zafe-cli/           # headless member for testing and CI
@@ -784,32 +823,34 @@ zafe/
 │   ├── regtest/            # regtest through `ths` (Docker)
 │   ├── relay/              # relay Dockerfile, Fly.io and VPS deploys
 │   └── site/               # the website
-├── scripts/                # m0-e2e.sh (three CLI members on regtest), benchmarks, generators
+├── scripts/                # m0-e2e.sh, move-e2e.sh (three CLI members on regtest), benchmarks, generators
 ├── docs/                   # tracker, audit scope, design and release notes
 └── spec.md
 ```
 
-`zafe-cli` is a full member without a UI. It makes end-to-end tests possible (`scripts/m0-e2e.sh`: three CLI members run a 2-of-3 vault on regtest; run locally, CI doesn't run it) and serves as the first thing built (§16, M0).
+`zafe-cli` is a full member without a UI. It makes end-to-end tests possible (`scripts/m0-e2e.sh`: three CLI members run a 2-of-3 vault on regtest; `scripts/move-e2e.sh`: the same three move it between two relays; both run locally, not in CI) and was the first thing built (§16, M0). The full command list is in `AGENTS.md` ("Commands").
 
 ---
 
 ## 16. Milestones
 
 **M0: Core protocol (CLI, testnet)**
-*Status 2026-09-29: **complete.*** `scripts/m0-e2e.sh` runs three separate `zafe` CLI members through the relay: invite and join, matching safety numbers, key generation over sealed envelopes, vault funded on Ironwood regtest (`infra/regtest/`), payment proposed, independently verified and approved, FROST-signed, broadcast and logged. Library-level tests: 51 plus the Docker-gated `regtest_e2e`. **Cross-checked against frost-tools `zcash-sign`** (`tests/zcash_sign_crosscheck.rs`): on zcash-sign's real testnet Ironwood fixture, Zafe reproduces the on-chain sighash; on a Zafe PCZT, zcash-sign prints the same sighash and randomizers, accepts Zafe's FROST signatures, and writes byte-identical spend-auth signatures. The relay is still in-memory, which is fine for M0.
-DKG + safety number + `sk` agreement + UFVK/address → sync → PCZT → FROST signing for all spends → broadcast. Three `zafe-cli` members running over a local relay. Resolve every [VERIFY] item. Cross-check signatures and transactions against `zcash-sign` / `zcash-devtool`.
+*Status 2026-09-29: **complete.*** `scripts/m0-e2e.sh` runs three separate `zafe` CLI members through the relay: invite and join, matching safety numbers (replaced by safety words on 2026-10-15), key generation over sealed envelopes, vault funded on Ironwood regtest (`infra/regtest/`), payment proposed, independently verified and approved, FROST-signed, broadcast and logged. Library-level tests: 51 plus the Docker-gated `regtest_e2e`. **Cross-checked against frost-tools `zcash-sign`** (`tests/zcash_sign_crosscheck.rs`): on zcash-sign's real testnet Ironwood fixture, Zafe reproduces the on-chain sighash; on a Zafe PCZT, zcash-sign prints the same sighash and randomizers, accepts Zafe's FROST signatures, and writes byte-identical spend-auth signatures. The relay was still in-memory then (SQLite since).
+DKG + safety check + `sk` agreement + UFVK/address → sync → PCZT → FROST signing for all spends → broadcast. Three `zafe-cli` members running over a local relay. Resolve every upstream open item. Cross-check signatures and transactions against `zcash-sign` / `zcash-devtool`.
 
 **M1: App v1 (testnet)**
 Flutter app with vault creation (invite link and QR), receive, balance, history, payment proposals, independent verification screen, approve/reject, async signing, push notifications, hosted relay.
+*Status 2026-10-27: done on Android (testnet relay `testnet.relay.zafe.cash`); iOS not built.*
 
 **M2: v1 feature-complete (mainnet beta)**
-Batch payments, address book, rules, CSV export, encrypted backup and restore, repair, backup health. External security audit of zafe-core and the protocol. **Mainnet gate:** a hosted relay and a small end-to-end mainnet dry run, then a beta (label only, no cap): the beta is out (`mainnet-v*` releases) while the external audit is still to come. (U1, ZF confirming the key derivation gives recoverable vaults, was answered 2026-10-01.)
+Batch payments, address book, rules, CSV export, encrypted backup and restore, repair, backup health. External security audit of zafe-core and the protocol. **Mainnet gate:** a hosted relay and a small end-to-end mainnet dry run, then a beta (label only, no cap). (U1, ZF confirming the key derivation gives recoverable vaults, was answered 2026-10-01.)
+*Status 2026-10-27: the mainnet beta is out on Android (`mainnet-v*` releases, relay `relay.zafe.cash`). Built: batch payments, CSV export, backup and restore, repair, backup health. Not built: address book, rules (§11). The external audit is still to come (scope: `docs/audit-scope.md`).*
 
 **M3: Membership**
-Rotation (repair to add members, refresh to remove them, resharing to change t, §10.2), one-time ceremony keys (§10.4.4), migration flow with late-payment sweeps, unapproved-spend alert, desktop builds.
+Rotation (repair to add members, refresh to remove them, resharing to change t, §10.2), one-time ceremony keys (§10.4.4), migration flow with late-payment sweeps, desktop builds. (The unapproved-spend alert, first planned here, shipped early: §10.4.4.)
 
 **M4: Platform**
-Self-hostable relay packaging and paid hosted tiers, dapp SDK (proposal requests from third-party apps), hardware members (Keystone/Ledger FROST support permitting), payment disclosures.
+Paid hosted relay tiers (self-hosting and relay moves shipped early: `infra/relay/README.md`, §6.4), dapp SDK (proposal requests from third-party apps), hardware members (Keystone/Ledger FROST support permitting), payment disclosures.
 
 ---
 
@@ -825,7 +866,7 @@ Self-hostable relay packaging and paid hosted tiers, dapp SDK (proposal requests
 
 | Project | What it is | Relation to Zafe |
 |---|---|---|
-| Konclave (deegalabs, Apache/MIT) | Desktop (Tauri) FROST treasury; browser DKG; blind relay; **helper server holding the UFVK** builds PCZTs; mainnet Ironwood spends | Closest product. Zafe differs by being mobile-first, **building PCZTs only on members' devices** (the server never holds a viewing key), async approvals, signer-enforced rules, and **ZIP 2005 quantum-recoverable vault keys**. Tools built on frost-tools currently use the legacy, non-recoverable derivation (§7.4.1); confirm this for Konclave's own code |
+| Konclave (deegalabs, Apache/MIT) | Desktop (Tauri) FROST treasury; browser DKG; blind relay; **helper server holding the UFVK** builds PCZTs; mainnet Ironwood spends | Closest product. Zafe differs by being mobile-first, **building PCZTs only on members' devices** (the server never holds a viewing key), async approvals, signer-enforced rules (planned), and **ZIP 2005 quantum-recoverable vault keys**. Tools built on frost-tools currently use the legacy, non-recoverable derivation (§7.4.1); confirm this for Konclave's own code |
 | Quorum / zcash-multisig | Next.js + keyless coordinator; testnet Ironwood 2-of-3 | Hackathon-stage web app |
 | ZF frost-tools | `frostd`, `frost-client`, `zcash-sign` CLIs | Reference implementation and test oracle |
 | Zodl / Vizor | Single-user wallets with Keystone (PCZT) support | Pattern source: view-only account plus external signer |
@@ -836,22 +877,22 @@ Self-hostable relay packaging and paid hosted tiers, dapp SDK (proposal requests
 
 | # | Item | Blocks |
 |---|---|---|
-| ~~V1~~ | **Resolved (2026-09-29), with follow-up:** no upstream ZIP 2005 FROST constructor exists (frost-tools deliberately uses the legacy, non-recoverable derivation). Zafe implements the ZIP 2005 derivations itself and builds the FVK with the public `FullViewingKey::from_bytes`. DKG output is normalized with `EvenY`. `sk` is 32 bytes. See §7.4.1. **Follow-up:** write test vectors and get them cross-checked upstream; move to the upstream API when it ships | M0 |
+| ~~V1~~ | **Resolved (2026-09-29), with follow-up:** no upstream ZIP 2005 FROST constructor exists (frost-tools deliberately uses the legacy, non-recoverable derivation). Zafe implements the ZIP 2005 derivations itself and builds the FVK with the public `FullViewingKey::from_bytes`. DKG output is normalized with `EvenY`. `sk` is 32 bytes. See §7.4.1. **Follow-up:** vectors written (§7.4.1); get them cross-checked upstream; move to the upstream API when it ships | M0 |
 | ~~V2~~ | **Resolved (2026-09-29):** use the PCZT's `α` as the FROST randomizer (§9.5.1). Checked against frost-tools @ `06c0dbdb` (`zcash-sign/src/sign.rs`, `frost-client/src/coordinator/round_2.rs`), frost @ `0966bd15` (`frost-rerandomized`), ZIP 312, and ePrint 2024/436 | — |
 | ~~V3~~ | **Resolved:** `pczt` 0.9.3 `roles::low_level_signer::Signer::{sign_ironwood_with, sign_orchard_with}`, then `action.spend().alpha()` and `action.apply_signature(sighash, sig)` (in `orchard` 0.15.5 `pczt/signer.rs`); the v6 sighash is `v6_signature_hash(&pczt.into_effects(), SignableInput::Shielded, …)`; dummy spends are signed by the IO Finalizer | — |
-| ~~V4~~ | **Resolved (2026-09-29):** lightwalletd ≥ v0.5 (on Zebra ≥ 6.0) and `zcash_client_backend` 0.24 support Ironwood. Public mainnet endpoints are unconfirmed, so Zafe runs its own and checks servers on connect (§8.1) | — |
+| ~~V4~~ | **Resolved (2026-09-29):** lightwalletd ≥ v0.5 (on Zebra ≥ 6.0) and `zcash_client_backend` 0.24 support Ironwood. Zafe uses public community servers and checks them on connect (§8.1) | — |
 | ~~V5~~ | **Resolved (2026-09-29):** `frost-core` 3.0.0 supports DKG refresh (can remove members, N shrinks, t fixed) and repair (lost share or new identifier, ≥ t helpers). Changing t → resharing in our own code (§10.4.4, checked 2026-10-04) or migrate. Repair output isn't verified, so Zafe adds verifying-share checks and a test signature before old shares are deleted. See §10.2 and §10.4 | — |
 | ~~V6~~ | **Resolved (2026-09-29):** `pczt` 0.9.3 `roles::updater::Updater::set_ironwood_spend_witnesses` sets or refreshes spend witnesses (and hence the anchor) **after** signing without changing the sighash, as long as proofs haven't been created yet. Proving happens after signing, at broadcast time. `Builder` also supports deferring anchors until proving. Evidence: `pczt` tests `wallet_can_set_ironwood_witness_after_signing` and `builder_can_defer_anchors_until_proving` | — |
 | V7 | **Measured on a phone (2026-09-29).** Nothing Phone A024, Snapdragon SM8735 (1× Cortex-X4 + 7× A720), Android 16, via `scripts/android-bench.sh`. Proving-key build / 2-action Ironwood proof: 1 thread **3.4 s / 4.6 s**, 2 threads 2.6 / 3.5 s, 4 threads 2.2 / 2.2 s, 8 threads **2.1 s / 1.7 s**, ~113 MB peak. Pinned to the two slowest cores (A720 @ 2.0 GHz, a mid-range proxy): 6.5 s / 8.9 s single-threaded, 4.5 s / 4.8 s on two. Round 2 (verify + FROST sign): **12 ms, 6.8 MB peak** (25 ms pinned). The desktop i7 is only ~1.4× faster than this phone. **Estimate for budget phones** (Cortex-A55-class cores, not measured): about 2–3× slower per core than the pinned run, so roughly 10–25 s to build the key and prove. Acceptable for a leader-only, once-per-payment step with a progress bar. Build the proving key once per app session and reuse it. Still open: a real low-end device run, and Zakura's faster prover when it supports Ironwood | M1 |
 | V8 | **Feasible (resolved in design; device prototype pending).** Round 2 (full PCZT verification plus FROST signing) takes ~10 ms and **~6 MB peak memory for the whole process**, well inside an iOS Notification Service Extension's 24 MB / ~30 s budget. Design: approval (round 1) is always an explicit user action in the app. Round 2 runs **automatically in the NSE** on a push, and only for a signing request that matches a proposal the member already approved; every §9.3 check runs again, so it never signs anything new. The NSE needs the key share and vault secret in a Keychain access group shared with the extension (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, because the phone may be locked), a cached chain tip, and the PCZT fetched from the log. No wallet database and no proving. Pushes must be visible alert pushes with `mutable-content` (silent pushes are throttled). Fallback: sign on next app open. Android: an FCM high-priority data message, then sign in `onMessageReceived` or expedited WorkManager | M1 |
 | ~~V9~~ | **Resolved (2026-09-29):** all published crates, no git pins (see §4.4) | — |
 | D1 | Maximum N (default 15): DKG cost is O(N²) messages; confirm the UX | M1 |
-| D2 | Default proposal expiry and timeouts | M1 |
+| ~~D2~~ | **Resolved:** default approval window 7 days, 1 to 30 at creation (§9.6) | — |
 | D3 | Free vs paid tier limits | M4 |
-| ~~U1~~ | **Answered (frost#1094, 2026-10-01):** vaults derived per §7.4 (ZIP 2005 § 4.2.3, agreed `sk`, `ak` from the DKG) are expected to stay recoverable; a change is "very unlikely" and "if you have your own system that will also work". Daira-Emma Hopwood (Discord, 2026-10-01): "that's the intended usage with use_qsk = true" Left: get our `use_qsk` vectors cross-checked upstream | — |
+| ~~U1~~ | **Answered (frost#1094, 2026-10-01):** vaults derived per §7.4 (ZIP 2005 § 4.2.3, agreed `sk`, `ak` from the DKG) are expected to stay recoverable; a change is "very unlikely" and "if you have your own system that will also work". Daira-Emma Hopwood (Discord, 2026-10-01): "that's the intended usage with use_qsk = true". Left: get our `use_qsk` vectors cross-checked upstream (frost-tools#609 / #610, open) | — |
 | ~~U2~~ | **Answered (frost#1094, 2026-09-21):** an external-randomizer API will always exist; `sign()` may be un-deprecated | — |
 | ~~U3~~ | **Answered (frost#1094, 2026-10-01):** the redpallas ciphersuite moves to the FROST repo with the same serialization; any 0.5.x security fix before then will be worked out | — |
 | U4 | **Upstream:** COCKTAIL-DKG Pallas implementation (frost#1033). The ZIP 312 key-generation spec is drafted in zips#895 (§7.4.1) | Not blocking (§7.5) |
 | ~~U5~~ | **Answered (2026-10-01):** a builder-chosen `α` is fine (Daira-Emma Hopwood: the proof even lets the adversary choose it; conradoplg: the ZIP 312 step only hedges a weak coordinator RNG). Caveat: `α` links `rk` to `ak`, so it stays among members (§9.5.1) | — |
 
-Questions for ZF are drafted in `upstream-asks.md`.
+The questions and answers are in `upstream-asks.md`.

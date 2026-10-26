@@ -1,10 +1,17 @@
 # Onboarding: research, process and design
 
-Written 2026-10-15. Research, the study of Vizor's and Zodl's first-run flows, and a
-proposed design for Zafe's onboarding. Since written (2026-10-15/16), the P0 and P1 items
-were built (safety words, async setup, invite expiry, name in setup, generated backup words
-with a recall check, ...); some ideas here were dropped. `docs/tracker.md` ("Onboarding")
-has what was built and what was dropped; it wins where this doc disagrees.
+Written 2026-10-15: research, a study of Vizor's and Zodl's first-run flows, and a
+proposed design for Zafe's onboarding. This is the design as proposed, not the app as
+built. `docs/tracker.md` "Onboarding" lists what was built and what was dropped, and wins
+where this doc disagrees. The main differences:
+- Built 2026-10-15/16: commit-then-reveal safety words (4 words, not 5; no QR mode),
+  async setup (keys start on each member's "They match", no shared sitting), invite
+  expiry (72 h), names in setup, generated backup words with a recall check, the
+  notification primer, and a backup card first once the vault holds money.
+- Built 2026-10-21: Welcome's two recovery paths merged into "I'm already in a vault".
+- Dropped: threshold presets, the t = n sheet, the "before you invite" brief, the
+  readiness card and the Receive interstitial.
+- Open: guided test payment, one-time tips, practice vault.
 
 Sources used:
 - A web research pass (NN/g, Apple HIG, Material, Monzo, Mercury, Ramp, Fordefi, Safe,

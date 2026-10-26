@@ -41,18 +41,23 @@ docker build -f infra/relay/Dockerfile -t zafe-relay:dev .
 docker run -d --name zr -p 18899:8080 zafe-relay:dev && curl localhost:18899/health; docker rm -f zr
 ```
 
-Docs (infra/site, `/docs`): **a change to an app label, flow, screen or server setting
-updates the docs in the same change.** `python3 scripts/check_docs_sync.py` (CI on app and
-site changes) fails when a `<strong>` label isn't in app/lib, a `ZAFE_RELAY_*` setting
-isn't read by the relay, or a `<Shot>` screen is missing from assets.py;
-`scripts/check_docs_links.py` (site CI, after `build.sh`) checks every URL in
-`docs_links.dart`. `<b>` is plain emphasis. The live docs follow main (site deploys on push).
+Docs (`infra/site`, served at `/docs`, page list in `infra/site/src/docs/pages.ts`): **a
+change to an app label, flow, screen or server setting updates the docs in the same
+change.** `python3 scripts/check_docs_sync.py` (CI) fails when a `<strong>` label isn't in
+`app/lib`, a `ZAFE_RELAY_*` setting isn't read by the relay, or a `<Shot>` screen is
+missing from `assets.py`; `<b>` is plain emphasis. App links to the site live only in
+`app/lib/src/core/config/docs_links.dart`; `scripts/check_docs_links.py` (site CI, after
+`infra/site/build.sh`) checks each one resolves. A path a shipped build links to never
+dies: redirect it (`/relay` → `/docs/run-a-server`, in `public/_redirects` and
+`vercel-output.sh`). The live docs follow `main` (the site deploys on push).
+`python3 scripts/check_md_links.py` (Docs workflow) fails on a relative Markdown link to a
+missing file or heading: rename a doc or heading, fix its links in the same change.
 
 Type: `python3 scripts/check_typography.py` (CI) fails on a `fontSize`/`fontFamily`
 outside `app_typography.dart`, a mobile size under 14, the no-op `lnum`/`case` features,
-or a font name that isn't bundled; use the roles (`hero`, `title`, `heading`, `amount`,
-`amountTicker`, `mono`, body/label styles) and `copyWith` colour only. Exceptions carry
-`// type: <why>`. Rules and research: docs/brand.md "Type".
+or a font name that isn't bundled. Use the roles (`hero`, `title`, `heading`, `amount`,
+`amountTicker`, `mono`, body/label styles) and `copyWith` only for colour or weight.
+Exceptions carry `// type: <why>`. Rules and research: `docs/brand.md` "Type".
 
 Theme colours: `python3 scripts/check_theme_pairs.py` (CI) flags a token whose dark and
 light values differ in ramp, read grey in one theme, or differ in hue; mark a deliberate
@@ -72,16 +77,19 @@ Commits end with the attribution lines the harness gives. Never commit unless th
 ```
 crates/zafe-core    keys (ZIP 2005), keygen (DKG + sk), signing, tx (PCZT), verify (§9.3),
                     session, vault (descriptor, events, replay), wallet (zcash_client_sqlite),
-                    relay_client, node (orchestration), log_cache, spend_watch, repair, sas, tor
+                    relay_client, node (orchestration; node/relay_move), moves, log_cache,
+                    backup, spend_watch, mempool, repair, sas, tor, net, price, durable
 crates/zafe-proto   identities, signed/HPKE envelopes, vault log, relay API types, `version`
                     (no Zcash deps, so the relay can use it)
-crates/zafe-relay   blind axum relay on SQLite (ZAFE_RELAY_DB), push hook, pruning
+crates/zafe-relay   blind axum relay on SQLite (ZAFE_RELAY_DB): FCM push, long polls,
+                    limits, quotas, expiry, pruning
 crates/zafe-cli     `zafe` binary: headless member for tests (dev-only plain-file state)
 app/                Flutter app; app/rust = bridge crate `rust_lib_zafe` (workspace member)
 infra/regtest       regtest through `ths` (up.sh / fund.sh / down.sh)
 infra/relay         Dockerfile, vps/ (Compose + Caddy + backups, bootstrap.sh, deploy.sh)
-infra/site          website (Astro)
-scripts/            m0-e2e.sh, android-bench.sh, app-harness.sh, brand/, illustrations/, sounds/
+infra/site          website and user docs (Astro)
+scripts/            e2e scripts, app-harness.sh, CI checks (check_*), brand/, illustrations/,
+                    sounds/
 ```
 
 State dir names live in `zafe_core::state_dir`; CLI home files are consts at the top of
@@ -241,9 +249,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   (`<dir>/<vault id>.log`, keyed by vault id, never the label; grows only). `load_log`
   rebuilds from it and refuses a relay missing our last entry (`RelayRolledBack`), with
   another one (`RelayForked`) or no mailbox (`RelayLostVault`). A copy that doesn't verify is
-  `LogCopyInvalid`, never a silent first load. `log_cache::configure` once per process/isolate (bridge `identity()` fails closed
-  otherwise). Restore with `reseed_relay`; leave a fork only via `node::follow_relay` (behind a
-  dialog + unlock). Don't build anything that changes replay of existing entries without a gate.
+  `LogCopyInvalid`, never a silent first load. Call `log_cache::configure` once per
+  process/isolate (the bridge's `identity()` fails closed otherwise). Restore with
+  `reseed_relay`; leave a fork only via `node::follow_relay` (behind a dialog + unlock).
+  Don't build anything that changes replay of existing entries without a gate.
 - **Relay moves** (`docs/relay-move.md` §4, `node/relay_move.rs`, `moves.rs`): the vault
   switches only by a `VaultMoved` entry carrying m = max(t, n − t + 1) distinct current
   members' arrivals (signatures over `MoveTarget`: vault id, move id, relay URL, label, base
@@ -260,9 +269,9 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   a verified switch (`with_followed_relay`) before anything is built from the material.
   **Every write to the current relay reads its move notices first** (`write_target`): a
   phone that was off during a switch learns of it only there, and one write after it forks
-  the history it must follow from (follow then fails with `RelayForked`). A
-  move state keeps the relay it left from (`MoveState.from`), so starting the next move
-  before the app saved the last switch never sends the phone back to an older relay.
+  the history it must follow from (follow then fails with `RelayForked`). A move state
+  keeps the relay it left from (`MoveState.from`), so starting the next move before the
+  app saved the last switch never sends the phone back to an older relay.
 - **Relay membership check**: `reseed` lets the restorer pick members, so
   `node::check_relay_membership` compares the relay's list with the replayed log (`RelayMembership`).
 - **Relay hardening**: client reads at most 64 MiB per response; `log_append` verifies and
@@ -341,7 +350,8 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   `unstable-frost` gives `UnifiedFullViewingKey::from_orchard_fvk`; `propose_transfer` /
   `create_pczt_from_proposal` need explicit error type params.
 - Messaging crypto is the previous generation (`ed25519-dalek` 2, `hpke` 0.12,
-  `chacha20poly1305` 0.10): newer needs `sha2` 0.11, which conflicts with `bip32`'s pin.
+  `chacha20poly1305` 0.10). Newer ones need `sha2` 0.11, which used to clash with `bip32`;
+  `bip32` 0.6 is on 0.11 now, so the upgrade is open (tracker, Tech debt).
 - `rusqlite` uses `bundled` workspace-wide; only `zafe-core` adds
   `bundled-sqlcipher-vendored-openssl` (needs `perl` + `make`). The relay DB stays unencrypted on
   purpose (public data only).
@@ -373,11 +383,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   via `relay-mainnet.yml` (promotes a soaked testnet digest, reviewers required). Separate
   forced-command deploy users per network (`vps/zafe-deploy`, change it via `bootstrap.sh`).
   DNS must stay **DNS only** in Cloudflare. Publish no Docker port but Caddy's (bypasses ufw).
-  Compose variables need defaults. Details: `infra/relay/README.md`, `docs/audit-scope.md` §10.
-- **Site links from the app** go through `app/lib/src/core/config/docs_links.dart`;
-  `scripts/check_docs_links.py` (after `infra/site/build.sh`) checks each still resolves. A
-  path a shipped build used never dies: redirect it (`/relay` → `/docs/run-a-server`, in
-  `public/_redirects` and `vercel-output.sh`). Docs pages: `infra/site/src/docs/pages.ts`.
+  Compose variables need defaults. Details: `infra/relay/README.md`.
 - **Promote the relay before an app that needs it ships** (e.g. FCM FIDs, `PushPlatform::FcmFid`).
 - Public lightwalletd: testnet `https://testnet.zec.rocks:443`, mainnet `https://zec.rocks:443`.
 
@@ -397,7 +403,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 
 - Flutter (fvm, **3.47.7**) + `flutter_rust_bridge` 2.11.1 + Riverpod + go_router, built on
   Vizor (chainapsis/vizor-wallet, Apache-2.0) with **Zafe's own look**: keep attribution in
-  `NOTICE`; no Vizor references in code comments; never copy Vizor's art, name or IDs.
+  `app/NOTICE`; no Vizor references in code comments; never copy Vizor's art, name or IDs.
 - FRB: write `Result<T, ZafeError>` in public signatures (a type alias becomes anyhow and drops
   the typed error). Streams report failures as events, not `Err`.
 - New in-vault routes go in the `inVault` list in `app.dart`'s redirect. Switch tabs with
@@ -405,22 +411,21 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - Secure storage only through `ZafeSecureStore` (`_PatientStorage`): plugin calls can hang on
   Android while a background engine uses it. Endpoints only via `endpointsProvider` /
   `ZafeEndpoints.fromPrefs` (after `prefs.reload()`), never the build consts.
-- **Relays in Dart**: the UI says **server** (relay only in help and docs). No app-wide
-  relay setting is shown: a new vault's server is picked in Create > More options;
-  `endpointsProvider.relayUrl` is only that default and the bridge fallback, and Home
-  saves it into pre-per-vault vaults once (`pinLegacyRelays`, bridge `pin_vault_relay`).
-  Show a vault's relay from `activeVaultRelayProvider`. The vault's server and its moves
-  live on one screen (`/vault-server`: facts, Move, waiting room with per-member Nudge);
-  a move another member started is a Needs you card (`moveRequest`), never a link step;
-  the Status screen (`/status`) suggests a listed server after `kSuggestMoveAfter` down.
-  The creator's create token lives in `ZafeSecureStore` with the invite until the
-  material is saved; `stepSetup` passes it on every step. The server list checks only
-  the selected server, never the list.
-- **Sheets** (user: no sheet on a sheet): a pushed screen for typing, a list with live
-  status or more than one step; `AppMenu` for a few short choices; `showAppConfirm` for
-  what can't be undone (the only surface over a sheet or screen); sheets only for a quick
-  pick, info, or one short field opened from the screen it changes. Settings' first
-  level keeps discoverable features (Tor first).
+- **Relays in Dart**: the UI says **server** (relay only in help and docs). There is no
+  app-wide relay setting: a new vault's server is picked in Create > More options, and
+  `endpointsProvider.relayUrl` is only that default and the bridge fallback (Home pins it
+  into pre-per-vault vaults once: `pinLegacyRelays`). Show a vault's relay from
+  `activeVaultRelayProvider`. A vault's server and its moves live on one screen
+  (`/vault-server`); a move another member started is a Needs you card (`moveRequest`),
+  never a link step. The creator's create token stays in `ZafeSecureStore` with the
+  invite until the material is saved; `stepSetup` passes it on every step. The server
+  list checks only the selected server, never the whole list. Detail:
+  `docs/app-notes.md` "Relay move".
+- **Sheets** (user: no sheet on a sheet): a pushed screen for typing, for a list with live
+  status, or for more than one step; `AppMenu` for a few short choices; `showAppConfirm`
+  for what can't be undone (the only surface allowed over a sheet or screen); a sheet
+  only for a quick pick, info, or one short field opened from the screen it changes.
+  Settings' first level keeps discoverable features (Tor first).
 - Never drop a refresh request because work is running (`CoalescedRun`, `refreshSoon`).
 - Gated actions call `confirmUnlock` first; background checks act only on approvals already given.
 - UX rules (user): minimal text, exact values, no toasts (`ActionButton` + `appNoticesProvider`),
@@ -431,14 +436,12 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - Testnet builds are a separate Android app (`xyz.zafe.zafe.testnet`); the harness and adb
   commands use `xyz.zafe.zafe`. Reset test devices with `adb shell pm clear xyz.zafe.zafe`.
 - Device testing: emulator AVD `zafe` (`emulator -avd zafe -gpu host -no-snapshot -no-audio`,
-  emulator ≥ 37.2). Flutter 3.47's Impeller crashes the `swangle_indirect`/`swiftshader`
-  host renderers (`dmesg`: RenderThread signal 4/11); `-gpu host` (llvmpipe under WSLg)
-  runs it. Emulator 37.2 needs `libxkbfile.so.1`: without sudo, `apt-get download
-  libxkbfile1`, `dpkg-deb -x` it under `~/android/extra-libs` and set `LD_LIBRARY_PATH`.
-  `scripts/app-harness.sh` runs relay + CLI members B and C
-  (state in `~/.cache/zafe-harness`; `cargo build -p zafe-cli` after core changes). WSL2 has no
-  USB: `adb pair IP:PORT CODE` on one line. Record with `adb shell screenrecord` as a
-  background task. Phone: proof ~1.7 s on 8 threads, round 2 12 ms / 6.8 MB.
+  emulator ≥ 37.2): never `swangle_indirect`/`swiftshader`, Flutter 3.47's Impeller crashes
+  them (setup and history: `docs/app-notes.md` "Device testing and toolchain").
+  `scripts/app-harness.sh` runs the relay + CLI members B and C (state in
+  `~/.cache/zafe-harness`; `cargo build -p zafe-cli` after core changes). WSL2 has no USB:
+  `adb pair IP:PORT CODE` on one line. Record with `adb shell screenrecord` as a
+  background task.
 - Toolchain: `~/android/install-toolchain.sh`, `source ~/android/env.sh`. env.sh puts
   `~/flutter` (3.41, too old for `pubspec.yaml`) first: then `export
   PATH=$HOME/flutter-3.47/bin:$PATH` (no `fvm` binary here).

@@ -104,15 +104,8 @@ const String kZafeLightwalletdUrl = String.fromEnvironment(
 /// True when this build still points at the placeholder relay (no relay configured).
 const bool kZafeRelayIsPlaceholder = kZafeRelayUrl == kPlaceholderRelayUrl;
 
-/// Shown on the vault card of every non-mainnet build, so the testnet app can't be taken
-/// for the mainnet one (they look alike and install side by side); empty on mainnet.
-const String kNetworkBadge = kZafeNetwork == 'main'
-    ? ''
-    : kZafeNetwork == 'test'
-    ? 'TESTNET'
-    : 'REGTEST';
-
-/// Ticker shown next to amounts: ZEC on mainnet, TAZ on test networks.
+/// Ticker shown next to amounts: ZEC on mainnet, TAZ on test networks (with the
+/// "Zafe Testnet" app name, how a testnet build tells itself apart).
 const String kZcashDefaultCurrencyTicker = kZafeNetwork == 'main'
     ? 'ZEC'
     : 'TAZ';

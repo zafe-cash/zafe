@@ -1,4 +1,4 @@
-// Static site: no client framework, no JS except the hand-written /assets/join.js. Nothing
+// Static site: no client framework; JS only in hand-written files under /assets. Nothing
 // may be inlined (the CSP allows only same-origin files), see README.md.
 import { defineConfig } from 'astro/config';
 

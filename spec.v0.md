@@ -1,3 +1,5 @@
+> **Superseded by [`spec.md`](spec.md).** This is the original hackathon spec, kept as history; [`spec-review.md`](spec-review.md) reviews it.
+
 # Zcash Shielded Treasury — Technical Specification
 
 **Status:** MVP / Hackathon → Startup  

@@ -1,9 +1,15 @@
 # Relays: choosing one and moving a vault
 
-Written 2026-10-25. Why a group would leave its relay, the least-friction way to do it, the
-design every case leads to, and a part-by-part security and privacy review (§8). It reopens
-part of the 2026-10-06 decision "one relay per vault, no relay migration" (`docs/tracker.md`).
-Principles come from `docs/onboarding.md` §5.1.
+Why a group would leave its relay, the least-friction way to do it, the design every case
+leads to, and a part-by-part security and privacy review (§8). Designed 2026-10-25; built
+2026-10-25 to 2026-10-27 on branch `relay-client` (what was built: §7; what wasn't: §12).
+As of 2026-10-27 none of it is merged or deployed: the hosted relays answer 404 on
+`GET /v1/info`, and the relay must be promoted before an app from this branch ships
+(`docs/tracker.md` "Now").
+
+It reopens part of the 2026-10-06 decision "one relay per vault, no relay migration"
+(`docs/tracker.md` "Decisions"). Principles come from `docs/onboarding.md` §5.1. This
+document says **relay**; the app calls it the **server**.
 
 **Goal: no lock-in, including from us.** A group can run its own relay, use a community relay,
 or leave ours at any time, without losing funds or history, and a relay that died is not a
@@ -11,22 +17,22 @@ special case. **No relay is trusted, and none is needed:** a relay is a pipe and
 everything a phone relies on is checked against member signatures, its own copy of the
 history, or values passed between members sealed or out of band.
 
-## 1. Where we are
+## 1. Where we started (2026-10-25)
+
+Every point here except push changed with this design (§7).
 
 - **Funds never depend on the relay.** Each phone holds its key share, the vault keys and its
   wallet, and syncs from lightwalletd. Balance and receive work without a relay.
 - **Without a relay, nothing can be proposed, approved or sent.**
 - **Each phone keeps a verified copy of the vault log** (`log_cache`). `node::reseed_relay`
-  rebuilds a vault on any relay from one copy; the app offers it only on the same relay.
-  Backups don't carry the copy, so a restore trusts its first load.
-- **The relay URL is one app-wide setting per network.** Invites don't carry it. (Phase 2a
-  moved it into each vault's material; see §7.)
+  rebuilds a vault on any relay from one copy; the app offered it only on the same relay.
+  Backups didn't carry the copy, so a restore trusted its first load.
+- **The relay URL was one app-wide setting per network.** Invites didn't carry it.
 - **Log entries and envelopes are bound to the mailbox id** (`EntryHeader.mailbox`, in the AAD
-  and signature; `Header.mailbox` for envelopes), and the relay files a vault under that same
-  id (`lib.rs:1055`, `lib.rs:1375`).
-- **A relay never deletes a mailbox** (`Relay::prune` deletes only old deliveries; expiry
-  is now built, see §7).
-- **The unapproved-spend alert stops during an outage** (`api/spends.rs` loads from the relay).
+  and signature; `Header.mailbox` for envelopes), and the relay filed a vault under that same
+  id (`reseed` and `log_append` in `crates/zafe-relay/src/lib.rs`).
+- **A relay never deleted a mailbox** (`Relay::prune` deletes only old deliveries).
+- **The unapproved-spend alert stopped during an outage** (`api/spends.rs` loaded from the relay).
 - **Push works only from our relay** (FCM with Zafe's service account) (§10).
 
 A vault lives on exactly one relay at a time: the relay orders the log. Zcash servers are a
@@ -36,10 +42,10 @@ per-phone choice because they all serve the same chain; a relay is a per-vault o
 
 | # | Situation | What they really want | Group move? |
 |---|---|---|---|
-| 1 | Our relay is down for hours | Their payment to go out | No: wait (status shows since when); our standby relay makes it rare |
+| 1 | Our relay is down for hours | Their payment to go out | No: wait (status shows since when); a standby relay would make it rare (§12) |
 | 2 | One member can't reach the relay (blocked country, work network) | That member connected | No: Tor, per member |
 | 3 | A member doesn't want the relay to see their IP | Privacy | No: Tor, per member |
-| 4 | The relay lost its data | The vault back | No: "Restore vault on the relay" |
+| 4 | The relay lost its data | The vault back | No: "Restore vault on the server" |
 | 5 | A DAO evaluating Zafe asks "can we leave you?" | A credible yes before adopting | No: relay choice at creation, a self-host guide, and §4 documented |
 | 6 | A DAO wants its own relay from day one | Self-hosting | No: choose it at creation |
 | 7 | **Our relay is gone for good** | Keep using the vault | **Yes**, old relay dead |
@@ -59,7 +65,7 @@ Each move needs three things:
    an invite: a link.
 3. **Enough members on the new relay that the ones left behind can't pay without them.**
 
-**The rule people see: "Payments switch when 3 of 4 have moved."** The number is
+**The rule people see: "Grants switches when 3 of 4 have moved."** The number is
 `m = max(t, n − t + 1)`: at least t (so payments work there) and more than the members who
 could be left behind (so they can never reach t on the old relay). For 2-of-3 and 3-of-5 that
 is t; for 2-of-4 it is 3, for 2-of-5 it is 4. Until m members have moved, the vault stays
@@ -74,79 +80,103 @@ Dropped, and why (each pass was critiqued before the next):
 - **A vote shown as an approval:** a server setting dressed up as a money decision. The tap to
   follow is the consent.
 - **Two flows by relay state:** people do the same thing either way; a working old relay only
-  adds a second way to *receive* the link.
+  adds a second way to *receive* the move (the Needs you card, §4.3).
 
 ## 4. The design
 
+Built as described here. The screens changed after research on 2026-10-27 (one Server
+screen per vault, moves as Needs you cards, "server" in the UI); this section describes
+what shipped on the branch.
+
 ### 4.1 Choosing at creation
 
-Create > More options > **Relay**, defaulting to ours. The invite carries the URL and the
-relay's mailbox id (`INVITE` bump); the join screen shows the relay as a fact:
+Create > More options > **Server**, defaulting to ours. The invite carries the URL and the
+relay's mailbox id (`INVITE` 3); the join screen shows the relay as a fact:
 `Grants · 2 of 3 · relay.dao.org`. A new vault's mailbox id is random (§4.6), never the vault id.
 
-The picker reuses the Zcash server list: our relays plus community relays (added by pull
-request, each with an operator name), then **Other address** / **Scan**, and **Run your own
-relay →** (a site page: Compose, Caddy, backups, the create token). Only the relay the user
-selects is checked (health, version, limits, "No notifications" when true), through Tor when
-Tor is on. The list itself is not probed in the background (§8, box B).
+The server list (`relay_picker.dart`, presets in `core/config/relay_presets.dart`) shows our
+relays (one per network today) and any community relays (added by pull request, each with an
+operator name; none yet), then **Other address** (type, paste or scan; `host#token` fills in a
+create token) and **Run your own server →** (<https://zafe.cash/docs/run-a-server>). Only the
+relay the user selects is checked (health, version, limits, "No notifications" when true),
+through Tor when Tor is on. The list itself is not probed in the background (§8, box B).
 
-Settings splits the two servers: **Zcash server · this phone** and **Relay · everyone in
-Grants**.
+Settings keeps the two servers apart: **<vault> > Server** (everyone in the vault) and
+**This phone > Zcash server**. There is no app-wide relay row: a vault from before per-vault
+relays gets the app-wide URL saved into its material once.
 
 ### 4.2 Moving
 
+Settings > Grants > **Server** (`/vault-server`, `vault_server_screen.dart`) is the one place
+for the vault's relay. While a move runs it becomes the move's waiting room.
+
 ```
- Alice                              Alice, after Move
- ┌──────────────────────────────┐   ┌──────────────────────────────┐
- │ Move Grants to another relay │   │ Moving to relay.dao.org      │
- │ [ picker ]                   │   │  ✓ You                       │
- │                              │   │  · Bob     not yet           │
- │ Everyone moves by opening a  │   │  · Carol   not yet           │
- │ link you send them.          │   │  · Dan     not yet           │
- │                              │   │                              │
- │ [ Move ]   (unlock)          │   │ Payments switch when 3 of 4  │
- └──────────────────────────────┘   │ have moved.                  │
-                                    │ [ Share link ]               │
-                                    │   Cancel move                │
-                                    └──────────────────────────────┘
+ Server                               Server, after Move
+ ┌──────────────────────────────┐    ┌──────────────────────────────┐
+ │ Address   relay.zafe.cash    │    │ Moving Grants to             │
+ │ Run by    Zafe               │    │ relay.dao.org                │
+ │ Status    Connected          │    │  ✓ You          Moved        │
+ │ Notifications  On            │    │  · Bob          [ Nudge ]    │
+ │                              │    │  · Carol        [ Nudge ]    │
+ │ Everyone in Grants uses this │    │  · Dan          [ Nudge ]    │
+ │ server to work on payments   │    │ Grants switches when 3 of 4  │
+ │ together. It only sees       │    │ have moved.                  │
+ │ encrypted messages.          │    │ They see the move in Zafe.   │
+ │                              │    │ Nudge sends one of them the  │
+ │ [ Move to another server ]   │    │ link.                        │
+ └──────────────────────────────┘    │   Cancel move                │
+                                     └──────────────────────────────┘
 ```
 
-- **Move** (after unlock) picks a random mailbox id and a move id, creates the mailbox on the
-  new relay from this phone's history (`reseed_relay`), and only then opens the share sheet:
-  "I'm moving our Zafe vault Grants to relay.dao.org. Open this to move too:
-  https://zafe.cash/move#…". The fragment holds the vault id, relay URL, mailbox id and move
-  id; the site never sees it.
-- Alice's phone sends a sealed **arrival** (§4.4) to every member on the new relay, and a sealed
-  **move notice** to every member on the old relay while it answers.
-- **Alice's phone keeps using the current relay until the switch.** Payments in progress carry on.
+- **Move to another server** opens the server list ("Move to"; the current relay is shown,
+  never chosen), then the unlock. It is off, with the reason, while a member's app is too old
+  ("Bob must update Zafe first.", §4.7) or two moves were found.
+- `node::move_vault` picks a random mailbox label and move id, creates the mailbox on the new
+  relay from this phone's history (`reseed_relay`, with the create token for a private relay),
+  sends a sealed **arrival** (§4.4) to every member there, and leaves a sealed **move notice**
+  for every member on the old relay if it answers.
+- **Members learn of the move in the app**, as a Needs you card (§4.3), whenever the old relay
+  delivers the notice. **Nudge** shares the link with one member: "I'm moving our Zafe vault
+  Grants to relay.dao.org. Open this to move too: https://zafe.cash/move#…". The fragment holds
+  the vault id, relay URL, label and move id, never the create token; the site never sees it.
+  The link is the way in when the old relay is dead. (The design first opened the share sheet
+  for everyone at Move; the 2026-10-27 rework replaced it with the card and per-member Nudge.)
+- While the move runs, Home shows "Moving Grants to relay.dao.org · 1 of 4 moved", which opens
+  the waiting room. A member who followed sees the same room, without Cancel.
+- After the switch the mover sees "Grants moved to relay.dao.org" and Done.
+- **The mover's phone keeps using the current relay until the switch.** Payments in progress
+  carry on.
 
 ### 4.3 Following
 
 ```
- Bob: from the link, or a card on Home
- ┌──────────────────────────────┐
- │ Move Grants to relay.dao.org?│
- │ Alice is moving it. 1 of 4   │
- │ have moved.                  │
- │ Your funds don't move.       │
- │ [ Move ]   (unlock)          │
- │   Not now                    │
- └──────────────────────────────┘
+ Bob, Home > Needs you                  Bob, the card opened (or the link)
+ ┌──────────────────────────────┐      ┌──────────────────────────────┐
+ │ Move Grants to relay.dao.org │      │ Move Grants to relay.dao.org?│
+ │ Alice asked · 1 of 4 moved · │      │ Alice is moving it. 1 of 4   │
+ │ your funds don't move        │      │ have moved.                  │
+ │ [ Move ]  Not now            │      │ Your funds don't move.       │
+ └──────────────────────────────┘      │ [ Move ]   (unlock)          │
+                                       │   Not now                    │
+                                       └──────────────────────────────┘
 ```
 
-- **The same screen** opens from the link or from a Home card when the move notice arrives
-  through the old relay.
+- **The card** (`needs_you.dart`) comes from the move notice on the current relay. Move
+  follows in place (after the unlock); Not now hides it. Tapping the card opens the follow
+  screen (`/vault-server/follow`, `relay_move_screen.dart`), which the link opens too.
 - **Nothing connects to the new relay before Bob taps Move.** "Alice is moving it" and the count
-  come from the move notice (if the old relay delivered it) or are shown as "From a link" until
-  the tap. Then the phone connects, and **refuses** unless:
+  come from the move notice (if the old relay delivered it); a link alone shows "From a link".
+  Then the phone connects (`node::follow_move`), and **refuses** unless:
   1. the new relay holds a valid arrival for this move id **signed by a current member** (so a
      link alone, or one forged by a hostile relay, is never enough);
   2. the move isn't expired or older than this phone's last switch;
   3. the relay's history passes the checks every load does (`RelayRolledBack`/`RelayForked`/
      `RelayMembership`).
   It then adds any entries its copy has that the relay lacks and sends its own arrival.
-- **Lines shown only when true:** "No notifications on this relay"; "relay.dao.org will see your
-  IP address. Tor hides it." for a relay not on the built-in list.
+- **Lines shown only when true:** "No notifications on this server"; "relay.dao.org will see
+  your IP address. Tor hides it." for a relay not on the built-in list.
+- **After the switch**, a phone that hasn't followed shows "Grants moved to relay.dao.org" /
+  "Move to continue", with no Not now.
 - **One move at a time per phone:** a phone that followed one move can't follow another until
   that one switches, expires or is cancelled.
 
@@ -167,8 +197,7 @@ Grants**.
 - **Every phone switches when it sees `VaultMoved`:** those that followed watch the new relay;
   the rest learn from the move notice on the old relay and check `VaultMoved` on the new one
   before switching. Switching re-registers push on the new relay and unregisters on the old
-  one (new signed `/v1/push/forget`; the relay has no client route for it today). Activity:
-  "Grants moved to relay.dao.org".
+  one (signed `/v1/push/forget`). Activity: "Grants moved to relay.dao.org".
 
 ### 4.5 Rules that keep the history whole
 
@@ -186,28 +215,28 @@ Grants**.
    (one-tap commitments, its version) before any screen shows the notice.
 4. **Everything carries over:** open payments, votes, one-tap commitments and shares, and note
    reservations are in the log; the leader re-sends a persisted interactive request (`<id>.req`).
-5. **Old relay dead, fewer than m moved:** nobody can pay; the payment screen says "Payments
-   resume when 1 more member moves to relay.dao.org."
+5. **Old relay dead, fewer than m moved:** nobody can pay; the payment screen and the waiting
+   room say "Payments resume when 1 more member moves to relay.dao.org."
 
 Why this is safe: at most `n − m < t` members are left behind, so the old relay can never
 complete a payment after the switch. Members who sent an arrival check before each write, so the
 only window is a write that races `VaultMoved` by milliseconds; it ends up in the existing fork
-flow and can't complete a payment on its own.
+flow and can't complete a payment on its own. (That flow has no screen after a move yet: §12.)
 
 ### 4.6 Labelled mailboxes (the anti-squatting change)
 
-Today a vault's mailbox id is its vault id, and that id is in every invite. Anyone who knows it
-could create that mailbox on other relays first, filled with a fake log the blind relay can't
-tell apart, so the group could never move there. A hostile current relay, us included, could
-do it to every listed relay.
+Before this change a vault's mailbox id was its vault id, and that id is in every invite.
+Anyone who knew it could create that mailbox on other relays first, filled with a fake log the
+blind relay can't tell apart, so the group could never move there. A hostile current relay, us
+included, could do it to every listed relay.
 
-- **A relay's mailbox id becomes a random label**, separate from the vault id the entries carry.
+- **A relay's mailbox id is a random label**, separate from the vault id the entries carry.
   New vaults and every move get a fresh one. The mover creates the mailbox **before** anyone
   else learns the label, which travels only sealed or in the link's fragment.
 - **The relay stores the vault id from the first entry** and requires it on every later one, in
-  place of `h.mailbox == p.mailbox` (`lib.rs:1055`). `log_append` finds the mailbox from the
-  entry header today (`lib.rs:1375`), so labelled mailboxes get new routes that take the label
-  (no `RELAY_API` bump; a 404 means an older relay, greyed in the picker).
+  place of "the entry's mailbox is the mailbox". `log_append` finds the mailbox from the entry
+  header, so labelled mailboxes have their own routes that take the label (no `RELAY_API` bump;
+  a 404 means an older relay, shown as "Needs an update" in the server list).
 - **Envelopes and signed requests use the label**, so nothing from one relay verifies on another.
 - Existing vaults keep their current id where they are; their next move gets a label.
 
@@ -217,57 +246,61 @@ do it to every listed relay.
 |---|---|
 | Alice cancels before the switch | A sealed "move cancelled" voids her arrival. Cancel can't cause a split: the switch needs `VaultMoved` with m arrivals in the log, and if a stale arrival is used anyway, everyone acts on that one entry |
 | Two members move to different relays | m > n/2, and a phone follows one move at a time, so only one can reach m. The other expires |
-| A member is on an older app | **Move** is available only once every member's app supports it (`VAULT_EVENT` gate by tag); the screen names who must update |
-| A phone was off during the move | It reads the move notice on the old relay, verifies `VaultMoved` on the new one and switches. After the 30-day prune, or if the old relay is dead: "Got a link from a co-signer?" |
+| A member is on an older app | **Move** is offered only once every current member's app wrote a version 10 event (`VAULT_EVENT` gate); the Server screen names who must update |
+| A phone was off during the move | It reads the move notice on the old relay, verifies `VaultMoved` on the new one and switches. After the 30-day prune, or if the old relay is dead, only the link brings it over (a co-signer's Nudge) |
 | A restore from a pre-move backup | Same as a phone that was off. The backup's log copy anchors the history (§6) |
 | The old relay comes back | Moved phones ignore it; stragglers find the notice and switch |
 | A member wants to stay | They can; they can't pay alone (n − m < t); their phone shows "Move to continue" |
 
 ## 5. During an outage
 
-The Home status reads `Can't reach relay · since 09:14`. The sheet: "Payments can't be
-approved until the relay is back. Your funds are safe.", then **Move to another relay**. No
-notification.
+Home's status line turns orange: `Can't reach server`. It opens the Status screen
+(`sync_status_screen.dart`): "Payments can't be approved until the server is back. Your funds
+are safe.", with "Down since 09:14" and **Move to another server**. No notification.
+
+After 6 hours down (`kSuggestMoveAfter`) the Status screen suggests the first listed relay
+other than the current one that answers and can hold the vault: "Move Grants to …? Still down
+after 6 hours. Your funds are safe, and payments go on once enough members move." with Move and
+Pick another server. With one listed relay per network today, the suggestion needs a second
+one first (§12).
+
+The same Move button shows for every failure a move can fix: unreachable, rolled back, lost
+vault, forked, wrong membership, outdated relay (`SyncFailure.canMoveRelay`).
 
 | Keeps working | Stops |
 |---|---|
 | Balance, receive, history | Propose, approve, send |
-| Unapproved-spend alert (**fix**: from this phone's log copy, labelled "based on this phone's history from 09:14") | Push, new members, seat recovery |
+| Unapproved-spend alert, from this phone's log copy ("Based on this phone's history from 09:14.") | Push, new members, seat recovery |
 
 Our own outages should be invisible: a standby relay at a second provider, restored from the
-Litestream replica, with a tested DNS switch and a scheduled restore drill.
+Litestream replica, with a tested DNS switch and a scheduled restore drill. Not built (§12).
 
 ## 6. Relays own their data
 
-Every phone holds the history, and backups will too, so a relay's copy is a cache. Users never
+Every phone holds the history, and so do backups, so a relay's copy is a cache. Users never
 clean up after themselves on a relay:
 - **Inactive mailboxes expire:** no authenticated member request for 1 year → deleted.
   Background checks keep active vaults alive. Last-seen is stored per day, not per request.
-- **Unused copies expire sooner:** a labelled mailbox where no member other than its maker has
-  made a request within 30 days is deleted. A cancelled or failed move goes; a restored vault
-  everyone uses stays, even if no one appends.
-- **Backups carry the log copy** (`BACKUP` bump), so no relay is ever the only holder of a
-  vault's history, even when every phone was lost.
-- **Private relays:** `ZAFE_RELAY_CREATE_TOKEN`, when set, is needed to create or reseed a mailbox.
-  Any member may need it later to restore, so it travels only sealed between members (in the
-  move notice, in a sealed message after joining) and in backups, never in links or invites.
+- **Unused copies expire sooner:** a mailbox where no member other than its creator has made a
+  request within 30 days is deleted. A cancelled or failed move goes; a restored vault everyone
+  uses stays, even if no one appends.
+- **Backups carry the log copy** (`BACKUP` 3), so no relay is ever the only holder of a vault's
+  history, even when every phone was lost.
+- **Private relays:** `ZAFE_RELAY_CREATE_TOKEN`, when set, is needed to create or reseed a
+  mailbox. Any member may need it later to restore, so it travels only sealed between members
+  (in the arrival, in the log-key message at setup, in a recovered seat's sigma) and in
+  backups, never in links or invites.
 
-## 7. What changes in code
+Operator settings and defaults: `infra/relay/README.md`.
 
-| Area | Change |
-|---|---|
-| App storage | Per vault: relay URL, relay mailbox id, create token if any; Settings relay is the default for new vaults |
-| Formats | `INVITE`: relay URL + mailbox id. `BACKUP`: URL, mailbox id, token, log copy. `REPAIR`: log length + head hash; the seat-recovery code carries the relay URL and label. Move notices and arrivals padded (1 KiB buckets, see below). `envelope::Kind::MoveNotice`, `Arrival`, `MoveCancelled` appended, payloads versioned. `VaultEvent::VaultMoved` appended (`VAULT_EVENT` 10, gate). Record bumps in `AGENTS.md` |
-| Core | `node::move_vault`, `node::follow_move`, arrival counting and verification, `VaultMoved` replay rule (m distinct current members, unexpired, one move), rules 1-3 of §4.5 in `append_event`, `NodeError::VaultMoved { url }`, notices never acknowledged, first loads anchored (backup copy, recovery head hash), spend alert from the log copy |
-| Relay | Labelled mailboxes: a labelled `log_append` route and reseed checks the stored vault id (`lib.rs:1055`, `:1375`; the other routes already take the mailbox from the payload). `/v1/push/forget`. `GET /v1/info` (version, limits, notifications). Expiry across all tables (1 year idle; 30 days for unused labels; last-seen at most once a day). Create token. `RELAY_DB` bump (vault id, last-seen day) |
-| App | Picker (selected relay checked only), Create > Relay, relay on join, Settings split, move / follow / list screens, `zafe.cash/move#` link, Home card, no connection before the tap, status "since" |
-| Ops/docs | Standby relay + drill; built-in relay list; "Run your own relay"; spec §6/§14; audit scope §10 |
+## 7. What was built
 
-**Order:** (1) per-vault relay + labels for new vaults + invite/backup/recovery anchors;
-(2) relay labelled routes, expiry, create token + picker + self-host page; (3) move and follow
-with `VaultMoved`; (4) standby relay. Each protection ships with or before what it protects.
+Built in this order, each protection with or before what it protects: per-vault relay, labels
+and anchors; relay routes, expiry, create token and picker; moves; the UI rework. Format
+versions are recorded in `AGENTS.md` ("Bumping a version").
 
-**Relay side built (2026-10-25, branch `relay-labels`, not deployed).** What it refines:
+### 7.1 Relay (2026-10-25)
+
 - **Labelled append:** `POST /v1/log/append-labelled`, a `Signed<LabelledAppend { mailbox,
   entry, timestamp }>` by any member of that mailbox (catch-up posts others' entries); the
   entry's author must be a current member, as on `/v1/log/append`. `RelayClient::append_log_to`.
@@ -279,27 +312,28 @@ with `VaultMoved`; (4) standby relay. Each protection ships with or before what 
   limits (body, members, quotas, key rate, delivery retention), push, create token, expiry.
 - **Expiry:** `last_seen_day`, `created_day` (day numbers) and `shared` (a member other than
   the creator made a request). The 30-day rule applies to every mailbox, not only labelled
-  ones: from now on every new mailbox is a label, and a setup nobody joined is as dead as a
-  move nobody followed. Migrated mailboxes count as shared and seen on upgrade day, so only
-  the 1-year rule applies to them. Off in `Relay::new()`, on in the binary
-  (`ZAFE_RELAY_EXPIRY`, `ZAFE_RELAY_IDLE_DAYS`, `ZAFE_RELAY_UNUSED_DAYS`).
+  ones: every new mailbox is a label, and a setup nobody joined is as dead as a move nobody
+  followed. Migrated mailboxes count as shared and seen on upgrade day, so only the 1-year
+  rule applies to them. Off in `Relay::new()`, on in the binary (`ZAFE_RELAY_EXPIRY`,
+  `ZAFE_RELAY_IDLE_DAYS`, `ZAFE_RELAY_UNUSED_DAYS`).
 - **Create token:** a request header (`zafe-create-token`), so no body changed; refusal is
   401 with `www-authenticate: zafe-create-token` (`RelayClientError::CreateTokenRefused`).
   Stored as a BLAKE2b hash, compared with `subtle`. The per-IP creation bucket is charged
   before the check, so every guess costs one creation.
 - **Members:** at most 64 per mailbox, now on `create` too (vaults have at most 15).
 - **Older relays:** a 404 whose body isn't "unknown mailbox" → `RelayClientError::RelayTooOld
-  { route }`; the bridge maps it to `RelayOutdated` (phase 2a).
+  { route }`; the bridge maps it to `RelayOutdated`.
+- `RELAY_DB` 4. Tests: `crates/zafe-relay/tests/{labels,expiry}.rs`.
 
-**Client foundations built (2026-10-25, branch `relay-client`, phase 2a: Rust core, CLI,
-bridge; no screens).** What it refines:
+### 7.2 Client foundations (phase 2a, 2026-10-25: Rust core, CLI, bridge)
+
 - **Where the per-vault relay lives:** in `VaultMaterial` (`VAULT_MATERIAL` 2, `relay:
   VaultRelay { url, label, create_token }`), not a separate file: it is in secure storage
   already, travels in backups with the material, and every core call that talks to the relay
   already has the material. `url: None` (all version 1 material) means the app-wide setting,
   so testers' vaults keep working; the bridge builds every vault client from the material
-  (`vault_relay`) and treats the URL Dart passes as that fallback only. A move (phase 3)
-  rewrites the material, as a seat move already does.
+  (`vault_relay`) and treats the URL Dart passes as that fallback only. A move rewrites the
+  material, as a seat move already does.
 - **Two ids** (`node::VaultIds`): the vault id stays what keys, FROST identifiers, `sk`
   commitments, the safety words, the descriptor and every log entry are bound to; the label
   addresses the relay (envelope headers, signed requests, appends, inbox). The log copy is
@@ -339,9 +373,14 @@ bridge; no screens).** What it refines:
   bridge's long-poll watch, at most once a minute while reachable.
 - **CLI:** `--relay` always wins (one relay has different addresses from the host and an
   emulator); `--create-token`; `zafe seat link`; `zafe recover --link`.
+- Tests: `crates/zafe-core/tests/{relay_rollback,relay_labels}.rs`.
 
-**Moves built (2026-10-25, branch `relay-client`, phase 3: core, CLI, bridge, app).** What
-it refines:
+### 7.3 Moves (phase 3, 2026-10-25: core, CLI, bridge)
+
+Code: `crates/zafe-core/src/moves.rs` (formats, `MoveState`) and `node/relay_move.rs`
+(`move_vault`, `follow_move`, `move_progress`, `cancel_move`, `move_notice`,
+`announce_version`, `write_target`); bridge `app/rust/src/api/relay_move.rs`.
+
 - **Formats.** `envelope::Kind::MoveNotice`, `Arrival`, `MoveCancelled` (appended). Their
   payload is `moves::MoveMessage` (`MOVE_MESSAGE` 1: `Arrival { target, signature,
   create_token }`, `Notice { target, mover, signature, create_token, moved }`, `Cancelled {
@@ -364,23 +403,26 @@ it refines:
   each author wrote; Move is offered only when every current member wrote a version 10
   event. An updated app writes one once (`node::announce_version`: an idempotent `Name`
   re-stating its current name) on its first refresh (bridge `list_proposals`, CLI
-  `proposals`, `pool`, keygen). The mover names who must update ("Bob must update Zafe
-  first."), from the relay or, if it's down, from its copy.
+  `proposals`, `pool`, keygen). The mover's Server screen names who must update, from the
+  relay or, if it's down, from its copy.
 - **Where a move lives on a phone:** `moves::MoveState` in `<vault id>.move` next to the
-  log copy (encrypted with a key derived from the vault secret, so the create token can be
-  in it): target, mover, arrived, token, who got notices, cancelled, `moved_seen` (a
-  verified `VaultMoved` seen), `switched` (verified on the new relay). One open move per
-  phone. The material follows a switch through `node::with_followed_relay` (the bridge
-  applies it in `material()`, so every call uses the new relay at once; `list_proposals`
-  returns `updated_material` for Dart to save, then push re-registers there).
+  log copy (`MOVE_STATE` 1, encrypted with a key derived from the vault secret, so the create
+  token can be in it): target, mover, arrived, token, who got notices, cancelled,
+  `moved_seen` (a verified `VaultMoved` seen), `switched` (verified on the new relay), and
+  `from`, the relay it left. One open move per phone. The material follows a switch through
+  `node::with_followed_relay` (the bridge applies it in `material()`, so every call uses the
+  new relay at once; `list_proposals` returns `updated_material` for Dart to save, then push
+  re-registers there). Because `from` is kept, starting the next move before the app saved
+  the last switch never sends the phone back to an older relay.
 - **Write rules** are in `append_event` (`relay_move::write_target`): rule 1 refuses an
   event on the new relay's label before the switch; rule 2 (a phone that sent its arrival)
   reads the new relay's log, verified on its own and compared with this phone's copy,
   before each write to the old relay, and **writes the same event bytes to the new relay
   itself** once `VaultMoved` is there (chain and state become the new relay's), rather
   than refusing and leaving the re-send to every caller: the bytes are never rebuilt and
-  no caller can drop them. `NodeError::VaultMoved { url }` is for rule 3: a phone that saw
-  the switch only in a notice and hasn't followed.
+  no caller can drop them. Before every write to the current relay it reads the move
+  notices there (rule 3). `NodeError::VaultMoved { url }` is for a phone that saw the switch
+  only in a notice and hasn't followed.
 - **Follow** (`node::follow_move`): checks the new relay's whole log on its own (signatures,
   chain, membership incl. threshold) and against this phone's copy (`RelayForked` if they
   differ where both have entries), refuses `MoveNotFound` (no current member's arrival for
@@ -394,10 +436,10 @@ it refines:
   arrival carries the create token sealed. At m, `switch_relay` does a last catch-up from
   the old relay if it answers, catches the new relay up, appends `VaultMoved`, leaves it in
   move notices on the old relay (a `Notice` with `moved`), and forgets push there.
-- **Notices** (`node::move_notice`, the Home card) read only the current relay. A notice's
-  `VaultMoved` is verified offline against this phone's copy (author, signature, m valid
-  arrivals, base where the copy reaches it); once it verifies, the phone stops writing to
-  the old relay. A `MoveCancelled` from the mover hides the card.
+- **Notices** (`node::move_notice`, the Needs you card) read only the current relay. A
+  notice's `VaultMoved` is verified offline against this phone's copy (author, signature, m
+  valid arrivals, base where the copy reaches it); once it verifies, the phone stops writing
+  to the old relay. A `MoveCancelled` from the mover hides the card.
 - **Cancel** voids the sender's arrival (on the new relay) and, from the mover, the notice.
   Tested: with the cancel withheld from one phone, that phone can still switch with the
   stale arrival; everyone then acts on that one entry (the others see it in the notice).
@@ -410,9 +452,15 @@ it refines:
   away from an old relay still work by the link). Promote the relay first.
 - **CLI:** `zafe move <url> [--create-token]`, `zafe move --status`, `zafe move --cancel`,
   `zafe follow <link>`; `--relay-alias FROM=TO` (dev: one relay, two addresses). After a
-  switch the CLI follows the vault's relay instead of `--relay`. `scripts/move-e2e.sh`.
-- **Not built:** the `zafe.cash/move` site page (the fragment link opens the app through
-  an unverified intent filter; `zafe://move#…` too); iOS universal links.
+  switch the CLI follows the vault's relay instead of `--relay`.
+
+### 7.4 App (phase 2b 2026-10-25, rework 2026-10-27)
+
+Server list, Create > More options > Server, the relay on the join screen, the per-vault
+Server screen with its waiting room, the follow screen, Needs you cards, the Home move card,
+the Status screen with "Down since" and the 6-hour suggestion, the payments-resume line, the
+Activity row, seat links (share, QR, paste, scan). Screens are in §4 and §5; app notes in
+`docs/app-notes.md`; previews in `app/tool/screens/relay_move_render_test.dart`.
 
 ## 8. Review: each part on its own
 
@@ -423,7 +471,7 @@ Tor leave.
 
 **A. Per-vault relay at creation.** Invites already are bearer credentials; adding the URL and
 label adds no capability. A fake invite pointing at a hostile relay is caught by the safety
-words, as today. ✓
+words, as before. ✓
 
 **B. The picker.** *Found:* probing every listed relay for latency would tell every operator on
 the list this phone's IP and that it runs Zafe, each time Settings opens. *Fixed:* only the
@@ -456,7 +504,8 @@ carrying m arrivals that everyone reads from the same log. ✓
 **G. Write rules.** *Found:* an arrived phone that hasn't noticed the switch could keep signing on the
 old relay. *Fixed:* arrived phones check for `VaultMoved` before each write to the old relay. The
 remaining race is milliseconds wide, ends in the fork flow, and can't complete a payment
-(n − m < t). ✓
+(n − m < t). *Found in the emulator run (2026-10-26):* a phone that was off during the switch
+forked the old relay with its first write. *Fixed:* every write reads the move notices first. ✓
 
 **H. Cancel and competing moves.** m > n/2, one move per phone, and the switch is one log entry. So
 among honest phones two moves can't both succeed, and a withheld cancel can't split the group. A
@@ -478,7 +527,7 @@ between the backup and the present: the worst case is a cancelled proposal whose
 complete looking open again, which is already sendable by any member until it expires (spec
 §9.5.2 consequences) and is invalidated by the sweep. No new power. ✓
 
-**L. Recovered seats.** The helpers' sealed package now carries the log head, so a new phone
+**L. Recovered seats.** The helpers' sealed package carries the log head, so a new phone
 anchors its first load. A relay can drop the package (delay), not change it. ✓
 
 **M. Create token.** *Found:* keeping it only on the mover's phone meant other members couldn't
@@ -489,54 +538,54 @@ operator rotates it. ✓
 **N. Push.** Unregistering on the old relay tells it the group left, which it can see anyway. Push
 itself only works from our relay (§10). ✓ (limit stated)
 
-**P. The relay itself (`zafe-relay/src/lib.rs`, every route read against this design).**
+**O. Spend alert during an outage.** Runs from the phone's copy and says so, so it can't claim an
+unapproved spend that a newer entry, not yet seen, would explain. ✓
+
+**P. The relay itself (`crates/zafe-relay/src/lib.rs`, every route read against this design).**
 - **Which routes find the mailbox how.**
   - Most routes take the mailbox from the signed payload: `inbox`, `inbox_ack`, `log_read`,
     `wait`, `register_push`, `mailbox_info`.
   - `post_envelope` takes it from the envelope header.
   - So labels work there unchanged, and an envelope from the old relay can't be posted to the
-    new one: its header names the old label, and the lookup fails (T7 holds by construction).
-  - **Only `log_append` (`:1375`) and reseed's entry check (`:1055`) use the entry's vault id as
-    the mailbox.** Those two change: a labelled append route, and "the vault id matches the one
-    stored from the first entry".
+    new one: its header names the old label, and the lookup fails.
+  - **Only `log_append` and reseed's entry check used the entry's vault id as the mailbox.**
+    Those two changed: a labelled append route (`log_append_labelled`), and "the vault id
+    matches the one stored from the first entry".
   - **Found in phase 2a: seat moves too.** `replace_member` takes the mailbox from the
     `ReplaceApproval`, which is signed over the vault id (the same signatures are in the
     log). Added `/v1/mailbox/replace-labelled`, which takes the label and checks the
     stored vault id.
 - **Rule 1 is enforced by clients only.** Once a reseed finishes, the mailbox is open
-  (`sealed = 1`, `:1083`) and `log_append` accepts any member's correctly chained entry. The
+  (`sealed = 1`) and the append routes accept any member's correctly chained entry. The
   relay can't tell catch-up from a new entry, so a dishonest member could write early and
   spoil a move for everyone (they'd hit `RelayForked`). That's a member delaying the group,
-  inside the threat model; honest phones show "The new relay's history differs: ask Alice"
-  and the group moves elsewhere.
+  inside the threat model; honest phones refuse the new relay and the group moves elsewhere.
 - **The mover sets the relay's threshold, and the relay enforces seat moves with it.**
-  `replace_member` checks approvals against `mb.threshold` (`:883-935`). A mover listing a
-  lower t would let fewer members swap a seat *on that relay*. Covered: the membership check
+  `replace_in` checks approvals against the mailbox's threshold. A mover listing a lower t
+  would let fewer members swap a seat *on that relay*. Covered: the membership check
   compares threshold as well as members (`check_relay_membership` → `mailbox_info`), and a
   mismatch refuses the relay before anyone follows.
-- **There is no client route to drop a push token.** `forget_push_token` is only used by the
-  relay itself, for tokens FCM rejects (`main.rs:71`). *Added:* a signed `/v1/push/forget`, so
-  switching phones can unregister on the old relay (T10).
-- **Seat recovery assumed one relay.** A recovering phone finds its vault with `/v1/mailboxes`
-  on the relay it knows. *Added:* the recovery code from a co-signer carries the vault's relay
-  URL and label.
+- **There was no client route to drop a push token.** `forget_push_token` was only used by
+  the relay itself, for tokens FCM rejects (`main.rs`). *Added:* a signed `/v1/push/forget`,
+  so switching phones can unregister on the old relay.
+- **Seat recovery assumed one relay.** A recovering phone found its vault with
+  `/v1/mailboxes` on the relay it knew. *Added:* the seat link from a co-signer carries the
+  vault's relay URL and label.
 - **Anyone can reseed a new label listing other people's public keys as members.** That puts
   bogus entries in a victim's `/v1/mailboxes` list. It's bounded by `creates_per_ip`; clients
   ignore any mailbox whose log doesn't verify against what they hold.
-- **Expiry must cover every table.** It deletes the rows in `members`, `deliveries`,
-  `sender_seqs`, `push_tokens` and `log_entries`, then the mailbox (the list `cancel_setup`
-  uses, `:818`, plus `log_entries`), keeping the quota counters in step. Last-seen is written at
-  most once per mailbox per day, so reads don't add a write under the single DB mutex.
+- **Expiry covers every table.** `delete_mailbox` deletes the rows in `members`,
+  `deliveries`, `sender_seqs`, `push_tokens` and `log_entries`, then the mailbox, and the
+  quota counters go with the mailbox row. Last-seen is written at most once per mailbox per
+  day, so reads don't add a write under the single DB mutex.
 - **`/health` stays a plain "ok"** for load balancers. Version, limits and whether the relay
-  sends notifications go in a new unauthenticated `GET /v1/info` that reveals nothing about mailboxes.
-- **Size gives moves away.** The old relay sees a sealed message from the mover to each member,
-  and a fixed-size message stands out. *Added:* move notices and arrivals are padded to the size
-  of an ordinary vote envelope.
+  sends notifications are in the unauthenticated `GET /v1/info`, which reveals nothing about
+  mailboxes.
+- **Size gives moves away.** The old relay sees a sealed message from the mover to each
+  member, and a fixed-size message stands out. *Added:* move messages are padded to a
+  multiple of 1 KiB, the bucket a small signing request falls in (§7.3).
 - **Create token:** checked in `create` and in reseed's create branch, compared in constant time,
   never logged. A wrong token counts against `creates_per_ip`.
-
-**O. Spend alert during an outage.** Runs from the phone's copy and says so, so it can't claim an
-unapproved spend that a newer entry, not yet seen, would explain. ✓
 
 ## 9. Review: the whole
 
@@ -558,7 +607,7 @@ unapproved spend that a newer entry, not yet seen, would explain. ✓
   - What can't be removed: colluding old and new relays can recognise the same vault. The moved
     entries are byte-identical and carry the vault id, and members sign in with the same keys.
     Hiding that would mean re-signing the history under new identities. Tor still hides IPs.
-- **Members.** A member can still delay the group, as today (never approving, never following).
+- **Members.** A member can still delay the group, as before (never approving, never following).
   A dishonest member's app can sign arrivals for two moves at once; honest phones never do
   (one move per phone).
   - **Then two `VaultMoved` entries can exist,** one on each new relay, with the dishonest
@@ -566,43 +615,75 @@ unapproved spend that a newer entry, not yet seen, would explain. ✓
     both).
   - **Each side can pay only with that member's signature,** and every payment still needs its
     honest co-signers. The effect is the same as one member approving two different
-    proposals, which is possible today: no theft, but a split history.
+    proposals, which is already possible: no theft, but a split history.
   - **Detection:** a switching phone also posts its `VaultMoved` into the move notice on the
     old relay. A phone that sees two moves for the same base refuses both and shows "Two
-    moves found: ask your group". With the old relay dead, it shows up when the two sides
-    next exchange links.
+    moves found". With the old relay dead, it shows up when the two sides next exchange
+    links. A phone that already switched no longer reads the old relay, so only stragglers
+    and followers detect it.
   - A dishonest member still can't move funds alone: t signatures, unchanged.
 - **Relays.** Never at users' mercy: they expire data on their own, can be private (create
-  token), and advertise limits. Fake vaults stay bounded by today's quotas.
+  token), and advertise limits. Fake vaults stay bounded by the creation quotas.
 
 ## 10. Not now: push from any relay
 
-Deferred (2026-10-25). A group on another relay gets no push; the picker and the follow screen
-say so. For later: UnifiedPush lets any relay send standard Web Push with its own VAPID key,
-which FCM accepts directly (Android, no Zafe key or gateway; no iOS).
-https://unifiedpush.org/news/20250131_push_for_decentralized/
+Deferred (2026-10-25). A group on another relay gets no push; the server list, the Server
+screen and the follow screen say so. For later: UnifiedPush lets any relay send standard Web
+Push with its own VAPID key, which FCM accepts directly (Android, no Zafe key or gateway; no
+iOS). https://unifiedpush.org/news/20250131_push_for_decentralized/
 
-## 11. How we'll know it works
+## 11. How we know it works
 
-- **Harness:** relays A and B, members on 2-of-3 and 2-of-5. Moves with A alive and with A
-  dead; payments continue on A until `VaultMoved`; a one-tap payment started on A completes on
-  B; a phone off throughout follows later; a restore from a pre-move backup follows.
-- **Rules:** a new entry on B before `VaultMoved` is refused; an arrived phone's write to A after
-  `VaultMoved` goes to B; 2-of-5 doesn't switch at 2 or 3 arrivals; two moves; cancel with the
-  cancel withheld from one phone; an older-app member blocks Move.
-- **Attacks:** squat B under the vault id and every old id first (the move still works); a link
-  with no member arrival (refused); a replayed old move (refused); an envelope from A replayed
-  into B (dropped); a relay serving an old history to a restored phone and to a recovered seat
-  (refused); a relay listing an extra member (`RelayMembership`); a `VaultMoved` with m − 1 or
-  non-member arrivals (ignored).
-- **Privacy:** no request to B before the tap; only the selected relay is checked; the old relay
-  never receives B's URL in the clear.
-- **Relay:** idle and unused-label expiry; a quiet restored vault survives; create token; a
-  mailbox whose entries carry two vault ids is refused.
-- **Moderated session:** a group moves to a relay they run; later we kill it mid-week and watch
-  whether they find **Move to another relay**.
+- **Moves** (`crates/zafe-core/tests/relay_move.rs`, 16 tests, relays A and B, 2-of-3 and
+  2-of-5): moves with A alive and with A dead; 2-of-5 doesn't switch at 2 or 3 arrivals; a new
+  entry on B before `VaultMoved` is refused; an arrived phone's write after `VaultMoved` goes
+  to B; a restore from a pre-move backup follows; a cancelled move isn't followed; a cancel
+  withheld from one phone still leaves one history; two moves; a link with no member arrival,
+  an expired or a replayed move are refused; an envelope from A is dropped by B; a second move
+  starts where the first went; a straggler can't fork the old relay; an older-app member
+  blocks Move; no request to B before the tap.
+- **Replay** (`crates/zafe-core/tests/vault.rs`): a `VaultMoved` with m − 1 or non-member
+  arrivals is ignored; who must update.
+- **Labels and anchors** (`crates/zafe-core/tests/relay_rollback.rs`, `relay_labels.rs`): a
+  relay listing other members or another threshold is refused; a restored backup and a
+  recovered seat refuse a relay with a shorter history; the spend alert falls back to the copy.
+- **Relay** (`crates/zafe-relay/tests/labels.rs`, `expiry.rs`): one vault per mailbox whatever
+  its label, entries with two vault ids refused, create token, wrong tokens charged, seat moves
+  on a label, idle and unused expiry across every table, a quiet restored vault survives.
+- **End to end:** `scripts/move-e2e.sh` (three CLI members move between two relays, a payment
+  across the switch and one after it); the emulator run of 2026-10-26 (the app as member A,
+  harness B and C, six relays: follow from the card and the link, the app as mover, payments
+  across switches, old relay dead, cancel, restore onto the moved relay, seat recovery by
+  link, create on a picked relay).
+- **Not done:** a moderated session (a group moves to a relay they run; later we kill it
+  mid-week and watch whether they find **Move to another server**).
 
-## 12. Sources
+## 12. Not built yet
+
+Matches `docs/tracker.md` "Now: branch `relay-client`".
+
+- **Ship order:** merge `relay-client`, promote the relay to mainnet, then release the app
+  (relays decode envelope kinds, so an old relay rejects move messages). The site's
+  `/docs/run-a-server` is built but deploys with the merge.
+- **Leaving a fork after a move:** a write that races the switch forks the old relay, and
+  `follow_move` then fails with `RelayForked`. No screen offers `node::follow_relay` for the
+  new relay (the "existing fork flow" of §4.5).
+- **The waiting room updates only on the next vault refresh** (up to a minute in the emulator
+  run): refresh it when an arrival lands.
+- **Site page `zafe.cash/move`** (opens the app with the fragment; explains a move to someone
+  without Zafe), plus verified App Links and iOS Universal Links for `/move`. Today the link
+  opens the app through an unverified intent filter.
+- **Standby relay** at a second provider, restored from the Litestream replica, with a DNS
+  switch and a restore drill (§5).
+- **A second listed relay** (standby or community): with one per network, the Status screen's
+  6-hour suggestion has nowhere to point. *(Not in the tracker yet.)*
+- **Spec §6/§14 and `docs/audit-scope.md`** don't fully describe per-vault relays, labels and
+  moves yet.
+- **Push from any relay** (UnifiedPush): deferred, §10.
+- **Known limit, not planned:** after a switch a phone stops reading the old relay's notices,
+  so only stragglers and followers detect `TwoMoves` (§9).
+
+## 13. Sources
 
 - Delta Chat: "Adding or removing a relay will automatically inform your chat partners".
   https://delta.chat/en/help

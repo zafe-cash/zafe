@@ -1,8 +1,10 @@
-# Review: Zcash Shielded Treasury Spec (`spec.md`)
+# Review: Zcash Shielded Treasury Spec (`spec.v0.md`)
 
 **Date:** 2026-09-29
-**Reviewed:** `spec.md` (§1–§28)
+**Reviewed:** the original hackathon spec, now [`spec.v0.md`](spec.v0.md) (§1–§28). Every section number below refers to that file, not to the current [`spec.md`](spec.md), which was rewritten from this review.
 **Verdict:** Direction is sound; the spec is not yet buildable as written. The main problems are omissions around key setup (DKG plus the ZIP 2005 shared secret), trust in the coordinator during setup, and what signers must verify. Before building, also account for two existing projects that already implement most of this spec on Ironwood.
+
+This review is a record of 2026-09-29. Its "coordinator", "treasury" and "signer" are the old spec's terms (in `spec.md`: relay, vault, member).
 
 ---
 
@@ -44,7 +46,7 @@ The spec says "Ironwood" throughout but never cites the specifications that defi
 | ZIP | What it defines | Why it matters here |
 |---|---|---|
 | ZIP 258 | Deployment of NU6.3 (Ironwood) | Activation height and network parameters |
-| ZIP 229 | v6 transaction format | Ironwood bundle; anchors moved into authorizing data (see §4.4 of this review) |
+| ZIP 229 | v6 transaction format | Ironwood bundle; anchors moved into authorizing data (see §3.5 of this review) |
 | ZIP 2005 | Ironwood quantum recoverability | Changes key derivation for FROST wallets (see §2.1); all Ironwood notes use the lead byte `0x03` plaintext format |
 | ZIP 312 | FROST for spend authorization signatures | Re-randomized FROST; rules for the coordinator and signers |
 | ZIP 317 | Proportional fees | Fee checks on the signer side |
@@ -263,7 +265,7 @@ type Body =
   | { type: "ABORT"; reason: string }
 ```
 
-Before designing your own, check whether `frostd` and `frost-client` already provide this envelope and encryption layer (see §6).
+Before designing your own, check whether `frostd` and `frost-client` already provide this envelope and encryption layer (see §5).
 
 ### 3.3 The state machines don't match (§11, §12)
 

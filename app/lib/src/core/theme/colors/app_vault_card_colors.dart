@@ -3,7 +3,7 @@ import 'package:flutter/painting.dart';
 import '../primitives.dart';
 
 /// The vault card (Home's balance card) and the payment card that mirrors it
-/// (docs/brand.md §3, "Vault card in light mode").
+/// (docs/brand.md "Vault card").
 ///
 /// Plain since 2026-10-27 (user's pick after comparing the dial, a glow and tinted
 /// cards): the surface every other card uses, nothing drawn on it, the Zcash mark and

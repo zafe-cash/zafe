@@ -59,14 +59,14 @@ Each item: ask or comment first where noted, then a small PR. Record links in `t
 - [ ] **ZIP 2005 `use_qsk` vectors** (conradoplg invited them on frost#1094). Opened
       frost-tools#609 (issue) and #610 (PR, 2026-10-04): `zcash-sign/tests/fixtures/
       zip2005_use_qsk.json` plus a Rust test written from the ZIP text; the Python
-      checker is linked, not included. Awaiting review. *Our first
-      merged upstream PR.* (Replaces the tracker item that targeted zcash-test-vectors;
-      a generator there is a later follow-up.)
+      checker is linked, not included. Both still open and unreviewed on 2026-10-27.
+      Would be our first merged upstream PR. (Replaces the tracker item that targeted
+      zcash-test-vectors; a generator there is a later follow-up.)
 - [ ] **FROST book docs PR**: `book/src/zcash/technical-details.md` says to throw `sk`
       away, which contradicts ZIP 2005 (already on the tracker).
-- [ ] **Review frost-tools #579/#580** ("confirm PCZT contents"; open since 2026-01, no
-      reviews). Leave a review that points out the checks a co-signer needs (§3 row 3),
-      and offer follow-up PRs.
+- [ ] **Review frost-tools #580** ("confirm PCZT contents"; open since 2026-01; #579,
+      the participant refactor it built on, merged 2026-10-14). Leave a review that
+      points out the checks a co-signer needs (§3 row 3), and offer follow-up PRs.
 - [ ] **frost#1094**: offer the PR that un-deprecates `sign()` (or adds
       `sign_with_randomizer`), with docs that α must stay among the signers. Then drop
       our `#[allow(deprecated)]` wrapper.
@@ -107,8 +107,9 @@ updates AGENTS.md's layout and commands.
 - [ ] 5 (M/L) Pull sans-IO steps out of node (`build_vote`, `aggregate_ready`,
       `answer_request`, `classify_inbox`, `filter_shares`, `proposal_event`), then the
       `KeygenCeremony` state machine.
-- [ ] 6 (M) Move the leader's resumable send (`proposals.rs:805-937` and the CLI's copy)
-      and `maintain()` into the coordinator. `propose` verifies its own PCZT before
+- [ ] 6 (M) Move the leader's resumable send (the bridge's `send_proposal` /
+      `send_with_progress` in `app/rust/src/api/proposals.rs`, and the CLI's copy) and
+      `maintain()` into the coordinator. `propose` verifies its own PCZT before
       logging it; used commitments are persisted before a request is sent.
 - [ ] 7 (S) Move `history.rs` (CSV) into the app bridge.
 - [ ] 8 (L) Physical split, part 1: `crates/zafe-protocol`, with zafe-core as a facade.
@@ -182,14 +183,15 @@ updates AGENTS.md's layout and commands.
 - [ ] **Flagship pilot (you)**: offer the lockbox key-holders (ZF, ZODL, Shielded Labs)
       a testnet vault. The keyholder-organizations draft and ZIP 271 expect a FROST
       address.
-- [ ] Mainnet after the audit; then a coinholder retroactive grant (comparable winners
-      got $35-80k) with on-chain use and the integrations as evidence.
+- [ ] Drop the "beta" label after the audit (the mainnet beta shipped before it, with
+      the caveat in README, site and release notes); then a coinholder retroactive grant
+      (comparable winners got $35-80k) with on-chain use and the integrations as evidence.
 - [ ] Measure "canonical": wallets using the crates, ZF citing the spec, merged upstream
       PRs. Revisit this plan quarterly.
 
 ## Decisions waiting on you
 
-- [ ] **(you)** Org name (`zafe-cash` proposed) and moving the repo.
+- [x] Org name and moving the repo: `zafe-cash/zafe` (2026-10-03, Phase 0).
 - [ ] **(you)** Whether to invite Konclave and aryaethn to co-author the spec. That's the
       faster route to "canonical", at the cost of shared ownership.
 - [ ] **(you)** Whether to approach ZODL (AGPL + commercial) or Chainapsis (Apache, but

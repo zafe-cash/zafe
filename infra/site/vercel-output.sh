@@ -71,7 +71,7 @@ for page in "$output"/static/*.html "$output"/static/docs/*.html; do
 done
 shopt -u nullglob
 # Permanent redirects (public/_redirects has the same for other hosts). /relay is linked
-# from shipped app builds ("Run your own relay"): keep it forever.
+# from the app's first "Run your own server" link (never released): keep it as a redirect.
 redirects+="    { \"src\": \"^/relay(/|\\\\.html)?\$\", \"status\": 308, \"headers\": { \"Location\": \"/docs/run-a-server\" } },
 "
 for f in assetlinks.json apple-app-site-association; do

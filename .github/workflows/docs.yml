@@ -1,0 +1,23 @@
+name: Docs
+
+# Markdown and docs pages only: CI skips these paths, so links and docs labels are checked
+# here (the site workflow checks the built site's links too).
+on:
+  push:
+    branches: [main]
+    paths: ['**/*.md', 'docs/**', 'infra/site/src/**', 'scripts/check_md_links.py', 'scripts/check_docs_sync.py']
+  pull_request:
+    paths: ['**/*.md', 'docs/**', 'infra/site/src/**', 'scripts/check_md_links.py', 'scripts/check_docs_sync.py']
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Links resolve and docs match the app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 scripts/check_md_links.py
+      - run: python3 scripts/check_docs_sync.py

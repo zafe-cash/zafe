@@ -488,9 +488,9 @@ class _CountUpState extends State<CountUp> with SingleTickerProviderStateMixin {
   );
 }
 
-/// Zafe's vault card: the balance on the vault card (`colors.vaultCard`: ink in dark
-/// mode, pale verdigris in light mode) with safe-dial rings, and the approval rule as
-/// signer dots along the bottom.
+/// Home's balance card: the plain card surface (`colors.vaultCard`), a grey Zcash mark
+/// and "Vault balance", the balance in [AppTypography.hero] (shrinks to fit, never cut),
+/// and the approval rule as signer dots along the bottom (docs/brand.md "Vault card").
 class BalanceCard extends StatelessWidget {
   const BalanceCard({
     super.key,

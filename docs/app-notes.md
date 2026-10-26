@@ -40,15 +40,17 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   `xyz.zafe.zafe` (the harness and `adb` commands use that). The site's
   `assetlinks.json` lists both packages. `google-services.json` must contain a client
   for whichever package you build, or the Google Services Gradle plugin fails.
+## Servers, relays and settings
+
 - **Zcash server list** (2026-10-06, Vizor-style): `core/config/lightwalletd_presets.dart`
   holds the public servers per network (first = the build default; mainnet: Zec Rocks
   global/na/eu/ap/sa, Stardust us/eu, Zcash Explorer; testnet: only testnet.zec.rocks
-  answered). Settings > Zcash server lists them with a latency probe each
-  (`probeLightwalletd`, a `checkLightwalletd` call, through Tor when it's on) plus
-  "Custom server". Sync fails over (`serverFailoverProvider`, from `VaultNotifier.sync`)
-  to the next listed server on unreachable/timeout/TLS/server-behind, at most once per
-  5 min, never away from a custom URL, and the app toasts the move. Background checks
-  don't fail over. Re-probe the list (`grpcurl ... GetLightdInfo`) before adding hosts:
+  answered). Settings > This phone > Zcash server (`/zcash-server`) lists them with a
+  latency probe each (`probeLightwalletd`, a `checkLightwalletd` call, through Tor when
+  it's on) plus "Custom server". Sync fails over (`serverFailoverProvider`, from
+  `VaultNotifier.sync`) to the next listed server on unreachable/timeout/TLS/server-behind,
+  at most once per 5 min, never away from a custom URL, and Home shows a "Zcash server
+  switched" notice. Background checks don't fail over. Re-probe the list (`grpcurl ... GetLightdInfo`) before adding hosts:
   Stardust eu2/jp and two community servers were dead or had broken TLS.
 - **Relay picker** (2026-10-25, `docs/relay-move.md` §4.1): `core/config/relay_presets.dart`
   lists the relays per network (`RelayPreset`: operator + URL; community relays are added
@@ -59,8 +61,8 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   relay needs one. A full screen (`/pick-server`, `RelayPickerScreen`; buttons pinned:
   "Use this server" checks a typed address first, so closing the keyboard without Done
   still counts), used by Create > More options > Server and Move. Scan is `/scan-relay`;
-  both open with or without a vault. "Run your own server →" opens
-  `https://zafe.cash/relay`.
+  both open with or without a vault. "Run your own server →" opens `kDocsRunAServerUrl`
+  (`/docs/run-a-server`; older builds link `/relay`, which redirects there).
 - **Per-vault relay** lives in the vault's material (phase 2a); Dart reads it with
   `activeVaultRelayProvider` (`vault_relay_settings`; `usesDefault` = a vault from before
   per-vault relays; Home saves the app-wide value into them once, `pinLegacyRelays`).
@@ -72,16 +74,17 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   (`zafe_vault_<id>_createToken`, `add(createToken:)`), `stepSetup` reads it on **every**
   step (background ones too), and it is deleted once the material (which then holds it) is
   saved. Never in the invite. Cancel setup keeps it in `CreatePrefill` for the retry.
-- **Outage** (§5): Home reads `Can't reach server` (orange; the time is on the Status
-  screen as "Down since", from `vault_relay_status`, date when not today, `formatSince`); the unapproved-spend card and notification add
-  "Based on this phone's history from 09:14" when `from_copy_at` is set. A background
+- **Outage** (`docs/relay-move.md` §5): Home reads "Can't reach server" (orange); the
+  Status screen shows "Down since" (from `vault_relay_status`, `formatSince`: the date when
+  not today). The unapproved-spend card and notification add "Based on this phone's
+  history from 09:14" when `from_copy_at` is set. A background
   check whose relay read fails still announces those spends before giving up.
 - **Seat link**: the co-signer's "Replace lost phone" shows "Vault link for their new
   phone" (Share, Show QR) until the safety words appear; the new phone's "Recover your
   seat" takes it by Paste/Scan (`/scan-seat-link`), keeps it in `ZafeSecureStore` with the
   recovery identity (`zafe_recovery_seat_link`) and passes its relay and label to
   `check_recovery`. Without a link it searches the default relay (older vaults).
-- **Relay move** (2026-10-25, reworked 2026-10-26 after research on Matrix room
+- **Relay move** (2026-10-25, reworked 2026-10-27 after research on Matrix room
   upgrades, Mastodon/Bluesky moves, Delta Chat and SimpleX relay changes, Zashi's server
   screen; `docs/relay-move.md` §4.2-4.5): one place, `/vault-server`. "Move to another
   server" → the server list ("Move to", the current one shown as Current, never picked)
@@ -105,19 +108,15 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   screen: "Payments resume when 1 more member moves to <host>." while the relay is down
   and the move is short of m. Activity: "Grants moved to <host>" (`RelayMovedActivity`).
   Renders: `tool/screens/relay_move_render_test.dart` (in the size sweep).
-- **Settings and sheets** (2026-10-26, research: Apple HIG Sheets/Modality, Material
+- **Settings and sheets** (2026-10-27, research: Apple HIG Sheets/Modality, Material
   bottom sheets, NN/g "do not stack bottom sheets", Zashi/Signal/Safe/Rainbow settings):
   Settings' first level is Privacy (Use Tor first, Hide amounts), Security (Lock app, an
   `AppMenu` on the row), <vault> (Back up, Viewing key, How it's protected, Server), This
   phone (Zcash server, Notifications), App (Theme, Payment sounds, Diagnostic report,
-  licenses). Zcash server is a screen (`/zcash-server`; presets with live checks, "Custom
+  Open-source licenses). Zcash server is a screen (`/zcash-server`; presets with live checks, "Custom
   server" opens a field in place, Test and save), also from Welcome's cog. Diagnostic
-  report and Status are screens. Confirmations use `showAppConfirm` (themed dialog);
-  Manage vaults' ⋯ is an `AppMenu`. Home has pull to refresh (sync now).
-- **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
-  task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
-  leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,
-  secrets) record black. The recording shows whatever is on screen, other apps included: look only at Zafe.
+  report (`/diagnostics`) and Status (`/status`) are screens too. Confirmations use
+  `showAppConfirm` (themed dialog); Manage vaults' ⋯ is an `AppMenu`. Home has pull to refresh (sync now).
 
 ## Tor (full notes)
 
@@ -217,8 +216,8 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   with keys, arc, wheel, bolts, shake and ripple (too much), a band sweeping across the door (loud and fast even at
   4.5 s / 8%). The hero's gradient overlay is `IgnorePointer`. Clamp curve inputs (`(u - a) / b` can exceed 1 by
   rounding; `Curve.transform` asserts).
-- Art is also used outside onboarding: backup/export/restore banners, the sending screen's
-  full-page background (`SentArt`), the Activity empty state.
+- Art is also used outside onboarding: the backup prompt and restore banners, the sending
+  screen's full-page background (`SentArt`), the Activity empty state.
 - **App icon and splash** are generated the same way: `scripts/brand/brand.py` ("Seam":
   deep verdigris #004A46 tile, a block split by a Z-shaped channel into a pale #D9F5F2
   upper piece and a #51DDD2 lower piece, geometry = `marks.js` `seam()`; flat colours
@@ -298,9 +297,6 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   `MaterialApp` in the `RepaintBoundary` and apply `AppTheme` through its `builder`
   (`welcome_render_test.dart`). Widget tests use the Ahem font, which is wider than DM
   Sans: a 390 pt view overflows button labels, so use a wider view there.
-- In a fresh worktree `flutter analyze` reports errors in `rust_builder/cargokit/build_tool`
-  until `dart pub get` is run in that directory.
-
 
 ## M1 app: built on Vizor (chainapsis/vizor-wallet, Apache-2.0), with Zafe's own look
 
@@ -311,17 +307,19 @@ that Zafe **not look like a copy**. Zafe's visual identity, keep it when resynci
   #00736C light), primary buttons #51DDD2 with a #001B19 label (dark) and #00736C with a
   white label (light). **Zcash gold = value**: received money, "+x TAZ", the ticker,
   success (`GoldPrimitives`, #F3BA3C / #835A00; never green: teal and green are too
-  close). Warnings orange (`OrangePrimitives`, #FFAE81 / #A55115), errors rose
+  close; the one green is the sync status "Synced", which is not money). Warnings orange
+  (`OrangePrimitives`, #FFAE81 / #A55115; also every sync failure), errors rose
   (`RosePrimitives`, #E96CAD / #A82571). Window #080B0B / #F1F5F5. The vault and payment
-  cards use `colors.vaultCard` (`AppVaultCardColors`): ink #091312 in dark mode, a light
-  #E0F3F1 card with a line border in light mode (user's decision), dial drawn in the
-  accent (70% in light). Earlier: "Signal" lime + charcoal (2026-09-30), jade + slate.
+  cards use `colors.vaultCard` (`AppVaultCardColors`): since 2026-10-27 the plain card
+  surface, no dial or border (the user's pick over the dial, a glow and tinted cards).
+  Earlier: "Signal" lime + charcoal (2026-09-30), jade + slate.
   **Token names follow the three colour jobs** (renamed 2026-10-01): value =
   `text.value`, `icon.value`, `background.valueAlpha` (were `positiveStrong`/`success`,
   `utilitySuccessAlpha`); errors = `*.destructive*` (the `utility` prefix is gone:
   `background.destructiveSubtle/Strong/Alpha/AlphaSubtle`, `border.destructive/
   destructiveSubtle`); `background.darkCard` / `text.darkCard` (were `homeCard`: the
-  dark QR card, not the vault card); `sync.{text,textError,glow}` only. Unused gold
+  dark QR card, not the vault card); `sync.{text,glow}` (green), `{textError,glowError}`
+  (orange), `{torText,torGlow}` (purple). Unused gold
   leftovers (`utilitySuccessSubtle/Strong`, `border.utilitySuccess/utilityPositiveStrong`,
   `text.success`, `sync.textSyncing/lightSuccess/lightError`) were deleted.
   Material widgets use `core/theme/material_theme.dart` (was `legacy_material_theme`,
@@ -344,13 +342,14 @@ that Zafe **not look like a copy**. Zafe's visual identity, keep it when resynci
   icon to the script's `MAP` and to `AppIcons` together; unused icons are deleted, not
   kept. Contact sheet: `flutter test tool/screens/icons_render_test.dart` →
   `build/screen_preview/icons_{dark,light}.png`.
-- **Signature pieces**: home "vault card" (`BalanceCard`: safe-dial rings + accent glow,
-  signer-dot threshold strip); the same card for payments (`PaymentCard` in `core/widgets/mobile/zafe_detail.dart`,
-  proposal page and send review); signers as `SignerRow`s with key-derived rounded-square
+- **Signature pieces**: Home's vault card (`BalanceCard`: a grey Zcash mark and "Vault
+  balance", the amount, signer dots for the approval rule); the same plain card for
+  payments (`PaymentCard` in `core/widgets/mobile/zafe_detail.dart`, proposal page and
+  send review); signers as `SignerRow`s with key-derived rounded-square
   `SignerTile`s (hue + mirrored 5x5 pattern from the key; "You" outlined in the brand accent) and
-  `ApprovalDots` for votes; pushed pages use a boxed back button with a left-aligned 24 px
+  `ApprovalDots` for votes; pushed pages use a boxed back button with a left-aligned 22 px
   title. Icon: Seam on a deep verdigris tile (`scripts/brand/`).
-- **No Vizor references in code comments** (the user asked); attribution stays in `NOTICE`
+- **No Vizor references in code comments** (the user asked); attribution stays in `app/NOTICE`
   and the licenses page.
 - `ZAFE_FORM_FACTOR` defaults to `mobile` (the phone app previously used desktop tokens
   because no build passed the flag).
@@ -369,8 +368,7 @@ first study used). Detailed reference (tokens, components, screens, bridge setup
 `docs/vizor-reference.md` (§11: resync notes). `lib/src/core` was resynced to upstream
 `4bff2e7`; check upstream for newer work and resync file by file, re-applying Zafe edits
 (AppButton semantics, `xyz.zafe/*` channels, no Vizor background PNG in the progress screen).
-Upstream features to borrow later: settings screens, address book. (Tor is done: see
-"Tor" under Dependency gotchas.)
+Upstream features to borrow later: address book. (Tor is done: "Tor (full notes)" above.)
 Learned while studying it:
 - **Copy** architecture, tokens, component specs, screen structures, and the Keystone
   signing UX (it starts proving in the background while the external signer works — do the
@@ -395,25 +393,28 @@ Learned while studying it:
   call goes through `_PatientStorage` (10 s timeout, one retry); never call the plugin
   directly. The **network** is compile-time (`ZAFE_NETWORK`,
   default regtest, `core/config/network_config.dart`). Relay/lightwalletd **defaults**
-  come from the build: presets per network (`regtest` local http; `test`/`testnet`:
-  zec.rocks TLS lightwalletd + a placeholder relay `https://relay.zafe.invalid` until one
-  is deployed, shown as "Not configured" in Settings), overridden by the dart-defines
-  `ZAFE_RELAY_URL` / `ZAFE_LIGHTWALLETD_URL`. Dart const expressions can't read fields of
-  const objects, hence the parallel consts. **At runtime** the user can change the Zcash
-  server (Settings > This phone > Zcash server, `features/settings/zcash_server_screen.dart`;
-  a new vault's server is picked in Create): `core/config/endpoints.dart`
-  (`ZafeEndpoints`, `checkEndpointUrl`: https required except localhost/127.0.0.1/
-  10.0.2.2 on regtest; path/query refused; typed ports kept, since Dart's `Uri` drops a
-  default `:443`) stores them in prefs keyed per network (`zafe_relay_url_<net>`,
-  `zafe_lightwalletd_url_<net>`; saving the default removes the key). The sheet tests
-  the URL first (bridge `api/endpoints.rs`: `check_relay` = `GET /health` must answer
-  `ok`; `check_lightwalletd` = `GetLightdInfo`, network must match). **Never use
-  `kZafeRelayUrl`/`kZafeLightwalletdUrl` directly**: UI code reads
-  `ref.read(endpointsProvider)` (from the bootstrap), background checks use
-  `ZafeEndpoints.fromPrefs(prefs)` after `prefs.reload()` (prefs cache per isolate). A
-  relay change re-registers the push token (`reregisterPush`). All members of a vault
-  must use the same relay.
-- **Site download link**: `site.yml` sets `ZAFE_DOWNLOAD_URL` to `https://github.com/zafe-cash/zafe/releases` (the testnet APKs are pre-releases, so `/releases/latest` 404s).
+  come from the build: presets per network (`regtest`: local http; `test`: zec.rocks TLS
+  lightwalletd and the placeholder relay `https://relay.zafe.invalid`, so testnet builds
+  pass `ZAFE_RELAY_URL`; `main`: `relay.zafe.cash` and `zec.rocks`), overridden by the
+  dart-defines `ZAFE_RELAY_URL` / `ZAFE_LIGHTWALLETD_URL`. Dart const expressions can't
+  read fields of const objects, hence the parallel consts. **At runtime** the user can
+  change the Zcash server (Settings > This phone > Zcash server,
+  `features/settings/zcash_server_screen.dart`); a new vault's server is picked in
+  Create. `core/config/endpoints.dart` (`ZafeEndpoints`, `checkEndpointUrl`: https
+  required except localhost/127.0.0.1/10.0.2.2 on regtest; path/query refused; typed
+  ports kept, since Dart's `Uri` drops a default `:443`) stores them in prefs keyed per
+  network (`zafe_relay_url_<net>`, `zafe_lightwalletd_url_<net>`; saving the default
+  removes the key). The screens test a URL before saving it (bridge `api/endpoints.rs`:
+  `check_relay` = `GET /health` must answer `ok`, then `GET /v1/info` (push, create
+  token, API version; none = too old); `check_lightwalletd` =
+  `GetLightdInfo`, network must match). **Never use `kZafeRelayUrl`/`kZafeLightwalletdUrl`
+  directly**: UI code reads `ref.read(endpointsProvider)` (from the bootstrap),
+  background checks use `ZafeEndpoints.fromPrefs(prefs)` after `prefs.reload()` (prefs
+  cache per isolate). A change of a vault's relay re-registers the push token
+  (`reregisterPush`). Each vault's relay lives in its material ("Per-vault relay" above).
+- **Site download links**: `site.yml` looks up the newest `mainnet-v*` and `v*` tags
+  (`gh release list`) and sets `ZAFE_DOWNLOAD_URL` / `ZAFE_TESTNET_URL` to those release
+  pages (testnet APKs are pre-releases, so `/releases/latest` would 404).
 - **Bridge errors are typed**: API functions return `Result<T, ZafeError>` (`api/error.rs`,
   `kind` + `message`); Dart maps `ZafeErrorKind` to copy in `core/errors/zafe_error_copy.dart`.
   FRB treats a `type Result<T> = ...` alias as **anyhow** — always write
@@ -455,7 +456,8 @@ Learned while studying it:
   (independent check on this device, votes, approve/reject, "Collect signatures & send"),
   `/proposal/:id/send` (Vizor's transaction progress screen; the send lives in
   `ProposalsNotifier`, so leaving the screen doesn't stop it), `/activity` (all payments).
-  Home polls every 15 s (60 s while the live watch is connected, see "Live activity"):
+  Home polls every 15 s (60 s while the live watch is connected: `services/live_vault_watch.dart`,
+  `docs/tracker.md` "Live activity"):
   proposals refresh + answering signing requests, then wallet sync.
   Wallet DB access is serialized by `wallet_lock()` in the bridge.
 - **Received payments** (`wallet::VaultWallet::received_payments`, bridge
@@ -601,10 +603,11 @@ Learned while studying it:
 - **Viewing key** (`/viewing-key`, in `inVault`, SecureScreen): bridge
   `vault_viewing_key(material)` derives the UFVK and refuses if it differs from the
   descriptor's `ufvk` (`Verification`).
-- Pushed-page titles are 24 px and left-aligned (room for ~20 characters); keep them short.
+- Pushed-page titles are 22 px (`AppTypography.heading`) and left-aligned (room for ~20
+  characters); keep them short.
 - **An icon leading a row of text** goes in `core/widgets/line_icon.dart` `LineIcon(size:, line: <first line's
   style>)`: it centres the icon on the first line (scaled with text size). A bare `AppIcon` in a
-  `CrossAxisAlignment.start` row sits low next to a 17 px title (2026-10-22, all ten cards moved).
+  `CrossAxisAlignment.start` row sits low next to a card title (2026-10-22, all ten cards moved).
 - **Copy and layout rules (user, 2026-10-16)**: minimal text: delete lines that restate the screen,
   show exact values (bridge `estimate_fee`, never "at least"), explanations only in help sheets.
   Check UI on a 360x640 phone at 1.0 and 2.0x text (`adb shell wm size 720x1280; wm density 320;
@@ -625,9 +628,9 @@ Learned while studying it:
   to 96% (`AppButton`). Payments that need your vote open as a request
   (`PaymentRequestView`, Approve/Decline pinned; the request stays on screen through
   "Approved" while it leaves: `_holdRequest`). Auto-send is always on (the toggle is gone;
-  `SendPrefill` has no `autoSend`). Confirmation sheets only for what can't be undone
-  (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline, backup
-  "Later" just leaves.
+  `SendPrefill` has no `autoSend`). Confirmations (`showAppConfirm`) only for what can't be
+  undone (remove vault, cancel payment, abandon setup); Tor is a row switch, theme inline,
+  backup "Later" just leaves.
 - **The proposer approves when proposing** (2026-10-16, user's call after the testnet dry run, as Safe does):
   `send_screen._propose` runs bridge `propose_and_approve` under one unlock ("Propose and approve this payment"):
   `node::propose_loaded` then `node::approve_after_propose` with the log state the proposal left (2026-10-17, one
@@ -637,17 +640,19 @@ Learned while studying it:
   alongside the log, before the wallet lock (`propose_inner`). Before, the proposer's own payment came back as a request with Approve/Decline. The CLI still
   proposes and approves separately.
 - **Needs you** (Home, 2026-10-16, `features/home/needs_you.dart`): payments where `needsMyAction`
-  (`proposal_status.dart`; the same rule counts notifications) and seat moves this member can approve, as
-  `RequestCard`s (amount first with a gold ticker, then who and the message; a tonal full-width button
-  naming the decision: "Approve or decline" opens the request, never approves from Home since the card
-  lacks the address; "Send now" sends after the unlock; "Compare safety words" for seat moves) in an
-  `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms); from 3 requests they stack (`_FanStack`:
-  the first card in full, two edges under it, "N waiting"); tapping the top card or the edges fans them out
-  (300 ms), leaving for a payment folds it back. Decline is optimistic (`declinesProvider`: the card leaves on
-  the tap, a failure brings it back with the reason). Test: `test/needs_you_stack_test.dart`. Tip: phone
-  screenshots are scaled to 900 px wide; multiply by the stated factor before `adb shell input tap`, above every notice except "Money left
-  without approval"; they leave Recent activity. Nothing else (no badge, no "waiting for others" group): the user
-  wants attention asked for only when the member must act.
+  (`proposal_status.dart`; the same rule counts notifications), seat moves this member can approve
+  and relay moves to follow (`moveRequest`), as `RequestCard`s (amount first with a gold ticker, then
+  who and the message; a tonal full-width button naming the decision: "Approve or decline" opens the
+  request, never approves from Home since the card lacks the address; "Send now" sends after the
+  unlock; "Compare safety words" for seat moves). The cards sit above every notice except "Money left
+  without approval", and requests they show leave Recent activity. They live in an
+  `AnimatedKeyedColumn` (cards grow in and collapse out, 250 ms); from 3 requests they stack
+  (`_FanStack`: the first card in full, two edges under it, "N waiting"); tapping the top card or the
+  edges fans them out (300 ms), leaving for a payment folds it back. Decline is optimistic
+  (`declinesProvider`: the card leaves on the tap, a failure brings it back with the reason). Test:
+  `test/needs_you_stack_test.dart`. Nothing else (no badge, no "waiting for others" group): the user
+  wants attention asked for only when the member must act. Tip: phone screenshots are scaled to
+  900 px wide; multiply by the stated factor before `adb shell input tap`.
 - **Privacy mode is app-wide** (`privacyModeProvider`, persisted in prefs, read in the
   bootstrap): every amount goes through `amountWithTicker(text, hide:)`. Vizor's
   `hideAmountIfPrivacyMode` only appends the unit to the *mask*, so passing a bare amount
@@ -665,8 +670,9 @@ Learned while studying it:
   handler (haptics only); needs CAF/M4A copies. Payment sounds are a signature, not UI
   feedback: keep them clean, short, open intervals (the user rejected chimes, bass
   "tactile" thuds and bright major-third runs).
-- **Balance card + dollars** (2026-10-06, after Vizor): one total (pending included; what's
-  pending shows as "Pending" in activity rows, not as notes on the card) and a dollar line
+- **Balance card + dollars** (2026-10-06, after Vizor): one total (pending included; what
+  can't be spent yet adds one "0.001 ZEC confirming" line, and pending payments show as
+  "Pending" in activity rows) and a dollar line
   `fiatText` from `zecPriceProvider`. **Mainnet builds only** (`kShowsFiat`: test coins
   have no value; Vizor does the same), so testnet/regtest never fetch a price. The price
   comes from Rust (`zafe_core::price::zec_usd`, bridge `api/price.rs`) so it follows the Tor
@@ -674,8 +680,8 @@ Learned while studying it:
   isolated circuit `Purpose::Price`); off → one CoinGecko request (needs a User-Agent:
   403 without). Refresh 3 min in the foreground, last price cached 1 h in prefs
   (`zafe_zec_usd_v1`). Live tests: `price::tests::live_direct_price` and the Tor live test.
-- **In-app updates** (`services/app_update.dart`, `in_app_update` **4.2.5**: 5.x needs
-  Flutter 3.44): Android Play installs only; checks at launch/unlock/resume (6 h apart).
+- **In-app updates** (`services/app_update.dart`, `in_app_update` 5.0.0): Android Play
+  installs only; checks at launch/unlock/resume (6 h apart).
   Priority comes from the release's class (`docs/releases/<version>.md`: essential = 5,
   optional = 2; set by `release-mainnet.yml` and `play-promote.yml`, never by hand: the Console
   can't set it). Priority ≥ 4 = immediate full-screen update,
@@ -685,13 +691,10 @@ Learned while studying it:
   (internal app sharing or an internal testing track).
 - **Secret screens** block capture: wrap a route's page in `SecureScreen`
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
-  in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:
-  `xyz.zafe/haptics` and `window_appearance` have none yet (Dart swallows
-  `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
-- Settings (`/settings` tab, 2026-10-27): Privacy (Use Tor, Hide amounts), Security (Lock app),
-  the open vault by name (Back up, Viewing key, How it's protected, Server), This phone (Zcash
-  server, Notifications), App (theme, payment sounds, diagnostic report, licenses; fonts + NOTICE
-  registered in `main.dart`); see "Settings and sheets" above. Other vaults live in **Manage
+  in `MainActivity.kt` (`FLAG_SECURE`). `xyz.zafe/haptics` and `modal_corners` have no
+  Android handler (Dart swallows `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
+- **Settings** (`/settings` tab; groups in "Settings and sheets" above; font licences and
+  `NOTICE` registered in `main.dart` for the licenses page). Other vaults live in **Manage
   vaults** (`/vaults`, `features/vaults/manage_vaults_screen.dart`, opened from the vault sheet
   `showVaultSwitcher`); each vault's ⋯ is an `AppMenu` (`vault_actions.dart` `VaultActionsMenu`):
   Rename, Back up, Viewing key, How it's protected, Remove (switching to that vault first where
@@ -733,11 +736,11 @@ Learned while studying it:
   `test/mobile_top_nav_motion_test.dart` (no frame scheduled between ticks). **First-sync stall**
   (separate cause): see the wallet-key note under "Wallet DB is encrypted"; the steps before the Rust
   call time out in 45 s and a slow/stuck sync is recorded in the report as `slow-sync` / `sync` entries.
-- **Sync status**: "First sync..." while the first sync of a vault on this device runs (`VaultState.firstSync`:
-  no saved sync time); the
-  sync sheet says "First sync" / "Syncing" while a sync runs (it used to say "Vault in sync"
-  whenever there was no error). While "Use Tor" is on the status line and its glow are Tor's
-  purple (`AppSyncColors.torText/torGlow`), unless Tor failed (error colour). Settings'
+- **Sync status**: Home's status line reads "First sync..." while a vault's first sync on
+  this device runs (`VaultState.firstSync`: no saved sync time), "Syncing...", then
+  "Synced" (green); a failure that isn't transient shows its label in orange. The Status screen's title says
+  "First sync" / "Syncing" / "Vault in sync". While "Use Tor" is on, the status line and
+  its glow are Tor's purple (`AppSyncColors.torText/torGlow`), unless Tor failed (orange). Settings'
   version comes from `--dart-define=ZAFE_VERSION` (both release workflows pass it).
 - **Secure storage plugin** (2026-10-12): `flutter_secure_storage` 11.2.0 (was 10.3.4; we have used the 10.x
   default ciphers since the first commit, so no data used the algorithms v11 dropped). Why: 10.x probed
@@ -780,7 +783,7 @@ Learned while studying it:
   blocked), `USE_BIOMETRIC`, and iOS `NSFaceIDUsageDescription`.
 - **App lock** (spec §14; `core/security/app_lock.dart` pure rules,
   `app_lock_gate.dart` `AppLockGate` = `MaterialApp.builder`, so the lock screen covers
-  routes, sheets and toasts while the screen underneath stays mounted with input, focus
+  routes and sheets while the screen underneath stays mounted with input, focus
   and semantics excluded). Locks at launch when a vault exists and on resume after the
   "Lock app" delay (`zafe_app_lock`: off / immediately / 1 min default / 5 min, read in
   the bootstrap; weakening it needs an unlock). `appLockedProvider` holds the state.
@@ -810,7 +813,7 @@ Learned while studying it:
   `paymentLinks` (`features/send/payment_link.dart`, latest wins). `app.dart`'s
   `openPaymentLink` waits while locked, during keygen and on `/backup-prompt`, drops a
   link older than `kPaymentLinkTtl` (10 min, Vizor's rule: an old link must not turn
-  into a payment on some later unlock) or with no ready vault (toast), then pushes
+  into a payment on some later unlock) or with no ready vault (a notice), then pushes
   `/payment-request` (exempt from the vault redirect: it picks its own vault).
   `PaymentRequestScreen`: "Check who sent this" warning, full address, the link's
   `label`/`message` shown as "(not verified)" (bridge `ScannedPayment.label/message`),
@@ -833,10 +836,10 @@ Learned while studying it:
   10,000 zats = the shown minimum). Backing out to the launcher ends the activity, so a link still
   waiting behind the lock is gone when the app is reopened from the launcher.
 - **Backups** (spec §12.2; `zafe_core::backup`, bridge `api/backup.rs`, app `features/backup/`):
-  `ZAFEBAK` v2 = header (Argon2id params, salt, nonce; authenticated as AEAD data) +
-  XChaCha20-Poly1305 of {identity seeds, material, invite, signer names}; **never nonces**
-  (nor the wallet DB key: a restore gets a new key and resyncs). v1 (no names) still
-  restores. Restore writes the names to `names.json` (cleaned with `MemberNames.clean`,
+  `ZAFEBAK` v3 = header (Argon2id params, salt, nonce; authenticated as AEAD data) +
+  XChaCha20-Poly1305 of {identity seeds, material (with the vault's relay), invite,
+  signer names, log copy}; **never nonces** (nor the wallet DB key: a restore gets a new
+  key and resyncs). v1 (no names) and v2 (no log copy) still restore. Restore writes the names to `names.json` (cleaned with `MemberNames.clean`,
   non-hex keys dropped) before the vault becomes active. Import checks
   the identity is a vault member and refuses KDF params below 64 MiB / 3 passes (or absurdly
   high). Text form `zafe-backup-v1:` + base64url. Passphrase: since 2026-10-16 the app
@@ -887,14 +890,13 @@ Learned while studying it:
   `app/android/app/` (gitignored) and the Gradle plugin applies itself; without it the app
   builds and relies on background checks. Relay: `ZAFE_FCM_SERVICE_ACCOUNT=<key.json>`
   (never commit it). APNs isn't implemented yet (iOS).
-- **Firebase project `zafe-18c4d`** (the user's account), Android apps `xyz.zafe.zafe`
+- **Firebase project `zafe-18c4d`**, Android apps `xyz.zafe.zafe`
   (`1:303423821426:android:deff491a8e80f394ea14eb`) and the testnet app
   `xyz.zafe.zafe.testnet` (`1:303423821426:android:8a429ba817be26f5ea14eb`, added
   2026-10-06); one `google-services.json` lists both. Regenerate the app config with
   `npx -y firebase-tools@latest apps:sdkconfig ANDROID <app id> --project zafe-18c4d --out
-  app/android/app/google-services.json`. The relay key (service account
-  `firebase-adminsdk-fbsvc@zafe-18c4d.iam.gserviceaccount.com`) lives at
-  `~/.config/zafe/fcm-service-account.json` (0600, outside the repo); it was created
+  app/android/app/google-services.json`. The relay key (the project's Firebase Admin SDK service
+  account) lives at `~/.config/zafe/fcm-service-account.json` (0600, outside the repo); it was created
   through the IAM API with the Firebase CLI login token (the CLI has no command for it).
   The CLI login in a non-interactive shell is two steps: `login --no-localhost`, then
   `login <code>`.
@@ -902,7 +904,8 @@ Learned while studying it:
   don't conclude "not delivered" too early: check `adb logcat | grep FLTFireMsg`. The
   relay logs `push: sent` at debug level (`RUST_LOG=zafe_relay=debug`).
 - **Invites** (`features/onboarding/invite_link.dart`, pure and unit-tested): raw form
-  `zafe-invite-v2:<hex postcard>` (~250 chars; URL-safe, asserted in `node::tests`), link
+  `zafe-invite-v3:<hex postcard>` (URL-safe and under 400 chars, asserted in
+  `node::tests`), link
   form `zafe://join?invite=<raw>`, or `https://<ZAFE_LINK_HOST>/join#<raw>` when the build
   has the dart-define (invite in the **fragment**, so the landing site's server never sees
   it; only that exact host, port 443, no query). Both forms are always accepted; the https
@@ -910,11 +913,11 @@ Learned while studying it:
   control**: that site's page script could read every invite. The setup QR and "Share link" carry the link; Join
   accepts either (typed, pasted inside a message, or scanned on `/scan-invite`). **An
   invite is a bearer credential until membership is locked**: its `join_token` lets anyone
-  take an empty seat (it can't spend or see funds; the creator's member list and the
-  safety number catch an intruder). Copy says to share it only with co-signers over a
-  trusted channel. Links never join by themselves: they open Join prefilled, and the
-  safety number flow follows.
-- **Deep links**: `app_links` 7.0.0 (7.1+ needs Flutter 3.44), with Flutter's own deep
+  take an empty seat until it expires or setup locks (it can't spend or see funds; the
+  member list and the safety words catch an intruder). Copy says to share it only with
+  co-signers over a trusted channel. Links never join by themselves: they open Join
+  prefilled, and the safety words follow.
+- **Deep links**: `app_links` 7.2.2, with Flutter's own deep
   linking **off** (`flutter_deeplinking_enabled` meta-data / `FlutterDeepLinkingEnabled`),
   otherwise go_router receives `zafe://join` itself. **App Links**: a second, `autoVerify`
   intent filter for `https://<host>/join`; Gradle decodes Flutter's `dart-defines` project
@@ -933,9 +936,11 @@ Learned while studying it:
   xyz.zafe.zafe` first).
 - **Website** (`infra/site/`, Astro 7, static): a calm home page `/` (`hx-*`/`hc-*`
   classes; since 2026-10-23 four illustrated loops, each a Blender scene moving with an
-  app-rendered card, `docs/site.md` §6; its only script is `loops.js`, the pause buttons), `/download`,
-  `/support`, the 3D story on `/showcase` (keep heavy motion off the home page: the user's
-  call, a treasury product should feel sober), and the invite page `/join`. The site's one
+  app-rendered card, `docs/site.md` §6; its only script is `loops.js`, the pause buttons),
+  `/download`, `/support`, `/privacy`, the user docs under `/docs` (`src/pages/docs/`,
+  page list in `src/docs/pages.ts`), the 3D story on `/showcase` (keep heavy motion off the
+  home page: the user's call, a treasury product should feel sober), and the invite page
+  `/join`. The site's one
   server function is the iPhone waitlist (`infra/site/api/waitlist.mjs`, private Vercel Blob;
   README "The iPhone waitlist"); product truth for design work is `infra/site/PRODUCT.md`.
   **The two pages must not look alike** (round 12): home shows the app's real components on
@@ -1012,10 +1017,8 @@ Learned while studying it:
   `astro.config.mjs` sets `inlineStylesheets: 'never'` and `build.format: 'file'`;
   `build.sh` greps the output and fails on any inline script/style/handler. Phone shots
   are the app's own renders (`tool/screens/*_render_test.dart` → `infra/site/assets.py`
-  → WebP); fonts are the app's, subset to WOFF2. Calls to action go through `getUrl`/`getLabel`/`getNote` in
-  `src/config.ts`: "Get Zafe" only when the build sets `ZAFE_DOWNLOAD_URL`, otherwise
-  "View code" to the repo (no APK testers can use before the relay is hosted). Landing copy must only claim shipped
-  features. Look at it with agent-browser at 1280 and 390 wide, light and dark.
+  → WebP); fonts are the app's, subset to WOFF2. "Get Zafe" (`getUrl`/`getLabel` in
+  `src/config.ts`) goes to `/download`. Landing copy must only claim shipped features. Look at it with agent-browser at 1280 and 390 wide, light and dark.
   **Design** follows `docs/site.md` (now laid out after vizor.cash; decisions at the top): teal only
   for the action and "needs you", gold only for amounts, Space Grotesk only at display
   sizes, real app crops and illustrations (`assets.py` CROPS; wide pillar art is padded to 5:4). The
@@ -1029,50 +1032,53 @@ Learned while studying it:
   filled the runner disk and `ld` died with `signal 7 [Bus error]`. `ci.yml` frees ~30 GB
   first and builds with `CARGO_PROFILE_DEV_DEBUG=line-tables-only`. A bus error or "No
   space left" in a link step means disk, not code.
-- **Scanner**: `mobile_scanner` 7.4.2 with our own controller, so `scan_invite_screen.dart`
-  handles lifecycle itself (stop on inactive only while running, because the permission
-  prompt makes the app inactive; `start()` on resume also picks up a permission granted
-  in Settings). `permission_handler` is only used for `openAppSettings()`.
-  It bundles ML Kit's barcode model on Android (adds a few MB to the APK).
-- `flutter analyze` in a fresh worktree reports errors in
-  `rust_builder/cargokit/build_tool` until `dart pub get` runs there (not our code).
+- **Scanner**: `mobile_scanner` 7.4.2 with our own controller, so
+  `features/scan/qr_scan_screen.dart` (every `/scan-*` route) handles lifecycle itself
+  (stop on inactive only while running, because the permission prompt makes the app
+  inactive; `start()` on resume also picks up a permission granted in Settings).
+  `permission_handler` is only used for `openAppSettings()`. It bundles ML Kit's barcode
+  model on Android (adds a few MB to the APK).
 - Font family names in code must match `pubspec.yaml` exactly (`Space Grotesk`, `DM Sans`,
-  `JetBrains Mono`).
+  `JetBrains Mono`); `scripts/check_typography.py` flags any other.
 - `pubspec.yaml` must have a single `flutter:` key (a duplicate silently breaks FRB codegen).
 - Cargokit is patched (`rust_builder/cargokit/gradle/plugin.gradle`): debug builds no longer
   add x86/x64 unless `-Pzafe.debugEmulatorAbis=true`. Build for a phone with
   `flutter build apk --debug --target-platform android-arm64` (~5 min cold).
   Stale emulator `.so` files can linger in `build/rust_lib_zafe/jniLibs`; delete them.
+- **Release APKs** (`docs/releasing.md`, `.github/workflows/release.yml`): always
+  `--split-per-abi` with one `--target-platform`. Plugins (ML Kit) bundle
+  armeabi-v7a/x86_64 libs our Rust library lacks, so an unsplit APK installs on those
+  devices and crashes (`libflutter.so is for EM_AARCH64`), and Flutter's Gradle plugin
+  clears any `buildTypes.*.ndk.abiFilters` you set. Signing reads `android/key.properties`
+  (gitignored); without it release builds use the debug key.
 
-Device testing (agent-device): emulator AVD `zafe` (API 35 x86_64; needs `/dev/kvm`
-access and `libxkbfile.so.1`, which was unpacked into `~/android/sdk/emulator/lib64` without
-root). Start it windowed with `emulator -avd zafe -gpu swangle_indirect -no-snapshot
--no-audio`; build with `--target-platform android-x64`. `scripts/app-harness.sh` runs the
-relay plus CLI members B and C and sets `adb reverse` for 8787/9067, so the app's localhost
-defaults work on a device. Its `cli` subcommand does not rebuild: `cargo build -p zafe-cli`
-after core changes. **Emulator renderer (WSL)**: `-gpu swiftshader_indirect` segfaulted in the host
-`RenderThread` three times on 2026-09-30 (`dmesg`: "RenderThread: potentially unexpected fatal
-signal 11"), around the proposal/sending screens; the emulator died, not the app. Use
-`-gpu swangle_indirect` (stable since). AVD RAM raised to 4G for proving. A send's broadcast
-can still complete when the emulator dies mid-send: check the vault log (`zafe proposals`)
-before retrying. agent-device tips: prefer `find "<text>" click`; refs go stale after
-every snapshot; `scroll down --until 'label="..."'` before pressing bottom buttons.
+## Device testing and toolchain
 
-In a fresh git worktree, plain `flutter analyze` reports ~50 errors in
-`rust_builder/cargokit/build_tool` until `dart pub get` runs there; `flutter analyze lib
-test` checks the app alone.
-
-**Release APKs** (`docs/releasing.md`, `.github/workflows/release.yml`): always
-`--split-per-abi` with one `--target-platform`. Plugins (ML Kit) bundle
-armeabi-v7a/x86_64 libs our Rust library lacks, so an unsplit APK installs on those
-devices and crashes (`libflutter.so is for EM_AARCH64`), and Flutter's Gradle plugin
-clears any `buildTypes.*.ndk.abiFilters` you set. Signing reads `android/key.properties`
-(gitignored); without it release builds use the debug key.
-
-App commands (from `app/`, after `source ~/android/env.sh`):
-`flutter_rust_bridge_codegen generate` (after changing `app/rust/src/api`), `flutter analyze`
-(must be clean), `flutter build apk --debug --target-platform android-arm64`,
-`adb install -r build/app/outputs/flutter-apk/app-debug.apk`.
-
-Toolchain (installed by `~/android/install-toolchain.sh`; `source ~/android/env.sh`): Flutter at `~/flutter`, JDK 17 at
-`~/android/jdk-17`, Android SDK at `~/android/sdk` (platform 36, build-tools 36.0.0).
+- **Toolchain**: `~/android/install-toolchain.sh`, then `source ~/android/env.sh`: JDK 17
+  at `~/android/jdk-17`, Android SDK at `~/android/sdk` (platform 36, build-tools 36.0.0).
+  env.sh puts `~/flutter` (3.41, too old for `pubspec.yaml`) first; Flutter 3.47 is at
+  `~/flutter-3.47` (no `fvm` binary on this machine). Commands: `AGENTS.md` "Commands".
+- **Fresh worktree**: plain `flutter analyze` reports ~50 errors in
+  `rust_builder/cargokit/build_tool` until `dart pub get` runs there; `flutter analyze lib
+  test` checks the app alone.
+- **Emulator**: AVD `zafe` (API 35 x86_64, 4 GB RAM for proving; needs `/dev/kvm`
+  access). Start it windowed with `emulator -avd zafe -gpu host -no-snapshot -no-audio`
+  (emulator 37.2 or newer) and build with `--target-platform android-x64`. Renderer
+  history under WSL: `-gpu swiftshader_indirect` segfaulted in the host `RenderThread`
+  (2026-09-30, `dmesg`: "potentially unexpected fatal signal 11"), so we used
+  `swangle_indirect`; from Flutter 3.47 Impeller crashes both (signal 4/11), and `-gpu
+  host` (llvmpipe under WSLg) runs it. Emulator 37.2 needs `libxkbfile.so.1`: without
+  sudo, `apt-get download libxkbfile1`, `dpkg-deb -x` it under `~/android/extra-libs`
+  and set `LD_LIBRARY_PATH`. When the emulator dies mid-send the broadcast can still
+  complete: check the vault log (`zafe proposals`) before retrying.
+- **Harness**: `scripts/app-harness.sh` runs the relay plus CLI members B and C and sets
+  `adb reverse` for 8787/9067, so the app's localhost defaults work on a device. Its
+  `cli` subcommand does not rebuild: `cargo build -p zafe-cli` after core changes.
+- **agent-device tips**: prefer `find "<text>" click`; refs go stale after every
+  snapshot; `scroll down --until 'label="..."'` before pressing bottom buttons.
+- **Phone measurements**: proof ~1.7 s on 8 threads, FROST round 2 12 ms / 6.8 MB
+  (`scripts/android-bench.sh` measures them).
+- **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background
+  task (Bash `run_in_background`); started with `&` inside a foreground command it is killed when that returns and
+  leaves an empty file. Stop early with `adb shell pkill -INT screenrecord`. Capture-protected screens (setup, keys,
+  secrets) record black. The recording shows whatever is on screen, other apps included: look only at Zafe.

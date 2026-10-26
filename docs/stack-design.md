@@ -51,7 +51,7 @@ rust_lib_zafe (FRB), zafe-cli; later zafe-uniffi (Kotlin/Swift), zafe-ffi (C ABI
 `NonceStore`/`PoolStore`) and `vault`.
 
 **New modules:**
-- `network.rs`: `ZafeNetwork`, moved from wallet.rs:1084.
+- `network.rs`: `ZafeNetwork`, moved from `wallet.rs`.
 - `material.rs`: `VaultMaterial`, with its own error type.
 - `codec.rs`: the request hash, commitments hash, the codecs for requests, own shares
   and used commitments, and the wire structs that are private in node today.
@@ -71,8 +71,8 @@ No tokio, reqwest, rusqlite or tonic. CI checks this with
 ### zafe-coordinator
 
 - node.rs flows, made generic over the traits below.
-- The leader's resumable send. It lives in `app/rust/src/api/proposals.rs:805-937` today
-  and is duplicated in the CLI.
+- The leader's resumable send. It lives in the bridge today (`send_proposal` /
+  `send_with_progress` in `app/rust/src/api/proposals.rs`) and is duplicated in the CLI.
 - `maintain()`: top up the pool, forget closed proposals, reserve notes. Today this
   lives in the bridge.
 
@@ -124,7 +124,8 @@ Hardening that comes with the split:
 - `propose` runs `verify_pczt` on its own PCZT before logging it. Otherwise a foreign
   wallet adapter could publish proposals that every member rejects.
 - Used commitments are persisted *before* a request is sent.
-- The string match for insufficient funds at `wallet.rs:756` becomes a typed variant.
+- The string match for insufficient funds in `wallet.rs` (`e.contains("InsufficientFunds")`)
+  becomes a typed variant.
 
 ### Coupling to remove (file:line at 2026-10-01)
 
@@ -225,18 +226,20 @@ persistence), so one server serves both.
 **Global rules:**
 - postcard 1.x encoding (an enum's variant index is its wire value);
 - the u16 little-endian version tag;
-- decoders accept only the current version, except `VAULT_EVENT` (1..=2).
+- decoders accept only known versions and fail with `UnsupportedVersion` otherwise; which
+  old versions each format still reads is listed in AGENTS.md ("Vault log and versions").
 
 | Format | Still undocumented |
 |---|---|
 | ENVELOPE | `Header` field order. `Recipient`/`Kind` indices (Join=0 … SignatureShares=10; Approval and LogEntry are test-only, so mark them reserved). Signed bytes (domain `Zafe envelope signature v1`). HPKE suite X25519-HKDF-SHA256 / ChaCha20Poly1305, base mode, info `Zafe HPKE v1`, AAD = header. `ReplayGuard` seq. Raw payload per Kind |
 | LOG_ENTRY | Header encoding. XChaCha20-Poly1305 with AAD = header. Signature domain. Hash personalization `Zafe_LogEntryHsh`. Chain rules and the relay's compare-and-swap. Log-key rotation is described in the spec but **not implemented** |
-| VAULT_EVENT | Variant indices. **The replay rules work like consensus** (`VaultState::apply`, vault.rs:474-663): vote counting, rejection threshold n−t+1, author-only cancel, `NotesInUse`, `assign_commitments` order and caps, `ready_group`/`completed_by`, final votes, name rules, what gets ignored. Needs log → state test vectors |
+| VAULT_EVENT | Variant indices. **The replay rules work like consensus** (`VaultState::apply`, `apply_versioned`): vote counting, rejection threshold n−t+1, author-only cancel, `NotesInUse`, `assign_commitments` order and caps, `ready_group`/`completed_by`, final votes, name rules, what gets ignored. Needs log → state test vectors |
 | DESCRIPTOR | Field order, hash personalization, signing message, member ordering, `member_identifier`, DKG transcript hash |
-| RELAY_API | Endpoints, `Signed<T>`, 300 s clock skew, status codes (403 vs 404 on `/v1/wait`, 426, 429, 507), limits |
+| RELAY_API | Endpoints (incl. the labelled routes and `GET /v1/info`), `Signed<T>`, 300 s clock skew, the `zafe-create-token` header, status codes (403 vs 404 on `/v1/wait`, a bare 404 vs "unknown mailbox", 401, 426, 429, 507), limits |
 | INVITE, IDENTITY_SEEDS | Seed → Ed25519/X25519 derivation, fingerprint, and **the safety words algorithm** (users compare them across implementations). Consider adding an invite checksum |
 | DKG_ROUND1, SIGNING_REQUEST, SIGNATURE_SHARES | Message structs, ceremony order, request hash over the tagged bytes, deterministic signer choice, α = the PCZT's α |
 | BACKUP, VAULT_MATERIAL | Needed for cross-wallet restore (the backup objection ZCG raised) |
+| MOVE_MESSAGE, MOVE_LINK, SEAT_LINK, REPAIR, LOG_KEY_MESSAGE (added after this research) | Relay moves and the `VaultMoved` replay rule (`docs/relay-move.md` §7), seat links and recovery anchors, the sealed log key and create token |
 | Unversioned | `pczt_hash` (must be the hash of the logged bytes, so parse → serialize must round-trip exactly), `commitments_hash`, the ZIP 2005 derivation (vectors exist), expiry rounding and the accepted window, the ZIP 317 exact-fee rule and the §9.3 check order, 512-byte memos |
 
 ## 6. Host wallets: how each would consume it

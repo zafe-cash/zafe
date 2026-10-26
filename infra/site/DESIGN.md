@@ -190,7 +190,7 @@ components:
 
 # Design System: Zafe website
 
-Scope: the home page (`/`), `/download`, `/support`, `/privacy`, the docs (`/docs`, `/docs/<slug>`), `/waitlist`, `/waitlist-error`, the 404, and the shared nav, footer, install buttons, popovers and waitlist form. Out of scope: `/showcase` keeps its own world (the 3D diorama, its light fixed nav, title card and slim footer) and is not governed by this file. Brand source: `docs/brand.md` (Verdigris); illustration pipeline: `docs/site.md` §6.
+Scope: the home page (`/`), `/download`, `/support`, `/privacy`, the docs (`/docs`, `/docs/<slug>`), `/waitlist`, `/waitlist-error`, the 404 and the `/relay` fallback, and the shared nav, footer, install buttons, popovers and waitlist form. Out of scope: `/showcase` keeps its own world (the 3D diorama, its light fixed nav, title card and slim footer) and is not governed by this file. Brand source: `docs/brand.md` (Verdigris); illustration pipeline: `docs/site.md` §6.
 
 ## Overview
 
@@ -214,7 +214,7 @@ Motion is the loops themselves, a CSS-only intro that collapses the mark into th
 A cool, nearly neutral paper palette tinted toward verdigris, with one teal for action; the warm, saturated colour belongs to the illustrations.
 
 ### Primary
-- **Verdigris** (#00736C): the Get Zafe button, the nav's Get Zafe button, the Google Play button, the FAQ disclosure markers on the home page, focus rings, the email caret, links in the privacy policy.
+- **Verdigris** (#00736C): the Get Zafe button, the nav's Get Zafe button, the Google Play button, the FAQ disclosure markers on the home page, focus rings, the email caret, links in the privacy policy and the docs.
 - **Verdigris Pressed** (#005F59): hover on every verdigris button (fine pointers only).
 
 ### Neutral
@@ -323,7 +323,7 @@ The feature list: plain lines, each led by the app's Patina two-tone icon (22px,
 Native `popover` (no script): white, 28px corners, 32px 32px 20px padding, popover shadow, fades and scales from 0.96 over 200ms (`@starting-style`). Title in Space Grotesk 20px 600; links row in 15px secondary ink with 44px targets.
 
 ### Navigation
-Links either side of the Seam mark, which sits exactly centred (44px). Home: "How it works", "FAQ" left; "Support" right, then Get Zafe as a small verdigris button (10px corners, 8px 16px). Elsewhere a back chevron "Home". 16px secondary ink, ink on hover with a 1.5px underline that grows from scaleX(0) over 0.25s. On phones the mark moves left and only links marked mobile stay.
+One nav on every page (`components/Nav.astro`), pages only, never sections of a page. The Seam mark (44px) sits exactly centred and is the way home, so there is no Home link: "Docs" and "Security" (`/docs/security`) left of it; "Support" and Get Zafe right of it, Get Zafe as a small verdigris button (10px corners, 8px 16px). Links are 16px secondary ink, ink on hover with a 1.5px underline that grows from scaleX(0) over 0.25s. Under 600px the mark moves left and only Docs and Get Zafe stay.
 
 ### Disclosure (FAQ, checksum)
 Native `details`, the first FAQ item open. The marker is the app's Patina plus as a 16px mask (verdigris on the home FAQ, secondary ink on /download), rotating 45deg to an x over 200ms. 44px summary, 18px question; answers indent 32px in secondary ink. No dividers.

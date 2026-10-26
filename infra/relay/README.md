@@ -6,7 +6,8 @@ decrypts funds, but it does see who talks to which mailbox and when: pick a host
 trust with that metadata, and keep access logs off.
 
 The hosted relays (testnet and the mainnet beta) run on one VPS through Path B, deployed
-by CI (`.github/workflows/relay-deploy.yml`, `relay-mainnet.yml`). Two paths:
+by CI (`.github/workflows/relay-deploy.yml`, `relay-mainnet.yml`). The app calls a relay a
+"server". Two paths:
 
 | | Fly.io | VPS (Docker Compose + Caddy) |
 |---|---|---|
@@ -17,10 +18,11 @@ by CI (`.github/workflows/relay-deploy.yml`, `relay-mainnet.yml`). Two paths:
 
 Runtime contract (both paths):
 
-- `GET /health` returns `200 ok` when the database answers. `GET /v1/info` (JSON,
-  unauthenticated, nothing about any mailbox) gives the versions, limits, whether the
-  relay sends pushes and whether it needs a create token: what the app's relay picker
-  checks.
+- `GET /health` returns `200 ok` when the database answers (`503` otherwise). `GET
+  /v1/info` (JSON, unauthenticated, nothing about any mailbox) gives the versions, limits,
+  whether the relay sends pushes, whether it needs a create token and its expiry rules:
+  what the app's server list checks. The app creates new vaults only on a relay that
+  answers it (a 404 shows as "Needs an update").
 - `ZAFE_RELAY_LISTEN` (address) or `PORT` (then `0.0.0.0:$PORT`), default `127.0.0.1:8787`.
 - `ZAFE_RELAY_DB`: SQLite path. It runs in WAL mode, so the `-wal`/`-shm` files sit next
   to it: the whole directory must be on persistent storage.
@@ -56,20 +58,21 @@ Runtime contract (both paths):
   the vault is full. Undelivered envelopes expire after 30 days (hourly pruning), which
   frees their share; the log is kept while the vault is in use. Tune with `ZAFE_RELAY_MAX_INBOX` (envelopes),
   `ZAFE_RELAY_MAX_DELIVERY_MB` / `ZAFE_RELAY_MAX_LOG_MB` (MiB), `0` = that quota off, or
-  `ZAFE_RELAY_QUOTAS=off`. A database from schema 1 gets the quota counters added at
-  startup (one scan); keep a backup before upgrading as usual.
+  `ZAFE_RELAY_QUOTAS=off`.
 - Expiry (on by default): every phone keeps the vault's history, so the relay deletes
   what nobody uses: a vault with no member request for a year, and a mailbox where no
   member but its creator made a request within 30 days of its creation (an abandoned
   setup, restore or move). Members' background checks keep a vault in use alive. Only the
   day of the last request is kept. Tune with `ZAFE_RELAY_IDLE_DAYS` /
-  `ZAFE_RELAY_UNUSED_DAYS` (`0` = that rule off) or `ZAFE_RELAY_EXPIRY=off`. Upgrading
-  from schema 3 counts every existing vault as seen on the day of the upgrade.
+  `ZAFE_RELAY_UNUSED_DAYS` (`0` = that rule off) or `ZAFE_RELAY_EXPIRY=off`.
 - Private relay (optional): `ZAFE_RELAY_CREATE_TOKEN=<secret>` makes creating or restoring
   a vault need that token (header `zafe-create-token`; otherwise `401` with
   `www-authenticate: zafe-create-token`). Wrong tokens count against the per-IP creation
   limit. Everything else (joining, signing, reading) needs no token. Rotate it if a member
   leaks it; it is never logged.
+- Upgrades migrate the database at startup (schema 4 today): from schema 1 the quota
+  counters are filled in (one scan); from schema 3 every existing vault counts as used,
+  and seen on the day of the upgrade. Keep a backup before upgrading.
 - SIGTERM shuts down gracefully.
 - Exactly **one** instance per database. Don't scale out.
 
@@ -125,7 +128,7 @@ fly ssh console --app zafe-relay-testnet -C \
 fly ssh sftp get /data/backup.sqlite ./relay-backup.sqlite --app zafe-relay-testnet
 ```
 
-## Path B: a VPS with Docker Compose (the hosted testnet relay)
+## Path B: a VPS with Docker Compose (the hosted relays)
 
 `vps/compose.yml` runs Caddy (TLS) in front of the relay image, plus a backup sidecar.
 The relay runs as uid 10001 with a read-only root filesystem, no capabilities and no
@@ -202,18 +205,21 @@ from the `relay-testnet` environment secret `RELAY_FCM_SERVICE_ACCOUNT_JSON`, wh
 deploy writes on every run (removing the secret removes the file). The app must be built
 with the matching Firebase project's `google-services.json` (`docs/releasing.md`).
 
-**Mainnet** (`relay.zafe.cash`, a beta: labelled in the app, no cap): the same VPS runs a second relay
-(`relay-mainnet`, compose profile `mainnet`) with its own volume, its nightly backup
-(`backup-mainnet`, `/var/backups/zafe-relay/mainnet`), **Litestream** streaming the
-database to object storage (`litestream-mainnet`; `restore-mainnet` brings the database
-back from it when the volume is empty) and its own Caddy site block
-(`vps/mainnet/relay.caddy`, copied in by the mainnet deploy). It never deploys from a push:
-**Actions > Relay mainnet > Run workflow** with the digest testnet runs. The workflow
-waits for a **required reviewer** (the `relay-mainnet` environment), verifies the image's
-build provenance, and then, through the mainnet key's forced command (`zafe-deploy`, see
-"Deploy access"), has the server check that testnet runs exactly that digest and has for
-`min_soak_hours` (24), install the compose files of the workflow's commit, write the
-Litestream and FCM secrets, and run `deploy.sh mainnet`, which backs up, switches, health-checks and rolls back like testnet.
+**Mainnet** (`relay.zafe.cash`, the app's `kMainnetRelayUrl`) runs on the same VPS as a
+second relay (`relay-mainnet`, compose profile `mainnet`) with its own:
+- volume and nightly backup (`backup-mainnet`, `/var/backups/zafe-relay/mainnet`);
+- **Litestream** replica in object storage (`litestream-mainnet`; `restore-mainnet` brings
+  the database back from it when the volume is empty);
+- Caddy site block (`vps/mainnet/relay.caddy`, copied in by the mainnet deploy).
+
+It never deploys from a push: **Actions > Relay mainnet > Run workflow** with the digest
+testnet runs. The workflow waits for a **required reviewer** (the `relay-mainnet`
+environment) and verifies the image's build provenance. Then, through the mainnet key's
+forced command (`zafe-deploy`, see "Deploy access"), the server checks that testnet has run
+exactly that digest for `min_soak_hours` (default 24), installs the compose files of the
+workflow's commit, writes the Litestream and FCM secrets and runs `deploy.sh mainnet`,
+which backs up, switches, health-checks and rolls back like testnet.
+
 One-time setup (not done by CI):
 
 ```bash
@@ -243,7 +249,6 @@ curl https://relay.zafe.cash/health     # ok
 shred -u relay-testnet relay-testnet.pub relay-mainnet relay-mainnet.pub   # local copies
 ```
 
-The app's `kMainnetRelayUrl` is `https://relay.zafe.cash`; there is no cap.
 Litestream with R2 uses the S3 API with `force-path-style: true` and region `auto`
 (`vps/litestream.yml`); that is R2's documented setup, but it has **not been run** against
 the bucket from here: after the first mainnet deploy check `docker compose logs

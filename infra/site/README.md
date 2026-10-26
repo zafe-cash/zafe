@@ -1,16 +1,31 @@
 # Zafe site
 
-A static site built with [Astro](https://astro.build): the home page (`/`), the 3D
-walkthrough (`/showcase`), the invite page (`/join`, and `join-testnet.html` for the
-testnet host), `/privacy` and the docs (`/docs`, `/docs/<slug>`). Astro renders everything at build time. The home page ships
-**no JavaScript**, `/showcase` bundles its motion (`src/scripts/`) as same-origin modules,
-and the invite page loads only the hand-written `public/assets/join.js`. Nothing is
-inlined (the JSON-LD block excepted): `build.sh` fails if a page ends up with an inline
-script, inline style or event handler, because the CSP only allows files from the site's
-own origin.
+The static site at `zafe.cash`, built with [Astro](https://astro.build). Design system:
+`DESIGN.md`; audience and claims: `PRODUCT.md`; history and research: `docs/site.md`;
+SEO: `docs/seo.md`.
 
-The landing page's claims must match what the app does today (`docs/tracker.md`). Its
-phone screens are the app's own renders (`assets.py`).
+## Pages
+
+| Path | Source | Notes |
+|---|---|---|
+| `/` | `pages/index.astro` | One script: `public/assets/js/loops.js` (pause buttons, pauses loops off screen) |
+| `/download`, `/support`, `/privacy` | `pages/<name>.astro` | No script |
+| `/docs`, `/docs/<slug>` | `pages/docs/`, `docs/pages.ts` | No script; `/docs` is also the docs menu on phones |
+| `/showcase` | `pages/showcase.astro` | The 3D story: `scripts/story.js` → `world.js`, `ui.js`, bundled as same-origin modules |
+| `/join` | `pages/join.astro` (`components/JoinPage.astro`) | Invite page, noindex; loads `public/assets/join.js` as is |
+| `/join` on `testnet.zafe.cash` | `pages/join-testnet.astro` | Same page for the testnet app; the host picks it (`vercel-output.sh`) |
+| `/waitlist`, `/waitlist-error` | `pages/<name>.astro` | Where the iPhone waitlist form lands; noindex |
+| `/relay` | `pages/relay.astro` | The app's old "Run your own relay" link (builds from `relay-client` before `8b103b9`, none released): hosts redirect it permanently to `/docs/run-a-server`; the page is the fallback for hosts that can't |
+| 404 | `pages/404.astro` | noindex |
+
+Every page shares `components/Nav.astro`: Docs and Security left of the mark, Support and
+Get Zafe right of it; on phones only Docs and Get Zafe stay. `/showcase` uses its light
+variant (a way home, the mark, Get Zafe).
+
+Nothing is inlined except the JSON-LD block: `build.sh` fails if a page has an inline
+script, inline style or event handler, because the CSP allows only files from the site's
+own origin. The pages' claims must match what the app does today (`docs/tracker.md`), and
+their phone screens are the app's own renders (`assets.py`).
 
 ## Invite links
 
@@ -18,54 +33,52 @@ phone screens are the app's own renders (`assets.py`).
 
 - **Zafe installed:** the link opens the app on its Join screen (Android App Links, iOS
   Universal Links). The browser never loads the page.
-- **Not installed:** `/join` explains what Zafe is, links to the Android download, and
-  offers "Open in Zafe" (`zafe://join?invite=…`) and "Copy invite" for after the install.
+- **Not installed:** `/join` says what Zafe is, links to the Android download, and offers
+  "Open in Zafe" (`zafe://join?invite=…`) and "Copy invite" for after the install.
 
 The invite sits in the URL **fragment**, so the web server and any CDN never receive it.
 The page reads it in the browser, moves it to tab-scoped `sessionStorage` and removes it
 from the address bar (and so from browser history). The page loads nothing from other
-origins, and the CSP (`_headers`, plus a `<meta>` copy) forbids it. Whoever controls this
-host's pages can read invites, so only deploy it on a domain you control, and only then
-build the app with `ZAFE_LINK_HOST`.
+origins, and the CSP forbids it. Whoever controls this host's pages can read invites:
+deploy it only on a domain you control, and only then build the app with
+`ZAFE_LINK_HOST`.
 
 ## Layout
 
 ```
 src/
-  pages/index.astro        home page
-  pages/showcase.astro     the 3D story (scripts/story.js → world.js, ui.js)
-  pages/join.astro         invite page (built to join.html, served at /join; noindex);
-  pages/join-testnet.astro   the testnet host's copy (components/JoinPage.astro)
-  pages/privacy.astro, 404.astro
-  pages/docs/              the docs: index.astro (/docs, also the phone menu) and one
-                             <slug>.astro per page (/docs/<slug>, built to docs/<slug>.html)
-  docs/pages.ts            every docs page by section: sidebar, index, breadcrumbs, Related,
-                             sitemap (add a page here and in pages/docs/)
-  pages/relay.astro        /relay, linked from shipped app builds: hosts redirect it to
-                             /docs/run-a-server for good (this page is the no-redirect fallback)
-  pages/sitemap.xml.ts     sitemap, robots.txt and security.txt, from `site` in
-  pages/robots.txt.ts        astro.config.mjs
+  pages/                   one .astro per page (table above); docs/ holds the docs pages
+  pages/sitemap.xml.ts     sitemap, robots.txt and security.txt, built from `site` in
+  pages/robots.txt.ts        astro.config.mjs (docs pages come from docs/pages.ts)
   pages/.well-known/security.txt.ts
-  layouts/Base.astro       <head>: CSP meta, SEO/social tags, JSON-LD, icons, fonts,
-                           stylesheet (docs/seo.md)
-  components/              Nav, Footer, JoinPage, Icon (Patina icons), Mark, BrandIcon,
-                           DocsSidebar, Shot (an app screen in a docs page)
-  layouts/Doc.astro        a docs page: sidebar, breadcrumb, H1, steps, Related, checked line
-  styles/site.css          Verdigris tokens, light and dark
-  config.ts                download / source URLs, CSP
+  docs/pages.ts            every docs page by section: sidebar, /docs index, breadcrumbs,
+                             Related, sitemap (add a page here and in pages/docs/)
+  docs/troubleshooting.ts  the troubleshooting page's problems (anchors)
+  layouts/Base.astro       <head>: CSP meta, SEO and social tags, JSON-LD, icons, fonts,
+                             stylesheet (docs/seo.md)
+  layouts/Doc.astro        a docs page: sidebar, breadcrumb, H1, Related, "Checked with" line
+  components/              Nav, Footer, Mark, Icon (Patina icons), BrandIcon, PlayButton,
+                             IphoneButton, Waitlist, Loop, JoinPage, DocsSidebar, Shot
+  scripts/                 /showcase only (world.js, story.js, ui.js, ...)
+  styles/site.css          tokens and styles; light only
+  config.ts                download, source and Play URLs, social image, CSP
+api/waitlist.mjs           the iPhone waitlist function (the only server code)
 public/
-  assets/join.js           the invite page's script; reads the invite from the fragment
+  _headers                 CSP, cache and content types (Cloudflare Pages, Netlify;
+                             vercel-output.sh turns it into Vercel routes)
+  _redirects               /relay → /docs/run-a-server (Cloudflare Pages, Netlify)
+  assets/join.js           the invite page's script
+  assets/js/loops.js       the home page's script
   assets/boot.js           /showcase only: marks JS before the first paint
   assets/screens/, fonts/  generated by assets.py (committed)
+  assets/motion/, ui/      the home page's loops and their masks (film/, scenes/)
   assets/stills/           the /showcase fallback stills (stills.sh)
-  _headers                 CSP, cache and content types (Vercel via vercel-output.sh,
-                           Cloudflare Pages, Netlify)
-  _redirects               permanent redirects (/relay) for Cloudflare Pages and Netlify;
-                           vercel-output.sh writes the same as Vercel routes
+  <key>.txt                the IndexNow key (public by design)
+scenes/, film/             the loops: Blender scenes and the Remotion composite (film/README.md)
 assets.py                  app renders → WebP screens; app fonts → WOFF2 subsets
-build.sh                   astro build → dist/, plus .well-known/{assetlinks.json,
-                           apple-app-site-association}
-vercel-output.sh, stills.sh, icons.sh, indexnow.sh   deploy output, stills, icons, IndexNow
+build.sh                   astro build → dist/, the inline-code guard, .well-known files
+vercel-output.sh           dist/ → Vercel's prebuilt output (routes, redirects, function)
+stills.sh, icons.sh, indexnow.sh   showcase stills and og image, icons, IndexNow
 ```
 
 ## Develop and build
@@ -79,78 +92,95 @@ npm run dev                                  # http://localhost:4321
 ```sh
 ZAFE_ANDROID_CERT_SHA256=<release cert SHA-256>[,<debug cert SHA-256>] \  # else no assetlinks.json
 ZAFE_IOS_APP_IDS=<TeamID>.xyz.zafe.zafe \   # optional, once there is an iOS build
-ZAFE_DOWNLOAD_URL=https://… \               # optional; unset: "View code", no Android link
-ZAFE_TESTNET_URL=https://… \                # optional: the testnet build's download
+ZAFE_DOWNLOAD_URL=https://… \               # optional: the mainnet release page; unset: no APK on /download
+ZAFE_TESTNET_URL=https://… \                # optional: the testnet release page
 ZAFE_SOURCE_URL=https://… \                 # optional, default: the GitHub repo
-infra/site/build.sh
+infra/site/build.sh                          # same as npm run build
 ```
 
-Docs pages name the app's real buttons: check each label against `app/lib` and bump
-`checked` in `src/docs/pages.ts` when you do. App links into the docs live in
-`app/lib/src/core/config/docs_links.dart`; after a build, `python3 scripts/check_docs_links.py`
-(repo root) checks every one still resolves.
+Docs pages name the app's real buttons in `<strong>`. After changing one, run
+`python3 scripts/check_docs_sync.py` (repo root): it checks every label against
+`app/lib`, every `ZAFE_RELAY_*` setting against the relay, and every `<Shot>` screen.
+Bump `checked` in `src/docs/pages.ts` when you go through the steps against the app. The
+app's links into the site live in `app/lib/src/core/config/docs_links.dart`; after a
+build, `python3 scripts/check_docs_links.py` checks that each one resolves. CI runs both.
 
-New app screens for the landing page or the docs: run the render tests named in `assets.py`, then
+New app screens for the pages: run the render tests named in `assets.py`, then
 `python3 infra/site/assets.py` (needs `pillow fonttools brotli`).
 
 ### Signing fingerprints
 
 `assetlinks.json` must list the SHA-256 of **every certificate that signs an APK you want
-links verified for**. Android checks it when the app is installed, and a mismatch means
-the link opens the browser instead of the app.
+links verified for**. Android checks it when the app is installed; on a mismatch the link
+opens the browser instead of the app. `build.sh` writes one entry per package
+(`xyz.zafe.zafe`, `xyz.zafe.zafe.testnet`), each with every fingerprint.
 
 - Release: the "signing certificate SHA-256" line in each GitHub release's notes, or
   `keytool -list -v -keystore upload.jks -alias <alias>`.
 - Local debug builds (optional, for testing): `keytool -list -v -keystore
   ~/.android/debug.keystore -alias androiddebugkey -storepass android`.
-- Play App Signing: add the fingerprint from Play Console → App integrity as well (the
-  repo variable `ZAFE_ANDROID_CERT_SHA256` lists the upload key, then Play's key).
+- Play App Signing: the fingerprint from Play Console → App integrity. The repository
+  variable `ZAFE_ANDROID_CERT_SHA256` lists the upload key, then Play's key.
 
 ## Deploy
 
-Any static host with HTTPS on the exact host in `ZAFE_LINK_HOST` works. Requirements:
+Any static host with HTTPS on the exact host in `ZAFE_LINK_HOST` works. It must:
 
-- `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association` served
-  directly (no redirects) with `Content-Type: application/json`.
-- `/join` serves `join.html` (with or without a trailing slash); every page is served at its
-  clean path, docs pages included (`/docs/run-a-server` from `docs/run-a-server.html`).
-- `/relay` redirects permanently to `/docs/run-a-server` (shipped app builds link there).
-- The `_headers` security headers, or their equivalent.
+- serve `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association`
+  directly (no redirects) with `Content-Type: application/json`;
+- serve every page at its clean path, with or without a trailing slash (`/join` from
+  `join.html`, `/docs/run-a-server` from `docs/run-a-server.html`);
+- redirect `/relay` permanently to `/docs/run-a-server`;
+- send the `_headers` security headers, or their equivalent.
 
-**Vercel** (what we use; `.github/workflows/site.yml`). The workflow builds the site with
-`build.sh`, turns `dist/` into Vercel's prebuilt output with `vercel-output.sh` (headers
-taken from `public/_headers`, `/join` served from `join.html`, JSON content types for
-`.well-known`), and runs `vercel deploy --prebuilt`: production on pushes to `main` that
-touch `infra/site`, a preview for such pull requests. Vercel never builds anything itself.
-One-time setup:
+**Vercel** (what we use). `.github/workflows/site.yml` runs on pushes to `main` and pull
+requests that touch `infra/site/**`, `app/lib/src/core/config/docs_links.dart` or the
+workflow itself, and on demand. It:
+
+1. looks up the newest `mainnet-v*` and `v*` releases (`ZAFE_DOWNLOAD_URL`,
+   `ZAFE_TESTNET_URL`); the release workflows start it after publishing;
+2. builds with `build.sh`;
+3. runs `scripts/check_docs_sync.py` and `scripts/check_docs_links.py`;
+4. turns `dist/` into Vercel's prebuilt output with `vercel-output.sh` (headers from
+   `public/_headers`, clean paths, the `/relay` redirect, the testnet host's `/join`, JSON
+   content types for `.well-known`, the waitlist function);
+5. runs `vercel deploy --prebuilt`: production from `main`, a preview otherwise;
+6. after a production deploy, submits the sitemap's URLs to IndexNow (`indexnow.sh`).
+
+Vercel never builds anything itself. One-time setup:
 
 1. In Vercel, create an empty project (Add New → Project, or `vercel link` in
-   `infra/site`). No framework, build command or Git connection is needed: the workflow
-   uploads finished files. Its ids are in the project's settings, or in
-   `infra/site/.vercel/project.json` after `vercel link` (`orgId`, `projectId`).
+   `infra/site`). No framework, build command or Git connection is needed. Its ids are in
+   the project's settings, or in `infra/site/.vercel/project.json` after `vercel link`
+   (`orgId`, `projectId`).
 2. Create a token: Vercel → Account Settings → Tokens, scoped to that team.
 3. In GitHub (Settings → Secrets and variables → Actions): secret `VERCEL_TOKEN`;
    variables `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`. Optional variables
-   `ZAFE_ANDROID_CERT_SHA256` / `ZAFE_IOS_APP_IDS` (see "Build").
-4. Run the workflow (Actions → Site → Run workflow), then add the domain in the Vercel
-   project (Settings → Domains). Without the Vercel settings the workflow still builds
-   and checks the site, it just doesn't deploy.
+   `ZAFE_ANDROID_CERT_SHA256` and `ZAFE_IOS_APP_IDS` (see "Develop and build").
+4. Run the workflow (Actions → Site → Run workflow), then add the domains in the Vercel
+   project (Settings → Domains). Without the Vercel settings the workflow still builds and
+   checks the site; it just doesn't deploy.
 
 Try the Vercel output locally: `./build.sh && ./vercel-output.sh`, then read
 `.vercel/output/config.json`.
 
-**The iPhone waitlist** (`api/waitlist.mjs`, the only server code): `vercel-output.sh`
-bundles it with `@vercel/blob` into `.vercel/output/functions/api/waitlist.func`
-(Node 22), served at `POST /api/waitlist`. It stores each address as a private blob
-`waitlist/<sha256 of the address>.json` and redirects to `/waitlist` or `/waitlist-error`.
-Set up (done 2026-10-23): a private store `zafe-waitlist` (iad1), connected to production
-only with `vercel blob create-store zafe-waitlist --access private --environment production
---yes`, which sets `BLOB_READ_WRITE_TOKEN`; the function uses it (or OIDC when
-`BLOB_STORE_ID` is set). Without a store every signup lands on `/waitlist-error`. To read the list: `vercel blob list --prefix waitlist/`
-(or the dashboard), then delete the store after the launch email, as the privacy policy
-promises.
+**The iPhone waitlist** (`api/waitlist.mjs`): `vercel-output.sh` bundles it with
+`@vercel/blob` into `.vercel/output/functions/api/waitlist.func` (Node 22), served at
+`POST /api/waitlist`. It stores each address as a private blob
+`waitlist/<sha256 of the address>.json` and redirects to `/waitlist` or
+`/waitlist-error`. The store `zafe-waitlist` (private, iad1) was created on 2026-10-23
+and connected to production only:
 
-**Cloudflare Pages** (reads `_headers`, serves `/join` from `join.html`):
+```sh
+vercel blob create-store zafe-waitlist --access private --environment production --yes
+```
+
+That sets `BLOB_READ_WRITE_TOKEN`, which the function uses (or OIDC when `BLOB_STORE_ID`
+is set). Without a store every signup lands on `/waitlist-error`. To read the list:
+`vercel blob list --prefix waitlist/` (or the dashboard). Delete the store after the
+launch email, as the privacy policy promises.
+
+**Cloudflare Pages** (reads `_headers` and `_redirects`, serves `/join` from `join.html`):
 
 ```sh
 npx wrangler pages deploy infra/site/dist --project-name zafe-site
@@ -158,29 +188,34 @@ npx wrangler pages deploy infra/site/dist --project-name zafe-site
 
 then add the custom domain in the dashboard.
 
-**Caddy** (e.g. on the relay's VPS, `infra/relay/vps`):
+**Caddy** (for example on the relay's VPS, `infra/relay/vps`). The policy is the one in
+`public/_headers`:
 
 ```
 zafe.example {
 	root * /srv/zafe-site
 	redir /relay /docs/run-a-server permanent
+	redir /relay/ /docs/run-a-server permanent
 	try_files {path} {path}.html
 	file_server
 	header /.well-known/* Content-Type application/json
 	header {
-		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
 	}
 }
 ```
 
-GitHub Pages works for the page (`build.sh` writes `.nojekyll` so `.well-known` is
-served), but it can't set headers, so the AASA file is served with the wrong content type.
+The waitlist function runs only on Vercel; elsewhere the form lands on `/waitlist-error`.
+GitHub Pages works for the pages (`build.sh` writes `.nojekyll` so `.well-known` is
+served), but it can't set headers or redirects, so the AASA file gets the wrong content
+type.
 
 ## Then
 
-1. Build the app with `--dart-define=ZAFE_LINK_HOST=<host>` (release workflow: repository
+1. Build the app with `--dart-define=ZAFE_LINK_HOST=<host>` (release workflows: repository
    variable `ZAFE_LINK_HOST`). The setup screen's QR and "Share link" switch to the https
    form; `zafe://` links keep working.
 2. Check Android verification after installing that build:
@@ -189,10 +224,10 @@ served), but it can't set headers, so the AASA file is served with the wrong con
    adb shell pm verify-app-links --re-verify xyz.zafe.zafe
    adb shell pm get-app-links xyz.zafe.zafe          # <host>: verified
    adb shell am start -a android.intent.action.VIEW \
-     -d "'https://<host>/join#zafe-invite-v2:…'"      # opens Join, not the browser
+     -d "'https://<host>/join#zafe-invite-v3:…'"      # opens Join, not the browser
    ```
 
    Google's checker: `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://<host>&relation=delegate_permission/common.handle_all_urls`.
-3. iOS (once it builds): add the Associated Domains capability with
-   `applinks:<host>` to the Runner target, and put the team's app ID in
-   `ZAFE_IOS_APP_IDS`. `app_links` already delivers Universal Links to Dart.
+3. iOS (once it builds): add the Associated Domains capability with `applinks:<host>` to
+   the Runner target, and put the team's app ID in `ZAFE_IOS_APP_IDS`. `app_links`
+   already delivers Universal Links to Dart.

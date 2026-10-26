@@ -28,7 +28,7 @@ import '../home/sync_status_screen.dart' show currentSyncFailure;
 import '../relay_move/relay_move_screen.dart';
 import 'relay_picker.dart';
 
-/// Settings > This vault > Server: the server everyone in the vault uses (docs/relay-move.md),
+/// Settings > `<vault name>` > Server: the server everyone in the vault uses (docs/relay-move.md),
 /// what it says about itself, its create token when it is private, and **Move to another
 /// server**. While a move runs, the same screen is its waiting room: who has moved, a
 /// Nudge for each member who hasn't, and Cancel. Moving is a state of this one place, never

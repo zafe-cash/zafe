@@ -82,13 +82,13 @@ density low.
 
 | file | used in | concept |
 |---|---|---|
-| `welcome_vault_*` | Welcome (hero) | A round vault door in a stone wall, its face ringed with dial ticks. Five keyholes (five members) around a five-spoke hand wheel with verdigris grips; three gold keys are turned and a gold arc joins them: 3 of 5 opens it. Coins on the floor. |
+| `welcome_vault_*` | Welcome (hero, animated: `WelcomeArt`) | A round vault door in a stone wall, its face ringed with dial ticks. Five keyholes (five members) around a five-spoke hand wheel with verdigris grips; three gold keys are turned and a gold arc joins them: 3 of 5 opens it. Coins on the floor. |
 | `create_stones_*` | New vault (banner) | A ring of standing stones at moonrise; the lit stones (two uprights and a lintel) form the arch, the others stay dark: enough members complete it. |
 | `join_doorway_*` | Join a vault (banner) | An arched doorway with warm light spilling out, a verdigris keystone and door leaf, and a sealed invitation waiting on the step. |
-| `key_shards_*` | "Creating your vault keys" (hero) | One ornate gold key broken into five pieces, each with a member's verdigris gem, held apart around a dashed outline of the whole key: the full key never exists in one place. |
-| `backup_seal_*` | Back up vault prompt and the export form (banner) | An envelope in front of a large dial, the key share inside (dashed gold ghost), sealed by a combination lock with a verdigris dial; blank word cards (the passphrase) are threaded to it. |
+| `key_shards_*` | Setup's key screen (hero, animated: `KeyShardsArt`) | One ornate gold key broken into five pieces, each with a member's verdigris gem, held apart around a dashed outline of the whole key: the full key never exists in one place. |
+| `backup_seal_*` | Backup prompt after setup (banner) | An envelope in front of a large dial, the key share inside (dashed gold ghost), sealed by a combination lock with a verdigris dial; blank word cards (the passphrase) are threaded to it. |
 | `restore_key_*` | Restore vault (banner) | The envelope open and its lock unlocked; the gold key flies along a dotted arc back to a safe's round door, whose keyhole glows verdigris. |
-| `sent_slot_*` | Sending screen (full-page background) | A vault door bleeding off the top edge; light pours from its slot, flanked by verdigris member marks, and coins drift out to the edges along dotted trails. Faint dial ripples rise from the bottom. The middle is empty for the status circle and text. |
+| `sent_slot_*` | Sending screen (full-page background, animated: `SentArt`) | A vault door bleeding off the top edge; light pours from its slot, flanked by verdigris member marks, and coins drift out to the edges along dotted trails. Faint dial ripples rise from the bottom. The middle is empty for the status circle and text. |
 | `empty_ledger_*` | Activity, empty state (small banner, 1080 x 440) | A quiet shelf: a shut little safe, an open blank ledger with a verdigris ribbon, one coin. |
 
 ## In the app
@@ -100,15 +100,16 @@ density low.
   placed first (behind the content). The art is full width at 1080:1240, with a gradient in
   the window colour: 85 % at the top (status bar legibility) → clear at 10 % → clear at
   40 % → solid at 74 %. Content goes below/over the faded part (Welcome pushes its title
-  down with `Spacer(flex: 3)`).
+  down with a `Spacer`). Pass `art:` for an animated scene (`WelcomeArt`, `KeyShardsArt`).
 - `OnboardingBanner('name')`: 1080:560 `AspectRatio`, `BoxFit.cover`, clipped to
   `AppRadii.large`; use it as the first child of a `ZafeScreen`, followed by
-  `SizedBox(height: AppSpacing.md)`.
+  `SizedBox(height: AppSpacing.md)`. `OnboardingBanner('name', aspectRatio: 1080 / 440)`
+  for the small banners (`empty_ledger`, inside the Activity empty card).
+- `SentArt`: the sending screen's full-page art, passed as
+  `MobileTransactionProgressScreen(background: ...)`.
 
-- `OnboardingBanner('name', aspectRatio: 1080 / 440)` for the small banners
-  (`empty_ledger`, inside the Activity empty card).
-- `IllustrationBackground('name')`: full-page `BoxFit.cover` art, passed as
-  `MobileTransactionProgressScreen(background: ...)` (the sending screen).
+Animated scenes are stacks of layer SVGs (`LAYERS` in `scenes.py`); how they move:
+`docs/app-notes.md` "Animated art".
 
 All are wrapped in `ExcludeSemantics` (decorative).
 
@@ -128,4 +129,4 @@ All are wrapped in `ExcludeSemantics` (decorative).
    installs it, **clears the app's data**, screenshots Welcome / New vault / Join in light
    and dark into `app/build/illustration_device/`). Needs a running emulator and
    `agent-device`. Add steps there if the new art is on another screen.
-6. `cd app && flutter analyze`, keep every SVG under 60 KB.
+6. `cd app && flutter analyze lib test`; keep every SVG under 60 KB.
