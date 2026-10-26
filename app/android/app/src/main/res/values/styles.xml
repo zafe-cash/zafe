@@ -17,5 +17,9 @@
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowBackground">@color/zafe_window</item>
+        <!-- No Android focus highlight on the FlutterView: after a key press (hardware
+             keyboard, D-pad, adb input) Android leaves touch mode and tints the focused
+             full-screen view with a 12% white veil. Flutter draws its own focus. -->
+        <item name="android:defaultFocusHighlightEnabled" tools:targetApi="26">false</item>
     </style>
 </resources>

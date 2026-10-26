@@ -23,7 +23,10 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
       server moves and the new Settings, which 0.1.22 doesn't have. Release the app soon.
 - [ ] Promote the relay to mainnet (`relay-mainnet.yml`) before any build from this branch
       reaches users.
-- [ ] Release the app: testnet `v*`, then `mainnet-v*` (`docs/releasing.md`).
+- [ ] Promote after 24 h on testnet: the testnet relay went live 2026-10-26 21:00 UTC.
+- [ ] Release 0.1.24: `v0.1.24` testnet, phone dry run, then `mainnet-v0.1.24` on the same
+      commit (`docs/releasing.md`). 0.1.23 (testnet only) failed the dry run: one key press
+      veiled the app in grey (Android focus highlight, fixed in the themes).
 
 Done on the branch:
 - [x] Relay: labelled mailboxes, `GET /v1/info`, `/v1/push/forget`, mailbox expiry,

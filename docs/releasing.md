@@ -77,9 +77,12 @@ managed publishing on, an approved release still waits for **Publish** in the Co
 `app/android/key.properties` (gitignored) with `storeFile`, `storePassword`, `keyAlias`,
 `keyPassword` makes `flutter build apk --release` sign with that key; without it release
 builds use the debug key (fine for testing, but such an APK can't update a real one).
+Always pass `--build-number=1` locally: a signed local build with a code above CI's
+(4100 + run number) makes every later release a downgrade on that phone, and the only way
+out is uninstalling, which deletes its vaults (happened 2026-10-16 and 2026-10-27).
 
 ```bash
 cd app && flutter build apk --release --split-per-abi --target-platform android-arm64 \
   --dart-define=ZAFE_NETWORK=test --dart-define=ZAFE_RELAY_URL=https://<relay> \
-  --dart-define=ZAFE_LINK_HOST=<site host>   # required for releases
+  --dart-define=ZAFE_LINK_HOST=<site host> --build-number=1   # link host: required for releases
 ```

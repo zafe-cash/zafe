@@ -431,6 +431,11 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - UX rules (user): minimal text, exact values, no toasts (`ActionButton` + `appNoticesProvider`),
   no dead ends; check 360x640 at 1.0 and 2.0 text scale and both proposer and approver flows.
 - `pubspec.yaml` has a single `flutter:` key; font names match it exactly.
+- Android themes keep `android:defaultFocusHighlightEnabled=false`: the FlutterView is
+  focusable, so after any key press (keyboard, D-pad, `adb input`) Android leaves touch mode
+  and veils the whole app in 12% white (`res/values*/styles.xml`).
+- Local release builds use `--build-number=1`: a higher code than CI's (4100 + run) blocks
+  every later release on that phone (Android refuses downgrades; only uninstalling helps).
 - `shared_preferences_android` pinned to 2.4.23 (2.5 breaks minified release builds).
   Release APKs: always `--split-per-abi` with one `--target-platform`.
 - Testnet builds are a separate Android app (`xyz.zafe.zafe.testnet`); the harness and adb
