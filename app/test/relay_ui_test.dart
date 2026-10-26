@@ -1,7 +1,10 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/config/network_config.dart';
 import 'package:zafe/src/core/config/relay_presets.dart';
 import 'package:zafe/src/core/errors/sync_failure.dart';
+import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/features/home/sync_status_sheet.dart'
     show homeStatusLabel;
 import 'package:zafe/src/features/onboarding/join_vault_screen.dart'
@@ -127,5 +130,85 @@ void main() {
         1761384840000,
       );
     });
+  });
+
+  group('picker', () {
+    // Opens the picker on `current` (a relay the vault is on) and records what it pops.
+    Future<List<RelayChoice?>> open(WidgetTester tester, String current) async {
+      final popped = <RelayChoice?>[];
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: AppTheme(
+              data: AppThemeData.dark,
+              child: Builder(
+                builder: (context) => Center(
+                  child: TextButton(
+                    onPressed: () async => popped.add(
+                      await Navigator.of(context).push<RelayChoice>(
+                        MaterialPageRoute(
+                          builder: (_) => AppTheme(
+                            data: AppThemeData.dark,
+                            child: Material(
+                              child: SingleChildScrollView(
+                                child: RelayPickerSheet(
+                                  title: 'Move to',
+                                  initialUrl: current,
+                                  currentUrl: current,
+                                  check: (_) async =>
+                                      RelayCheckResult.ok(_check()),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    child: const Text('open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return popped;
+    }
+
+    testWidgets('the current relay is shown but never chosen', (tester) async {
+      final popped = await open(tester, 'https://relay-a.example.org');
+      expect(find.text('Current'), findsOneWidget);
+      await tester.tap(find.text('Use this relay'));
+      await tester.pumpAndSettle();
+      expect(popped, isEmpty);
+    });
+
+    testWidgets('a typed address counts without the keyboard\'s Done', (
+      tester,
+    ) async {
+      final popped = await open(tester, 'https://relay-a.example.org');
+      await tester.enterText(find.byType(TextField), 'relay-b.example.org');
+      await tester.pump();
+      await tester.tap(find.text('Use this relay'));
+      await tester.pumpAndSettle();
+      expect(popped.single?.url, 'https://relay-b.example.org');
+    });
+  });
+
+  test('same relay URL', () {
+    expect(
+      sameRelayUrl('https://Relay.example.org', 'https://relay.example.org/'),
+      isTrue,
+    );
+    expect(
+      sameRelayUrl('http://127.0.0.1:18902', 'http://127.0.0.1:18903'),
+      isFalse,
+    );
+    expect(
+      sameRelayUrl('http://127.0.0.1:18902', 'https://127.0.0.1:18902'),
+      isFalse,
+    );
   });
 }

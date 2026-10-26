@@ -574,9 +574,24 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
             `relay_move.rs`, app move/follow screens, Home card, outage sheet button,
             Activity row, payments-resume line. Tests: `tests/relay_move.rs` (14),
             replay rules in `tests/vault.rs`, `scripts/move-e2e.sh` (payment across the
-            switch, payment after it). Details: `docs/relay-move.md` §7. Left: emulator
-            end to end (app as member A, harness B and C), the relay must be promoted
-            before the app (relays decode envelope kinds), and the items below
+            switch, payment after it). Details: `docs/relay-move.md` §7. Left: the relay
+            must be promoted before the app (relays decode envelope kinds), and the items
+            below
+      - [x] Emulator end to end (2026-10-26, app as member A, harness B and C, six
+            relays): join and setup, follow from the Home card and from a link, the app as
+            mover (picker, share, progress, switch), payments before/after each switch,
+            old relay dead, cancel, restore from a backup onto the moved relay, seat
+            recovery through a link (app approves, repaired key signs), create on a picked
+            relay (random label). Fixed on the way: a phone that started a move before the
+            app saved the last switch fell back to an older relay (`MoveState.from`); a
+            straggler's first write forked the old relay (writes now read the notices);
+            the picker ignored an address typed without Done; the finished-move screen
+            blocked the next move
+      - [ ] Leaving a fork after a move: a write that races the switch forks the old relay
+            and `follow_move` then fails with `RelayForked`; no screen offers
+            `node::follow_relay` for the new relay (the design's "existing fork flow")
+      - [ ] The mover's progress screen updates only on the next vault refresh (up to a
+            minute in the emulator run): wake it when an arrival lands
       - [ ] Site page `zafe.cash/move` (opens the app with the fragment, explains a move
             for someone without Zafe) + assetlinks/universal links for `/move`
       - [ ] Two-move detection after the switch: a phone that switched no longer reads
@@ -739,6 +754,8 @@ needs a device check.
 
 ### UX issues found while testing on a phone (2026-10-12, v0.1.10)
 
+- [ ] (requested 2026-10-26) Home: pull to resync; then decide whether tapping the sync
+      status still needs its bottom sheet; "Synced" reads greyed out (check it's meant)
 - [x] (done 2026-10-13) Amount screen "available" now follows the wallet; "Proposal not found" flash fixed
       (`ProposalsNotifier.refreshFresh`: actions wait for a running refresh instead of returning early, which also
       kept the page stale after cancelling); Signers copy reworded (your labels stay on your phone, members' own names
@@ -889,6 +906,11 @@ check. Fixed in the same change unless open:
 
 ## One-tap follow-ups
 
+- [ ] **Recovered seat without a pool** (seen 2026-10-26, CLI B2 after `recover --wait`): C
+      approved one-tap (shares for groups with pools), B2 approved interactively (no pool
+      yet), and `send`/`request` both refused ("membership is not ready") until the proposal
+      was cancelled. The app tops the pool up on its first refresh; check whether a
+      recovered app can hit it and whether `request` should take a one-tap voter's part
 - [x] **Cancel after completion** (2026-09-30): a cancelled proposal whose signatures
       are complete (`ProposalInfo.still_sendable`) offers "Make it unsendable":
       `node::invalidate` proposes a **sweep** (a `Proposal` with no payments, auto-send)

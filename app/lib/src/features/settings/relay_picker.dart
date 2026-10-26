@@ -40,10 +40,12 @@ class RelayCheckResult {
 
 /// Shows the relay picker. Pops the choice on "Use this relay", null on close.
 /// `askToken`: offer the create-token field when the relay needs one (creating a vault).
+/// `currentUrl`: the relay the vault is on (moving it), shown but never chosen.
 Future<RelayChoice?> showRelayPicker(
   BuildContext context, {
   required String title,
   required String selectedUrl,
+  String? currentUrl,
   String? token,
   bool askToken = true,
   String confirmLabel = 'Use this relay',
@@ -52,6 +54,7 @@ Future<RelayChoice?> showRelayPicker(
   builder: (_) => RelayPickerSheet(
     title: title,
     initialUrl: selectedUrl,
+    currentUrl: currentUrl,
     initialToken: token,
     askToken: askToken,
     confirmLabel: confirmLabel,
@@ -82,13 +85,19 @@ class RelayPickerSheet extends ConsumerStatefulWidget {
     super.key,
     required this.title,
     required this.initialUrl,
+    this.currentUrl,
     this.initialToken,
     this.askToken = true,
     this.confirmLabel = 'Use this relay',
+    this.check = checkRelayAt,
   });
 
   final String title;
   final String initialUrl;
+  final String? currentUrl;
+
+  /// Asks one relay what it is ([checkRelayAt]; replaced in tests).
+  final Future<RelayCheckResult> Function(String url) check;
   final String? initialToken;
   final bool askToken;
   final String confirmLabel;
@@ -111,14 +120,20 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
   late bool _otherOpen = relayPresetFor(widget.initialUrl) == null;
   String? _otherError;
 
+  /// "Use this relay" was tapped with an unchecked typed address: confirm once it checks out.
+  bool _confirmWhenChecked = false;
+
   /// Bumped on every selection, so a slow answer for an earlier one is dropped.
   int _generation = 0;
 
   @override
   void initState() {
     super.initState();
+    _other.addListener(_otherChanged);
     _check();
   }
+
+  void _otherChanged() => setState(() {});
 
   @override
   void dispose() {
@@ -133,9 +148,13 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
     final generation = ++_generation;
     final url = _url;
     setState(() => _result = const RelayCheckResult.checking());
-    final result = await checkRelayAt(url);
+    final result = await widget.check(url);
     if (!mounted || generation != _generation) return;
     setState(() => _result = result);
+    if (_confirmWhenChecked) {
+      _confirmWhenChecked = false;
+      if (_ready) _confirm();
+    }
   }
 
   void _select(String url, {String? token}) {
@@ -155,6 +174,7 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
   void _submitOther(String text) {
     final input = parseRelayInput(text);
     if (input.url == null) {
+      _confirmWhenChecked = false;
       setState(() => _otherError = input.error);
       return;
     }
@@ -179,16 +199,41 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
   bool get _needsToken =>
       widget.askToken && (_result.info?.createTokenRequired ?? false);
 
+  bool get _isCurrent {
+    final current = widget.currentUrl;
+    return current != null && sameRelayUrl(_url, current);
+  }
+
+  /// The typed address isn't the selected one yet (the keyboard was closed without Done).
+  bool get _otherPending {
+    final text = _other.text.trim();
+    return _otherOpen &&
+        text.isNotEmpty &&
+        text != relayHost(_url) &&
+        text != _url;
+  }
+
+  bool get _ready =>
+      _result.usable &&
+      !_isCurrent &&
+      (!_needsToken || _token.text.trim().isNotEmpty);
+
+  void _confirm() {
+    final token = _token.text.trim();
+    Navigator.of(
+      context,
+    ).pop(RelayChoice(_url, token: _needsToken ? token : null));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final token = _token.text.trim();
-    final ready = _result.usable && (!_needsToken || token.isNotEmpty);
     return MobileModalScaffold(
       title: widget.title,
       onClose: () => Navigator.of(context).pop(),
       child: RelayPickerBody(
         presets: kRelayPresets,
         selectedUrl: _url,
+        selectedIsCurrent: _isCurrent,
         result: _result,
         otherOpen: _otherOpen,
         other: _other,
@@ -206,10 +251,13 @@ class _RelayPickerSheetState extends ConsumerState<RelayPickerSheet> {
         onScan: _scan,
         onTokenChanged: (_) => setState(() {}),
         onRetry: _result.error != null ? _check : null,
-        onConfirm: ready
-            ? () => Navigator.of(
-                context,
-              ).pop(RelayChoice(_url, token: _needsToken ? token : null))
+        onConfirm: _otherPending
+            ? () {
+                _confirmWhenChecked = true;
+                _submitOther(_other.text);
+              }
+            : _ready
+            ? _confirm
             : null,
         onRunYourOwn: () => launchUrl(
           Uri.parse(kRunYourOwnRelayUrl),
@@ -229,6 +277,7 @@ class RelayPickerBody extends StatelessWidget {
     super.key,
     required this.presets,
     required this.selectedUrl,
+    this.selectedIsCurrent = false,
     required this.result,
     required this.otherOpen,
     required this.other,
@@ -250,6 +299,9 @@ class RelayPickerBody extends StatelessWidget {
 
   final List<RelayPreset> presets;
   final String selectedUrl;
+
+  /// The selected relay is the one the vault is on (moving it): shown as current.
+  final bool selectedIsCurrent;
   final RelayCheckResult result;
   final bool otherOpen;
   final TextEditingController other;
@@ -281,15 +333,18 @@ class RelayPickerBody extends StatelessWidget {
           : null,
     );
     // Only the selected relay was asked; the others show who runs them.
-    String? status(String fallback) => result.checking
+    String? status(String fallback) => selectedIsCurrent
+        ? 'Current'
+        : result.checking
         ? 'Checking...'
         : result.tooOld
         ? 'Needs an update'
         : result.error != null
         ? 'Unavailable'
         : fallback;
-    Color statusColor() =>
-        result.error != null ? colors.text.destructive : colors.text.secondary;
+    Color statusColor() => result.error != null && !selectedIsCurrent
+        ? colors.text.destructive
+        : colors.text.secondary;
     final info = result.info;
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -436,3 +491,11 @@ class _Line extends StatelessWidget {
 
 /// The host shown for a relay URL (`Uri` drops the default https port).
 String relayHost(String url) => Uri.tryParse(url)?.authority ?? url;
+
+/// Whether two relay URLs name the same relay (scheme, host and port).
+bool sameRelayUrl(String a, String b) {
+  final x = Uri.tryParse(a.trim()), y = Uri.tryParse(b.trim());
+  if (x == null || y == null) return a.trim() == b.trim();
+  return x.scheme.toLowerCase() == y.scheme.toLowerCase() &&
+      x.authority.toLowerCase() == y.authority.toLowerCase();
+}

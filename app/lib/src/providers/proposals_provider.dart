@@ -246,6 +246,8 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     } catch (e) {
       debugPrint('refresh failed: ${describeError(e)}');
       state = state.copyWith(error: e);
+      // A refresh refused because the vault moved still shows the move to follow.
+      unawaited(ref.read(relayMoveProvider.notifier).refresh());
     } finally {
       _refreshing = false;
       if (_again) {

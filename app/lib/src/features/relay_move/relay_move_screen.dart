@@ -88,6 +88,10 @@ class _RelayMoveScreenState extends ConsumerState<RelayMoveScreen> {
   RelayChoice? _choice;
   List<String>? _blockers;
 
+  /// This visit showed the move in progress: its switch is then shown once, with Done.
+  /// Opened later, the screen starts the next move.
+  bool _sawMoving = false;
+
   @override
   void initState() {
     super.initState();
@@ -116,6 +120,7 @@ class _RelayMoveScreenState extends ConsumerState<RelayMoveScreen> {
       context,
       title: 'Move to',
       selectedUrl: _choice?.url ?? current,
+      currentUrl: current,
       token: _choice?.token,
       confirmLabel: 'Use this relay',
     );
@@ -157,6 +162,7 @@ class _RelayMoveScreenState extends ConsumerState<RelayMoveScreen> {
         ref.watch(activeVaultNameProvider) ?? vault.summary?.name ?? '';
     final status = view.status;
     if (status != null && view.moving) {
+      _sawMoving = true;
       final members = vault.summary?.members ?? const <String>[];
       return ZafeScreen(
         title: kRelayMoveTitle,
@@ -178,7 +184,7 @@ class _RelayMoveScreenState extends ConsumerState<RelayMoveScreen> {
         ],
       );
     }
-    if (status != null && status.switched && status.mine) {
+    if (status != null && status.switched && status.mine && _sawMoving) {
       return ZafeScreen(
         title: kRelayMoveTitle,
         bottom: AppButton(
