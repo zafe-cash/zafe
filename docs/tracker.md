@@ -40,8 +40,8 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
       phone at 2x). Manage vaults' ⋯ no longer repeats "How it's protected" (2026-10-27).
 - [ ] *(upstream)* The Valar testnet faucet pays nobody since 2026-10-23 ("the wallet
       cannot pay this address" for t- and shielded addresses):
-      https://github.com/valargroup/valar-testnet-faucet/issues/5. Testers need another
-      source of TAZ meanwhile; releasing.md points at this faucet.
+      https://github.com/valargroup/valar-testnet-faucet/issues/5. Testnet release notes and
+      releasing.md now point at Fauzec (https://fauzec.com/, 1 TAZ per address per day).
 
 Done on the branch:
 - [x] Relay: labelled mailboxes, `GET /v1/info`, `/v1/push/forget`, mailbox expiry,

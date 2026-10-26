@@ -23,10 +23,11 @@ repaired. A CLI member can be the co-signer (`zafe vault join` takes the raw
 `zafe-invite-v…` text, not the link). `release-mainnet.yml`
 refuses a commit that has no `v*` tag. The testnet app installs next to the mainnet one
 as "Zafe Testnet" (`xyz.zafe.zafe.testnet`) and shows amounts in TAZ. Its release notes
-tell testers they need testnet coins and link the
-[Valar faucet](https://faucet.testnet.valargroup.dev/) (0.125 TAZ per request, one per IP
-per 24 h; its payout reached an Ironwood vault on 2026-09-30). Each open proposal locks a
-whole note, so a test with two proposals at once needs two payouts.
+tell testers they need testnet coins and link [Fauzec](https://fauzec.com/) (1 TAZ per
+address every 24 h, a Turnstile check; paid an Ironwood vault on 2026-10-27). The Valar
+faucet has paid nobody since 2026-10-23
+([valar-testnet-faucet#5](https://github.com/valargroup/valar-testnet-faucet/issues/5)). Each
+open proposal locks a whole note, so a test with two proposals at once needs two payouts.
 
 **Invite page per host.** `testnet.zafe.cash/join` serves `join-testnet.html` (a TESTNET
 badge, "test coins with no value", the testnet download) and `zafe.cash/join` the mainnet

@@ -165,8 +165,8 @@ jobs:
             echo "installing from your browser or files app when Android asks."
             echo
             echo "**You need testnet coins (TAZ) to make a payment.** They have no value. Paste your"
-            echo "vault's address (Receive) into the [Valar testnet faucet](https://faucet.testnet.valargroup.dev/):"
-            echo "0.125 TAZ per request, one payout per IP address every 24 hours. More in the"
+            echo "vault's address (Receive) into [Fauzec](https://fauzec.com/): 1 TAZ per address every"
+            echo "24 hours. More in the"
             echo "[Zcash testnet guide](https://zcash.readthedocs.io/en/latest/rtd_pages/testnet_guide.html)."
             echo
             echo "**Update every member of a vault together.** Since NU7 (testnet, 2026-10-04) payment expiry is"
