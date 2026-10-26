@@ -79,7 +79,9 @@ class AppPrimaryButtonColors {
     border: Primitives.p900Alpha10Light,
     borderHover: Primitives.p900Alpha10Light,
     borderPressed: Primitives.p900Alpha10Light,
+    // theme-pair: the fill flips (light teal / deep teal), so the label does too.
     label: Primitives.p0Light,
+    // theme-pair: as label.
     labelHover: Primitives.p0Light,
   );
 }

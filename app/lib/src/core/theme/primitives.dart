@@ -225,7 +225,7 @@ abstract final class RosePrimitives {
 
 /// Value ladder: Zcash gold (hue 83). Money arriving, amounts' ticker, success,
 /// keys and funds (same meaning as the illustrations). Dark p500 #F3BA3C and light
-/// p400 #835A00 are the text colours; dark p800 / light p500 are the sync text.
+/// p400 #835A00 are the text colours; dark p600 / light p500 are the sync text.
 abstract final class GoldPrimitives {
   static const p0Dark = Color(0xFF0D0A05);
   static const p0Light = Color(0xFFFFF8EC);

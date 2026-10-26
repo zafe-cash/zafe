@@ -41,6 +41,10 @@ docker build -f infra/relay/Dockerfile -t zafe-relay:dev .
 docker run -d --name zr -p 18899:8080 zafe-relay:dev && curl localhost:18899/health; docker rm -f zr
 ```
 
+Theme colours: `python3 scripts/check_theme_pairs.py` (CI) flags a token whose dark and
+light values differ in ramp, read grey in one theme, or differ in hue; mark a deliberate
+pair with `// theme-pair: <why>`.
+
 App (from `app/`, after `source ~/android/env.sh`): `flutter_rust_bridge_codegen generate` after
 changing `app/rust/src/api`; `flutter analyze lib test` (must be clean; a fresh worktree needs
 `dart pub get` in `rust_builder/cargokit/build_tool` before a plain `flutter analyze`);

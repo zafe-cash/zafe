@@ -4,7 +4,7 @@ import '../primitives.dart';
 
 /// The sync status in the top nav.
 ///
-/// * [text] — "Synced" label: the value colour's pale step (Zcash gold).
+/// * [text] — "Synced" label: Zcash gold, one step past the value colour.
 /// * [textError] — Label when a sync failed.
 /// * [glow] — The status indicator's glow.
 /// * [torText], [torGlow] — The same two while "Use Tor" is on: Tor's purple, so the
@@ -24,10 +24,12 @@ class AppSyncColors {
   final Color torText;
   final Color torGlow;
 
+  // Dark mirrors light by role: the text one step past the value colour (so "Synced"
+  // reads gold, not cream; p800 read as grey on the dark window) and a gold glow.
   static const dark = AppSyncColors(
-    text: GoldPrimitives.p800Dark,
+    text: GoldPrimitives.p600Dark,
     textError: Primitives.p900Alpha50Dark,
-    glow: Primitives.p500Dark,
+    glow: GoldPrimitives.p400Dark,
     torText: Color(0xFFC9A6E4),
     torGlow: Color(0xFF9A5CC9),
   );

@@ -76,7 +76,7 @@ Received money uses the value colour (gold), not green: teal and green are only 
 | brand fill (primary button) | #51DDD2, label #001B19 | #00736C, label #FFFFFF |
 | brand accent (icons, "needs you", focus) | #51DDD2 | #00736C |
 | value = received (Zcash gold) | #F3BA3C | #835A00 |
-| sync text | #FFECC9 | #65470F |
+| sync text (glow) | #FFCC65 (#A5802F) | #65470F (#C79533) |
 | warning (orange, hue 50) | #FFAE81 | #A55115 |
 | error (rose, hue 350) | #E96CAD | #A82571 |
 | vault card | ink #091312 | light card #E0F3F1 (see below) |
