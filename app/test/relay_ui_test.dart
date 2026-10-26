@@ -5,8 +5,6 @@ import 'package:zafe/src/core/config/network_config.dart';
 import 'package:zafe/src/core/config/relay_presets.dart';
 import 'package:zafe/src/core/errors/sync_failure.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
-import 'package:zafe/src/features/home/sync_status_screen.dart'
-    show homeStatusLabel;
 import 'package:zafe/src/features/onboarding/join_vault_screen.dart'
     show inviteFact;
 import 'package:zafe/src/features/settings/relay_picker.dart';
@@ -96,17 +94,9 @@ void main() {
       expect(formatSince(DateTime(2026, 10, 24, 23, 59), now: now), '24 Oct');
     });
 
-    test('Home says since when the relay went away', () {
+    test('Home says the server is down; since when is on Status', () {
       const f = SyncFailure(kind: SyncFailureKind.relayUnreachable);
-      expect(
-        homeStatusLabel(
-          f,
-          relayDownSince: DateTime(2026, 10, 25, 9, 14),
-          now: now,
-        ),
-        'Can\'t reach server · since 09:14',
-      );
-      expect(homeStatusLabel(f), 'Can\'t reach server');
+      expect(f.statusLabel, 'Can\'t reach server');
       expect(f.explanation, contains('funds are safe'));
       expect(f.explanation, contains('until the server is back'));
     });

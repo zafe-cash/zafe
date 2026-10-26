@@ -37,16 +37,16 @@ class ZecCoin extends StatelessWidget {
   );
 }
 
-/// The payment at the top of the review and proposal screens: amount in large type on
-/// the vault card (`colors.vaultCard`, dark or light with the theme), and the recipient (shielded address, compact) with a
-/// "Full address" action.
+/// The payment at the top of the review and proposal screens: the Zcash mark and a label,
+/// the amount in large type on the plain vault card (`colors.vaultCard`, like Home's
+/// balance card), and the recipient (shielded address, compact) with "Full address".
 class PaymentCard extends StatelessWidget {
   const PaymentCard({
     super.key,
     required this.amountText,
     this.address,
     this.onFullAddress,
-    this.label = 'PAYMENT',
+    this.label = 'Payment',
     this.recipients = 1,
     this.hidden = false,
     this.strikethrough = false,
@@ -73,24 +73,14 @@ class PaymentCard extends StatelessWidget {
         ? TextDecoration.lineThrough
         : TextDecoration.none;
     return Container(
+      // Plain, like every other card (and Home's balance card).
       decoration: BoxDecoration(
         color: card.background,
         borderRadius: BorderRadius.circular(AppRadii.large),
-        // Flat with a hairline, like every other card: a drop shadow under the pale
-        // light-mode card read as a grey rim.
-        border: Border.all(color: card.border, width: 1),
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _PaymentDialPainter(
-                color: card.accent,
-                opacity: card.dialOpacity,
-              ),
-            ),
-          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 16, 16),
             child: Column(
@@ -98,19 +88,22 @@ class PaymentCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(
-                      label,
-                      style: AppTypography.labelSmall.copyWith(
-                        color: card.textSecondary,
-                        letterSpacing: 1.6,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    AppIcon(
+                      AppIcons.zcashCurrency,
+                      size: 18,
+                      color: card.textSecondary,
                     ),
                     const SizedBox(width: AppSpacing.xs),
-                    AppIcon(
-                      AppIcons.shieldKeyhole,
-                      size: 14,
-                      color: card.accent,
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.labelMedium.copyWith(
+                          color: card.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -274,50 +267,6 @@ class _Recipient extends StatelessWidget {
             ),
     );
   }
-}
-
-/// A quarter of the vault dial (rings and ticks) behind the payment card's top-right.
-class _PaymentDialPainter extends CustomPainter {
-  const _PaymentDialPainter({required this.color, required this.opacity});
-  final Color color;
-  final double opacity;
-
-  Color _a(double alpha) => color.withValues(alpha: alpha * opacity);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width + 8, -12);
-    final glow = size.width * 0.55;
-    canvas.drawCircle(
-      center,
-      glow,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [_a(0.2), _a(0)],
-        ).createShader(Rect.fromCircle(center: center, radius: glow)),
-    );
-    final ring = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    for (var i = 0; i < 4; i++) {
-      ring.color = _a(0.20 - i * 0.04);
-      canvas.drawCircle(center, 56.0 + i * 30, ring);
-    }
-    final tick = Paint()
-      ..color = _a(0.33)
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round;
-    const outer = 56.0 + 30;
-    for (var i = 0; i < 72; i++) {
-      final dir = Offset.fromDirection(i * 5 * math.pi / 180);
-      final len = i % 6 == 0 ? 8.0 : 4.0;
-      canvas.drawLine(center + dir * (outer - len), center + dir * outer, tick);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _PaymentDialPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.opacity != opacity;
 }
 
 class DetailRow extends StatelessWidget {

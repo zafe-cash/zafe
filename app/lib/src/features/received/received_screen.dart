@@ -48,7 +48,7 @@ class ReceivedScreen extends ConsumerWidget {
       title: 'Received',
       children: [
         PaymentCard(
-          label: r.isCoinbase ? 'MINING REWARD' : 'RECEIVED',
+          label: r.isCoinbase ? 'Mining reward' : 'Received',
           amountText:
               '+${ZecAmount.fromZatoshi(r.amountZat).receipt.amountText}',
           hidden: hide,

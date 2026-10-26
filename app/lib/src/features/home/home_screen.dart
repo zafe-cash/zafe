@@ -186,16 +186,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // "Use Tor" while Tor isn't connected: nothing syncs, say why.
     final tor = ref.watch(torProvider);
     final torLabel = tor.homeLabel;
+    final failing =
+        tor.failed ||
+        (torLabel == null && failure != null && !failure.isTransient);
     final String syncLabel;
     if (torLabel != null) {
       syncLabel = torLabel;
     } else if (failure != null) {
-      syncLabel = homeStatusLabel(
-        failure,
-        relayDownSince: failure.kind == SyncFailureKind.relayUnreachable
-            ? relayUnreachableSince(vault.activeId!)
-            : null,
-      );
+      // Just what failed; since when is on the Status screen ("Down since").
+      syncLabel = failure.statusLabel;
     } else if (vault.syncing) {
       syncLabel = vault.firstSync ? 'First sync...' : 'Syncing...';
     } else if (vault.balance != null) {
@@ -213,17 +212,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             MobileTopNav.account(
               accountName: ref.watch(activeVaultNameProvider) ?? summary.name,
               syncLabel: syncLabel,
-              syncLabelColor:
-                  tor.failed ||
-                      (torLabel == null &&
-                          failure != null &&
-                          !failure.isTransient)
+              // Green when in sync, orange (text and bar) when something failed.
+              syncLabelColor: failing
                   ? colors.sync.textError
                   : tor.enabled
                   ? colors.sync.torText
                   : colors.sync.text,
               // Tor's purple while Tor is on, so the status line shows it.
-              syncIndicatorColor: tor.enabled ? colors.sync.torGlow : null,
+              syncIndicatorColor: failing
+                  ? colors.sync.glowError
+                  : tor.enabled
+                  ? colors.sync.torGlow
+                  : null,
               syncAnimated:
                   tor.connecting ||
                   (vault.syncing && (failure?.isTransient ?? true)),
@@ -527,24 +527,14 @@ class BalanceCard extends StatelessWidget {
     final grow = (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 40);
     return Container(
       height: 216 + grow * 3,
+      // Plain, like every other card: no dial, no border.
       decoration: BoxDecoration(
         color: card.background,
         borderRadius: BorderRadius.circular(AppRadii.large),
-        // Flat with a hairline, like every other card: a drop shadow under the pale
-        // light-mode card read as a grey rim.
-        border: Border.all(color: card.border, width: 1),
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _VaultDialPainter(
-                color: card.accent,
-                opacity: card.dialOpacity,
-              ),
-            ),
-          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
             child: Column(
@@ -554,30 +544,21 @@ class BalanceCard extends StatelessWidget {
                   children: [
                     // The label takes what it needs and ellipsizes only when the
                     // card is too narrow (narrow phones, large system text).
+                    AppIcon(
+                      AppIcons.zcashCurrency,
+                      size: 18,
+                      color: card.textSecondary,
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
                     Expanded(
-                      child: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              kNetworkBadge.isEmpty
-                                  ? 'VAULT BALANCE'
-                                  : 'VAULT BALANCE · $kNetworkBadge',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTypography.labelSmall.copyWith(
-                                color: card.textSecondary,
-                                letterSpacing: 1.6,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.xs),
-                          AppIcon(
-                            AppIcons.shieldKeyhole,
-                            size: 14,
-                            color: card.accent,
-                          ),
-                        ],
+                      child: Text(
+                        'Vault balance',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.labelMedium.copyWith(
+                          color: card.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                     AppTappable(
@@ -699,51 +680,6 @@ class _ThresholdStrip extends StatelessWidget {
       ],
     );
   }
-}
-
-/// Concentric safe-dial rings with tick marks, off the card's top-right corner, over a
-/// soft glow, in the card's accent [color] (its alphas multiplied by [opacity]).
-class _VaultDialPainter extends CustomPainter {
-  const _VaultDialPainter({required this.color, required this.opacity});
-  final Color color;
-  final double opacity;
-
-  Color _a(double alpha) => color.withValues(alpha: alpha * opacity);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width - 36, 20);
-    canvas.drawCircle(
-      center,
-      size.width * 0.75,
-      Paint()
-        ..shader = RadialGradient(colors: [_a(0.25), _a(0)]).createShader(
-          Rect.fromCircle(center: center, radius: size.width * 0.75),
-        ),
-    );
-    final ring = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    for (var i = 0; i < 6; i++) {
-      ring.color = _a(0.22 - i * 0.03);
-      canvas.drawCircle(center, 44.0 + i * 26, ring);
-    }
-    final tick = Paint()
-      ..color = _a(0.33)
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round;
-    const outer = 44.0 + 2 * 26;
-    for (var i = 0; i < 60; i++) {
-      final angle = i * 6 * 3.141592653589793 / 180;
-      final len = i % 5 == 0 ? 8.0 : 4.0;
-      final dir = Offset.fromDirection(angle);
-      canvas.drawLine(center + dir * (outer - len), center + dir * outer, tick);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _VaultDialPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.opacity != opacity;
 }
 
 /// Rows shown on Home; everything else is one tap away under "See all".

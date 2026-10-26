@@ -45,15 +45,6 @@ DateTime? relayUnreachableSince(String vaultId) {
   }
 }
 
-/// The status at the top of Home: `Can't reach relay · since 09:14` while the relay is
-/// down (the date when it wasn't today).
-String homeStatusLabel(
-  SyncFailure failure, {
-  DateTime? relayDownSince,
-  DateTime? now,
-}) => relayDownSince == null
-    ? failure.statusLabel
-    : '${failure.statusLabel} · since ${formatSince(relayDownSince, now: now)}';
 
 /// How long the vault's server must be down before the Status screen suggests moving to
 /// a listed one.

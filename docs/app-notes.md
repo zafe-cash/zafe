@@ -72,8 +72,8 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
   (`zafe_vault_<id>_createToken`, `add(createToken:)`), `stepSetup` reads it on **every**
   step (background ones too), and it is deleted once the material (which then holds it) is
   saved. Never in the invite. Cancel setup keeps it in `CreatePrefill` for the retry.
-- **Outage** (§5): Home reads `Can't reach server · since 09:14` from `vault_relay_status`
-  (date when not today, `formatSince`); the unapproved-spend card and notification add
+- **Outage** (§5): Home reads `Can't reach server` (orange; the time is on the Status
+  screen as "Down since", from `vault_relay_status`, date when not today, `formatSince`); the unapproved-spend card and notification add
   "Based on this phone's history from 09:14" when `from_copy_at` is set. A background
   check whose relay read fails still announces those spends before giving up.
 - **Seat link**: the co-signer's "Replace lost phone" shows "Vault link for their new

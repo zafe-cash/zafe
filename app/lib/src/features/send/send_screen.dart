@@ -682,8 +682,8 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       children: [
         PaymentCard(
           label: widget.prefill?.fromLink ?? false
-              ? (batch ? 'BATCH PAYMENT REQUEST' : 'PAYMENT REQUEST')
-              : (batch ? 'NEW BATCH PAYMENT' : 'NEW PAYMENT'),
+              ? (batch ? 'Batch payment request' : 'Payment request')
+              : (batch ? 'New batch payment' : 'New payment'),
           amountText: amount.amountText,
           address: address,
           recipients: payments.length,

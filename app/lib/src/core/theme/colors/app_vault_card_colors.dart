@@ -5,15 +5,13 @@ import '../primitives.dart';
 /// The vault card (Home's balance card) and the payment card that mirrors it
 /// (docs/brand.md §3, "Vault card in light mode").
 ///
-/// Dark: a deep verdigris ink card with the dial, shield and signer dots in the
-/// brand accent. Light: the card follows the theme (user's decision, 2026-10-01): a
-/// pale verdigris card with a 1 px line border, the dial drawn in the deep accent at
-/// [dialOpacity].
+/// Plain since 2026-10-27 (user's pick after comparing the dial, a glow and tinted
+/// cards): the surface every other card uses, nothing drawn on it, the Zcash mark and
+/// "Vault balance" in the secondary text colour.
 ///
-/// * [background] / [border] — The card itself.
-/// * [text] / [textSecondary] — Amount, and the label, notes and threshold text.
-/// * [accent] — Shield icon, filled signer dots, dial rings, ticks and glow.
-/// * [dialOpacity] — Multiplies the dial drawing's own alphas.
+/// * [background] — The card itself (the cards' ground surface).
+/// * [text] / [textSecondary] — Amount, and the label, mark, notes and threshold text.
+/// * [accent] — Filled signer dots and the recipient's shield.
 /// * [emptyDot] — Outline of a signer dot beyond the threshold.
 /// * [ticker] — The currency ticker next to amounts: Zcash gold, the value colour.
 /// * [chip] — Small buttons on the card (show/hide balance, full address).
@@ -21,11 +19,9 @@ import '../primitives.dart';
 class AppVaultCardColors {
   const AppVaultCardColors({
     required this.background,
-    required this.border,
     required this.text,
     required this.textSecondary,
     required this.accent,
-    required this.dialOpacity,
     required this.emptyDot,
     required this.ticker,
     required this.chip,
@@ -34,11 +30,9 @@ class AppVaultCardColors {
   });
 
   final Color background;
-  final Color border;
   final Color text;
   final Color textSecondary;
   final Color accent;
-  final double dialOpacity;
   final Color emptyDot;
   final Color ticker;
   final Color chip;
@@ -46,12 +40,10 @@ class AppVaultCardColors {
   final Color insetBorder;
 
   static const dark = AppVaultCardColors(
-    background: Color(0xFF091312),
-    border: Color(0x1A51DDD2),
+    background: Primitives.p50Dark,
     text: Primitives.p800Dark,
     textSecondary: Color(0xB3F1F5F5),
     accent: BrandPrimitives.p400Dark,
-    dialOpacity: 1,
     emptyDot: Color(0x66F1F5F5),
     ticker: GoldPrimitives.p500Dark,
     chip: Color(0x14FFFFFF),
@@ -60,16 +52,14 @@ class AppVaultCardColors {
   );
 
   static const light = AppVaultCardColors(
-    background: Color(0xFFE0F3F1),
-    border: Primitives.p150Light,
+    background: Primitives.p0Light,
     text: Primitives.p900Light,
     textSecondary: Primitives.p600Light,
     accent: BrandPrimitives.p300Light,
-    dialOpacity: 0.7,
     emptyDot: Primitives.p500Light,
     ticker: GoldPrimitives.p400Light,
     chip: Color(0x0F090E0E),
-    inset: Color(0x99FFFFFF),
+    inset: Primitives.p100Light,
     insetBorder: Primitives.p150Light,
   );
 }

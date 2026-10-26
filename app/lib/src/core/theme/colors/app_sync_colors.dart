@@ -2,11 +2,12 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// The sync status in the top nav.
+/// The sync status in the top nav: green when in sync, orange when something failed.
 ///
-/// * [text] — "Synced" label: Zcash gold, one step past the value colour.
-/// * [textError] — Label when a sync failed.
-/// * [glow] — The status indicator's glow.
+/// * [text], [glow] — "Synced" and the status indicator's glow: a muted green (status,
+///   not money: gold is the value colour; teal means tappable). Chosen 2026-10-27.
+/// * [textError], [glowError] — A failure ("Can't reach server"): the warning orange,
+///   text and glow alike, so the whole status changes colour.
 /// * [torText], [torGlow] — The same two while "Use Tor" is on: Tor's purple, so the
 ///   status line shows at a glance that traffic goes through Tor.
 class AppSyncColors {
@@ -14,6 +15,7 @@ class AppSyncColors {
     required this.text,
     required this.textError,
     required this.glow,
+    required this.glowError,
     required this.torText,
     required this.torGlow,
   });
@@ -21,23 +23,24 @@ class AppSyncColors {
   final Color text;
   final Color textError;
   final Color glow;
+  final Color glowError;
   final Color torText;
   final Color torGlow;
 
-  // Dark mirrors light by role: the text one step past the value colour (so "Synced"
-  // reads gold, not cream; p800 read as grey on the dark window) and a gold glow.
   static const dark = AppSyncColors(
-    text: GoldPrimitives.p600Dark,
-    textError: Primitives.p900Alpha50Dark,
-    glow: GoldPrimitives.p400Dark,
+    text: Color(0xFF6BD99A),
+    textError: OrangePrimitives.p500Dark,
+    glow: Color(0xFF2E8A57),
+    glowError: OrangePrimitives.p500Dark,
     torText: Color(0xFFC9A6E4),
     torGlow: Color(0xFF9A5CC9),
   );
 
   static const light = AppSyncColors(
-    text: GoldPrimitives.p500Light,
-    textError: Primitives.p900Alpha50Light,
-    glow: GoldPrimitives.p300Light,
+    text: Color(0xFF1E7A47),
+    textError: OrangePrimitives.p400Light,
+    glow: Color(0xFF4CB57D),
+    glowError: OrangePrimitives.p400Light,
     torText: Color(0xFF6B3A8C),
     torGlow: Color(0xFFA678C8),
   );
