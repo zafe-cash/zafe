@@ -21,9 +21,9 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
 - [x] Merge `relay-client` into `main` (2026-10-27). Testnet relay and site deployed.
 - [ ] **The live docs are ahead of the app**: zafe.cash/docs shows the Server screen,
       server moves and the new Settings, which 0.1.22 doesn't have. Release the app soon.
-- [ ] Promote the relay to mainnet (`relay-mainnet.yml`) before any build from this branch
-      reaches users.
-- [ ] Promote after 24 h on testnet: the testnet relay went live 2026-10-26 21:00 UTC.
+- [x] Mainnet relay promoted 2026-10-27 00:00 UTC (digest `sha256:82be41cd…`,
+      `min_soak_hours` 2 at the user's request instead of 24; testnet had run it 2 h 45 min).
+      `RELAY_DB` 3 -> 4 ran: `/v1/info` answers, an existing mainnet vault still loads.
 - [x] `v0.1.24` testnet dry run passed on a phone (Android 16), 2026-10-27: in-place update,
       create 2-of-2 with a CLI member, safety words, backup, wipe + restore, receive 1 TAZ,
       propose 0.1 TAZ with a memo, CLI verifies and approves, Send now, mined (txid
@@ -31,8 +31,9 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
 - [x] `v0.1.26` (`65c1211`; 0.1.24 + menus that stay on screen and close on Back, restore
       Paste, clipboard countdown) checked on the phone 2026-10-27: in-place update, menu at
       1x/2x, Back, empty-clipboard Paste, countdown, a 0.01 TAZ send (txid `72d989da…`).
-- [ ] `mainnet-v0.1.26` on `65c1211`, after the mainnet relay is promoted (0.1.24 and 0.1.25
-      stay testnet only).
+- [ ] `mainnet-v0.1.26` tagged on `65c1211` 2026-10-27 (0.1.24 and 0.1.25 stay testnet
+      only); then **(you)** Promote to Google Play production (essential, 100%), approve,
+      Publish in Play Console.
 - [x] Restore: **Paste** says when the clipboard is empty or holds something that isn't a
       backup (and never pastes that into the field); it used to do nothing (2026-10-27).
 - [x] Backup **Copy as text** and **Copy words** show "On the clipboard for 42 s", then "No
