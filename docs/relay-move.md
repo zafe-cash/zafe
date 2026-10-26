@@ -2,10 +2,9 @@
 
 Why a group would leave its relay, the least-friction way to do it, the design every case
 leads to, and a part-by-part security and privacy review (§8). Designed 2026-10-25; built
-2026-10-25 to 2026-10-27 on branch `relay-client` (what was built: §7; what wasn't: §12).
-As of 2026-10-27 none of it is merged or deployed: the hosted relays answer 404 on
-`GET /v1/info`, and the relay must be promoted before an app from this branch ships
-(`docs/tracker.md` "Now").
+2026-10-25 to 2026-10-27 and merged on 2026-10-27; testnet relay deployed, mainnet relay and
+app not yet (what was built: §7; what wasn't: §12). The mainnet relay must be promoted
+before an app with moves ships (`docs/tracker.md` "Now").
 
 It reopens part of the 2026-10-06 decision "one relay per vault, no relay migration"
 (`docs/tracker.md` "Decisions"). Principles come from `docs/onboarding.md` §5.1. This

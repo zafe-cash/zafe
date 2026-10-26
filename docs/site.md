@@ -17,7 +17,7 @@ Add a section at the top of "History" when a round changes the site.
 - **Home**: hero (Google Play badge, H1 "The Zcash multisig nobody can see", one Get Zafe
   button), four illustrated loops (sign, sent, setup, live; §6), a feature list, the close
   (Google Play and the iPhone waitlist), a six-question FAQ.
-- **Docs** (2026-10-27, branch `relay-client`, not deployed): tasks in the reader's words,
+- **Docs** (deployed 2026-10-27): tasks in the reader's words,
   the app's real button names in bold (checked by `scripts/check_docs_sync.py`), crops of
   the app's renders, no script. The pages describe the app built from `relay-client`, so
   they go live with that release.

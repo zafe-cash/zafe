@@ -12,14 +12,15 @@ update it in the same change when you finish, defer or find something. `§` refe
 
 Last updated: 2026-10-27.
 
-## Now: branch `relay-client`
+## Now: relay moves (merged 2026-10-27)
 
-Nothing on this branch is merged or deployed yet. Details: `docs/relay-move.md` §7.
+`relay-client` was merged into `main` on 2026-10-27 (`9724b0c`): the testnet relay
+(`RELAY_DB` 4, `/v1/info`) and the site are deployed. Details: `docs/relay-move.md` §7.
 
 Ship order (relays decode envelope kinds, so an old relay rejects move messages):
-- [ ] Merge `relay-client` into `main`. The push deploys testnet's relay and the site.
-      The site's docs describe this branch's app, so time the merge with the app release
-      or hold `infra/site` back.
+- [x] Merge `relay-client` into `main` (2026-10-27). Testnet relay and site deployed.
+- [ ] **The live docs are ahead of the app**: zafe.cash/docs shows the Server screen,
+      server moves and the new Settings, which 0.1.22 doesn't have. Release the app soon.
 - [ ] Promote the relay to mainnet (`relay-mainnet.yml`) before any build from this branch
       reaches users.
 - [ ] Release the app: testnet `v*`, then `mainnet-v*` (`docs/releasing.md`).
