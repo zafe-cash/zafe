@@ -761,10 +761,7 @@ class CreatingKeysScreen extends StatelessWidget {
                           ready
                               ? 'Vault keys ready'
                               : 'Creating your vault keys...',
-                          style: TextStyle(
-                            fontFamily: 'Space Grotesk',
-                            fontSize: 24,
-                            height: 28 / 24,
+                          style: AppTypography.heading.copyWith(
                             color: colors.text.accent,
                           ),
                         ),

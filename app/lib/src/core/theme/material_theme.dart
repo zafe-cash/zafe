@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'app_typography.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
@@ -55,86 +56,27 @@ ColorScheme _scheme(AppColors c, Brightness brightness) => ColorScheme(
 
 const _bodyFamily = 'DM Sans';
 
+/// Material's text styles, for widgets that pick one by themselves (dialogs, menus,
+/// selectable text): each is a role from the app's scale (AppTypography), so nothing
+/// renders off it or under 14.
 TextTheme _buildTextTheme(Color textColor) {
+  TextStyle c(TextStyle s) => s.copyWith(color: textColor);
   return TextTheme(
-    // Hero balance (56px, w800)
-    displayLarge: TextStyle(
-      fontWeight: FontWeight.w800,
-      fontSize: 56,
-      height: 1.0,
-      letterSpacing: -2,
-      color: textColor,
-    ),
-    // Large heading (28px, w600) — e.g. "ZEC" unit
-    displayMedium: TextStyle(
-      fontWeight: FontWeight.w600,
-      fontSize: 28,
-      height: 1.2,
-      letterSpacing: -0.5,
-      color: textColor,
-    ),
-    // Section heading (20px, w700)
-    titleLarge: TextStyle(
-      fontWeight: FontWeight.w700,
-      fontSize: 20,
-      height: 1.2,
-      letterSpacing: -0.3,
-      color: textColor,
-    ),
-    // List item title (15px, w700)
-    titleMedium: TextStyle(
-      fontWeight: FontWeight.w700,
-      fontSize: 15,
-      height: 1.4,
-      color: textColor,
-    ),
-    // Body (14px Inter 400)
-    bodyLarge: TextStyle(
-      fontFamily: _bodyFamily,
-      fontWeight: FontWeight.w400,
-      fontSize: 14,
-      height: 1.5,
-      color: textColor,
-    ),
-    // Body secondary (14px Inter 500)
-    bodyMedium: TextStyle(
-      fontFamily: _bodyFamily,
-      fontWeight: FontWeight.w500,
-      fontSize: 14,
-      height: 1.5,
-      color: textColor,
-    ),
-    // Small body (12px Inter 500)
-    bodySmall: TextStyle(
-      fontFamily: _bodyFamily,
-      fontWeight: FontWeight.w500,
-      fontSize: 12,
-      height: 1.5,
-      color: textColor,
-    ),
-    // Uppercase label (11px Inter 600)
-    labelLarge: TextStyle(
-      fontFamily: _bodyFamily,
-      fontWeight: FontWeight.w600,
-      fontSize: 11,
-      letterSpacing: 1.5,
-      color: textColor,
-    ),
-    // Button label (11px, w700)
-    labelMedium: TextStyle(
-      fontWeight: FontWeight.w700,
-      fontSize: 11,
-      letterSpacing: 2,
-      color: textColor,
-    ),
-    // Caption (10px Inter 700)
-    labelSmall: TextStyle(
-      fontFamily: _bodyFamily,
-      fontWeight: FontWeight.w700,
-      fontSize: 10,
-      letterSpacing: 1.5,
-      color: textColor,
-    ),
+    displayLarge: c(AppTypography.hero),
+    displayMedium: c(AppTypography.title),
+    displaySmall: c(AppTypography.title),
+    headlineLarge: c(AppTypography.title),
+    headlineMedium: c(AppTypography.title),
+    headlineSmall: c(AppTypography.heading),
+    titleLarge: c(AppTypography.heading),
+    titleMedium: c(AppTypography.labelLarge),
+    titleSmall: c(AppTypography.labelMedium),
+    bodyLarge: c(AppTypography.bodyMedium),
+    bodyMedium: c(AppTypography.labelMedium),
+    bodySmall: c(AppTypography.bodySmall),
+    labelLarge: c(AppTypography.labelLarge),
+    labelMedium: c(AppTypography.labelMedium),
+    labelSmall: c(AppTypography.labelMedium),
   );
 }
 
@@ -180,6 +122,7 @@ ThemeData _buildTheme(AppColors colors, Brightness brightness) {
     brightness: colorScheme.brightness,
     colorScheme: colorScheme,
     textTheme: _buildTextTheme(colorScheme.onSurface),
+    // type: the default family for Material widgets without a style.
     fontFamily: _bodyFamily,
     scaffoldBackgroundColor: colors.background.window,
     textSelectionTheme: TextSelectionThemeData(
@@ -201,10 +144,7 @@ ThemeData _buildTheme(AppColors colors, Brightness brightness) {
       foregroundColor: colorScheme.onSurface,
       elevation: 0,
       scrolledUnderElevation: 0,
-      titleTextStyle: TextStyle(
-        fontWeight: FontWeight.w700,
-        fontSize: 20,
-        letterSpacing: -0.3,
+      titleTextStyle: AppTypography.heading.copyWith(
         color: colorScheme.onSurface,
       ),
     ),
@@ -213,7 +153,7 @@ ThemeData _buildTheme(AppColors colors, Brightness brightness) {
         backgroundColor: colorScheme.primary,
         foregroundColor: colorScheme.onPrimary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        textStyle: AppTypography.labelLarge,
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -221,7 +161,7 @@ ThemeData _buildTheme(AppColors colors, Brightness brightness) {
         foregroundColor: colorScheme.onSurface,
         side: BorderSide(color: colorScheme.outline),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        textStyle: AppTypography.labelLarge,
       ),
     ),
   );

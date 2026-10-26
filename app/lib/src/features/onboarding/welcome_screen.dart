@@ -47,13 +47,7 @@ class WelcomeScreen extends ConsumerWidget {
           Spacer(flex: centred ? 1 : 3),
           Text(
             'Zafe',
-            style: TextStyle(
-              fontFamily: 'Space Grotesk',
-              fontSize: 48,
-              height: 1.1,
-              letterSpacing: -1.35,
-              color: colors.text.accent,
-            ),
+            style: AppTypography.hero.copyWith(color: colors.text.accent),
           ),
           const SizedBox(height: AppSpacing.s),
           Text(

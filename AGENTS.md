@@ -48,6 +48,12 @@ isn't read by the relay, or a `<Shot>` screen is missing from assets.py;
 `scripts/check_docs_links.py` (site CI, after `build.sh`) checks every URL in
 `docs_links.dart`. `<b>` is plain emphasis. The live docs follow main (site deploys on push).
 
+Type: `python3 scripts/check_typography.py` (CI) fails on a `fontSize`/`fontFamily`
+outside `app_typography.dart`, a mobile size under 14, the no-op `lnum`/`case` features,
+or a font name that isn't bundled; use the roles (`hero`, `title`, `heading`, `amount`,
+`amountTicker`, `mono`, body/label styles) and `copyWith` colour only. Exceptions carry
+`// type: <why>`. Rules and research: docs/brand.md "Type".
+
 Theme colours: `python3 scripts/check_theme_pairs.py` (CI) flags a token whose dark and
 light values differ in ramp, read grey in one theme, or differ in hue; mark a deliberate
 pair with `// theme-pair: <why>`.

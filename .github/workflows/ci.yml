@@ -95,6 +95,13 @@ jobs:
       - uses: actions/checkout@v5
       - run: python3 scripts/check_docs_sync.py
 
+  typography:
+    name: Type stays on the scale
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 scripts/check_typography.py
+
   theme-pairs:
     name: Theme colours match in dark and light
     runs-on: ubuntu-latest

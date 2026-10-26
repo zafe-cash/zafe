@@ -482,12 +482,7 @@ class _RequestedPayment extends StatelessWidget {
                   )
                 : 'Not set: you\'ll enter it next',
             style: hasAmount
-                ? TextStyle(
-                    fontFamily: 'Space Grotesk',
-                    fontSize: 28,
-                    height: 1.2,
-                    color: colors.text.value,
-                  )
+                ? AppTypography.title.copyWith(color: colors.text.value)
                 : valueStyle,
           ),
           const SizedBox(height: AppSpacing.s),

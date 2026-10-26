@@ -86,21 +86,33 @@ Brand ramp (dark, low → high): `#00110F #001B19 #002825 #003633 #004743 #00666
 #00736C #00605A #004D49 #003C38 #002B28 #001B19 #000C0B`. Lowest contrast of any text
 pair above: 4.98:1. The derivation lives in `.claude/skills/brand-palette/oklch.js`.
 
-### Vault card in light mode
+### Vault card
 
-**Decision (user, 2026-10-01): the card follows the theme and is light in light mode.**
-Light card: background #E0F3F1 (verdigris at OKLCH L 0.95), 1 px border in `line`
-(#D9DFDF); amount and label text in the light text colours (#090E0E, secondary #55615F);
-dial rings, ticks, glow, shield icon and filled signer dots in the deep accent #00736C
-(the dial drawing at ~70% opacity); empty signer dots in muted #7E8987; ticker in light
-gold #835A00. Measured on #E0F3F1: amount 16.9:1, secondary 5.6:1, ticker 5.3:1, accent
-5.0:1; the empty signer dot is 3.1:1 (a graphic, which needs 3:1 under WCAG 1.4.11).
+**Decision (user, 2026-10-27): plain.** The balance card and the payment card use the
+surface every other card uses (`background.ground`: #111515 dark, #FFFFFF light), no
+dial, no border. The label is a grey Zcash mark and "Vault balance" in the secondary
+text colour (no network badge, shield or capitals); the ticker is the value colour.
+Chosen from renders of the dial, a glow, a tinted card and plain (the earlier light
+card #E0F3F1 with a dial was decided 2026-10-01). Tokens: `AppVaultCardColors`.
 
-The study's own recommendation had been to keep the card dark (it is the vault as an
-object, and the dial glow reads best on a dark ground) and lift it to graphite #1C2323;
-that variant is in the accent study's "graphite card" toggle if this is revisited. Either
-way the card needs its own token set rather than hard-coded colours (today
-`_BalanceCard` hard-codes `_ink` and `_lime`).
+## Type
+
+**Decision (user, 2026-10-27): six sizes, three families with one job each**, after reading
+research (legibility and reading studies) and a side-by-side comparison of four directions:
+- **Space Grotesk** for amounts and headings: hero 44/48 (balance, a payment), title 28/34,
+  heading 22/28 (screen titles), amount 18/24 (rows, cards). Every amount uses tabular
+  figures (`kTabularFigures`), so digits don't shift as values change. Ticker: half the
+  hero (22), 14 next to an 18 amount, in the value colour.
+- **DM Sans** for text: 18/24 subheadings, 16/24 body, 16/20 labels, 14/20 small text.
+  **14 is the minimum**: at 13 the x-height falls below the critical print size where
+  reading slows (Legge & Bigelow 2011). DM Sans has no tabular figures, so amounts never
+  use it.
+- **JetBrains Mono** 14/20 for addresses and codes (dotted zero, distinct Il1).
+- Amounts shrink to fit (`FittedBox`), never "…": the exact value must stay readable at
+  2x text. Steps under ~10% (13 vs 14) don't read as levels; use weight or colour.
+- `scripts/check_typography.py` (CI) keeps code on the scale.
+- Worth testing with people before mainnet: grouped vs plain addresses (spotting a
+  look-alike that matches only the ends), 14 vs 15 small text with presbyopic readers.
 
 ## 4. Icon style: Patina two-tone
 

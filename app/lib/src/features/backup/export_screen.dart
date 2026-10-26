@@ -281,10 +281,8 @@ class BackupWordGrid extends StatelessWidget {
                     TextSpan(text: '  ${words[i]}'),
                   ],
                 ),
-                style: TextStyle(
-                  fontFamily: 'JetBrains Mono',
-                  fontSize: 16,
-                  height: 1.4,
+                style: AppTypography.mono.copyWith(
+                  height: 1.6,
                   color: colors.text.primary,
                 ),
               ),

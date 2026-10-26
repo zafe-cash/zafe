@@ -526,7 +526,7 @@ class BalanceCard extends StatelessWidget {
     // Taller with large system text (amount, label and lines grow; it overflowed).
     final grow = (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 40);
     return Container(
-      height: 216 + grow * 3,
+      height: 216 + grow * 4,
       // Plain, like every other card: no dial, no border.
       decoration: BoxDecoration(
         color: card.background,
@@ -582,33 +582,28 @@ class BalanceCard extends StatelessWidget {
                   ],
                 ),
                 const Spacer(),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: hidden ? fixedPrivacyMask() : amount,
-                        style: TextStyle(
-                          fontFamily: 'Space Grotesk',
-                          fontWeight: FontWeight.w500,
-                          fontSize: 46,
-                          height: 1.05,
-                          letterSpacing: -1.8,
-                          color: card.text,
+                // Shrinks to fit, never cut: the exact balance must stay readable at
+                // large text sizes.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: hidden ? fixedPrivacyMask() : amount,
+                          style: AppTypography.hero.copyWith(color: card.text),
                         ),
-                      ),
-                      TextSpan(
-                        text: ' $kZcashDefaultCurrencyTicker',
-                        style: TextStyle(
-                          fontFamily: 'Space Grotesk',
-                          fontWeight: FontWeight.w500,
-                          fontSize: 22,
-                          color: card.ticker,
+                        TextSpan(
+                          text: ' $kZcashDefaultCurrencyTicker',
+                          style: AppTypography.heroTicker.copyWith(
+                            color: card.ticker,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    maxLines: 1,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 if (fiatText case final fiat?)

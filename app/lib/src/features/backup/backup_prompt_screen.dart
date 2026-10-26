@@ -55,12 +55,7 @@ class BackupPromptScreen extends ConsumerWidget {
         const SizedBox(height: AppSpacing.md),
         Text(
           '"$name" is ready',
-          style: TextStyle(
-            fontFamily: 'Space Grotesk',
-            fontSize: 28,
-            height: 1.2,
-            color: colors.text.accent,
-          ),
+          style: AppTypography.title.copyWith(color: colors.text.accent),
         ),
         const SizedBox(height: AppSpacing.s),
         Text(

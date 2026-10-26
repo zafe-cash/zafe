@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../../core/widgets/row_amount.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/amount_display.dart';
 import '../../core/theme/app_theme.dart';
@@ -105,16 +106,12 @@ class ReceivedRow extends StatelessWidget {
               ),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 128),
-                child: Text(
+                child: RowAmount(
                   receivedAmountText(r, hide: hideAmount),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.labelLarge.copyWith(
-                    color: r.minedHeight == 0
-                        ? colors.text.secondary
-                        : colors.text.value,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  // Money in: the value colour once mined, grey while confirming.
+                  color: r.minedHeight == 0
+                      ? colors.text.secondary
+                      : colors.text.value,
                 ),
               ),
             ],

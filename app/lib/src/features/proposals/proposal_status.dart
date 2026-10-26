@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../../core/widgets/row_amount.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/amount_display.dart';
 import '../../core/theme/app_theme.dart';
@@ -130,6 +131,10 @@ class ProposalRow extends StatelessWidget {
     final colors = context.colors;
     final p = proposal;
     final expired = proposalExpired(p, height);
+    final faded =
+        expired ||
+        p.stage == rust.ProposalStage.rejected ||
+        p.stage == rust.ProposalStage.cancelled;
     final needsMe = needsMyAction(p, height: height);
     final subtitle = expired
         ? (p.createdAt > BigInt.zero ? formatTimestamp(p.createdAt) : '')
@@ -191,26 +196,26 @@ class ProposalRow extends StatelessWidget {
               ),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 128),
-                child: Text(
-                  p.payments.isEmpty
-                      ? 'To vault'
-                      : amountWithTicker(
+                child: p.payments.isEmpty
+                    ? Text(
+                        'To vault',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.labelLarge.copyWith(
+                          color: colors.text.secondary,
+                        ),
+                      )
+                    : RowAmount(
+                        amountWithTicker(
                           ZecAmount.fromZatoshi(p.totalZat).activity.amountText,
                           hide: hideAmount,
                           maskLength: 3, // short mask for list rows
                         ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.labelLarge.copyWith(
-                    color:
-                        expired ||
-                            p.stage == rust.ProposalStage.rejected ||
-                            p.stage == rust.ProposalStage.cancelled
-                        ? colors.text.muted
-                        : colors.text.accent,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                        color: faded ? colors.text.muted : colors.text.accent,
+                        tickerColor: faded
+                            ? colors.text.muted
+                            : colors.text.value,
+                      ),
               ),
             ],
           ),

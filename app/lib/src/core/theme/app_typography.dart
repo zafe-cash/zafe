@@ -10,11 +10,14 @@
 /// in tooling (widgetbook galleries, token tests) that must show both
 /// modes inside one binary.
 ///
-/// Desktop serif styles use Space Grotesk Regular with the OpenType 'case'
-/// feature enabled: Space Grotesk defaults to old-style figures whose
-/// descenders sit below the baseline, and 'case' swaps them for uniform
-/// lining digits. Mobile serif styles also use Space Grotesk but pin lining
-/// figures to match the mobile app frames.
+/// Mobile scale (2026-10-27, after reading research and a side-by-side comparison; see
+/// docs/brand.md "Type"): six sizes. Space Grotesk for amounts and headings: [hero] 44,
+/// [title] 28, [heading] 22, [amount] 18; DM Sans for text: 18 (headlineSmall, bodyLarge),
+/// 16 (body, labels), 14 (small text and captions, the minimum: below it reading slows,
+/// Legge & Bigelow 2011); JetBrains Mono 14 for addresses and codes. Every amount uses
+/// tabular figures ([kTabularFigures]) so digits don't shift as values change; DM Sans has
+/// none, so amounts never use it. Space Grotesk's digits are lining by default (the
+/// bundled files have no `lnum` or `case` feature).
 ///
 /// Naming maps Figma → Dart by full word and camelCase where possible:
 /// `Headline L` → `headlineLarge`, `Body L` → `bodyLarge`,
@@ -44,27 +47,88 @@ import '../layout/app_form_factor.dart';
 
 // ─── Mode-invariant styles (identical in both Figma modes) ───────────
 
-/// Desktop Space Grotesk styles use the `case` feature for lining digits.
-const _youngSerifCaseFigures = [FontFeature.enable('case')];
+/// Equal-width digits for amounts: a value that changes (a balance, the send field, a
+/// countdown) or sits in a column keeps its width. Space Grotesk has `tnum`; DM Sans
+/// doesn't.
+const kTabularFigures = [FontFeature.tabularFigures()];
 
-/// Space Grotesk's default numerals are old-style figures (6/8 ascend,
-/// 3/4/5/7/9 descend below the baseline); the mobile frames render every
-/// serif number — balance, send amount, numpad — with uniform lining
-/// figures, so the Space Grotesk tokens pin the font's `lnum` feature.
-const _youngSerifFigures = [FontFeature.liningFigures()];
+// ─── Roles shared by both form factors ───────────────────────────────
 
-/// Figma desktop `Headline L` — Space Grotesk, 32 / 33 px.
-///
-/// The original `Desktop.tokens.json` export predated the design system's
-/// serif migration and still said Libre Caslon; the live desktop screen
-/// frames use Space Grotesk.
+/// The balance and a payment's amount: Space Grotesk 44 / 48, tabular.
+const _hero = TextStyle(
+  fontFamily: 'Space Grotesk',
+  fontWeight: FontWeight.w500,
+  fontSize: 44,
+  height: 48 / 44,
+  letterSpacing: -0.88,
+  fontFeatures: kTabularFigures,
+);
+
+/// The ticker next to a [_hero] amount: half its size.
+const _heroTicker = TextStyle(
+  fontFamily: 'Space Grotesk',
+  fontWeight: FontWeight.w500,
+  fontSize: 22,
+  height: 28 / 22,
+  letterSpacing: 0,
+);
+
+/// Large headings in a screen's body ("Zafe is locked", "Grants is ready").
+const _title = TextStyle(
+  fontFamily: 'Space Grotesk',
+  fontWeight: FontWeight.w500,
+  fontSize: 28,
+  height: 34 / 28,
+  letterSpacing: -0.28,
+  fontFeatures: kTabularFigures,
+);
+
+/// Screen titles in the top bar and step headings.
+const _heading = TextStyle(
+  fontFamily: 'Space Grotesk',
+  fontWeight: FontWeight.w500,
+  fontSize: 22,
+  height: 28 / 22,
+  letterSpacing: 0,
+);
+
+/// Amounts in rows and cards: Space Grotesk 18 / 24, tabular.
+const _amount = TextStyle(
+  fontFamily: 'Space Grotesk',
+  fontWeight: FontWeight.w500,
+  fontSize: 18,
+  height: 24 / 18,
+  letterSpacing: 0,
+  fontFeatures: kTabularFigures,
+);
+
+/// The ticker next to an [_amount].
+const _amountTicker = TextStyle(
+  fontFamily: 'Space Grotesk',
+  fontWeight: FontWeight.w500,
+  fontSize: 14,
+  height: 24 / 14,
+  letterSpacing: 0,
+);
+
+/// Addresses, codes and the diagnostic report: JetBrains Mono 14 / 20 (dotted zero,
+/// distinct Il1).
+const _mono = TextStyle(
+  fontFamily: 'JetBrains Mono',
+  fontWeight: FontWeight.w400,
+  fontSize: 14,
+  height: 20 / 14,
+  letterSpacing: 0,
+);
+
+/// Desktop `Headline L` — Space Grotesk, 32 / 33 px.
 const _headlineLDesktop = TextStyle(
   fontFamily: 'Space Grotesk',
   fontWeight: FontWeight.w500,
   fontSize: 32,
   height: 33 / 32,
   letterSpacing: 0,
-  fontFeatures: _youngSerifCaseFigures,
+  fontFeatures: kTabularFigures,
 );
 
 /// Figma desktop `Headline M` — Space Grotesk, 28 / 30 px, −0.28.
@@ -74,32 +138,7 @@ const _headlineMDesktop = TextStyle(
   fontSize: 28,
   height: 30 / 28,
   letterSpacing: -0.28,
-  fontFeatures: _youngSerifCaseFigures,
-);
-
-/// Figma mobile app `Headline L` — Space Grotesk, 32 / 33 px.
-///
-/// The current `3 Fonts-3.zip` variable export lists Libre Caslon Text for
-/// this slot, but the actual mobile screen frames still render the display
-/// headline scale with Space Grotesk. Keep the app token aligned with the
-/// screen frames until the design file and variable export agree.
-const _headlineLMobile = TextStyle(
-  fontFamily: 'Space Grotesk',
-  fontWeight: FontWeight.w500,
-  fontSize: 32,
-  height: 33 / 32,
-  letterSpacing: 0,
-  fontFeatures: _youngSerifFigures,
-);
-
-/// Figma mobile app `Headline M` — Space Grotesk, 28 / 30 px, −0.28.
-const _headlineMMobile = TextStyle(
-  fontFamily: 'Space Grotesk',
-  fontWeight: FontWeight.w500,
-  fontSize: 28,
-  height: 30 / 28,
-  letterSpacing: -0.28,
-  fontFeatures: _youngSerifFigures,
+  fontFeatures: kTabularFigures,
 );
 
 /// Figma `Code M` — JetBrains Mono Medium, 14 / 21 px.
@@ -111,19 +150,11 @@ const _codeMDesktop = TextStyle(
   letterSpacing: 0,
 );
 
-/// Figma `Code M`, Mobile mode — JetBrains Mono Medium, 16 / 21 px.
-const _codeMMobile = TextStyle(
-  fontFamily: 'JetBrains Mono',
-  fontWeight: FontWeight.w500,
-  fontSize: 16,
-  height: 21 / 16,
-  letterSpacing: 0,
-);
-
-/// Figma `Code S` — JetBrains Mono Medium, 13 / 17 px.
+/// Desktop `Code S` — JetBrains Mono Medium, 13 / 17 px (the mobile scale uses [_mono]).
 const _codeS = TextStyle(
   fontFamily: 'JetBrains Mono',
   fontWeight: FontWeight.w500,
+  // type: desktop only; the mobile minimum is 14.
   fontSize: 13,
   height: 17 / 13,
   letterSpacing: 0,
@@ -135,7 +166,7 @@ abstract final class AppTypographyDesktop {
   static const displayLarge = TextStyle(
     fontFamily: 'Space Grotesk',
     fontWeight: FontWeight.w500,
-    fontFeatures: _youngSerifCaseFigures,
+    fontFeatures: kTabularFigures,
     fontSize: 45,
     height: 48 / 45,
     letterSpacing: -1.35,
@@ -146,7 +177,7 @@ abstract final class AppTypographyDesktop {
   static const headlineLarge = _headlineLDesktop;
   static const headlineMedium = _headlineMDesktop;
 
-  /// Figma `Headline S` — Geist Medium, 16 / 20 px.
+  /// Figma `Headline S` — DM Sans Medium, 16 / 20 px.
   static const headlineSmall = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
@@ -155,7 +186,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: 0,
   );
 
-  /// Figma `Body L` — Geist Medium, 16 / 24 px, −0.24.
+  /// Figma `Body L` — DM Sans Medium, 16 / 24 px, −0.24.
   static const bodyLarge = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
@@ -164,7 +195,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: -0.24,
   );
 
-  /// Figma `Body M` — Geist Regular, 14 / 21 px, −0.21.
+  /// Figma `Body M` — DM Sans Regular, 14 / 21 px, −0.21.
   static const bodyMedium = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w400,
@@ -173,7 +204,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: -0.21,
   );
 
-  /// Figma `Body M Medium` — Geist Medium, 14 / 21 px, −0.21.
+  /// Figma `Body M Medium` — DM Sans Medium, 14 / 21 px, −0.21.
   static const bodyMediumStrong = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
@@ -182,7 +213,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: -0.21,
   );
 
-  /// Figma `Body S` — Geist Regular, 12 / 18 px, −0.12.
+  /// Figma `Body S` — DM Sans Regular, 12 / 18 px, −0.12.
   static const bodySmall = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w400,
@@ -191,7 +222,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: -0.12,
   );
 
-  /// Figma `Body XS` — Geist Regular, 11 / 16 px, −0.055.
+  /// Figma `Body XS` — DM Sans Regular, 11 / 16 px, −0.055.
   static const bodyExtraSmall = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w400,
@@ -200,7 +231,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: -0.055,
   );
 
-  /// Figma `Label M` — Geist Medium, 14 / 16 px, −0.06.
+  /// Figma `Label M` — DM Sans Medium, 14 / 16 px, −0.06.
   static const labelLarge = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
@@ -209,7 +240,7 @@ abstract final class AppTypographyDesktop {
     letterSpacing: -0.06,
   );
 
-  /// Figma `Label S` — Geist Medium, 13 / 14 px.
+  /// Figma `Label S` — DM Sans Medium, 13 / 14 px.
   static const labelMedium = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
@@ -223,102 +254,74 @@ abstract final class AppTypographyDesktop {
   static const codeSmall = _codeS;
 }
 
-/// The Mobile mode of the Figma `Fonts` collection.
-///
-/// Body, label, and code metrics follow the current mobile variable
-/// export. The display headline scale intentionally follows the actual
-/// mobile screen frames, which still use Space Grotesk.
+/// The mobile scale: six sizes (44, 28, 22, 18, 16, 14), see the library doc.
 abstract final class AppTypographyMobile {
-  /// Figma mobile app `Headline XL` — Space Grotesk, 40 / 40 px, −1.35.
-  static const displayLarge = TextStyle(
-    fontFamily: 'Space Grotesk',
-    fontWeight: FontWeight.w500,
-    fontSize: 40,
-    height: 40 / 40,
-    letterSpacing: -1.35,
-    fontFeatures: _youngSerifFigures,
-  );
+  static const displayLarge = _hero;
+  static const displayMedium = _hero;
+  static const displaySmall = _title;
+  static const headlineLarge = _title;
+  static const headlineMedium = _title;
 
-  static const displayMedium = displayLarge;
-  static const displaySmall = _headlineLMobile;
-  static const headlineLarge = _headlineLMobile;
-  static const headlineMedium = _headlineMMobile;
-
-  /// Figma `Headline S` — Geist Medium, 18 / 22 px.
+  /// Subheadings: DM Sans Medium 18 / 24.
   static const headlineSmall = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
     fontSize: 18,
-    height: 22 / 18,
-    letterSpacing: 0,
+    height: 24 / 18,
+    letterSpacing: -0.18,
   );
+  static const bodyLarge = headlineSmall;
 
-  /// Figma `Body L` — Geist Medium, 18 / 26 px, −0.24.
-  static const bodyLarge = TextStyle(
-    fontFamily: 'DM Sans',
-    fontWeight: FontWeight.w500,
-    fontSize: 18,
-    height: 26 / 18,
-    letterSpacing: -0.24,
-  );
-
-  /// Figma `Body M` — Geist Regular, 16 / 25 px, −0.21.
+  /// Body text: DM Sans 16 / 24.
   static const bodyMedium = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w400,
     fontSize: 16,
-    height: 25 / 16,
-    letterSpacing: -0.21,
+    height: 24 / 16,
+    letterSpacing: 0,
   );
 
-  /// Figma `Body M Medium` — Geist Medium, 16 / 25 px, −0.21.
   static const bodyMediumStrong = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
     fontSize: 16,
-    height: 25 / 16,
-    letterSpacing: -0.21,
+    height: 24 / 16,
+    letterSpacing: 0,
   );
 
-  /// Figma `Body S` — Geist Regular, 14 / 20 px, −0.12.
+  /// Small text and captions: DM Sans 14 / 20, the smallest size.
   static const bodySmall = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w400,
     fontSize: 14,
     height: 20 / 14,
-    letterSpacing: -0.12,
+    letterSpacing: 0,
   );
 
-  /// Figma `Body XS` — Geist Regular, 13 / 18 px, −0.055.
-  static const bodyExtraSmall = TextStyle(
-    fontFamily: 'DM Sans',
-    fontWeight: FontWeight.w400,
-    fontSize: 13,
-    height: 18 / 13,
-    letterSpacing: -0.055,
-  );
+  /// Was 13; 14 is the minimum now (13 sat below the size where reading slows).
+  static const bodyExtraSmall = bodySmall;
 
-  /// Figma `Label M` — Geist Medium, 16 / 17 px, −0.06.
+  /// Buttons, rows and nav: DM Sans Medium 16 / 20 (room for a wrapped second line).
   static const labelLarge = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
     fontSize: 16,
-    height: 17 / 16,
-    letterSpacing: -0.06,
+    height: 20 / 16,
+    letterSpacing: 0,
   );
 
-  /// Figma `Label S` — Geist Medium, 14 / 15 px.
+  /// Small labels: DM Sans Medium 14 / 20.
   static const labelMedium = TextStyle(
     fontFamily: 'DM Sans',
     fontWeight: FontWeight.w500,
     fontSize: 14,
-    height: 15 / 14,
+    height: 20 / 14,
     letterSpacing: 0,
   );
 
   static const labelSmall = labelMedium;
-  static const codeMedium = _codeMMobile;
-  static const codeSmall = _codeS;
+  static const codeMedium = _mono;
+  static const codeSmall = _mono;
 }
 
 const _mobile = kAppFormFactor == AppFormFactor.mobile;
@@ -329,6 +332,29 @@ const _mobile = kAppFormFactor == AppFormFactor.mobile;
 /// [AppTypographyDesktop] / [AppTypographyMobile] for per-style Figma
 /// metrics.
 abstract final class AppTypography {
+  // ─── Roles (both form factors) ──────────────────────────────────
+
+  /// The balance and a payment's amount (Space Grotesk 44, tabular).
+  static const hero = _hero;
+
+  /// The ticker next to a [hero] amount (22).
+  static const heroTicker = _heroTicker;
+
+  /// Large headings in a screen's body (Space Grotesk 28).
+  static const title = _title;
+
+  /// Screen titles and step headings (Space Grotesk 22).
+  static const heading = _heading;
+
+  /// Amounts in rows and cards (Space Grotesk 18, tabular).
+  static const amount = _amount;
+
+  /// The ticker next to an [amount] (14).
+  static const amountTicker = _amountTicker;
+
+  /// Addresses and codes (JetBrains Mono 14).
+  static const mono = _mono;
+
   // ─── Display (legacy aliases onto the headline scale) ─────────────
 
   /// Largest onboarding/welcome headline (Figma `Headline XL`).
@@ -419,5 +445,7 @@ abstract final class AppTypography {
 
   /// Secondary monospace copy: mnemonic word indices, compact numeric
   /// metadata (Figma `Code S`).
-  static const codeSmall = _codeS;
+  static const codeSmall = _mobile
+      ? AppTypographyMobile.codeSmall
+      : AppTypographyDesktop.codeSmall;
 }

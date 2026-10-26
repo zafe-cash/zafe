@@ -118,12 +118,7 @@ class PaymentCard extends StatelessWidget {
                       children: [
                         TextSpan(
                           text: hidden ? fixedPrivacyMask() : amountText,
-                          style: TextStyle(
-                            fontFamily: 'Space Grotesk',
-                            fontWeight: FontWeight.w500,
-                            fontSize: 42,
-                            height: 1.05,
-                            letterSpacing: -1.6,
+                          style: AppTypography.hero.copyWith(
                             color: card.text.withValues(
                               alpha: strikethrough ? 0.55 : 1,
                             ),
@@ -133,10 +128,7 @@ class PaymentCard extends StatelessWidget {
                         ),
                         TextSpan(
                           text: ' $kZcashDefaultCurrencyTicker',
-                          style: TextStyle(
-                            fontFamily: 'Space Grotesk',
-                            fontWeight: FontWeight.w500,
-                            fontSize: 20,
+                          style: AppTypography.heroTicker.copyWith(
                             color: card.ticker.withValues(
                               alpha: strikethrough ? 0.55 : 1,
                             ),
@@ -145,7 +137,6 @@ class PaymentCard extends StatelessWidget {
                       ],
                     ),
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 // One recipient: its address and "Full address". Several: the
@@ -205,12 +196,7 @@ class _Recipient extends StatelessWidget {
           compactAddress(address),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontFamily: 'JetBrains Mono',
-            fontSize: 13,
-            height: 1.3,
-            color: card.text,
-          ),
+          style: AppTypography.mono.copyWith(color: card.text),
         ),
       ],
     );
@@ -639,16 +625,12 @@ class SignerRow extends StatelessWidget {
                           color: colors.text.primary,
                           fontWeight: FontWeight.w600,
                         )
-                      : AppTypography.labelLarge.copyWith(
-                          fontFamily: 'JetBrains Mono',
-                          color: colors.text.primary,
-                        ),
+                      : AppTypography.mono.copyWith(color: colors.text.primary),
                 ),
                 if (named)
                   Text(
                     shortKey(keyHex),
-                    style: AppTypography.labelSmall.copyWith(
-                      fontFamily: 'JetBrains Mono',
+                    style: AppTypography.mono.copyWith(
                       color: colors.text.muted,
                     ),
                   ),

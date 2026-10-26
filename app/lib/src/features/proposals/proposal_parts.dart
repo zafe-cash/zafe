@@ -161,11 +161,7 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
         : blocksToSeconds(widget.height!, p.expiryHeight) < 86400
         ? expiresIn(p, widget.height!)
         : null;
-    final display = TextStyle(
-      fontFamily: 'Space Grotesk',
-      fontWeight: FontWeight.w500,
-      color: colors.text.accent,
-    );
+    final display = AppTypography.hero.copyWith(color: colors.text.accent);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -196,16 +192,11 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
                   text: hide
                       ? fixedPrivacyMask()
                       : ZecAmount.fromZatoshi(p.totalZat).receipt.amountText,
-                  style: display.copyWith(
-                    fontSize: 48,
-                    height: 1.05,
-                    letterSpacing: -1.8,
-                  ),
+                  style: AppTypography.hero.copyWith(color: display.color),
                 ),
                 TextSpan(
                   text: ' $kZcashDefaultCurrencyTicker',
-                  style: display.copyWith(
-                    fontSize: 22,
+                  style: AppTypography.heroTicker.copyWith(
                     color: colors.text.value,
                   ),
                 ),
@@ -602,8 +593,7 @@ class RecipientsCard extends ConsumerWidget {
                           semanticsLabel: 'Recipient ${i + 1} full address',
                           child: Text(
                             compactAddress(lines[i].address),
-                            style: AppTypography.labelLarge.copyWith(
-                              fontFamily: 'JetBrains Mono',
+                            style: AppTypography.mono.copyWith(
                               color: colors.text.primary,
                             ),
                           ),

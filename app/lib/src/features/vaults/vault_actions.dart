@@ -67,8 +67,7 @@ class VaultActionsMenu extends ConsumerWidget {
           AppMenuItem(
             icon: AppIcons.shieldKeyhole,
             label: 'How it\'s protected',
-            onTap: () =>
-                onVault(() async => context.push('/vault-protection')),
+            onTap: () => onVault(() async => context.push('/vault-protection')),
           ),
         ],
         AppMenuItem(

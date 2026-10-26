@@ -331,13 +331,7 @@ class MobileTopNav extends StatelessWidget {
   }
 }
 
-const _zafeTitleStyle = TextStyle(
-  fontFamily: 'Space Grotesk',
-  fontWeight: FontWeight.w600,
-  fontSize: 24,
-  height: 1.2,
-  letterSpacing: -0.5,
-);
+const _zafeTitleStyle = AppTypography.heading;
 
 enum _MobileTopNavVariant { account, steps, back }
 

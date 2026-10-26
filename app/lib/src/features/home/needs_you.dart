@@ -526,8 +526,7 @@ class RequestCard extends StatelessWidget {
                               TextSpan(text: amount),
                               TextSpan(
                                 text: ' $kZcashDefaultCurrencyTicker',
-                                style: TextStyle(
-                                  fontSize: 13,
+                                style: AppTypography.amountTicker.copyWith(
                                   color: colors.text.value,
                                 ),
                               ),
@@ -535,9 +534,8 @@ class RequestCard extends StatelessWidget {
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: strong.copyWith(
-                            fontFamily: 'Space Grotesk',
-                            fontSize: 18,
+                          style: AppTypography.amount.copyWith(
+                            color: colors.text.accent,
                           ),
                         ),
                       const SizedBox(height: 2),

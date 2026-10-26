@@ -553,10 +553,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                         onChanged: (_) => setState(() {}),
                         textAlign: TextAlign.end,
                         cursorColor: colors.text.accent,
-                        style: TextStyle(
-                          fontFamily: 'Space Grotesk',
-                          fontSize: 48,
-                          height: 1.1,
+                        style: AppTypography.hero.copyWith(
                           color: tooMuch
                               ? colors.text.destructive
                               : colors.text.accent,
@@ -565,9 +562,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                           border: InputBorder.none,
                           isCollapsed: true,
                           hintText: '0',
-                          hintStyle: TextStyle(
-                            fontFamily: 'Space Grotesk',
-                            fontSize: 48,
+                          hintStyle: AppTypography.hero.copyWith(
                             color: colors.text.disabled,
                           ),
                         ),
@@ -575,10 +570,8 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                     ),
                     Text(
                       ' $kZcashDefaultCurrencyTicker',
-                      style: TextStyle(
-                        fontFamily: 'Space Grotesk',
-                        fontSize: 38,
-                        color: colors.text.accent.withValues(alpha: 0.5),
+                      style: AppTypography.heroTicker.copyWith(
+                        color: colors.text.value,
                       ),
                     ),
                   ],

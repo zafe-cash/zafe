@@ -217,10 +217,7 @@ class LockScreen extends StatelessWidget {
                         Text(
                           'Zafe is locked',
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: 'Space Grotesk',
-                            fontSize: 28,
-                            height: 1.2,
+                          style: AppTypography.title.copyWith(
                             color: colors.text.accent,
                           ),
                         ),

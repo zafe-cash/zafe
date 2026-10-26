@@ -327,7 +327,8 @@ that Zafe **not look like a copy**. Zafe's visual identity, keep it when resynci
   Material widgets use `core/theme/material_theme.dart` (was `legacy_material_theme`,
   Vizor's gray/green scheme): its `ColorScheme` and text selection come from `AppColors`,
   body font DM Sans.
-- **Type**: Space Grotesk (display, amounts, titles), DM Sans (body), JetBrains Mono (codes).
+- **Type**: Space Grotesk (amounts, titles), DM Sans (text), JetBrains Mono (codes); six
+  sizes, 14 minimum, tabular amounts. Rules and research: docs/brand.md "Type".
 - **Shapes**: rounded-rectangle buttons (`zafeButtonRadius`: 14 / 10 / 8), card radius 20,
   rounded-square avatars; activity icon tiles are circles (Patina).
 - **Icons ("Patina two-tone", docs/brand.md §4)**: **every** `AppIcons` name renders
@@ -398,8 +399,9 @@ Learned while studying it:
   zec.rocks TLS lightwalletd + a placeholder relay `https://relay.zafe.invalid` until one
   is deployed, shown as "Not configured" in Settings), overridden by the dart-defines
   `ZAFE_RELAY_URL` / `ZAFE_LIGHTWALLETD_URL`. Dart const expressions can't read fields of
-  const objects, hence the parallel consts. **At runtime** the user can override either
-  URL in Settings (`features/settings/endpoint_sheet.dart`): `core/config/endpoints.dart`
+  const objects, hence the parallel consts. **At runtime** the user can change the Zcash
+  server (Settings > This phone > Zcash server, `features/settings/zcash_server_screen.dart`;
+  a new vault's server is picked in Create): `core/config/endpoints.dart`
   (`ZafeEndpoints`, `checkEndpointUrl`: https required except localhost/127.0.0.1/
   10.0.2.2 on regtest; path/query refused; typed ports kept, since Dart's `Uri` drops a
   default `:443`) stores them in prefs keyed per network (`zafe_relay_url_<net>`,
@@ -686,13 +688,14 @@ Learned while studying it:
   in `MainActivity.kt` (`FLAG_SECURE`). The first Zafe channel with an Android handler:
   `xyz.zafe/haptics` and `window_appearance` have none yet (Dart swallows
   `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
-- Settings (`/settings` tab) is app-only since 2026-10-16: Security (lock app), Privacy (hide
-  amounts, Tor, diagnostics), System (theme, payment sounds, relay, Zcash server, licenses; fonts +
-  NOTICE registered in `main.dart`). Vault things live in **Manage vaults** (`/vaults`,
-  `features/vaults/manage_vaults_screen.dart`, opened from the vault sheet `showVaultSwitcher`: the
-  open vault large, other vaults with a dot when something waits, [Manage vaults] [+]); each vault's ⋯
-  (`vault_actions.dart` `showVaultActions`) has Rename, Back up, Viewing key, How it's protected, Remove
-  (switching to that vault first where needed).
+- Settings (`/settings` tab, 2026-10-27): Privacy (Use Tor, Hide amounts), Security (Lock app),
+  the open vault by name (Back up, Viewing key, How it's protected, Server), This phone (Zcash
+  server, Notifications), App (theme, payment sounds, diagnostic report, licenses; fonts + NOTICE
+  registered in `main.dart`); see "Settings and sheets" above. Other vaults live in **Manage
+  vaults** (`/vaults`, `features/vaults/manage_vaults_screen.dart`, opened from the vault sheet
+  `showVaultSwitcher`); each vault's ⋯ is an `AppMenu` (`vault_actions.dart` `VaultActionsMenu`):
+  Rename, Back up, Viewing key, How it's protected, Remove (switching to that vault first where
+  needed).
   "How it's protected" (`/vault-protection`, `VaultProtectionBody` takes plain data;
   preview `flutter test tool/screens/protection_render_test.dart`): the approval rule, full
   view access, what losing too many keys means, and the post-quantum caveat (spec §2.3).
@@ -701,7 +704,9 @@ Learned while studying it:
   (`VaultState.syncError`, kept while the next attempt runs so the label doesn't flicker)
   and the last vault refresh error (`ProposalsState.error`) into a `SyncFailureKind`
   (both unreachable = offline). Home's top-nav status shows `statusLabel`; tapping it
-  (`MobileTopNav.onSyncTap`) opens `features/home/sync_status_sheet.dart`. Last sync time
+  (`MobileTopNav.onSyncTap`) opens the Status screen (`/status`,
+  `features/home/sync_status_screen.dart`; the error detail goes to the diagnostic report,
+  not the screen). Last sync time
   is `VaultState.syncedAt` / `summary.json` `syncedAt` (also written by background
   checks). Classification is typed end to end: `zafe_core::net::NetFailure` reads error
   **types** (rustls error inside `io::Error::get_ref`, `io::ErrorKind::TimedOut`,

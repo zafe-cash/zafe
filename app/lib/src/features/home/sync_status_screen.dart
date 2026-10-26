@@ -45,7 +45,6 @@ DateTime? relayUnreachableSince(String vaultId) {
   }
 }
 
-
 /// How long the vault's server must be down before the Status screen suggests moving to
 /// a listed one.
 const kSuggestMoveAfter = Duration(hours: 6);

@@ -34,11 +34,7 @@ class AppMenuItem {
 /// acts at once, no Update button and no sheet. For a handful of short options; anything
 /// with typing or a second step is a pushed screen.
 class AppMenu extends StatelessWidget {
-  const AppMenu({
-    super.key,
-    required this.items,
-    required this.builder,
-  });
+  const AppMenu({super.key, required this.items, required this.builder});
 
   final List<AppMenuItem> items;
 
@@ -98,10 +94,8 @@ class AppMenu extends StatelessWidget {
             ),
           ),
       ],
-      builder: (context, controller, _) => builder(
-        context,
-        () => _toggle(controller),
-      ),
+      builder: (context, controller, _) =>
+          builder(context, () => _toggle(controller)),
     );
   }
 
