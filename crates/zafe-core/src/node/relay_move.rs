@@ -90,14 +90,16 @@ pub fn followed_relay(material: &VaultMaterial) -> Option<VaultRelay> {
 /// [`followed_relay`] with the log copy's directory given.
 pub fn followed_relay_in(dir: &std::path::Path, material: &VaultMaterial) -> Option<VaultRelay> {
     let ms = MoveState::load(dir, &material.descriptor.vault_id, &material.vault_secret)?;
-    if !ms.switched || material.relay.label == ms.target.label {
-        return None;
-    }
-    Some(VaultRelay {
-        url: Some(ms.target.relay.clone()),
-        label: ms.target.label,
-        create_token: ms.create_token.clone(),
-    })
+    let relay = if ms.switched {
+        VaultRelay {
+            url: Some(ms.target.relay.clone()),
+            label: ms.target.label,
+            create_token: ms.create_token.clone(),
+        }
+    } else {
+        ms.from
+    };
+    (relay.label != material.relay.label).then_some(relay)
 }
 
 /// `material` with [`followed_relay`] applied.
@@ -363,6 +365,7 @@ pub async fn move_vault<R: RngCore + CryptoRng>(
         switched: false,
         moved_notice_sent: false,
         arrival_delivered: false,
+        from: material.relay.clone(),
     };
     // Saved first: the label is the one secret of the new mailbox until it exists.
     ms.save(&dir, &material.vault_secret)
@@ -607,6 +610,7 @@ pub async fn follow_move<R: RngCore + CryptoRng>(
                 switched: false,
                 moved_notice_sent: false,
                 arrival_delivered: false,
+                from: material.relay.clone(),
             });
         if ms.create_token.is_none() {
             ms.create_token = Box::pin(read_arrivals(&new, me, &state, link)).await?.token;
@@ -659,6 +663,7 @@ pub async fn follow_move<R: RngCore + CryptoRng>(
         switched: false,
         moved_notice_sent: false,
         arrival_delivered: false,
+        from: material.relay.clone(),
     };
     ms.save(&dir, &material.vault_secret)
         .map_err(|e| NodeError::Io(format!("move state: {e}")))?;
@@ -1144,6 +1149,7 @@ pub async fn move_notice(
                     switched: false,
                     moved_notice_sent: false,
                     arrival_delivered: false,
+                    from: material.relay.clone(),
                 },
             };
             if !ms.moved_seen {
@@ -1162,8 +1168,36 @@ pub async fn move_notice(
 /// for the relay the caller passed; `Some` for the new relay once this phone holds proof of
 /// the switch, with `chain` and `state` replaced by the new relay's history. Refuses a new
 /// entry on a new relay before its switch, and a write by a phone that knows the vault
-/// moved but hasn't followed.
+/// moved but hasn't followed. Before a write to the relay the vault is on, the move notices
+/// there are read: a phone that took no part in a switch (off while the others moved)
+/// learns of it only from them, and a write after it would fork the history it has to
+/// follow from.
 pub(super) async fn write_target(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    chain: &mut Chain,
+    state: &mut VaultState,
+) -> Result<Option<(RelayClient, VaultIds)>, NodeError> {
+    if let Some(target) = Box::pin(own_move_target(relay, me, material, chain, state)).await? {
+        return Ok(Some(target));
+    }
+    match Box::pin(move_notice(relay, me, material)).await {
+        Ok(Some(n)) if n.moved => Err(NodeError::VaultMoved {
+            url: n.target.relay,
+        }),
+        // Two switches from one point: follow neither, so the vault stays here.
+        Ok(_) | Err(NodeError::TwoMoves) => Ok(None),
+        Err(e) => {
+            tracing::warn!("could not read the move notices before writing: {e}");
+            Ok(None)
+        }
+    }
+}
+
+/// [`write_target`] from this phone's own move: the rules for a phone that sent an
+/// arrival or saw a verified switch.
+async fn own_move_target(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,

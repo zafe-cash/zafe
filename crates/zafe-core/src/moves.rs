@@ -232,6 +232,10 @@ pub struct MoveState {
     pub moved_notice_sent: bool,
     /// This phone's arrival reached every other member on the new relay.
     pub arrival_delivered: bool,
+    /// Where the vault lived on this phone when this state was made: followed until the
+    /// move switches, so replacing the state of an earlier switch the app hadn't saved
+    /// into its material yet never sends it back to an older relay.
+    pub from: crate::node::VaultRelay,
 }
 
 impl MoveState {

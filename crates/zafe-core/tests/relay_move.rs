@@ -755,3 +755,126 @@ async fn an_envelope_from_the_old_relay_is_dropped_by_the_new_one() {
     // And a client reading the new mailbox drops envelopes naming another one.
     assert_ne!(w.material[0].label(), started.target.label);
 }
+
+#[tokio::test]
+async fn a_second_move_starts_from_where_the_first_one_went() {
+    let w = world(2, 3, 15).await;
+    w.announce_all().await;
+    let second = serve(Relay::new()).await;
+    let started = w.move_to(0, &second).await.unwrap();
+    assert!(w.follow(1, &started.link).await.unwrap().switched);
+    assert!(w.progress(0).await.unwrap().switched);
+    assert_eq!(w.here(0).base_url(), second);
+
+    // Alice moves again before her app saved the second relay into its material (World
+    // keeps the material each member was made with): until this move switches, her
+    // vault stays on the second relay, never back on the first.
+    let third = serve(Relay::new()).await;
+    let again = node::move_vault(
+        &w.here(0),
+        &w.ids[0],
+        &w.material(0),
+        &third,
+        None,
+        &mut StdRng::seed_from_u64(700),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        w.here(0).base_url(),
+        second,
+        "until the second move switches"
+    );
+    w.name(0, "Alice").await.unwrap();
+
+    let status = Box::pin(node::follow_move(
+        &w.here(1),
+        &w.ids[1],
+        &w.material(1),
+        &MoveLink::decode(&again.link).unwrap(),
+        &mut StdRng::seed_from_u64(701),
+    ))
+    .await
+    .unwrap();
+    assert!(status.switched, "{status:?}");
+    let (_, state) = load_state(&w.here(1), &w.ids[1], &w.material(1))
+        .await
+        .unwrap();
+    assert_eq!(state.names[&w.ids[0].public().sig_pk], "Alice");
+    assert_eq!(state.moves.len(), 2);
+    let progress = node::move_progress(
+        &w.here(0),
+        &w.ids[0],
+        &w.material(0),
+        &mut StdRng::seed_from_u64(702),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(progress.switched);
+    assert_eq!(w.here(0).base_url(), third);
+}
+
+#[tokio::test]
+async fn a_straggler_that_never_read_the_notice_cannot_fork_the_old_relay() {
+    let w = world(2, 3, 16).await;
+    w.announce_all().await;
+    let second = serve(Relay::new()).await;
+    let started = w.move_to(0, &second).await.unwrap();
+    assert!(w.follow(1, &started.link).await.unwrap().switched);
+    let old_len = w.old_len().await;
+
+    // Carol was off the whole time and writes before anything showed her the notice
+    // (her app's first refresh): refused, so the old relay's history stays the one the
+    // switch was made from.
+    let err = w.name(2, "Carol").await.unwrap_err();
+    assert!(
+        matches!(&err, NodeError::VaultMoved { url } if *url == started.target.relay),
+        "{err:?}"
+    );
+    assert_eq!(w.old_len().await, old_len);
+    assert!(w.follow(2, &started.link).await.unwrap().switched);
+    w.name(2, "Carol").await.unwrap();
+
+    // The same after a second move, for a phone whose last move record is the switch
+    // that brought it to the relay it is on.
+    assert!(w.progress(0).await.unwrap().switched);
+    let third = serve(Relay::new()).await;
+    let again = node::move_vault(
+        &w.here(0),
+        &w.ids[0],
+        &w.material(0),
+        &third,
+        None,
+        &mut StdRng::seed_from_u64(800),
+    )
+    .await
+    .unwrap();
+    let status = Box::pin(node::follow_move(
+        &w.here(1),
+        &w.ids[1],
+        &w.material(1),
+        &MoveLink::decode(&again.link).unwrap(),
+        &mut StdRng::seed_from_u64(801),
+    ))
+    .await
+    .unwrap();
+    assert!(status.switched, "{status:?}");
+    let err = w.name(2, "Carol B").await.unwrap_err();
+    assert!(
+        matches!(&err, NodeError::VaultMoved { url } if *url == again.target.relay),
+        "{err:?}"
+    );
+    let status = Box::pin(node::follow_move(
+        &w.here(2),
+        &w.ids[2],
+        &w.material(2),
+        &MoveLink::decode(&again.link).unwrap(),
+        &mut StdRng::seed_from_u64(802),
+    ))
+    .await
+    .unwrap();
+    assert!(status.switched, "{status:?}");
+    w.name(2, "Carol B").await.unwrap();
+    assert_eq!(w.here(2).base_url(), third);
+}

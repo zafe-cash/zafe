@@ -181,6 +181,9 @@ Grants**.
    `PoolStore::keep_vote`).
 3. **A phone that sees `VaultMoved`** (directly, or through a move notice it then verifies) stops
    writing to the old relay and shows "Grants moved to relay.dao.org. Move to continue."
+   Every write to the vault's current relay reads its move notices first: a phone that was
+   off during the switch learns of it only there, and its app writes on its first refresh
+   (one-tap commitments, its version) before any screen shows the notice.
 4. **Everything carries over:** open payments, votes, one-tap commitments and shares, and note
    reservations are in the log; the leader re-sends a persisted interactive request (`<id>.req`).
 5. **Old relay dead, fewer than m moved:** nobody can pay; the payment screen says "Payments

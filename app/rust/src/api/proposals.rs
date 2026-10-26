@@ -485,12 +485,20 @@ pub fn list_proposals(
         // whatever it appends (it used to load the log a second time).
         let (mut chain, mut state) = node::load_state(&relay, &me, &m).await?;
         watch.lap("log");
-        node::top_up_pool_loaded(
+        match node::top_up_pool_loaded(
             &relay, &me, &m, &mut pool, reset, notes, &mut chain, &mut state, &mut OsRng,
         )
-        .await?;
-        if reset {
-            let _ = std::fs::remove_file(&reset_marker);
+        .await
+        {
+            Ok(_) => {
+                if reset {
+                    let _ = std::fs::remove_file(&reset_marker);
+                }
+            }
+            // The vault moved and this phone hasn't followed yet: still list what is here
+            // (the Home card offers the move).
+            Err(node::NodeError::VaultMoved { .. }) => {}
+            Err(e) => return Err(e.into()),
         }
         watch.lap("pool");
         // This app's event version, once, so the others can see it supports relay moves.

@@ -241,6 +241,11 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   recipient and padded; **move notices are never acked** (`respond` skips unknown kinds).
   Two switches from one base = `TwoMoves`, follow neither. The bridge's `material()` applies
   a verified switch (`with_followed_relay`) before anything is built from the material.
+  **Every write to the current relay reads its move notices first** (`write_target`): a
+  phone that was off during a switch learns of it only there, and one write after it forks
+  the history it must follow from (follow then fails with `RelayForked`). A
+  move state keeps the relay it left from (`MoveState.from`), so starting the next move
+  before the app saved the last switch never sends the phone back to an older relay.
 - **Relay membership check**: `reseed` lets the restorer pick members, so
   `node::check_relay_membership` compares the relay's list with the replayed log (`RelayMembership`).
 - **Relay hardening**: client reads at most 64 MiB per response; `log_append` verifies and
@@ -393,8 +398,12 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   Release APKs: always `--split-per-abi` with one `--target-platform`.
 - Testnet builds are a separate Android app (`xyz.zafe.zafe.testnet`); the harness and adb
   commands use `xyz.zafe.zafe`. Reset test devices with `adb shell pm clear xyz.zafe.zafe`.
-- Device testing: emulator AVD `zafe` (`emulator -avd zafe -gpu swangle_indirect -no-snapshot
-  -no-audio`, never swiftshader); `scripts/app-harness.sh` runs relay + CLI members B and C
+- Device testing: emulator AVD `zafe` (`emulator -avd zafe -gpu host -no-snapshot -no-audio`,
+  emulator ≥ 37.2). Flutter 3.47's Impeller crashes the `swangle_indirect`/`swiftshader`
+  host renderers (`dmesg`: RenderThread signal 4/11); `-gpu host` (llvmpipe under WSLg)
+  runs it. Emulator 37.2 needs `libxkbfile.so.1`: without sudo, `apt-get download
+  libxkbfile1`, `dpkg-deb -x` it under `~/android/extra-libs` and set `LD_LIBRARY_PATH`.
+  `scripts/app-harness.sh` runs relay + CLI members B and C
   (state in `~/.cache/zafe-harness`; `cargo build -p zafe-cli` after core changes). WSL2 has no
   USB: `adb pair IP:PORT CODE` on one line. Record with `adb shell screenrecord` as a
   background task. Phone: proof ~1.7 s on 8 threads, round 2 12 ms / 6.8 MB.

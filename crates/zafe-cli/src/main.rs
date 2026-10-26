@@ -1012,16 +1012,17 @@ async fn vault(
 }
 
 /// The relay for the vault in `home`: once this member's phone verified a relay move,
-/// its material follows the new relay (saved here) and so does the client.
+/// its material follows the new relay (saved here), and the client uses the vault's own
+/// relay whenever it names one other than `--relay`.
 fn followed(home: &Home, base: &RelayClient, material: VaultMaterial) -> Result<RelayClient> {
     let mut material = material;
     if let Some(relay) = node::followed_relay(&material) {
         material.relay = relay;
         fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
     }
-    Ok(match node::move_state(base, &material) {
-        Some(ms) if ms.switched && ms.target.label == material.relay.label => base
-            .at(&ms.target.relay)
+    Ok(match &material.relay.url {
+        Some(url) if url.trim_end_matches('/') != base.base_url() => base
+            .at(url)
             .with_create_token(material.relay.create_token.as_deref()),
         _ => base.clone(),
     })
