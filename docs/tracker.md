@@ -28,9 +28,10 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
       create 2-of-2 with a CLI member, safety words, backup, wipe + restore, receive 1 TAZ,
       propose 0.1 TAZ with a memo, CLI verifies and approves, Send now, mined (txid
       `f966e885…`). 0.1.23 had failed it: one key press veiled the app in grey (fixed).
-- [ ] `v0.1.25` (0.1.24 + menus, restore Paste, clipboard countdown): check the changed
-      screens and one send on a phone, then `mainnet-v0.1.25` on the same commit, after the
-      mainnet relay is promoted (0.1.24 stays testnet only).
+- [ ] `v0.1.26` (0.1.24 + menus that stay on screen and close on Back, restore Paste,
+      clipboard countdown): check the changed screens and one send on a phone, then
+      `mainnet-v0.1.26` on the same commit, after the mainnet relay is promoted (0.1.24 and
+      0.1.25 stay testnet only).
 - [x] Restore: **Paste** says when the clipboard is empty or holds something that isn't a
       backup (and never pastes that into the field); it used to do nothing (2026-10-27).
 - [x] Backup **Copy as text** and **Copy words** show "On the clipboard for 42 s", then "No
