@@ -1,0 +1,92 @@
+---
+// One anchor per problem: /support and the app link to them (#safety-words, ...).
+// Labels and messages are the app's own (app/lib/src/core/errors/sync_failure.dart,
+// zafe_error_copy.dart, features/home/sync_status_screen.dart).
+import Doc from '../../layouts/Doc.astro';
+
+import { problems } from '../../docs/troubleshooting';
+---
+
+<Doc slug="troubleshooting">
+  <nav aria-label="Problems on this page">
+    <ul class="docs-toc">
+      {problems.map((p) => <li><a href={`#${p.id}`}>{p.title}</a></li>)}
+    </ul>
+  </nav>
+
+  <h2 id="safety-words">The safety words don’t match</h2>
+  <p>
+    Stop: someone may be in the middle. Tap <strong>They don’t match</strong> and start again,
+    sharing the invite over a channel you trust. <a href="/docs/safety-words">More on safety words</a>.
+  </p>
+
+  <h2 id="payment-waiting">A payment is waiting</h2>
+  <p>
+    It needs enough members to approve. Notifications can be late, so ask them. If it
+    expires, tap <strong>Propose again</strong>. <a href="/docs/waiting-and-expired">Waiting and expired payments</a>.
+  </p>
+
+  <h2 id="lost-phone">Someone lost their phone</h2>
+  <p>
+    They restore their backup. Without one, the others open <strong>Signers</strong>, tap
+    <strong>Replace a lost phone</strong> and compare safety words with the new phone.
+    <a href="/docs/lost-phone">Replace a lost phone</a>.
+  </p>
+
+  <h2 id="update">Zafe says to update</h2>
+  <p>
+    Update from Google Play, or install the newest APK. Everyone in the vault should
+    update, and before NU7 on November 5 everyone must. <a href="/docs/updates">Updates</a>.
+  </p>
+
+  <h2 id="sync">Sync fails</h2>
+  <p>
+    Tap the status at the top of Home to open <strong>Status</strong> and see what failed. If it’s
+    the Zcash server, check your connection, then <strong>Settings</strong>, <strong>Zcash server</strong>;
+    <strong>Reset to default</strong> goes back to the standard one. If Tor is on, turn it off and on.
+  </p>
+
+  <h2 id="server-unreachable">Can’t reach the server</h2>
+  <p>
+    Home says “Can’t reach server”; <strong>Status</strong> shows since when, as <strong>Down since</strong>. Payments can’t be approved until the
+    vault’s server is back; balances and receiving still work, and funds are safe.
+  </p>
+  <ol class="doc-steps">
+    <li>Check your connection, then open <strong>Status</strong> and tap <strong>Try again</strong>.</li>
+    <li>Ask another member whether theirs works. If only yours fails, try another network, or Tor.</li>
+    <li>If the server stays down, any member can tap <strong>Move to another server</strong>. After 6 hours down, Status may suggest one. <a href="/docs/move-servers">Moving servers</a>.</li>
+  </ol>
+
+  <h2 id="status">What the Status screen says</h2>
+  <p>Open it by tapping the status at the top of Home.</p>
+  <dl class="doc-fixes">
+    <div><dt>Server lost data · Server lost the vault</dt><dd>The server lost part or all of the vault’s history. Your funds are safe. A member whose phone has the full history taps <strong>Restore vault on the server</strong>.</dd></div>
+    <div><dt>Server not trusted</dt><dd>The server shows another history, or other members, than this phone saw, so Zafe won’t use it. Check with the others. If they agree the server is right, tap <strong>Follow the server instead</strong>; if not, move to another server.</dd></div>
+    <div><dt>History damaged</dt><dd>This phone’s saved copy is damaged. If another member’s app works normally, tap <strong>Follow the server instead</strong>.</dd></div>
+    <div><dt>Server outdated</dt><dd>Ask whoever runs it to update it, or move to another server.</dd></div>
+    <div><dt>Update needed</dt><dd>The server or another member uses a newer Zafe. <a href="/docs/updates">Update</a>.</dd></div>
+    <div><dt>Can’t reach Zcash server · Server behind · Wrong network</dt><dd>A problem with this phone’s Zcash server. Wait, or tap <strong>Zcash server</strong> and pick another.</dd></div>
+    <div><dt>Tor couldn’t connect</dt><dd>Nothing is sent. Tap <strong>Try again</strong>, or turn off <a href="/docs/tor">Tor</a>.</dd></div>
+    <div><dt>Storage problem</dt><dd>This phone couldn’t read the vault’s wallet data. Keys and funds are safe; the data can be rebuilt. Tap <strong>Try again</strong>; if it stays, write to us.</dd></div>
+  </dl>
+
+  <h2 id="move">A move doesn’t finish</h2>
+  <ul>
+    <li>Waiting for members: on the Server screen, tap <strong>Nudge</strong> next to each one who hasn’t moved.</li>
+    <li><strong>Move to another server</strong> is off: the screen names who must update Zafe first.</li>
+    <li>“Two moves were found”: ask your group which server to use.</li>
+    <li>“This move expired”: moves last 14 days. Start a new one.</li>
+  </ul>
+
+  <h2 id="notifications">No notifications</h2>
+  <ul>
+    <li>Check <strong>Settings</strong>, <strong>Notifications</strong> under <strong>This phone</strong>. Home says “Notifications are off” when they are.</li>
+    <li>Only Zafe’s servers send notifications. On another server, the Server screen says “Not on this server”: open Zafe to check, and ask co-signers to do the same.</li>
+  </ul>
+
+  <h2>Still stuck?</h2>
+  <p>
+    <a href="/support">Write to us</a> and attach the report from <strong>Settings</strong>, <strong>Diagnostic report</strong>.
+    Addresses, amounts and keys are removed from it.
+  </p>
+</Doc>

@@ -271,7 +271,7 @@ back it up here, and use a managed database with point-in-time recovery once the
 scales out (Postgres). **A restored (older) database is detected:** every phone keeps its
 own copy of each vault's log and refuses a relay that no longer holds its last entry
 (`RelayRolledBack` / `RelayForked` / `RelayLostVault` in the app). A member whose phone
-has the longest copy then taps "Restore vault on the relay" (Home > sync status): the
+has the longest copy then taps "Restore vault on the server" (Home > status line > Status): the
 relay is recreated or caught up from that phone (`POST /v1/mailbox/reseed`; CLI:
 `zafe restore-relay`; spec §6.3). So an old backup loses at most the messages in flight
 (signing requests, which are asked for again) and push tokens, not the vault. Still
@@ -305,14 +305,17 @@ docker compose start relay-testnet backup-testnet && rm /tmp/relay.sqlite
 
 ## Pointing the app at it
 
-Build the app with the testnet preset and the relay URL:
+Nothing to build: the server is chosen per vault in the app. In the server list (Create >
+More options > Server, or Settings > <vault> > Server > Move to another server) tap
+**Other address** and type, paste or scan the server's address, e.g.
+`relay.example.org`. For a private relay hand out the address and the create token in one
+piece, `relay.example.org#<token>`: the app splits it and fills in the token. Members who
+join get the server from the invite. The step-by-step guide for operators is
+<https://zafe.cash/docs/run-a-server> (`infra/site/src/pages/docs/run-a-server.astro`;
+`/relay` redirects there).
 
-```bash
-flutter build apk --dart-define=ZAFE_NETWORK=test \
-  --dart-define=ZAFE_RELAY_URL=https://testnet.relay.zafe.cash
-```
-
-The testnet preset already uses `https://testnet.zec.rocks:443` (Ironwood-aware
-lightwalletd, over TLS); override with `ZAFE_LIGHTWALLETD_URL`. Without
-`ZAFE_RELAY_URL` a testnet build points at a placeholder (`relay.zafe.invalid`) and
-Settings shows the relay as "Not configured". The CLI takes `--relay https://...` (or `ZAFE_RELAY`).
+`ZAFE_RELAY_URL` (`--dart-define`) only changes which server a build offers first for new
+vaults; release builds already list Zafe's (`app/lib/src/core/config/relay_presets.dart`;
+add community servers there by pull request). The testnet preset uses
+`https://testnet.zec.rocks:443` (Ironwood-aware lightwalletd, over TLS); override with
+`ZAFE_LIGHTWALLETD_URL`. The CLI takes `--relay https://...` (or `ZAFE_RELAY`).

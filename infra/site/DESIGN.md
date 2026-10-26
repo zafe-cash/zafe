@@ -190,7 +190,7 @@ components:
 
 # Design System: Zafe website
 
-Scope: the home page (`/`), `/download`, `/support`, `/privacy`, `/waitlist`, `/waitlist-error`, the 404, and the shared nav, footer, install buttons, popovers and waitlist form. Out of scope: `/showcase` keeps its own world (the 3D diorama, its light fixed nav, title card and slim footer) and is not governed by this file. Brand source: `docs/brand.md` (Verdigris); illustration pipeline: `docs/site.md` §6.
+Scope: the home page (`/`), `/download`, `/support`, `/privacy`, the docs (`/docs`, `/docs/<slug>`), `/waitlist`, `/waitlist-error`, the 404, and the shared nav, footer, install buttons, popovers and waitlist form. Out of scope: `/showcase` keeps its own world (the 3D diorama, its light fixed nav, title card and slim footer) and is not governed by this file. Brand source: `docs/brand.md` (Verdigris); illustration pipeline: `docs/site.md` §6.
 
 ## Overview
 
@@ -327,6 +327,9 @@ Links either side of the Seam mark, which sits exactly centred (44px). Home: "Ho
 
 ### Disclosure (FAQ, checksum)
 Native `details`, the first FAQ item open. The marker is the app's Patina plus as a 16px mask (verdigris on the home FAQ, secondary ink on /download), rotating 45deg to an x over 200ms. 44px summary, 18px question; answers indent 32px in secondary ink. No dividers.
+
+### Docs
+A 13.5rem sidebar (wide screens only; the current page on a raised-grey pill) beside the 44rem reading column. Breadcrumb in 15px secondary ink (also the way back on phones), H1 clamp(36px, 5vw, 56px) as a task, a 19px secondary summary, H2s at 26px. Numbered steps in a raised-grey disc with the app's real button names in bold; "If it goes wrong" as a question/answer list; Related links in verdigris, then "All docs" and the "Checked with Zafe" line. App screens are crops of the app's renders (`assets.py`), 320px wide, 24px corners, hairline border, no phone frame. No script: under 900px the sidebar goes and `/docs` is the menu.
 
 ### Footer
 The one dark band: footer ink under a 48px paper lip; the mark with "Privacy, held together." (Space Grotesk 30px), three link columns (get it, the project, help; brand glyphs at 15px, a small "soon" pill), a bottom row ("No cookies. No analytics.", X and GitHub at 44px targets, "Zafe, 2026"), and a giant "zafe" wordmark in ghost ink cut by the page's bottom edge.

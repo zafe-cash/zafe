@@ -1,0 +1,19 @@
+---
+// /relay: the old "Run your own relay" link in shipped app builds. Hosts redirect it
+// permanently to /docs/run-a-server (vercel-output.sh, public/_redirects, README.md's
+// Caddy block); this page is the fallback for hosts that can't redirect. Keep it forever.
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+
+const to = '/docs/run-a-server';
+---
+
+<Base title="Run your own server · Zafe" description="This page moved to the docs." bodyClass="not-found" noindex>
+  <meta slot="head" http-equiv="refresh" content={`0; url=${to}`} />
+  <Nav />
+  <main class="nf">
+    <h1>This page moved</h1>
+    <p class="sub">Running a server is now in the docs.</p>
+    <a class="pill" href={to}>Run your own server</a>
+  </main>
+</Base>

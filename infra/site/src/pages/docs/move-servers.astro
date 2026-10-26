@@ -1,0 +1,66 @@
+---
+import Doc from '../../layouts/Doc.astro';
+import Shot from '../../components/Shot.astro';
+---
+
+<Doc slug="move-servers">
+  <h2>Before you start</h2>
+  <ul>
+    <li>Every member needs a Zafe version that can move. If one doesn’t, the Server screen names who must update first.</li>
+    <li>Every member must be able to reach the new server. For a private one, have its create token, or its address as <code>host#token</code>.</li>
+    <li>Tell the group. Enough of them must move before the vault switches.</li>
+  </ul>
+
+  <h2>Start the move</h2>
+  <ol class="doc-steps">
+    <li>Open <strong>Settings</strong>, then <strong>Server</strong> under the vault’s name.</li>
+    <li>Tap <strong>Move to another server</strong>. Pick the server, tap <strong>Use this server</strong> and unlock.</li>
+    <li>The Server screen now shows who has moved. Tap <strong>Nudge</strong> to send someone the move link.</li>
+    <li>When enough members have moved, the vault switches. Tap <strong>Done</strong>.</li>
+  </ol>
+  <Shot
+    name="docs_move_waiting"
+    width={780}
+    height={920}
+    alt="Zafe's Server screen during a move: “Moving Grants to relay.dao.org”, You and Treasurer Alice marked Moved, Bob and one more member with a Nudge button, and “Grants switches when 3 of 4 have moved.”"
+  />
+
+  <h2>Follow a move</h2>
+  <ol class="doc-steps">
+    <li>On Home, under <strong>Needs you</strong>, find “Move <em>vault</em> to <em>server</em>”. Or open the move link someone sent you.</li>
+    <li>Tap <strong>Move</strong> and unlock. Or <strong>Not now</strong>.</li>
+  </ol>
+  <Shot
+    name="docs_move_card"
+    width={780}
+    height={290}
+    alt="A Needs you card on Home: “Move Grants to relay.dao.org. Treasurer Alice asked · 1 of 4 moved · your funds don't move”, with Not now and Move buttons."
+  />
+  <p>
+    Nothing connects to the new server until you tap <strong>Move</strong>. Funds never move: open
+    payments and approvals carry over. A member who hasn’t moved by the switch sees
+    “<em>vault</em> moved to <em>server</em>” and taps <strong>Move</strong> to continue.
+  </p>
+
+  <h2>How many must move</h2>
+  <p>
+    The larger of the approval threshold and (members − threshold + 1). So 2 of 3 needs 2,
+    3 of 4 needs 3, and 2 of 5 needs 4. That way the members left behind can never approve
+    a payment on the old server. A move link expires after 14 days; the member who started
+    the move can <strong>Cancel move</strong> before the switch.
+  </p>
+
+  <h2>When the server is down</h2>
+  <p>
+    The Status screen says “Can’t reach the server” and offers <strong>Move to another server</strong>.
+    After 6 hours down it may suggest one of the listed servers. Until enough members
+    move, payments say “Payments resume when 1 more member moves to …”.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“Two moves were found”</dt><dd>Two members moved to different servers. Ask your group which server to use.</dd></div>
+    <div><dt>“This move expired” or “This link is from an earlier move”</dt><dd>Ask for a new link. A move that expired has to be started again.</dd></div>
+    <div><dt>“You’re already moving this vault”</dt><dd>A phone follows one move at a time. Cancel that move first.</dd></div>
+  </dl>
+</Doc>

@@ -19,7 +19,7 @@ import BrandIcon from '../components/BrandIcon.astro';
 import { downloadUrl, playUrl, sourceUrl, specUrl } from '../config';
 
 const faq = [
-  { q: 'Is it safe to use?', a: 'It’s a beta, so start small. The key is split across your phones and never put together, and the app, the relay and the spec are open source.' },
+  { q: 'Is it safe to use?', a: 'It’s a beta, so start small. The key is split across your phones and never put together, and the app, the server and the spec are open source.' },
   { q: 'Has it been audited?', a: 'Not yet. An external audit of the key, signing and checking code is planned, and its scope is public in the repository. Where Zafe differs from the Zcash drafts, the Zcash Foundation has confirmed the approach. Until the audit, keep amounts small.' },
   { q: 'Is it really a multisig?', a: 'Yes. Each phone holds a share of the key (FROST), and enough of them sign together. The chain sees one ordinary signature.' },
   { q: 'What if someone loses their phone?', a: 'They restore their backup, or the others move their seat to a new phone. Lose more phones than your rule allows, with no backups, and the funds are gone.' },
@@ -92,7 +92,7 @@ const jsonLd = {
     <div class="intro-mark"><Mark /></div>
   </div>
   <script is:inline slot="head" src="/assets/js/loops.js" defer></script>
-  <Nav links={[{ href: '#how', label: 'How it works' }, { href: '#faq', label: 'FAQ' }]} right={[{ href: '/support', label: 'Support' }]} />
+  <Nav />
 
   <main>
     <section class="hc-hero">

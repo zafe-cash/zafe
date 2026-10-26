@@ -199,7 +199,7 @@ List<(String, String?, Widget)> relayCases() => [
           children: [
             MobileTopNav.account(
               accountName: 'Grants',
-              syncLabel: 'Can\'t reach relay · since 09:14',
+              syncLabel: 'Can\'t reach server',
               syncLabelColor: context.colors.sync.textError,
             ),
             Padding(

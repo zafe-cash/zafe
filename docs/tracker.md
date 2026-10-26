@@ -606,10 +606,12 @@ passphrase and already-on-this-phone refusals, backup prompt after creating a va
       - [ ] Two-move detection after the switch: a phone that switched no longer reads
             the old relay's notices, so only stragglers and followers see `TwoMoves`
             *(limit stated in docs/relay-move.md §9)*
-      - [ ] **Site page `zafe.cash/relay`** ("Run your own relay →" in the picker opens it):
-            Compose + Caddy, backups, `ZAFE_RELAY_CREATE_TOKEN` and how to hand it out
-            (`relay.example.org#token`), expiry settings, how to get listed in
-            `relay_presets.dart` by PR
+      - [x] **Site page for running a server** (2026-10-27, not deployed yet): the docs
+            section `/docs` (`infra/site/src/docs/pages.ts`), with `/docs/run-a-server`
+            (Compose + Caddy, backups, `ZAFE_RELAY_CREATE_TOKEN` as `host#token`, defaults,
+            getting listed by PR). `/relay` (older builds) redirects there for good; the
+            app's docs URLs live in `docs_links.dart`, checked by `scripts/check_docs_links.py`.
+            Ship with the relay-client app release: the pages describe its UI
 - [x] Relay URL per vault (Rust side 2026-10-25, see above): the invite carries the vault's
       relay URL and the vault keeps it in its material, so vaults on a self-hosted relay and
       on ours coexist in one app. UI in phase 2b

@@ -1,0 +1,30 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="safety-words">
+  <p>
+    Each phone works out four words from every member’s keys and the vault’s settings. If
+    someone sat in the middle, or the server swapped a key, the phones show different
+    words. A server gets one guess at faking them, with odds of about one in 17 trillion.
+  </p>
+
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>Once everyone has joined, the setup shows <strong>Safety words</strong>.</li>
+    <li>Read them aloud to each member on a call or in person, or compare them in a chat you trust. Every phone must show the same four words, in the same order.</li>
+    <li>All the same: tap <strong>They match</strong>. Any difference: tap <strong>They don’t match</strong>.</li>
+  </ol>
+  <p class="doc-note">Wait until every member has compared. One member who skips the check is enough for someone in the middle to go unnoticed.</p>
+
+  <p>
+    You compare safety words again when a co-signer <a href="/docs/lost-phone">moves to a new phone</a>
+    without a backup: their new phone and yours must show the same words.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>The words don’t match</dt><dd>Stop. Tap <strong>They don’t match</strong>; no keys or funds exist yet. Start again with a new invite, shared over a channel you trust.</dd></div>
+    <div><dt>“Waiting for 1 member”</dt><dd>Someone hasn’t opened Zafe since the last person joined. Ask them to.</dd></div>
+  </dl>
+</Doc>

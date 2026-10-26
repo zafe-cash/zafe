@@ -1,12 +1,12 @@
 ---
 // The privacy policy (Google Play needs its URL). Every claim here is checked against the
-// code: keep it true when the app, the relay or the hosting changes (AGENTS.md "No
-// telemetry", relay retention in crates/zafe-relay, Caddy's "no access log").
+// code: keep it true when the app, the server (relay) or the hosting changes (AGENTS.md "No
+// telemetry", retention and expiry in crates/zafe-relay, Caddy's "no access log").
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 
-const updated = '22 October 2026';
+const updated = '27 October 2026';
 ---
 
 <Base
@@ -14,7 +14,7 @@ const updated = '22 October 2026';
   description="What Zafe keeps on your phone, what leaves it, and who can see what."
   bodyClass="legal-page"
 >
-  <Nav links={[{ href: '/', label: 'Home', mobile: true, back: true }]} />
+  <Nav />
   <main class="legal">
     <h1>Privacy policy</h1>
     <p class="legal-date">Last updated {updated}</p>
@@ -39,10 +39,13 @@ const updated = '22 October 2026';
 
     <h2>What leaves your phone, and who can see it</h2>
 
-    <h3>The relay (run by us)</h3>
+    <h3>The vault's server</h3>
     <p>
-      The members of a vault reach each other through a relay. It passes on messages and
-      keeps the vault's history so every member sees the same payments. The relay sees:
+      The members of a vault reach each other through a server. It passes on messages and
+      keeps the vault's history so every member sees the same payments. This policy covers
+      Zafe's servers (relay.zafe.cash and testnet.relay.zafe.cash). A vault can also use a
+      server run by someone else, or by you: its operator can see the same kinds of data and
+      sets their own terms. A server sees:
     </p>
     <ul>
       <li>
@@ -52,18 +55,22 @@ const updated = '22 October 2026';
       </li>
       <li>
         If you allow notifications, a notification token, so it can wake your phone through
-        Google's Firebase Cloud Messaging. Notifications carry no content.
+        Google's Firebase Cloud Messaging. Only Zafe's servers send notifications, and they
+        carry no content.
       </li>
       <li>
         The name you give yourself in a vault, encrypted like the rest of the history.
       </li>
     </ul>
     <p>
-      The relay keeps no access logs and doesn't record IP addresses. It uses them only
+      Our servers keep no access logs and don't record IP addresses. They use them only
       briefly, in memory, to limit abuse. Messages waiting for a member are deleted once
       picked up, and in any case after 30 days; recovery checks after 7 days. A vault's
-      encrypted history is kept while the vault exists, and a setup that is cancelled is
-      deleted. We keep backups of the relay's data to recover from failures.
+      encrypted history is kept while its members use it: a vault is deleted after a year
+      with no request from any member, or 30 days after it was created if no member but its
+      creator ever connected (an abandoned setup or move). Every member's phone keeps its own
+      copy. A setup that is cancelled is deleted. We keep backups of the servers' data to
+      recover from failures.
     </p>
 
     <h3>The Zcash server</h3>
@@ -83,7 +90,7 @@ const updated = '22 October 2026';
 
     <h3>Tor</h3>
     <p>
-      With "Use Tor" on (Settings), the app reaches the relay, the Zcash server and price
+      With "Use Tor" on (Settings), the app reaches the vault's server, the Zcash server and price
       sources through Tor, so they don't see your IP address. Notifications still arrive
       through Google.
     </p>

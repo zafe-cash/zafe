@@ -1,0 +1,49 @@
+---
+// Facts from docs/audit-scope.md (threat model, accepted risks), spec-review.md and the
+// README's status line. Keep it in step with them.
+import Doc from '../../layouts/Doc.astro';
+
+const repo = 'https://github.com/zafe-cash/zafe';
+---
+
+<Doc slug="security">
+  <h2>Status</h2>
+  <p>
+    Zafe is a beta on Zcash mainnet and hasn’t had an external security audit. Only use
+    money you can afford to lose. The audit’s scope is <a href={`${repo}/blob/main/docs/audit-scope.md`}>public</a>,
+    and where Zafe departs from the Zcash drafts, the Zcash Foundation has confirmed the
+    approach (<a href="https://github.com/ZcashFoundation/frost/issues/1094">frost#1094</a>).
+  </p>
+
+  <h2>Who can do what</h2>
+  <ul>
+    <li><b>Fewer members than the rule</b> can’t spend, and can’t make another member’s phone sign something it didn’t check.</li>
+    <li><b>Enough members together</b> can spend; that is the rule. If money leaves without a payment in the vault’s history, every phone shows “Money left without approval”.</li>
+    <li><b>The member who proposes</b> picks the payment, but can’t change what the others’ phones check: recipients, amounts, memos, change and fee.</li>
+    <li><b>The server</b>, or anyone on the network, sees who talks and when. It can’t read messages, forge them, spend, or slip in an older or different history without phones noticing.</li>
+    <li><b>Zafe, the project</b>, can’t move or see your funds. There are no accounts, analytics or crash reports.</li>
+  </ul>
+
+  <h2>What is checked where</h2>
+  <ul>
+    <li>Setup: <a href="/docs/safety-words">safety words</a>, compared out loud, prove that no one sat in the middle.</li>
+    <li>Each payment: every phone rebuilds and checks it before approving and again before signing (<a href="/docs/approve">what it checks</a>).</li>
+    <li>On the phone: approving, proposing and sending need an unlock. The wallet data is encrypted, and Android backups and device transfers never copy the key share.</li>
+  </ul>
+
+  <h2>Known limits</h2>
+  <ul>
+    <li>Members and the rule can’t change. Anyone who was a member can still see the vault, and their key share still counts. To rule someone out, make a new vault and move the funds.</li>
+    <li>Every member sees every payment, memo and the balance, past and future.</li>
+    <li>If quantum computers ever break today’s cryptography, one member’s copy of the vault secret could be enough to spend. The funds would then need to move to a quantum-safe vault, once Zcash offers one.</li>
+    <li>The first time a phone loads a vault, it trusts the server’s history once. After that it checks every change.</li>
+    <li>Android only for now.</li>
+  </ul>
+
+  <h2>Report a problem</h2>
+  <p>
+    Write to <a href="mailto:security@zafe.cash">security@zafe.cash</a>. The design is in the
+    <a href={`${repo}/blob/main/spec.md`}>spec</a> and the code is
+    <a href={repo}>open source</a>.
+  </p>
+</Doc>

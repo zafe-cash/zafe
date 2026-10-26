@@ -1,0 +1,29 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="what-is-zafe">
+  <h2>How it works</h2>
+  <ul>
+    <li>A vault is one shielded Zcash account. On chain it looks like any single-person wallet: no owners, no threshold.</li>
+    <li>Its key is split across the members’ phones (FROST). The whole key never exists, not even to sign.</li>
+    <li>A payment leaves only once enough members approve it on their own phones. You choose the rule when you create the vault, such as 2 of 3. Up to 15 members.</li>
+    <li>Before signing, each phone rebuilds the transaction and checks it. Nobody signs a summary.</li>
+    <li>Phones reach each other through a <a href="/docs/servers">server</a> that only sees encrypted messages.</li>
+  </ul>
+
+  <h2>What you need</h2>
+  <ul>
+    <li>An Android phone (Android 7 or newer) for each member. iPhone isn’t out yet.</li>
+    <li>Zafe from <a href="/download">Google Play or GitHub</a>.</li>
+    <li>A call or a meeting with your co-signers, to compare <a href="/docs/safety-words">safety words</a> once.</li>
+  </ul>
+
+  <h2>Limits today</h2>
+  <ul>
+    <li>Zafe is a beta and hasn’t had an external security audit. Only use money you can afford to lose.</li>
+    <li>If more members lose their phone than the rule allows, and they have no backup, the funds are gone for good.</li>
+    <li>Members and the rule are fixed. To remove someone, make a new vault and move the funds.</li>
+    <li>Every member sees every payment, memo and the balance.</li>
+  </ul>
+</Doc>

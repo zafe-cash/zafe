@@ -2,7 +2,7 @@
 
 A static site built with [Astro](https://astro.build): the home page (`/`), the 3D
 walkthrough (`/showcase`), the invite page (`/join`, and `join-testnet.html` for the
-testnet host) and `/privacy`. Astro renders everything at build time. The home page ships
+testnet host), `/privacy` and the docs (`/docs`, `/docs/<slug>`). Astro renders everything at build time. The home page ships
 **no JavaScript**, `/showcase` bundles its motion (`src/scripts/`) as same-origin modules,
 and the invite page loads only the hand-written `public/assets/join.js`. Nothing is
 inlined (the JSON-LD block excepted): `build.sh` fails if a page ends up with an inline
@@ -37,12 +37,20 @@ src/
   pages/join.astro         invite page (built to join.html, served at /join; noindex);
   pages/join-testnet.astro   the testnet host's copy (components/JoinPage.astro)
   pages/privacy.astro, 404.astro
+  pages/docs/              the docs: index.astro (/docs, also the phone menu) and one
+                             <slug>.astro per page (/docs/<slug>, built to docs/<slug>.html)
+  docs/pages.ts            every docs page by section: sidebar, index, breadcrumbs, Related,
+                             sitemap (add a page here and in pages/docs/)
+  pages/relay.astro        /relay, linked from shipped app builds: hosts redirect it to
+                             /docs/run-a-server for good (this page is the no-redirect fallback)
   pages/sitemap.xml.ts     sitemap, robots.txt and security.txt, from `site` in
   pages/robots.txt.ts        astro.config.mjs
   pages/.well-known/security.txt.ts
   layouts/Base.astro       <head>: CSP meta, SEO/social tags, JSON-LD, icons, fonts,
                            stylesheet (docs/seo.md)
-  components/              Nav, Footer, JoinPage, Icon (Patina icons), Mark, BrandIcon
+  components/              Nav, Footer, JoinPage, Icon (Patina icons), Mark, BrandIcon,
+                           DocsSidebar, Shot (an app screen in a docs page)
+  layouts/Doc.astro        a docs page: sidebar, breadcrumb, H1, steps, Related, checked line
   styles/site.css          Verdigris tokens, light and dark
   config.ts                download / source URLs, CSP
 public/
@@ -52,6 +60,8 @@ public/
   assets/stills/           the /showcase fallback stills (stills.sh)
   _headers                 CSP, cache and content types (Vercel via vercel-output.sh,
                            Cloudflare Pages, Netlify)
+  _redirects               permanent redirects (/relay) for Cloudflare Pages and Netlify;
+                           vercel-output.sh writes the same as Vercel routes
 assets.py                  app renders → WebP screens; app fonts → WOFF2 subsets
 build.sh                   astro build → dist/, plus .well-known/{assetlinks.json,
                            apple-app-site-association}
@@ -75,7 +85,12 @@ ZAFE_SOURCE_URL=https://… \                 # optional, default: the GitHub re
 infra/site/build.sh
 ```
 
-New app screens for the landing page: run the render tests named in `assets.py`, then
+Docs pages name the app's real buttons: check each label against `app/lib` and bump
+`checked` in `src/docs/pages.ts` when you do. App links into the docs live in
+`app/lib/src/core/config/docs_links.dart`; after a build, `python3 scripts/check_docs_links.py`
+(repo root) checks every one still resolves.
+
+New app screens for the landing page or the docs: run the render tests named in `assets.py`, then
 `python3 infra/site/assets.py` (needs `pillow fonttools brotli`).
 
 ### Signing fingerprints
@@ -97,7 +112,9 @@ Any static host with HTTPS on the exact host in `ZAFE_LINK_HOST` works. Requirem
 
 - `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association` served
   directly (no redirects) with `Content-Type: application/json`.
-- `/join` serves `join.html` (with or without a trailing slash).
+- `/join` serves `join.html` (with or without a trailing slash); every page is served at its
+  clean path, docs pages included (`/docs/run-a-server` from `docs/run-a-server.html`).
+- `/relay` redirects permanently to `/docs/run-a-server` (shipped app builds link there).
 - The `_headers` security headers, or their equivalent.
 
 **Vercel** (what we use; `.github/workflows/site.yml`). The workflow builds the site with
@@ -146,6 +163,7 @@ then add the custom domain in the dashboard.
 ```
 zafe.example {
 	root * /srv/zafe-site
+	redir /relay /docs/run-a-server permanent
 	try_files {path} {path}.html
 	file_server
 	header /.well-known/* Content-Type application/json

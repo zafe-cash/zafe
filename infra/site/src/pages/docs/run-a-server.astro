@@ -1,0 +1,124 @@
+---
+// The page shipped app builds open from "Run your own server →" (kRunYourOwnRelayUrl,
+// app/lib/src/core/config/docs_links.dart; /relay redirects here). Facts from
+// infra/relay/README.md, infra/relay/vps/ and crates/zafe-relay/src/main.rs.
+import Doc from '../../layouts/Doc.astro';
+import Shot from '../../components/Shot.astro';
+
+const repo = 'https://github.com/zafe-cash/zafe';
+---
+
+<Doc slug="run-a-server">
+  <p>
+    Most groups can use Zafe’s server. Run your own if you’d rather no outside operator
+    sees when your members talk, want to look after its uptime yourself, or want to offer
+    one to other groups. It holds no keys and can’t spend.
+  </p>
+
+  <h2>Before you start</h2>
+  <ul>
+    <li>A Linux server you control: 1 vCPU and 1 GB of memory are enough.</li>
+    <li>Docker with the Compose plugin.</li>
+    <li>A domain name, with an A or AAAA record pointing at the server. Turn off any CDN proxy: the server needs the real connections, and a proxy would see every member’s address.</li>
+    <li>Ports 80 and 443 open. Nothing else needs to be.</li>
+  </ul>
+
+  <h2>Set it up</h2>
+  <p>The Compose file runs the server behind Caddy, which gets and renews its HTTPS certificate, plus a nightly backup.</p>
+  <ol class="doc-steps">
+    <li>
+      Get the files:
+      <pre><code>git clone --depth 1 {repo}
+sudo cp -r zafe/infra/relay/vps /opt/zafe-relay
+cd /opt/zafe-relay</code></pre>
+    </li>
+    <li>
+      Name the image and your domain in <code>.env</code>. The service is called
+      <code>relay-testnet</code> for historical reasons; it serves mainnet vaults too.
+      <pre><code>sudo tee .env &lt;&lt;'EOF'
+RELAY_TESTNET_IMAGE=ghcr.io/zafe-cash/zafe-relay:main
+RELAY_TESTNET_DOMAIN=relay.example.org
+EOF
+sudo install -d -o 10001 -g 10001 -m 700 /var/backups/zafe-relay/testnet</code></pre>
+    </li>
+    <li>
+      Start it and check it answers:
+      <pre><code>sudo docker compose up -d
+curl https://relay.example.org/health      # ok</code></pre>
+    </li>
+    <li>Check it from a phone: on <strong>New vault</strong>, tap <strong>More options</strong>, <strong>Server</strong>, then <strong>Other address</strong>, and enter <code>relay.example.org</code>. <strong>Use this server</strong> turns on once it answers.</li>
+  </ol>
+
+  <h2>Make it private</h2>
+  <p>
+    By default anyone can create a vault on your server. With a create token, creating or
+    restoring a vault needs it; joining, paying and everything else doesn’t.
+  </p>
+  <ol class="doc-steps">
+    <li>
+      Put a token in <code>secrets.env</code>, next to <code>compose.yml</code>, and restart:
+      <pre><code>echo "ZAFE_RELAY_CREATE_TOKEN=$(openssl rand -hex 24)" | sudo tee secrets.env &gt; /dev/null
+sudo chmod 600 secrets.env
+sudo docker compose up -d</code></pre>
+    </li>
+    <li>Give the group the address and token in one piece: <code>relay.example.org#&lt;token&gt;</code>. Pasted or scanned into <strong>Other address</strong>, it fills in the <strong>Create token</strong>.</li>
+    <li>Members’ phones keep the token with the vault and in backups, since restoring the vault needs it. If it leaks, change it in <code>secrets.env</code> and give the group the new one.</li>
+  </ol>
+  <Shot
+    name="docs_server_list"
+    width={780}
+    height={860}
+    alt="Zafe's server list: relay.zafe.cash run by Zafe, and Other address set to relay.dao.org, with the line “No notifications” and an empty Create token field."
+    caption="A private server in the app’s server list."
+  />
+
+  <h2>Back it up</h2>
+  <p>
+    A backup runs every night at 03:17 UTC into <code>/var/backups/zafe-relay/testnet</code>,
+    kept 14 days. Copy that folder off the machine too. Take one by hand with:
+  </p>
+  <pre><code>sudo docker compose exec backup-testnet sh /backup.sh once</code></pre>
+  <p>
+    A lost or old database doesn’t lose funds or vaults: every phone keeps the history,
+    and a member taps <strong>Restore vault on the server</strong> on the Status screen. Restore
+    the newest backup anyway; the steps are in the
+    <a href={`${repo}/blob/main/infra/relay/README.md#backups`}>relay README</a>.
+  </p>
+
+  <h2>Update it</h2>
+  <pre><code>sudo docker compose exec backup-testnet sh /backup.sh once
+sudo docker compose pull &amp;&amp; sudo docker compose up -d</code></pre>
+  <p>
+    <code>main</code> is the image Zafe’s test server runs after every change. To choose when you
+    update, use a <code>sha-&lt;commit&gt;</code> tag instead. An outdated server shows in the
+    app as “Needs an update”. To check where an image came from:
+  </p>
+  <pre><code>gh attestation verify oci://ghcr.io/zafe-cash/zafe-relay:main -R zafe-cash/zafe</code></pre>
+
+  <h2>Defaults</h2>
+  <p>Add any of these to <code>secrets.env</code> to change them; <code>0</code> turns one off.</p>
+  <dl class="doc-vars">
+    <div><dt><code>ZAFE_RELAY_KEY_RATE</code> · <code>ZAFE_RELAY_IP_RATE</code></dt><dd>Requests per minute: 300 per member key, 1,200 per IP address. Over them the server answers “busy”. <code>ZAFE_RELAY_LIMITS=off</code> turns all rate limits off.</dd></div>
+    <div><dt><code>ZAFE_RELAY_CREATES_PER_DAY</code> · <code>ZAFE_RELAY_MAX_VAULTS_PER_KEY</code></dt><dd>New vaults: 20 a day per IP address, 8 per key.</dd></div>
+    <div><dt><code>ZAFE_RELAY_MAX_INBOX</code> · <code>ZAFE_RELAY_MAX_DELIVERY_MB</code> · <code>ZAFE_RELAY_MAX_LOG_MB</code></dt><dd>Per vault: 10,000 waiting messages per member, 256 MiB of waiting messages, 512 MiB of history. <code>ZAFE_RELAY_QUOTAS=off</code> turns these off.</dd></div>
+    <div><dt><code>ZAFE_RELAY_IDLE_DAYS</code> · <code>ZAFE_RELAY_UNUSED_DAYS</code></dt><dd>A vault is deleted after 365 days with no member request, or 30 days after it was created if no member but its creator ever connected. <code>ZAFE_RELAY_EXPIRY=off</code> keeps everything.</dd></div>
+  </dl>
+  <p>Messages waiting for a member are deleted once picked up, and after 30 days in any case.</p>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li>No notifications: they need Zafe’s notification key, so only Zafe’s servers send them. Phones check in the background and when Zafe opens.</li>
+    <li>Every member must reach it over HTTPS, with a certificate phones trust. Members who use Tor can’t reach a private network address.</li>
+    <li>You see what any server sees: who talks to which vault, when, and from which IP address. The Caddy setup keeps no access log; keep it that way.</li>
+    <li>Run one instance per database file. Never two containers on the same data, and no scaling out.</li>
+    <li>Want it in the app’s server list? Open a pull request adding it to <a href={`${repo}/blob/main/app/lib/src/core/config/relay_presets.dart`}><code>relay_presets.dart</code></a>, with your name as its operator.</li>
+    <li>Own reverse proxy instead of Caddy? Let responses take 40 seconds or more (the app holds requests open for 25), and set <code>ZAFE_RELAY_CLIENT_IP_HEADER</code> to a header your proxy overwrites.</li>
+  </ul>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>The app says “Not a Zafe server.” or “Couldn’t connect.”</dt><dd>Open <code>https://relay.example.org/health</code> in a browser: it should say <code>ok</code>. If the certificate fails, check that DNS points straight at the server, then <code>sudo docker compose logs caddy</code>.</dd></div>
+    <div><dt>“It runs an older Zafe server and can’t hold new vaults.”</dt><dd>Pull the newest image (above).</dd></div>
+    <div><dt>“This server is private: it needs its create token.”</dt><dd>Send the member <code>relay.example.org#&lt;token&gt;</code>.</dd></div>
+  </dl>
+</Doc>

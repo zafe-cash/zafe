@@ -1,0 +1,27 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="send">
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>On Home, tap <strong>New payment</strong>.</li>
+    <li>Enter the <strong>Zcash address</strong>: <strong>Paste</strong> it or <strong>Scan QR code</strong>. Tap <strong>Continue</strong>.</li>
+    <li>Enter the amount and tap <strong>Finish &amp; review</strong>. Optional: <strong>Add short encrypted message</strong>. Only the recipient and the vault’s signers can read it.</li>
+    <li>Check the review: amount, recipient, <strong>Approvals needed</strong> and <strong>Network fee</strong>.</li>
+    <li>Tap <strong>Propose payment</strong> and unlock. Proposing counts as your approval.</li>
+    <li>The others see it under <strong>Needs you</strong> on Home. When the last approval needed comes in, that phone sends the payment. You see <strong>Sent!</strong>; it confirms on chain shortly.</li>
+  </ol>
+  <p>
+    Several recipients: tap <strong>Add another recipient</strong>, or <strong>Import recipients from CSV</strong>
+    with one <code>address,amount,memo</code> line per payment (memo optional). The fee is
+    Zcash’s standard fee (ZIP 317); your phone won’t sign a payment with any other.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“Some funds are held by open payments”</dt><dd>Money in a payment that is still open is set aside. Wait for it to be sent or expire, cancel it, or send less.</dd></div>
+    <div><dt>It waits for approvals</dt><dd>See <a href="/docs/waiting-and-expired">waiting and expired payments</a>.</dd></div>
+    <div><dt>“This needs a newer version of Zafe”</dt><dd><a href="/docs/updates">Update Zafe</a>, then try again.</dd></div>
+  </dl>
+</Doc>

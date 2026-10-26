@@ -41,6 +41,13 @@ docker build -f infra/relay/Dockerfile -t zafe-relay:dev .
 docker run -d --name zr -p 18899:8080 zafe-relay:dev && curl localhost:18899/health; docker rm -f zr
 ```
 
+Docs (infra/site, `/docs`): **a change to an app label, flow, screen or server setting
+updates the docs in the same change.** `python3 scripts/check_docs_sync.py` (CI on app and
+site changes) fails when a `<strong>` label isn't in app/lib, a `ZAFE_RELAY_*` setting
+isn't read by the relay, or a `<Shot>` screen is missing from assets.py;
+`scripts/check_docs_links.py` (site CI, after `build.sh`) checks every URL in
+`docs_links.dart`. `<b>` is plain emphasis. The live docs follow main (site deploys on push).
+
 Theme colours: `python3 scripts/check_theme_pairs.py` (CI) flags a token whose dark and
 light values differ in ramp, read grey in one theme, or differ in hue; mark a deliberate
 pair with `// theme-pair: <why>`.
@@ -361,6 +368,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   forced-command deploy users per network (`vps/zafe-deploy`, change it via `bootstrap.sh`).
   DNS must stay **DNS only** in Cloudflare. Publish no Docker port but Caddy's (bypasses ufw).
   Compose variables need defaults. Details: `infra/relay/README.md`, `docs/audit-scope.md` §10.
+- **Site links from the app** go through `app/lib/src/core/config/docs_links.dart`;
+  `scripts/check_docs_links.py` (after `infra/site/build.sh`) checks each still resolves. A
+  path a shipped build used never dies: redirect it (`/relay` → `/docs/run-a-server`, in
+  `public/_redirects` and `vercel-output.sh`). Docs pages: `infra/site/src/docs/pages.ts`.
 - **Promote the relay before an app that needs it ships** (e.g. FCM FIDs, `PushPlatform::FcmFid`).
 - Public lightwalletd: testnet `https://testnet.zec.rocks:443`, mainnet `https://zec.rocks:443`.
 

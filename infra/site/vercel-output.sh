@@ -51,20 +51,29 @@ PY
 rm -rf "$output"
 mkdir -p "$output"
 cp -R "$dist" "$output/static"
-rm -f "$output/static/_headers" "$output/static/.nojekyll"
+rm -f "$output/static/_headers" "$output/static/_redirects" "$output/static/.nojekyll"
 
-# Every top-level page but the home page is served at its clean path (/join, /showcase:
-# build.format 'file' writes join.html), with /name/ and /name.html redirecting there.
+# Every page but the home page is served at its clean path (/join, /showcase, /docs,
+# /docs/run-a-server: build.format 'file' writes join.html, docs/run-a-server.html), with
+# /name/ and /name.html redirecting there.
 overrides=''
 redirects=''
-for page in "$output"/static/*.html; do
-  name="$(basename "$page" .html)"
-  [[ "$name" == index ]] && continue
+shopt -s nullglob
+for page in "$output"/static/*.html "$output"/static/docs/*.html; do
+  name="${page#"$output/static/"}"
+  name="${name%.html}"
+  [[ "$name" == index || "$name" == relay ]] && continue
+  [[ "$name" =~ ^[a-z0-9/-]+$ ]] || die "unexpected page name: $name"
   overrides+="${overrides:+, }\"$name.html\": { \"path\": \"$name\", \"contentType\": \"text/html; charset=utf-8\" }"
   redirects+="    { \"src\": \"^/$name/\$\", \"status\": 308, \"headers\": { \"Location\": \"/$name\" } },
     { \"src\": \"^/$name\\\\.html\$\", \"status\": 308, \"headers\": { \"Location\": \"/$name\" } },
 "
 done
+shopt -u nullglob
+# Permanent redirects (public/_redirects has the same for other hosts). /relay is linked
+# from shipped app builds ("Run your own relay"): keep it forever.
+redirects+="    { \"src\": \"^/relay(/|\\\\.html)?\$\", \"status\": 308, \"headers\": { \"Location\": \"/docs/run-a-server\" } },
+"
 for f in assetlinks.json apple-app-site-association; do
   if [[ -f "$output/static/.well-known/$f" ]]; then
     overrides+=", \".well-known/$f\": { \"contentType\": \"application/json\" }"

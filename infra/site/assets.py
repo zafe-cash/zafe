@@ -42,6 +42,12 @@ CROPS = [
     # The vault door with its keys, behind the closing call to action (a dark card, so
     # the dark render).
     ("art_vault", "illustration_preview/welcome_vault", (0, 120, 1080, 1240), "dark"),
+    # The docs (/docs/*): the server screens, cropped to the part a page explains
+    # (relay_move_render_test, relay_render_test).
+    ("docs_server", "screen_preview/move_server", (0, 0, 780, 640)),
+    ("docs_server_list", "screen_preview/relay_picker_other_token", (0, 0, 780, 860)),
+    ("docs_move_waiting", "screen_preview/move_waiting", (0, 0, 780, 920)),
+    ("docs_move_card", "screen_preview/move_needs_you", (0, 148, 780, 438)),
 ]
 
 FONTS = [

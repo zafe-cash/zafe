@@ -1,0 +1,33 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="tor">
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>Open <strong>Settings</strong>. Under <strong>Privacy</strong>, turn on <strong>Use Tor</strong>.</li>
+    <li>Wait while it says <strong>Connecting...</strong>. The first connection can take a while.</li>
+  </ol>
+  <p>
+    Tor is built into Zafe; you don’t need another app. It is set per phone and is off
+    until you turn it on.
+  </p>
+
+  <h2>What goes through Tor</h2>
+  <ul>
+    <li>The vault’s server, the Zcash server and the price lookups. None of them see your IP address.</li>
+    <li>Once Tor is on, nothing connects without it. If Tor can’t connect, Zafe sends nothing and says so.</li>
+    <li>Not covered: notifications. They still arrive through Google, and carry no content.</li>
+  </ul>
+  <p>
+    Without Tor, a server that isn’t on Zafe’s list sees your IP address. The app tells you
+    when you pick or follow one.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“Tor couldn’t connect”</dt><dd>Tap <strong>Try again</strong> under <strong>Use Tor</strong>. On a network that blocks Tor, turn it off to use Zafe there.</dd></div>
+    <div><dt>“Connecting to Tor. Nothing is sent until it connects.”</dt><dd>Wait a moment. Payments and approvals go out once it connects.</dd></div>
+    <div><dt>A server on your home network doesn’t work</dt><dd>Tor can’t reach private network addresses. Use a public address for the server, or turn Tor off.</dd></div>
+  </dl>
+</Doc>

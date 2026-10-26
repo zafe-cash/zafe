@@ -67,10 +67,13 @@ touch "$out/.nojekyll" # GitHub Pages: serve .well-known
 # data for search engines, Base.astro). Browsers never execute that type, so script-src
 # doesn't apply to it; any other attribute or type still fails, and its contents must
 # parse as JSON (checked below).
-if grep -l -P '<script(?![^>]*\ssrc=)(?!\s+type="?application/ld\+json"?>)[^>]*>|<style|\s(style|on[a-z]+)=' "$out"/*.html; then
+shopt -s nullglob
+pages=("$out"/*.html "$out"/docs/*.html) # docs pages: /docs/<slug> -> docs/<slug>.html
+shopt -u nullglob
+if grep -l -P '<script(?![^>]*\ssrc=)(?!\s+type="?application/ld\+json"?>)[^>]*>|<style|\s(style|on[a-z]+)=' "${pages[@]}"; then
   die "inline script or style in the pages above (the CSP would block it)"
 fi
-python3 - "$out"/*.html <<'PY' || die "invalid JSON-LD"
+python3 - "${pages[@]}" <<'PY' || die "invalid JSON-LD"
 import json, re, sys
 for page in sys.argv[1:]:
     html = open(page, encoding='utf-8').read()

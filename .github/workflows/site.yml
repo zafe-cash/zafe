@@ -15,9 +15,9 @@ name: Site
 on:
   push:
     branches: [main]
-    paths: ['infra/site/**', '.github/workflows/site.yml']
+    paths: ['infra/site/**', 'app/lib/src/core/config/docs_links.dart', '.github/workflows/site.yml']
   pull_request:
-    paths: ['infra/site/**', '.github/workflows/site.yml']
+    paths: ['infra/site/**', 'app/lib/src/core/config/docs_links.dart', '.github/workflows/site.yml']
   workflow_dispatch:
 
 permissions:
@@ -70,6 +70,14 @@ jobs:
           [ -z "$testnet" ] || echo "ZAFE_TESTNET_URL=https://github.com/$repo/releases/tag/$testnet" >> "$GITHUB_ENV"
           echo "mainnet: ${mainnet:-none}, testnet: ${testnet:-none}"
       - run: ./build.sh
+      # The docs say what the app and the server do: labels, settings and screens still
+      # exist, and every link the app opens resolves on this build (one main build, one
+      # set of docs).
+      - name: Docs match the app
+        working-directory: .
+        run: |
+          python3 scripts/check_docs_sync.py
+          python3 scripts/check_docs_links.py
       - run: ./vercel-output.sh
 
       - name: Vercel settings

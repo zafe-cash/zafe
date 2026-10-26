@@ -1511,3 +1511,102 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
   .hc-live li { white-space: normal; }
   .hc-live ul { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
 }
+
+/* Docs (/docs and /docs/<slug>, layouts/Doc.astro): the sidebar on wide screens and one
+   reading column (44rem). No script: on phones the sidebar goes, the breadcrumb is the
+   way back, and Related plus "All docs" end each page. Teal only on links you follow. */
+.docs { display: grid; grid-template-columns: 13.5rem minmax(0, 44rem); gap: 72px; justify-content: center; max-width: 76rem; margin: 0 auto; padding: 88px 24px 120px; }
+.docs-page main.doc { max-width: 44rem; min-width: 0; margin: 0; padding: 0; }
+.docs-page main.docs-index { margin: 0 auto; padding: 88px 24px 120px; }
+
+.docs-side { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; padding: 4px 4px 24px 0; font-size: 15px; }
+.docs-side ul { list-style: none; margin: 0; padding: 0; }
+.docs-side a { display: flex; align-items: center; min-height: 36px; padding: 4px 12px; border-radius: 10px; color: var(--text-secondary); text-decoration: none; }
+.docs-side a[aria-current="page"] { background: var(--raised); color: var(--text); font-weight: 500; }
+@media (hover: hover) and (pointer: fine) { .docs-side a:hover { color: var(--text); } }
+.docs-side-home { margin-bottom: 8px; }
+.docs-side-group { margin-top: 20px; }
+.docs-side .docs-side-title { margin: 0 0 4px; padding: 0 12px; font-size: 14px; font-weight: 500; color: var(--text); }
+
+.crumbs ol { list-style: none; display: flex; flex-wrap: wrap; align-items: center; margin: 0 0 12px; padding: 0; font-size: 15px; color: var(--text-secondary); }
+.crumbs li + li::before { content: "\203A"; margin: 0 10px; }
+.doc .crumbs a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { .doc .crumbs a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 0.2em; } }
+
+.doc h1 { font-family: var(--display); font-weight: 500; font-size: clamp(36px, 5vw, 56px); line-height: 1.05; letter-spacing: -0.035em; text-wrap: balance; margin: 0 0 16px; }
+.doc .doc-sum { font-size: 19px; line-height: 1.5; color: var(--text-secondary); margin: 0 0 28px; max-width: 34em; }
+.doc h2 { font-family: var(--display); font-weight: 500; font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; margin: 56px 0 14px; }
+.doc h3 { font-family: var(--display); font-weight: 600; font-size: 19px; line-height: 1.3; letter-spacing: -0.01em; margin: 32px 0 8px; }
+.doc p, .doc li, .doc dd { font-size: 17px; line-height: 1.6; }
+.doc p { margin: 0 0 14px; }
+.doc ul:not([class]) { margin: 0 0 14px; padding-left: 1.2em; }
+.doc ul:not([class]) li { margin: 0 0 8px; }
+.doc a { color: var(--brand); text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+.doc strong { font-weight: 600; }
+.doc code { font-family: var(--mono); font-variant-ligatures: none; font-size: 0.86em; padding: 1px 5px; border-radius: 6px; background: var(--ground); overflow-wrap: anywhere; }
+.doc pre { margin: 12px 0 18px; padding: 14px 16px; border-radius: 12px; background: var(--ground); overflow-x: auto; font-size: 14px; line-height: 1.55; }
+.doc pre code { padding: 0; background: none; font-size: inherit; overflow-wrap: normal; }
+
+/* Numbered steps: the number in a quiet disc, the real button names in bold. */
+.doc-steps { list-style: none; counter-reset: step; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.doc-steps > li { counter-increment: step; position: relative; padding-left: 44px; margin: 0; }
+.doc-steps > li::before { content: counter(step); position: absolute; left: 0; top: 0.05em; width: 28px; height: 28px; border-radius: 999px; background: var(--raised); color: var(--text); font: 500 15px/28px var(--display); text-align: center; }
+.doc-steps pre { margin-top: 10px; }
+
+/* "If it goes wrong" and other question/answer lists. */
+.doc-fixes { margin: 8px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.doc-fixes dt { font-weight: 600; font-size: 17px; }
+.doc-fixes dd { margin: 4px 0 0; color: var(--text-secondary); }
+.doc-fixes dd p { margin: 6px 0 0; }
+/* Settings reference (run-a-server). */
+.doc-vars { margin: 8px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.doc-vars dt code { font-size: 14px; }
+.doc-vars dd { margin: 4px 0 0; color: var(--text-secondary); font-size: 16px; }
+
+.doc-note { font-size: 15px !important; color: var(--text-secondary); }
+
+.doc-shot { margin: 28px 0; }
+.doc-shot img { display: block; width: min(100%, 320px); height: auto; border-radius: 24px; border: 1px solid var(--line); background: #F0F4F4; }
+.doc-shot figcaption { margin-top: 10px; font-size: 15px; color: var(--text-secondary); }
+
+.doc-related { margin-top: 72px; padding-top: 8px; border-top: 1px solid var(--line); }
+.doc-related h2 { margin-top: 24px; font-size: 22px; }
+.doc-related ul { list-style: none; margin: 0; padding: 0; }
+.doc-related li a, .doc-all a { display: inline-flex; align-items: center; min-height: 44px; }
+.doc .doc-all { margin: 4px 0 0; }
+.doc-all a { color: var(--text); font-weight: 500; }
+.doc .doc-checked { margin: 40px 0 0; font-size: 14px; color: var(--text-secondary); }
+
+/* /docs: the sections as plain lists, title and one line each. */
+.docs-index section { scroll-margin-top: 24px; }
+.docs-list { list-style: none; margin: 0; padding: 0; }
+.docs-list li { border-top: 1px solid var(--line); }
+.docs-list li:last-child { border-bottom: 1px solid var(--line); }
+.docs-list a { display: grid; gap: 2px; padding: 14px 0; color: var(--text); text-decoration: none; }
+.docs-list strong { font-weight: 500; font-size: 17px; }
+.docs-list span { font-size: 15px; color: var(--text-secondary); }
+@media (hover: hover) and (pointer: fine) { .docs-list a:hover strong { text-decoration: underline; text-underline-offset: 0.2em; text-decoration-thickness: 1px; } }
+.docs-index h2 { font-size: 22px; margin: 48px 0 8px; }
+.doc .doc-help { margin-top: 48px; color: var(--text-secondary); }
+
+@media (max-width: 900px) {
+  .docs { display: block; padding: 32px 20px 96px; }
+  .docs-side { display: none; }
+  .docs-page main.docs-index { padding: 32px 20px 96px; }
+  .doc .doc-sum { font-size: 18px; }
+  .doc h2 { margin-top: 44px; }
+}
+/* Troubleshooting: the problems on the page, as jump links. */
+.docs-toc { list-style: none; margin: 24px 0 0; padding: 0; columns: 2; column-gap: 32px; }
+.docs-toc li { break-inside: avoid; }
+.docs-toc a { display: inline-flex; align-items: center; min-height: 44px; }
+.doc h2[id] { scroll-margin-top: 24px; }
+@media (max-width: 600px) { .docs-toc { columns: 1; } }
+/* Support's quick fixes: links into /docs/troubleshooting. */
+.sp-links { list-style: none; margin: 0 auto; padding: 0; max-width: 34rem; }
+.sp-links li { border-top: 1px solid var(--line); }
+.sp-links li:last-child { border-bottom: 1px solid var(--line); }
+.sp-links a { display: flex; align-items: center; min-height: 52px; font-size: 18px; color: var(--text); text-decoration: none; }
+@media (hover: hover) and (pointer: fine) { .sp-links a:hover { text-decoration: underline; text-underline-offset: 0.2em; text-decoration-thickness: 1px; } }
+.sp .sp-all { margin: 24px 0 0; text-align: center; }
+.sp-all a { display: inline-flex; align-items: center; min-height: 44px; color: var(--brand); font-weight: 500; }

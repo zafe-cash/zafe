@@ -1,0 +1,30 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="updates">
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>From Google Play, update Zafe as usual. When an update is ready inside the app, Home shows <strong>Update ready</strong>: tap it to restart. It waits while a payment is sending.</li>
+    <li>Installed the APK? Install the newest one from <a href="/download">the download page</a> over the old one. Your vaults stay.</li>
+    <li>Tell the others. Every member of a vault should be on a current version.</li>
+  </ol>
+
+  <h2>NU7 on November 5</h2>
+  <p>
+    Zcash’s NU7 network upgrade activates on mainnet around November 5, 2026 (block
+    3,543,405). Zafe 0.1.18 and newer are ready for it. Older versions can’t send after the
+    upgrade. Funds are never at risk, but every member has to update before then.
+  </p>
+  <p>
+    A payment proposed in the days before the upgrade gets a shorter approval window: it
+    expires before the upgrade. If it doesn’t make it, propose it again afterwards.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“Update Zafe”: other members use a newer version</dt><dd>Some vault activity only shows after you update. Update, then open the vault again.</dd></div>
+    <div><dt>“<em>Name</em> must update Zafe first”</dt><dd>Shown on the Server screen before a move. That member updates; then the move is available.</dd></div>
+    <div><dt>“The server needs an update”</dt><dd>The vault’s server is older than the app. Ask whoever runs it to update it, or <a href="/docs/move-servers">move to another server</a>.</dd></div>
+  </dl>
+</Doc>

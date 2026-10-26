@@ -1,0 +1,45 @@
+---
+// /docs: every docs page by section, with a few popular tasks first. It is also the docs
+// menu on phones (the docs pages have no drawer), so every page is listed here.
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import { docHref, findPage, popular, sections } from '../../docs/pages';
+
+const top = popular.map((s) => findPage(s).page);
+---
+
+<Base
+  title="Docs · Zafe"
+  description="How to set up a Zafe vault, pay and approve, replace a lost phone, and run your own server."
+  bodyClass="docs-page"
+>
+  <Nav />
+  <main class="doc docs-index">
+    <h1>Docs</h1>
+    <p class="doc-sum">Set up a vault, pay together, recover a phone, run a server.</p>
+
+    <section aria-labelledby="popular-title">
+      <h2 id="popular-title">Popular</h2>
+      <ul class="docs-list">
+        {top.map((p) => (
+          <li><a href={docHref(p.slug)}><strong>{p.title}</strong><span>{p.summary}</span></a></li>
+        ))}
+      </ul>
+    </section>
+
+    {sections.map((s) => (
+      <section id={s.id} aria-labelledby={`${s.id}-title`}>
+        <h2 id={`${s.id}-title`}>{s.title}</h2>
+        <ul class="docs-list">
+          {s.pages.map((p) => (
+            <li><a href={docHref(p.slug)}><strong>{p.title}</strong><span>{p.summary}</span></a></li>
+          ))}
+        </ul>
+      </section>
+    ))}
+
+    <p class="doc-help">Something else? <a href="/support">Write to us</a>.</p>
+  </main>
+  <Footer />
+</Base>

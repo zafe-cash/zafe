@@ -1,0 +1,40 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="backups">
+  <p>
+    Your key share exists only on your phone. A backup is an encrypted file plus 12 words
+    that unlock it. Each member backs up their own share, once per vault. The
+    <strong>Signers</strong> tab shows who has.
+  </p>
+
+  <h2>Back up</h2>
+  <ol class="doc-steps">
+    <li>Open <strong>Settings</strong>, then <strong>Back up</strong> under the vault’s name. Or tap <strong>Back up this vault</strong> on Home.</li>
+    <li>Write the 12 words down, or keep them in a password manager. Zafe can’t show them again. Tap <strong>I saved them</strong>.</li>
+    <li>Under <strong>Check your words</strong>, type the three words it asks for, then tap <strong>Create backup</strong>.</li>
+    <li>Tap <strong>Save or share the file</strong>, or <strong>Copy as text</strong>. Keep the file and the words in different places.</li>
+  </ol>
+
+  <h2>Restore on a new phone</h2>
+  <ol class="doc-steps">
+    <li>Install Zafe and tap <strong>I’m already in a vault</strong>, then <strong>Yes, restore it</strong>.</li>
+    <li>Tap <strong>Choose backup file</strong>, or <strong>Paste</strong> the backup text.</li>
+    <li>Enter the 12 <strong>Backup words</strong> and tap <strong>Restore vault</strong>.</li>
+  </ol>
+
+  <h2>What’s in it</h2>
+  <ul>
+    <li>Your key share and the vault’s keys, its members and its server.</li>
+    <li>A copy of the vault’s history, so a server that lost data can be repaired from it.</li>
+    <li>Not included: anything used while signing. A payment that was open when you restored may need to be proposed again.</li>
+  </ul>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>You lost the words</dt><dd>The file is useless without them, and nobody can recover them. If you still have the phone, make a new backup.</dd></div>
+    <div><dt>Someone may have the file and the words</dt><dd>They can sign in your place. Tell your co-signers, and consider moving the funds to a new vault.</dd></div>
+    <div><dt>No backup and the phone is gone</dt><dd>Your co-signers can <a href="/docs/lost-phone">move your seat</a> to a new phone.</dd></div>
+  </dl>
+</Doc>

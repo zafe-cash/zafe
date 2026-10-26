@@ -1,0 +1,49 @@
+---
+// One docs page (/docs/<slug>): the sidebar on wide screens, then the reading column:
+// breadcrumb (on phones also the way back), the H1 (a task), one line, the page's own
+// content (steps, "If it goes wrong"), Related, and when the steps were last checked
+// against the app. No script, no drawer: on phones the breadcrumb sits on top and Related
+// plus "All docs" at the bottom. Pages come from src/docs/pages.ts.
+import Base from './Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import DocsSidebar from '../components/DocsSidebar.astro';
+import { checked, docHref, findPage } from '../docs/pages';
+
+interface Props {
+  slug: string;
+}
+
+const { slug } = Astro.props;
+const { page, section } = findPage(slug);
+const related = page.related.map((s) => findPage(s).page);
+---
+
+<Base title={`${page.title} · Zafe docs`} description={page.summary} bodyClass="docs-page">
+  <Nav />
+  <div class="docs">
+    <DocsSidebar current={slug} />
+    <main class="doc">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <ol>
+          <li><a href="/docs">Docs</a></li>
+          <li><a href={`/docs#${section.id}`}>{section.title}</a></li>
+        </ol>
+      </nav>
+      <h1>{page.title}</h1>
+      <p class="doc-sum">{page.summary}</p>
+      <slot />
+      <section class="doc-related" aria-labelledby="related-title">
+        <h2 id="related-title">Related</h2>
+        <ul class="doc-related-list">
+          {related.map((r) => (
+            <li><a href={docHref(r.slug)}>{r.title}</a></li>
+          ))}
+        </ul>
+        <p class="doc-all"><a href="/docs">All docs</a></p>
+      </section>
+      <p class="doc-checked">Checked with Zafe {checked.version} · {checked.date}</p>
+    </main>
+  </div>
+  <Footer />
+</Base>

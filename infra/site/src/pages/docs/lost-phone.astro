@@ -1,0 +1,45 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="lost-phone">
+  <h2>With your backup</h2>
+  <ol class="doc-steps">
+    <li>Install Zafe on the new phone and tap <strong>I’m already in a vault</strong>, then <strong>Yes, restore it</strong>.</li>
+    <li>Tap <strong>Choose backup file</strong> (or <strong>Paste</strong>), enter the 12 <strong>Backup words</strong> and tap <strong>Restore vault</strong>.</li>
+  </ol>
+
+  <h2>Without a backup</h2>
+  <p>Your co-signers rebuild your key share on the new phone. Enough of them must take part; the app shows how many.</p>
+  <h3>On the new phone</h3>
+  <ol class="doc-steps">
+    <li>Install Zafe and tap <strong>I’m already in a vault</strong>, then <strong>No, ask my co-signers</strong>.</li>
+    <li>On <strong>Recover your seat</strong>, tap <strong>Send code to a co-signer</strong>.</li>
+    <li>When they send back the vault link, add it with <strong>Paste link</strong> or <strong>Scan</strong>.</li>
+  </ol>
+  <h3>On a co-signer’s phone</h3>
+  <ol class="doc-steps">
+    <li>Open <strong>Signers</strong> and tap <strong>Replace a lost phone</strong>.</li>
+    <li>Under <strong>Who lost their phone?</strong>, pick them. Paste or scan the <strong>Code from their new phone</strong>.</li>
+    <li>Send them the vault link it shows: <strong>Share</strong> or <strong>Show QR</strong>.</li>
+    <li>Call them or meet. If their new phone shows the same <a href="/docs/safety-words">safety words</a>, tick <strong>Their new phone shows these words</strong> and tap <strong>Approve move</strong>.</li>
+  </ol>
+  <p>
+    The other co-signers see the move under <strong>Needs you</strong> and tap <strong>Compare safety words</strong>
+    to do the same. Once enough approve, their phones rebuild the key share on the new phone.
+  </p>
+  <h3>Back on the new phone</h3>
+  <ol class="doc-steps">
+    <li>Ask a co-signer to read you the end of the vault address (Home, <strong>Receive</strong>).</li>
+    <li>If it matches <strong>Vault address ends in</strong>, tap <strong>It matches: save the vault</strong>. If not, tap <strong>It doesn’t match</strong>.</li>
+    <li><a href="/docs/backups">Back up</a> the new phone.</li>
+  </ol>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>The words differ, or someone you didn’t ask appears</dt><dd>Stop and don’t approve. Start over with a new code.</dd></div>
+    <div><dt>A co-signer’s phone doesn’t do its part</dt><dd>Another co-signer can take over from <strong>Signers</strong> with <strong>Help instead of …</strong>.</dd></div>
+    <div><dt>The old phone turns up somewhere else</dt><dd>Its key share still works if someone unlocks Zafe on it, though they would still need enough other members. To rule it out, move the funds to a new vault.</dd></div>
+  </dl>
+  <p class="doc-note">If more phones are lost than the vault’s rule allows, and none of them had a backup, the funds can’t be recovered.</p>
+</Doc>

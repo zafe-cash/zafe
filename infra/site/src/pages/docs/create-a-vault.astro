@@ -1,0 +1,33 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="create-a-vault">
+  <h2>Before you start</h2>
+  <ul>
+    <li>Agree on who the members are (2 to 15) and how many must approve each payment.</li>
+    <li>Everyone installs Zafe. Each member uses their own phone.</li>
+    <li>Plan a call or a meeting for the safety words, near the end of setup.</li>
+  </ul>
+
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>Open Zafe and tap <strong>Create a vault</strong>. Already in a vault? Tap its name at the top of Home, then <strong>Add vault</strong>.</li>
+    <li>Fill in <strong>Vault name</strong> and <strong>Your name</strong>. The other members see both.</li>
+    <li>Set <strong>Members</strong> and <strong>Signatures needed</strong>. The line below says how many lost keys the vault survives.</li>
+    <li>Pick the <strong>Approval window</strong>: 1, 3, 7 or 14 days. A payment that isn’t sent by then expires. You can’t change this later.</li>
+    <li>Optional: tap <strong>More options</strong>, then <strong>Server</strong>, to use <a href="/docs/servers">another server</a> than Zafe’s.</li>
+    <li>Tap <strong>Create vault</strong>.</li>
+    <li>Under <strong>Invite members</strong>, tap <strong>Share link</strong> or <strong>Copy</strong>, and send it to each co-signer over a channel you trust. It works for 3 days; sharing it again adds 3 more.</li>
+    <li>When everyone has joined, compare the <a href="/docs/safety-words">safety words</a> with every member, then tap <strong>They match</strong>.</li>
+    <li>The phones make the vault’s keys together. You can close Zafe: it tells you when the vault is ready.</li>
+    <li><a href="/docs/backups">Back up</a> your key share.</li>
+  </ol>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“This invite expired”</dt><dd>Open the setup and share the link again. Each share gives it another 3 days.</dd></div>
+    <div><dt>The words differ, or a stranger joined</dt><dd>Tap <strong>They don’t match</strong>. No keys exist yet. Start again with a new invite, sent another way.</dd></div>
+    <div><dt>Someone never shows up</dt><dd>The setup waits for them and names who is missing. To give up, tap <strong>Cancel setup</strong> (<strong>Abandon setup</strong> once everyone has joined) and start again with the people who are ready.</dd></div>
+  </dl>
+</Doc>

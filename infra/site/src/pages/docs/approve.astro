@@ -1,0 +1,46 @@
+---
+import Doc from '../../layouts/Doc.astro';
+import Shot from '../../components/Shot.astro';
+---
+
+<Doc slug="approve">
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>Open the request from <strong>Needs you</strong> on Home, or from the notification.</li>
+    <li>Read the amount, the recipient and the message. Tap the address to see all of it.</li>
+    <li>Wait for <strong>Checked on this phone</strong>. <strong>Approve</strong> stays off until the check is done.</li>
+    <li>Tap <strong>Approve</strong> and unlock. Or tap <strong>Decline</strong>.</li>
+  </ol>
+  <Shot
+    name="story_me_request"
+    width={780}
+    height={1688}
+    alt="Zafe's Payment request screen: Bob asks to send 12.50 ZEC with the message “Grant: Q4 audit milestone”, the line “Checked on this phone”, and Approve and Decline buttons."
+    caption="A request, checked on this phone."
+  />
+  <p>
+    Usually that is all: your approval carries your signature. If not, the phone that
+    sends asks yours to sign, and Zafe answers in the background.
+  </p>
+
+  <h2>What your phone checks</h2>
+  <p>
+    Your phone doesn’t trust the summary or the server. It rebuilds the transaction
+    itself, before you approve and again before it signs:
+  </p>
+  <ul>
+    <li><strong>Payments.</strong> Recipients, amounts and memos are exactly as shown.</li>
+    <li><strong>Funds.</strong> Only the vault’s money is spent.</li>
+    <li><strong>Change.</strong> Everything left over goes back to the vault.</li>
+    <li><strong>Fee.</strong> Exactly Zcash’s standard fee (ZIP 317).</li>
+    <li><strong>Network.</strong> The transaction is for this network, with the expected expiry.</li>
+  </ul>
+  <p>Tap <strong>Checked on this phone</strong> to see the same list in the app.</p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“This transaction does not do what the request says”</dt><dd>Don’t approve it. Tell the other members, and write to <a href="mailto:security@zafe.cash">security@zafe.cash</a>.</dd></div>
+    <div><dt>“Couldn’t check. Tap to retry.”</dt><dd>Usually a connection problem. Tap the line to check again.</dd></div>
+    <div><dt>“Approve again”</dt><dd>A signing round didn’t finish, or this phone was restored. Tap it to approve once more.</dd></div>
+  </dl>
+</Doc>

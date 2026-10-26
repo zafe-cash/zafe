@@ -1,0 +1,22 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="receive">
+  <h2>Steps</h2>
+  <ol class="doc-steps">
+    <li>On Home, tap <strong>Receive</strong>.</li>
+    <li>Show the QR code, or tap <strong>Share vault address</strong> or <strong>Copy vault address</strong>.</li>
+    <li>The payment shows on Home and in <strong>Activity</strong>, first as <strong>Pending</strong>, then <strong>Confirmed</strong>.</li>
+  </ol>
+  <p>
+    The vault has one shielded address, the same on every member’s phone. Receiving needs
+    no approval. The payer needs a Zcash wallet that can pay a shielded address.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>The payment doesn’t show</dt><dd>Pull down on Home to check again. A new vault’s first sync can take a few minutes. Tap the status at the top of Home to see whether something failed.</dd></div>
+    <div><dt>You want to check the address with a co-signer</dt><dd>Read the last characters to each other from your own phones, not from a message.</dd></div>
+  </dl>
+</Doc>

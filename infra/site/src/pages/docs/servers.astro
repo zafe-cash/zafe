@@ -1,0 +1,50 @@
+---
+import Doc from '../../layouts/Doc.astro';
+import Shot from '../../components/Shot.astro';
+---
+
+<Doc slug="servers">
+  <p>
+    Every vault has one server, shared by all its members. It passes encrypted messages
+    between their phones and keeps the vault’s history, so everyone sees the same
+    payments. It is not the <strong>Zcash server</strong> (Settings, <strong>This phone</strong>), which each
+    phone uses to read the blockchain.
+  </p>
+
+  <h2>What a server sees</h2>
+  <ul>
+    <li>Sees: each member’s public keys, encrypted messages with their size and time, and the phones’ IP addresses unless they <a href="/docs/tor">use Tor</a>.</li>
+    <li>Never sees: keys, balances, amounts, addresses or memos. It can’t spend, and it can’t make a phone sign anything that phone didn’t check.</li>
+    <li>Can: delay or drop messages, or go offline. Payments then wait; funds stay safe. Each phone keeps its own copy of the history, so a server that loses or changes it is caught.</li>
+  </ul>
+
+  <h2>Zafe’s server or another</h2>
+  <ul>
+    <li><b>Zafe’s</b> (relay.zafe.cash): run by us under our <a href="/privacy">privacy policy</a>, with notifications.</li>
+    <li><b>Another operator’s, or <a href="/docs/run-a-server">your own</a>:</b> they see what a server sees instead of us, and their terms apply. No notifications: phones check in the background and when you open Zafe. Every member must be able to reach it.</li>
+  </ul>
+
+  <h2>Pick or check the server</h2>
+  <ol class="doc-steps">
+    <li>New vault: on <strong>New vault</strong>, tap <strong>More options</strong>, then <strong>Server</strong>. Everyone who joins uses it.</li>
+    <li>Existing vault: open <strong>Settings</strong>, then <strong>Server</strong> under the vault’s name. It shows the address, who runs it, its status and whether it sends notifications.</li>
+  </ol>
+  <Shot
+    name="docs_server"
+    width={780}
+    height={640}
+    alt="Zafe's Server screen: Address relay.zafe.cash, Status Connected, Notifications On, and the line “Everyone in Grants uses this server to work on payments together. It only sees encrypted messages.”"
+  />
+  <p>
+    In the server list, pick a listed server or tap <strong>Other address</strong> and type, <strong>Paste</strong> or scan
+    one, then tap <strong>Use this server</strong>. Only the server you select is contacted. To change
+    an existing vault’s server, <a href="/docs/move-servers">move it</a>.
+  </p>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“Not a Zafe server.” or “Couldn’t connect.”</dt><dd>Check the address with whoever runs it. “Its certificate isn’t trusted.” means its HTTPS setup is broken.</dd></div>
+    <div><dt>“It runs an older Zafe server and can’t hold new vaults.”</dt><dd>Its operator needs to update it.</dd></div>
+    <div><dt>It asks for a <strong>Create token</strong></dt><dd>The server is private. Ask its operator for the token, or for an address with the token after <code>#</code>.</dd></div>
+  </dl>
+</Doc>

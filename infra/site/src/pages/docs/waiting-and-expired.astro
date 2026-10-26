@@ -1,0 +1,42 @@
+---
+import Doc from '../../layouts/Doc.astro';
+---
+
+<Doc slug="waiting-and-expired">
+  <h2>A payment is waiting</h2>
+  <p>
+    It needs enough approvals. The payment page says how many are missing, and when it
+    expires if it isn’t sent.
+  </p>
+  <ol class="doc-steps">
+    <li>Ask the others to open Zafe. Notifications can arrive late, be turned off, or not exist on <a href="/docs/servers">a server other than Zafe’s</a>.</li>
+    <li>All approvals in but not sent? Open it and tap <strong>Send now</strong>, <strong>Collect signatures &amp; send</strong> or <strong>Resume sending</strong>.</li>
+    <li>A signer doesn’t answer while signing: tap <strong>Start over with other signers</strong>. It leaves out those who didn’t answer; those who signed approve again.</li>
+  </ol>
+
+  <h2>How long it can wait</h2>
+  <p>
+    As long as the vault’s approval window, chosen when it was created: 1, 3, 7 or 14 days
+    (counted in blocks, so allow a little either way). A payment proposed shortly before
+    a Zcash network upgrade gets less time: it expires before the upgrade.
+  </p>
+
+  <h2>It expired</h2>
+  <p>
+    “This payment expired before it was sent. Nothing left the vault.” Tap
+    <strong>Propose again</strong> to start over; everyone approves again.
+  </p>
+
+  <h2>Cancel a payment</h2>
+  <ol class="doc-steps">
+    <li>The member who proposed it opens it and taps <strong>Cancel payment</strong>, then confirms.</li>
+    <li>If every signature was already in, it could still be sent until it expires. Tap <strong>Make it unsendable</strong>: this proposes moving its funds back to the vault, which needs the usual approvals.</li>
+  </ol>
+
+  <h2>If it goes wrong</h2>
+  <dl class="doc-fixes">
+    <div><dt>“A signer’s phone was replaced, so this payment can’t be signed”</dt><dd>Nothing was sent. The proposer taps <strong>Propose again</strong>.</dd></div>
+    <div><dt>“Payments resume when 1 more member moves to …”</dt><dd>The vault’s server is down and a move is under way. See <a href="/docs/move-servers">moving servers</a>.</dd></div>
+    <div><dt>“Other signers haven’t answered yet”</dt><dd>Ask them to open Zafe, then try again together.</dd></div>
+  </dl>
+</Doc>

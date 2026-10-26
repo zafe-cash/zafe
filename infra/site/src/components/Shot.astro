@@ -1,0 +1,19 @@
+---
+// A real app screen in a docs page: a crop of the app's own render (assets.py), never
+// rebuilt UI. Light theme only; no phone frame. `name` is the file under
+// public/assets/screens without "_light.webp"; width and height are the crop's pixels
+// (2x), so the page reserves its space before it loads.
+interface Props {
+  name: string;
+  alt: string;
+  width: number;
+  height: number;
+  caption?: string;
+}
+const { name, alt, width, height, caption } = Astro.props;
+---
+
+<figure class="doc-shot">
+  <img src={`/assets/screens/${name}_light.webp`} alt={alt} width={width / 2} height={height / 2} loading="lazy" decoding="async" />
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

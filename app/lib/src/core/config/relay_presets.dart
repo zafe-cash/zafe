@@ -5,6 +5,7 @@
 /// this phone's address (docs/relay-move.md §8 B).
 library;
 
+import 'docs_links.dart';
 import 'endpoints.dart';
 import 'network_config.dart';
 
@@ -16,8 +17,8 @@ class RelayPreset {
   final String url;
 }
 
-/// The site page on running a relay (Compose, Caddy, backups, the create token).
-const kRunYourOwnRelayUrl = 'https://zafe.cash/relay';
+/// The site page on running a server (Compose, Caddy, backups, the create token).
+const kRunYourOwnRelayUrl = kDocsRunAServerUrl;
 
 const List<RelayPreset> kMainnetRelayPresets = [
   RelayPreset(operator: 'Zafe', url: kMainnetRelayUrl),
