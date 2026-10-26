@@ -16,7 +16,11 @@ git tag mainnet-v<version> && git push origin mainnet-v<version>  # same commit,
 
 **Testnet first.** Testnet is the staging step for mainnet: tag the commit `v<version>`,
 install the testnet APK, run the dry run (create, receive, propose, sign, send, restore),
-and only then tag `mainnet-v<version>` on the **same commit**. `release-mainnet.yml`
+and only then tag `mainnet-v<version>` on the **same commit**. For the restore step, save the
+backup file, or wipe and paste within 60 s of **Copy as text**: Zafe clears a copied
+secret after 60 s (`kSecretClipboardLifetime`), and in a 2-of-2 a lost seat can't be
+repaired. A CLI member can be the co-signer (`zafe vault join` takes the raw
+`zafe-invite-v…` text, not the link). `release-mainnet.yml`
 refuses a commit that has no `v*` tag. The testnet app installs next to the mainnet one
 as "Zafe Testnet" (`xyz.zafe.zafe.testnet`) and shows amounts in TAZ. Its release notes
 tell testers they need testnet coins and link the
