@@ -31,9 +31,10 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
 - [x] `v0.1.26` (`65c1211`; 0.1.24 + menus that stay on screen and close on Back, restore
       Paste, clipboard countdown) checked on the phone 2026-10-27: in-place update, menu at
       1x/2x, Back, empty-clipboard Paste, countdown, a 0.01 TAZ send (txid `72d989da…`).
-- [ ] `mainnet-v0.1.26` tagged on `65c1211` 2026-10-27 (0.1.24 and 0.1.25 stay testnet
-      only); then **(you)** Promote to Google Play production (essential, 100%), approve,
-      Publish in Play Console.
+- [x] `mainnet-v0.1.26` on `65c1211` (2026-10-27; 0.1.24 and 0.1.25 stay testnet only):
+      APK published, Play internal, promoted to production (code 3007, essential, 100%),
+      sent for review.
+- [ ] **(you)** Publish 0.1.26 in Play Console (managed publishing) once Google approves it.
 - [x] Restore: **Paste** says when the clipboard is empty or holds something that isn't a
       backup (and never pastes that into the field); it used to do nothing (2026-10-27).
 - [x] Backup **Copy as text** and **Copy words** show "On the clipboard for 42 s", then "No
