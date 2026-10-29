@@ -153,9 +153,11 @@ Cloudflare serves `dist/` as static assets: `_headers`, `_redirects`, clean path
 redirect to `/join`) and `404.html` for unknown paths. **Requests to static assets are free
 and unlimited** (Cloudflare's "Billing and limitations" page), so a bot crawling the site
 costs nothing (we moved from Vercel, which counts every request, after a monitor
-fetching every page every 46 s set off its usage alert, 2026-10-29). The Worker (`worker/index.js`) runs only for `run_worker_first` (`/api/*`, `/join`), so
-only those count against the free plan's 100,000 Worker requests a day (past it they get
-a 429; the pages keep working).
+fetching every page every 46 s set off its usage alert, 2026-10-29). The Worker
+(`worker/index.js`) runs only for `run_worker_first`: `/api/waitlist` and `/join`, exact
+paths, so scanners probing other `/api/...` paths get the free static 404. Only those
+count against the free plan's 100,000 Worker requests a day (past it they get a 429; the
+pages keep working).
 
 A deploy attaches the domains in `routes` (`zafe.cash`, `testnet.zafe.cash`; `www.zafe.cash`
 in `www/wrangler.jsonc`) as Workers Custom Domains: Cloudflare creates their DNS records and
@@ -176,9 +178,10 @@ One-time setup:
    Always Use HTTPS on**. Leave Rocket Loader and Bot Fight Mode off: they inject scripts
    the CSP refuses.
 
-Try it locally: `./build.sh && npx wrangler dev` (local KV; the testnet page:
-`curl -H 'Host: testnet.zafe.cash' localhost:8787/join`). Never `wrangler deploy` by hand:
-it attaches the domains.
+Try it locally: `./build.sh && npx wrangler dev` (local KV). The testnet page needs
+`npx wrangler dev --host testnet.zafe.cash`: with `routes` set, dev rewrites every
+request's host to the first route, so a `Host:` header is ignored. Never `wrangler deploy`
+by hand: it attaches the domains.
 
 **The iPhone waitlist** (`worker/index.js`, `POST /api/waitlist`): stores each address in
 the KV namespace `zafe-waitlist` (bound as `WAITLIST`, id in `wrangler.jsonc`, created
