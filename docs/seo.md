@@ -25,7 +25,7 @@ against Google Search Central and schema.org).
   `assets/icons/*`; `public/site.webmanifest`.
 - Search engines: `zafe.cash` is verified in Google Search Console and Bing Webmaster
   Tools by DNS TXT record. Each production deploy submits the sitemap's URLs to IndexNow
-  (`indexnow.sh`). `zafe-pink.vercel.app` must keep redirecting to `zafe.cash`.
+  (`indexnow.sh`). Pages name `zafe.cash` as canonical, so the workers.dev preview URLs don't compete with it.
 
 ## Build guard
 

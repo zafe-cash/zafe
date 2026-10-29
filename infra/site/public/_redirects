@@ -1,4 +1,4 @@
-# Permanent redirects for Cloudflare Pages and Netlify (Vercel: vercel-output.sh).
+# Permanent redirects for Cloudflare (Workers static assets, Pages) and Netlify.
 # /relay was the app's first "Run your own server" link (never released); it stays a redirect.
 /relay   /docs/run-a-server   301
 /relay/  /docs/run-a-server   301

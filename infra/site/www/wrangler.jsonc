@@ -1,0 +1,10 @@
+// The www redirect (index.js), deployed by .github/workflows/site.yml with the site.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "zafe-www",
+  "main": "index.js",
+  "compatibility_date": "2026-10-01",
+  "routes": [{ "pattern": "www.zafe.cash", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false
+}

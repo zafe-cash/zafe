@@ -108,7 +108,7 @@ emissive/gold only, grain, vignette), GSAP ScrollTrigger, Lenis.
 (cd infra/site && ./build.sh)                         # includes the inline-code guard
 python3 -m http.server 8768 --bind 127.0.0.1 --directory infra/site/dist   # background
 S=.claude/skills/landing-page
-# The 3D story is on /showcase; the plain server needs the .html (Vercel serves clean paths).
+# The 3D story is on /showcase; the plain server needs the .html (Cloudflare serves clean paths).
 bash $S/frames.sh "http://127.0.0.1:8768/showcase.html?world=always&pointer=fine" .story 1440 900 12 "$OUT" story
 python3 $S/sheet.py "$OUT" story 3 0.36               # one contact sheet, then Read it
 bash $S/frames.sh "http://127.0.0.1:8768/showcase.html?world=always" .story 390 844 12 "$OUT" story_m && python3 $S/sheet.py "$OUT" story_m 6 0.5
@@ -126,7 +126,7 @@ bash $S/frames.sh "http://127.0.0.1:8768/showcase.html?world=always" .story 390 
   `agent-browser mouse move` twice before a cursor shot.
 - **Performance** (see `docs/site.md` ninth round): keep adaptive quality, the software
   renderer skip and the give-up path working (`canvas.world` `data-quality`: 0-5 or
-  `off`); hashed bundles are cached for a year via `public/_headers` → `vercel-output.sh`.
+  `off`); hashed bundles are cached for a year via `public/_headers`.
   Measure page weight and rAF rate with a small agent-browser script in a file.
 - The sandbox refuses complex inline shell and `eval` strings: put scripts in files and
   run them with `bash`.
@@ -145,7 +145,7 @@ limit you were given, and say what you'd do next.
 
 - Add a decision round at the top of `docs/site.md` (the feedback quoted, what changed,
   what's next) and update the website notes in `docs/app-notes.md` when you learn a gotcha.
-- Work in a worktree; commit and push the branch (a PR's `site.yml` run deploys a Vercel
+- Work in a worktree; commit and push the branch (a PR's `site.yml` run uploads a Cloudflare
   preview). **When done, push to main and clean up, always** (the user's standing rule):
   merge/push to main once the site build is OK (no need to wait for Rust/Flutter CI),
   confirm the branch is in `origin/main`, delete the remote branch, remove the worktree

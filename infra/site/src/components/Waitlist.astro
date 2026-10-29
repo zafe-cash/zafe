@@ -1,7 +1,7 @@
 ---
 // The iPhone waitlist: a plain form (no JavaScript) posting to our own function
-// (api/waitlist.mjs, stored in a private Vercel Blob store). It answers with a redirect to
-// /waitlist (joined) or /waitlist-error. The hidden field is a trap for bots.
+// (worker/index.js, stored in a private Cloudflare KV namespace). It answers with a redirect
+// to /waitlist (joined) or /waitlist-error. The hidden field is a trap for bots.
 interface Props {
   id?: string;
 }

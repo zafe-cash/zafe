@@ -15,7 +15,7 @@
     "three": "0.186.1"
   },
   "devDependencies": {
-    "@vercel/blob": "2.8.1",
-    "qrcode": "1.5.4"
+    "qrcode": "1.5.4",
+    "wrangler": "4.151.0"
   }
 }

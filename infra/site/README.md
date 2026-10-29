@@ -13,7 +13,7 @@ SEO: `docs/seo.md`.
 | `/docs`, `/docs/<slug>` | `pages/docs/`, `docs/pages.ts` | No script; `/docs` is also the docs menu on phones |
 | `/showcase` | `pages/showcase.astro` | The 3D story: `scripts/story.js` → `world.js`, `ui.js`, bundled as same-origin modules |
 | `/join` | `pages/join.astro` (`components/JoinPage.astro`) | Invite page, noindex; loads `public/assets/join.js` as is |
-| `/join` on `testnet.zafe.cash` | `pages/join-testnet.astro` | Same page for the testnet app; the host picks it (`vercel-output.sh`) |
+| `/join` on `testnet.zafe.cash` | `pages/join-testnet.astro` | Same page for the testnet app; the host picks it (`worker/index.js`) |
 | `/waitlist`, `/waitlist-error` | `pages/<name>.astro` | Where the iPhone waitlist form lands; noindex |
 | `/relay` | `pages/relay.astro` | The app's old "Run your own relay" link (builds from `relay-client` before `8b103b9`, none released): hosts redirect it permanently to `/docs/run-a-server`; the page is the fallback for hosts that can't |
 | 404 | `pages/404.astro` | noindex |
@@ -62,11 +62,14 @@ src/
   scripts/                 /showcase only (world.js, story.js, ui.js, ...)
   styles/site.css          tokens and styles; light only
   config.ts                download, source and Play URLs, social image, CSP
-api/waitlist.mjs           the iPhone waitlist function (the only server code)
+worker/index.js            the Worker: the iPhone waitlist and the testnet host's /join
+                             (the only server code)
+wrangler.jsonc             Cloudflare config: assets, domains, the waitlist's KV namespace
+www/                       the www.zafe.cash → zafe.cash redirect (its own Worker)
 public/
-  _headers                 CSP, cache and content types (Cloudflare Pages, Netlify;
-                             vercel-output.sh turns it into Vercel routes)
-  _redirects               /relay → /docs/run-a-server (Cloudflare Pages, Netlify)
+  _headers                 CSP, HSTS, cache and content types (Cloudflare, Netlify)
+  _redirects               /relay → /docs/run-a-server (Cloudflare, Netlify)
+  .assetsignore            files in dist/ Cloudflare must not serve (.nojekyll)
   assets/join.js           the invite page's script
   assets/js/loops.js       the home page's script
   assets/boot.js           /showcase only: marks JS before the first paint
@@ -77,7 +80,6 @@ public/
 scenes/, film/             the loops: Blender scenes and the Remotion composite (film/README.md)
 assets.py                  app renders → WebP screens; app fonts → WOFF2 subsets
 build.sh                   astro build → dist/, the inline-code guard, .well-known files
-vercel-output.sh           dist/ → Vercel's prebuilt output (routes, redirects, function)
 stills.sh, icons.sh, indexnow.sh   showcase stills and og image, icons, IndexNow
 ```
 
@@ -133,60 +135,58 @@ Any static host with HTTPS on the exact host in `ZAFE_LINK_HOST` works. It must:
 - redirect `/relay` permanently to `/docs/run-a-server`;
 - send the `_headers` security headers, or their equivalent.
 
-**Vercel** (what we use). `.github/workflows/site.yml` runs on pushes to `main` and pull
-requests that touch `infra/site/**`, `app/lib/src/core/config/docs_links.dart` or the
-workflow itself, and on demand. It:
+**Cloudflare Workers** (what we use). `.github/workflows/site.yml` runs on pushes to `main`
+and pull requests that touch `infra/site/**`, `app/lib/src/core/config/docs_links.dart` or
+the workflow itself, and on demand. It:
 
 1. looks up the newest `mainnet-v*` and `v*` releases (`ZAFE_DOWNLOAD_URL`,
    `ZAFE_TESTNET_URL`); the release workflows start it after publishing;
 2. builds with `build.sh`;
 3. runs `scripts/check_docs_sync.py` and `scripts/check_docs_links.py`;
-4. turns `dist/` into Vercel's prebuilt output with `vercel-output.sh` (headers from
-   `public/_headers`, clean paths, the `/relay` redirect, the testnet host's `/join`, JSON
-   content types for `.well-known`, the waitlist function);
-5. runs `vercel deploy --prebuilt`: production from `main`, a preview otherwise;
-6. after a production deploy, submits the sitemap's URLs to IndexNow (`indexnow.sh`).
+4. from `main`: `wrangler deploy` (the site, `wrangler.jsonc`) and `wrangler deploy
+   --config www/wrangler.jsonc` (the www redirect); from a pull request: `wrangler versions
+   upload --preview-alias pr-<n>`, a preview URL on workers.dev that leaves production alone;
+5. after a production deploy, submits the sitemap's URLs to IndexNow (`indexnow.sh`).
 
-Vercel never builds anything itself. One-time setup:
+Cloudflare serves `dist/` as static assets: `_headers`, `_redirects`, clean paths
+(`html_handling: auto-trailing-slash`: `/join` serves `join.html`, `/join.html` and `/join/`
+redirect to `/join`) and `404.html` for unknown paths. **Requests to static assets are free
+and unlimited** (Cloudflare's "Billing and limitations" page), so a bot crawling the site
+costs nothing (we moved from Vercel, which counts every request, after a monitor
+fetching every page every 46 s set off its usage alert, 2026-10-29). The Worker (`worker/index.js`) runs only for `run_worker_first` (`/api/*`, `/join`), so
+only those count against the free plan's 100,000 Worker requests a day (past it they get
+a 429; the pages keep working).
 
-1. In Vercel, create an empty project (Add New → Project, or `vercel link` in
-   `infra/site`). No framework, build command or Git connection is needed. Its ids are in
-   the project's settings, or in `infra/site/.vercel/project.json` after `vercel link`
-   (`orgId`, `projectId`).
-2. Create a token: Vercel → Account Settings → Tokens, scoped to that team.
-3. In GitHub (Settings → Secrets and variables → Actions): secret `VERCEL_TOKEN`;
-   variables `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`. Optional variables
-   `ZAFE_ANDROID_CERT_SHA256` and `ZAFE_IOS_APP_IDS` (see "Develop and build").
-4. Run the workflow (Actions → Site → Run workflow), then add the domains in the Vercel
-   project (Settings → Domains). Without the Vercel settings the workflow still builds and
-   checks the site; it just doesn't deploy.
+A deploy attaches the domains in `routes` (`zafe.cash`, `testnet.zafe.cash`; `www.zafe.cash`
+in `www/wrangler.jsonc`) as Workers Custom Domains: Cloudflare creates their DNS records and
+certificates. A name that still has a CNAME (for example to a previous host) can't become
+a Custom Domain: delete that record first, then rerun the workflow. A failed domain step
+leaves the old records serving. `relay` and `testnet.relay` stay DNS-only records to the
+VPS; never add them here.
 
-Try the Vercel output locally: `./build.sh && ./vercel-output.sh`, then read
-`.vercel/output/config.json`.
+One-time setup:
 
-**The iPhone waitlist** (`api/waitlist.mjs`): `vercel-output.sh` bundles it with
-`@vercel/blob` into `.vercel/output/functions/api/waitlist.func` (Node 22), served at
-`POST /api/waitlist`. It stores each address as a private blob
-`waitlist/<sha256 of the address>.json` and redirects to `/waitlist` or
-`/waitlist-error`. The store `zafe-waitlist` (private, iad1) was created on 2026-10-23
-and connected to production only:
+1. Cloudflare → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"
+   template; add **Zone → DNS → Edit**; Zone Resources: `zafe.cash` only.
+2. In GitHub (Settings → Secrets and variables → Actions): secret `CLOUDFLARE_API_TOKEN`;
+   variable `CLOUDFLARE_ACCOUNT_ID`. Optional variables `ZAFE_ANDROID_CERT_SHA256` and
+   `ZAFE_IOS_APP_IDS` (see "Develop and build").
+3. In the `zafe.cash` zone: **Scrape Shield → Email Address Obfuscation off** (it rewrites
+   the `mailto:` links into a script-decoded form) and **SSL/TLS → Edge Certificates →
+   Always Use HTTPS on**. Leave Rocket Loader and Bot Fight Mode off: they inject scripts
+   the CSP refuses.
 
-```sh
-vercel blob create-store zafe-waitlist --access private --environment production --yes
-```
+Try it locally: `./build.sh && npx wrangler dev` (local KV; the testnet page:
+`curl -H 'Host: testnet.zafe.cash' localhost:8787/join`). Never `wrangler deploy` by hand:
+it attaches the domains.
 
-That sets `BLOB_READ_WRITE_TOKEN`, which the function uses (or OIDC when `BLOB_STORE_ID`
-is set). Without a store every signup lands on `/waitlist-error`. To read the list:
-`vercel blob list --prefix waitlist/` (or the dashboard). Delete the store after the
-launch email, as the privacy policy promises.
-
-**Cloudflare Pages** (reads `_headers` and `_redirects`, serves `/join` from `join.html`):
-
-```sh
-npx wrangler pages deploy infra/site/dist --project-name zafe-site
-```
-
-then add the custom domain in the dashboard.
+**The iPhone waitlist** (`worker/index.js`, `POST /api/waitlist`): stores each address in
+the KV namespace `zafe-waitlist` (bound as `WAITLIST`, id in `wrangler.jsonc`, created
+2026-10-29) under the SHA-256 of the address, value `{ email, joined }`, and redirects to
+`/waitlist` or `/waitlist-error`. Pull-request previews write to the same namespace. To
+read the list: `npx wrangler kv key list --binding WAITLIST --remote`, then `kv key get`
+per key (or the dashboard). Delete the namespace after the launch email, as the privacy
+policy promises.
 
 **Caddy** (for example on the relay's VPS, `infra/relay/vps`). The policy is the one in
 `public/_headers`:
@@ -200,6 +200,7 @@ zafe.example {
 	file_server
 	header /.well-known/* Content-Type application/json
 	header {
+		Strict-Transport-Security max-age=63072000
 		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
@@ -208,7 +209,7 @@ zafe.example {
 }
 ```
 
-The waitlist function runs only on Vercel; elsewhere the form lands on `/waitlist-error`.
+The waitlist runs only on Cloudflare; elsewhere the form lands on `/waitlist-error`.
 GitHub Pages works for the pages (`build.sh` writes `.nojekyll` so `.well-known` is
 served), but it can't set headers or redirects, so the AASA file gets the wrong content
 type.

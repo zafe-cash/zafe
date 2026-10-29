@@ -1,0 +1,2 @@
+# Files in dist/ that Cloudflare must not serve (wrangler reads this; it is never uploaded).
+.nojekyll

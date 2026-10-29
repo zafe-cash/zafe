@@ -114,7 +114,7 @@ Website (Node 24, as in CI):
 cd infra/site && npm ci && ./build.sh     # → dist/; fails on any inline script or style
 ```
 
-Pushes to `main` deploy it to Vercel (`.github/workflows/site.yml`); see
+Pushes to `main` deploy it to Cloudflare Workers (`.github/workflows/site.yml`); see
 [`infra/site/README.md`](infra/site/README.md). Android releases:
 [`docs/releasing.md`](docs/releasing.md). Relay deployment:
 [`infra/relay/README.md`](infra/relay/README.md).

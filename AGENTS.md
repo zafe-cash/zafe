@@ -48,8 +48,9 @@ change.** `python3 scripts/check_docs_sync.py` (CI) fails when a `<strong>` labe
 missing from `assets.py`; `<b>` is plain emphasis. App links to the site live only in
 `app/lib/src/core/config/docs_links.dart`; `scripts/check_docs_links.py` (site CI, after
 `infra/site/build.sh`) checks each one resolves. A path a shipped build links to never
-dies: redirect it (`/relay` → `/docs/run-a-server`, in `public/_redirects` and
-`vercel-output.sh`). The live docs follow `main` (the site deploys on push).
+dies: redirect it (`/relay` → `/docs/run-a-server`, in `public/_redirects`). The live
+docs follow `main` (the site deploys on push to Cloudflare Workers; `infra/site/README.md`
+"Deploy": never `wrangler deploy` by hand, it attaches the domains).
 `python3 scripts/check_md_links.py` (Docs workflow) fails on a relative Markdown link to a
 missing file or heading: rename a doc or heading, fix its links in the same change.
 
@@ -384,6 +385,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   forced-command deploy users per network (`vps/zafe-deploy`, change it via `bootstrap.sh`).
   DNS must stay **DNS only** in Cloudflare. Publish no Docker port but Caddy's (bypasses ufw).
   Compose variables need defaults. Details: `infra/relay/README.md`.
+- **Site** (`zafe.cash`, `testnet.zafe.cash`, www redirect): Cloudflare Workers static
+  assets (`infra/site/wrangler.jsonc`, `www/`), deployed by `site.yml`; static requests are
+  free, only `run_worker_first` paths run code. Keep Email Address Obfuscation, Rocket
+  Loader and Bot Fight Mode off in the zone (they inject scripts the CSP blocks).
 - **Promote the relay before an app that needs it ships** (e.g. FCM FIDs, `PushPlatform::FcmFid`).
 - Public lightwalletd: testnet `https://testnet.zec.rocks:443`, mainnet `https://zec.rocks:443`.
 

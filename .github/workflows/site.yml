@@ -1,16 +1,16 @@
 name: Site
 
-# Builds infra/site (Astro) and deploys it to Vercel: production on pushes to main,
-# a preview for pull requests. The site is built here by build.sh, and Vercel only
-# serves the result (`vercel deploy --prebuilt`, output from vercel-output.sh).
+# Builds infra/site (Astro) and deploys it to Cloudflare Workers: production on pushes to
+# main, a preview version for pull requests. The site is built here by build.sh; Cloudflare
+# serves dist/ as static assets and runs the Worker only for the waitlist and the testnet
+# host's /join (infra/site/wrangler.jsonc). Static requests are free and uncounted.
 #
 # Needs (Settings > Secrets and variables > Actions), see infra/site/README.md:
-#   secret   VERCEL_TOKEN               a Vercel access token
-#   variable VERCEL_ORG_ID              the team / account id (.vercel/project.json "orgId")
-#   variable VERCEL_PROJECT_ID          the project id (.vercel/project.json "projectId")
+#   secret   CLOUDFLARE_API_TOKEN       a Cloudflare API token (README "Deploy")
+#   variable CLOUDFLARE_ACCOUNT_ID      the Cloudflare account id
 #   variable ZAFE_ANDROID_CERT_SHA256   optional: release signing cert, for assetlinks.json
 #   variable ZAFE_IOS_APP_IDS           optional: for apple-app-site-association
-# Without the Vercel settings the site is still built and checked, just not deployed.
+# Without the Cloudflare settings the site is still built and checked, just not deployed.
 
 on:
   push:
@@ -37,10 +37,8 @@ jobs:
         working-directory: infra/site
     env:
       ASTRO_TELEMETRY_DISABLED: 1
-      VERCEL_TELEMETRY_DISABLED: 1
-      VERCEL_CLI: vercel@62.0.0
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      WRANGLER_SEND_METRICS: false
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       ZAFE_ANDROID_CERT_SHA256: ${{ vars.ZAFE_ANDROID_CERT_SHA256 }}
       ZAFE_IOS_APP_IDS: ${{ vars.ZAFE_IOS_APP_IDS }}
     steps:
@@ -78,35 +76,40 @@ jobs:
         run: |
           python3 scripts/check_docs_sync.py
           python3 scripts/check_docs_links.py
-      - run: ./vercel-output.sh
 
-      - name: Vercel settings
-        id: vercel
+      - name: Cloudflare settings
+        id: cloudflare
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Not deploying: set the VERCEL_TOKEN secret and the VERCEL_ORG_ID / VERCEL_PROJECT_ID variables (infra/site/README.md)"
+            echo "::warning::Not deploying: set the CLOUDFLARE_API_TOKEN secret and the CLOUDFLARE_ACCOUNT_ID variable (infra/site/README.md)"
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Production: the site (zafe.cash, testnet.zafe.cash) and the www redirect. A pull
+      # request uploads a preview version (its own URL) without touching production.
       - name: Deploy
         id: deploy
-        if: steps.vercel.outputs.ready == 'true'
+        if: steps.cloudflare.outputs.ready == 'true'
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           if [ "$GITHUB_REF" = refs/heads/main ] && [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            target=--prod; kind=Production
+            npx --no-install wrangler deploy
+            npx --no-install wrangler deploy --config www/wrangler.jsonc
+            echo "**Production deployment:** https://zafe.cash" >> "$GITHUB_STEP_SUMMARY"
+            echo "production=true" >> "$GITHUB_OUTPUT"
           else
-            target=; kind=Preview
+            alias="pr-${{ github.event.number || github.run_number }}"
+            out=$(npx --no-install wrangler versions upload --preview-alias "$alias" --message "$GITHUB_SHA")
+            echo "$out"
+            url=$(grep -o "https://$alias-[^ ]*workers.dev" <<< "$out" | head -1)
+            echo "**Preview:** ${url:-see the log}" >> "$GITHUB_STEP_SUMMARY"
+            echo "production=false" >> "$GITHUB_OUTPUT"
           fi
-          url=$(npx --yes "$VERCEL_CLI" deploy --prebuilt $target --yes --token "$VERCEL_TOKEN")
-          echo "$kind deployment: $url"
-          echo "**$kind deployment:** $url" >> "$GITHUB_STEP_SUMMARY"
-          echo "production=$([ "$kind" = Production ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       # Bing & co. recrawl the sitemap's pages soon after a release; never fails the deploy.
       - name: IndexNow

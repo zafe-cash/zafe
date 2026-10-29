@@ -31,8 +31,8 @@ open proposal locks a whole note, so a test with two proposals at once needs two
 
 **Invite page per host.** `testnet.zafe.cash/join` serves `join-testnet.html` (a TESTNET
 badge, "test coins with no value", the testnet download) and `zafe.cash/join` the mainnet
-page: one deployment, one Vercel route with a host match (`vercel-output.sh`,
-`ZAFE_TESTNET_HOST`).
+page: one deployment, the Worker picks the page by host (`infra/site/worker/index.js`,
+`TESTNET_HOST` in `wrangler.jsonc`).
 
 **Site links.** `/download` links Google Play, the newest `mainnet-v*` APK, the newest
 `v*` testnet build and the iPhone waitlist. `site.yml` looks the releases up with

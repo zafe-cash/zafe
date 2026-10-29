@@ -945,8 +945,8 @@ Learned while studying it:
   page list in `src/docs/pages.ts`), the 3D story on `/showcase` (keep heavy motion off the
   home page: the user's call, a treasury product should feel sober), and the invite page
   `/join`. The site's one
-  server function is the iPhone waitlist (`infra/site/api/waitlist.mjs`, private Vercel Blob;
-  README "The iPhone waitlist"); product truth for design work is `infra/site/PRODUCT.md`.
+  server code is the Worker (`infra/site/worker/index.js`: the iPhone waitlist in KV, the
+  testnet host's `/join`; README "The iPhone waitlist"); product truth for design work is `infra/site/PRODUCT.md`.
   **The two pages must not look alike** (round 12): home shows the app's real components on
   drawn (not 3D-rendered) scenes; the showcase has no logo intro, a fixed `light` nav (`Nav.astro`),
   a title card and a slim footer. Nav links marked `mobile` are the only ones on phones.
@@ -994,16 +994,15 @@ Learned while studying it:
   jump before a screenshot. agent-browser renders WebGL in software, and the page skips
   the world on software renderers (and gives up at runtime if it stays under ~20 fps at
   its lowest quality), so screenshots of the world need `/showcase?world=always`.
-  Cache headers live in `public/_headers` (`/assets/...` blocks; `vercel-output.sh`
-  turns each into a Vercel route). The **static fallback** (no GPU, reduced motion, no
+  Cache headers live in `public/_headers` (`/assets/...` blocks). The **static fallback** (no GPU, reduced motion, no
   JS) shows stills of the world rendered by `infra/site/stills.sh` (capture mode
   `/showcase?still`; also writes the social image `og-mainnet.png`); re-run it after changing the world
   or the story. `public/assets/boot.js` adds `html.js` before the first paint so the
   world's visitors never fetch the stills; anything only for the fallback goes under
   `:is(html:not(.js), html.stills)`.
   **SEO** (`docs/seo.md`): the public origin is one value, `site` in `astro.config.mjs`
-  (`https://zafe.cash` since 2026-10-01: Cloudflare DNS, DNS-only CNAMEs to Vercel, www
-  redirects to the apex; mail to any `@zafe.cash` address is forwarded by Cloudflare
+  (`https://zafe.cash` since 2026-10-01: Cloudflare DNS; since 2026-10-29 served by
+  Cloudflare Workers, www redirected to the apex by its own Worker `infra/site/www/`; mail to any `@zafe.cash` address is forwarded by Cloudflare
   Email Routing); canonical, og:url/og:image, `sitemap.xml`, `robots.txt` and
   `.well-known/security.txt` (Astro endpoints in `src/pages/`; security.txt's `Expires`
   is build + 1 year, so redeploy at least yearly) derive from it. `build.sh` validates
@@ -1028,10 +1027,12 @@ Learned while studying it:
   sizes, real app crops and illustrations (`assets.py` CROPS; wide pillar art is padded to 5:4). The
   chain-view numbers are a real testnet transaction: never replace them with invented
   ones. Patina icons are inlined by `src/components/Icon.astro` (magenta → 38% layer).
-  **Deploy**: `.github/workflows/site.yml` → Vercel with `vercel deploy --prebuilt` on
-  `.vercel/output` from `vercel-output.sh` (Build Output API v3; headers read from
-  `public/_headers`, `overrides` serve `join.html` at `/join`). `builds.json` isn't
-  needed (the CLI only reads it for `vercel build` errors). Vercel never builds.
+  **Deploy**: `.github/workflows/site.yml` → Cloudflare Workers static assets
+  (`infra/site/wrangler.jsonc`; `_headers`/`_redirects` read as is, clean paths from
+  `html_handling`). Static requests are free and uncounted (Vercel counted each one; a
+  monitor crawling every page every 46 s set off its usage alert, so we moved,
+  2026-10-29). Only `run_worker_first` paths run the Worker. Cloudflare's Email Address
+  Obfuscation, Rocket Loader and Bot Fight Mode must stay off: they inject scripts.
 - **CI disk**: the Rust job's test binaries (arti, Halo 2, SQLCipher linked into each)
   filled the runner disk and `ld` died with `signal 7 [Bus error]`. `ci.yml` frees ~30 GB
   first and builds with `CARGO_PROFILE_DEV_DEBUG=line-tables-only`. A bus error or "No

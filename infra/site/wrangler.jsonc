@@ -1,0 +1,30 @@
+// The site on Cloudflare Workers (README.md "Deploy"). Static files in dist/ (from build.sh)
+// are served straight from the assets, with public/_headers and public/_redirects; the
+// Worker (worker/index.js) runs only for the paths in run_worker_first.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zafe-site",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    // /join serves join.html; /join.html and /join/ redirect to /join.
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*", "/join", "/join/"]
+  },
+  "vars": {
+    "TESTNET_HOST": "testnet.zafe.cash"
+  },
+  // The iPhone waitlist: one key per address (worker/index.js).
+  "kv_namespaces": [{ "binding": "WAITLIST", "id": "d726edc6fdc84413a186fc637e46d8fd" }],
+  // A deploy points these hosts' DNS at the Worker (www: www/wrangler.jsonc).
+  "routes": [
+    { "pattern": "zafe.cash", "custom_domain": true },
+    { "pattern": "testnet.zafe.cash", "custom_domain": true }
+  ],
+  // workers.dev serves pull-request previews; pages name zafe.cash as canonical.
+  "workers_dev": true,
+  "preview_urls": true
+}
