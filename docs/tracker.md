@@ -243,10 +243,11 @@ Never checked on a real phone:
 
 ## Site
 
-- [ ] Move to Cloudflare Workers (2026-10-29; a `site-watch/1.0` monitor fetching every
-      page every 46 s set off Vercel's usage alert): code done; then the API token + GitHub
-      secret, zone settings (`infra/site/README.md` "Deploy"), first deploy attaches the
-      domains, then delete the Vercel project and its empty Blob store.
+- [x] Moved to Cloudflare Workers (2026-10-29; a `site-watch/1.0` monitor fetching every
+      page every 46 s set off Vercel's usage alert). Live on zafe.cash, testnet and www;
+      every route, header, app-link file and the waitlist checked.
+- [ ] Delete the Vercel project (and its empty `zafe-waitlist` Blob store), and the
+      `VERCEL_*` repository secret/variables.
 - [ ] `/showcase` reports no LCP (its title card fades in); re-measure the two ~42 ms
       hitches that sat at the old island switches.
 - *(idea)* Double opt-in for the waitlist.
