@@ -179,7 +179,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       // Back to "New vault", filled in. With other vaults on this device, the onboarding
       // screens are shown the same way "Add vault" does.
       if (ref.read(vaultProvider).hasVault) notifier.beginAddVault();
-      context.go('/create');
+      final router = GoRouter.of(context);
+      router.go('/welcome'); // so back from "New vault" lands on onboarding
+      router.push('/create');
     } else {
       context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
     }
