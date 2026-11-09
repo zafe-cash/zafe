@@ -61,6 +61,10 @@ const KEYGEN_FILE: &str = "keygen.json";
 const SEAT_FILE: &str = "vault.json";
 const COSIGN_FILE: &str = "cosign.json";
 const COORDINATE_FILE: &str = "coordinate.json";
+/// The vault's wallet (`interop propose`): a cache of chain data, rebuilt from the
+/// birthday if lost. Dev-only: its key sits in a plain file next to it.
+const WALLET_DB_FILE: &str = "wallet.sqlite";
+const WALLET_KEY_FILE: &str = "wallet.key";
 // Exchanged messages, in `--dir` (round 1 and 2 names carry identifiers).
 const COMMITMENTS_MSG: &str = "commitments.json";
 const REQUEST_MSG: &str = "request.json";
@@ -100,6 +104,19 @@ pub enum InteropCmd {
         #[command(flatten)]
         expect: ExpectArgs,
     },
+    /// Build and prove a PCZT from this vault's own wallet (synced through
+    /// `--lightwalletd`): pays `--to`/`--amount`/`--memo`, change back to the vault. The
+    /// input for `coordinate --pczt`.
+    Propose {
+        /// Where to write the proven PCZT.
+        #[arg(long)]
+        out: PathBuf,
+        /// A height before the vault was first funded (needed the first time only).
+        #[arg(long)]
+        birthday: Option<u32>,
+        #[command(flatten)]
+        expect: ExpectArgs,
+    },
     /// Coordinate, one step per run: once the co-signer's `commitments.json` is in
     /// `--dir`, verifies `--pczt` and writes `request.json`; once `reply.json` is there,
     /// aggregates and writes the signed PCZT to `--out`.
@@ -112,6 +129,10 @@ pub enum InteropCmd {
         /// Where to write the signed PCZT.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Once signed, extract the transaction (checking proofs and signatures) and send
+        /// it through `--lightwalletd`.
+        #[arg(long)]
+        broadcast: bool,
         #[command(flatten)]
         expect: ExpectArgs,
     },
@@ -132,8 +153,9 @@ pub struct ExpectArgs {
     /// The chain tip (default: asked from `--lightwalletd`).
     #[arg(long)]
     tip_height: Option<u32>,
-    /// Largest accepted `expiry - tip` (the builder's default delta is 40 blocks).
-    #[arg(long, default_value_t = 200)]
+    /// Largest accepted `expiry - tip`: the builder's default is 40 blocks; `interop
+    /// propose` rounds expiry up to a multiple of 432 blocks after NU7 (up to ~435 ahead).
+    #[arg(long, default_value_t = 450)]
     max_expiry_delta: u32,
 }
 
@@ -164,12 +186,30 @@ pub async fn run(
         InteropCmd::Cosign { dir, expect, .. } => {
             cosign(state, network, &dir, &expect, lightwalletd).await
         }
+        InteropCmd::Propose {
+            out,
+            birthday,
+            expect,
+        } => propose(state, network, &out, birthday, &expect, lightwalletd).await,
         InteropCmd::Coordinate {
             dir,
             pczt,
             out,
+            broadcast,
             expect,
-        } => coordinate(state, network, &dir, pczt, out, &expect, lightwalletd).await,
+        } => {
+            coordinate(
+                state,
+                network,
+                &dir,
+                pczt,
+                out,
+                broadcast,
+                &expect,
+                lightwalletd,
+            )
+            .await
+        }
     }
 }
 
@@ -957,6 +997,7 @@ async fn coordinate(
     dir: &Path,
     pczt_path: Option<PathBuf>,
     out: Option<PathBuf>,
+    broadcast: bool,
     expect: &ExpectArgs,
     lightwalletd: &str,
 ) -> Result<()> {
@@ -1093,14 +1134,113 @@ async fn coordinate(
     // Checks each signature against its action's rk and the sighash.
     let signed = tx::apply_signatures(pczt, &signatures)?;
     let bytes = signed
+        .clone()
         .serialize()
         .map_err(|e| anyhow!("PCZT encoding: {e:?}"))?;
     fs::write(&out, bytes)?;
+    if broadcast {
+        let mut client = connect(lightwalletd).await?;
+        let sent = zafe_core::node::broadcast(signed, &mut client).await?;
+        let mut txid = sent.txid;
+        txid.reverse(); // txids display in reversed byte order
+        println!("broadcast: txid {}", hex::encode(txid));
+    }
     println!(
         "{} spend(s) signed with member {}; each signature checked under its rk. Written to \
          {}.",
         signatures.len(),
         short(&cosigner),
+        out.display()
+    );
+    Ok(())
+}
+
+/// Syncs the vault's own wallet, builds the PCZT (ZIP 317 fee, payment outputs
+/// recoverable with the vault OVK, change back to the vault) and proves it.
+async fn propose(
+    state: &Path,
+    network: &ZafeNetwork,
+    out: &Path,
+    birthday: Option<u32>,
+    expect: &ExpectArgs,
+    lightwalletd: &str,
+) -> Result<()> {
+    use pczt::roles::prover::Prover;
+    use zafe_core::wallet::{PaymentRequest, VaultWallet, WalletKey};
+
+    let seat = Seat::load(state)?;
+    let to = expect
+        .to
+        .clone()
+        .ok_or_else(|| anyhow!("--to is required"))?;
+    let amount_zat = expect
+        .amount
+        .ok_or_else(|| anyhow!("--amount is required"))?;
+    let memo = expect
+        .memo
+        .as_deref()
+        .map(|m| Ok::<_, anyhow::Error>(Memo::from_bytes(m.as_bytes())?.encode()))
+        .transpose()?;
+    let mut client = connect(lightwalletd).await?;
+    let key_path = state.join(WALLET_KEY_FILE);
+    let key = match fs::read(&key_path) {
+        Ok(bytes) => WalletKey::from_slice(&bytes)?,
+        Err(_) => {
+            let key = WalletKey::random();
+            durable::write(&key_path, key.as_bytes())?;
+            key
+        }
+    };
+    let path = state.join(WALLET_DB_FILE);
+    let mut wallet = if VaultWallet::exists(&path, &key, network.clone()) {
+        VaultWallet::open(&path, &key, network.clone())?
+    } else {
+        let birthday = birthday.ok_or_else(|| {
+            anyhow!("--birthday is required the first time: a height before the vault was funded")
+        })?;
+        VaultWallet::create(
+            &path,
+            &key,
+            network.clone(),
+            "interop",
+            &seat.vault_keys()?.ufvk()?,
+            birthday,
+            &mut client,
+        )
+        .await?
+    };
+    wallet.sync(&mut client).await?;
+    let b = wallet.balance()?;
+    println!(
+        "vault balance: {} spendable, {} change waiting for confirmations, {} other pending \
+         (zat, tip {})",
+        b.ironwood_spendable,
+        b.ironwood_change_pending,
+        b.ironwood_pending,
+        wallet.chain_height()?.unwrap_or(0)
+    );
+    let pczt = wallet.propose(
+        &[PaymentRequest {
+            address: to,
+            amount_zat,
+            memo,
+        }],
+        1,
+    )?;
+    println!("proving...");
+    let proved = tokio::task::spawn_blocking(move || {
+        Prover::new(pczt)
+            .create_ironwood_proof(zafe_core::zrng::zrng(), zafe_core::node::proving_key())
+            .map(|p| p.finish())
+            .map_err(|e| anyhow!("proving: {e:?}"))
+    })
+    .await??;
+    let bytes = proved
+        .serialize()
+        .map_err(|e| anyhow!("PCZT encoding: {e:?}"))?;
+    fs::write(out, bytes)?;
+    println!(
+        "proven PCZT written to {}: pass it to `zafe interop coordinate --pczt`",
         out.display()
     );
     Ok(())
