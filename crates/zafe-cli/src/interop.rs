@@ -770,7 +770,7 @@ fn inspect(state: &Path, network: &ZafeNetwork, dir: &Path) -> Result<()> {
                     continue;
                 }
                 let domain = IronwoodDomain::for_pczt_action(action);
-                if let Some(scope) = fvk.scope_for_address(&recipient) {
+                if let Some(scope) = fvk.scope_for_address(recipient) {
                     let ivk = fvk.to_ivk(scope).prepare();
                     let ok = try_note_decryption(&domain, &ivk, action).is_some();
                     change += value;
@@ -991,6 +991,7 @@ async fn cosign(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn coordinate(
     state: &Path,
     network: &ZafeNetwork,
@@ -1192,8 +1193,8 @@ async fn propose(
         }
     };
     let path = state.join(WALLET_DB_FILE);
-    let mut wallet = if VaultWallet::exists(&path, &key, network.clone()) {
-        VaultWallet::open(&path, &key, network.clone())?
+    let mut wallet = if VaultWallet::exists(&path, &key, *network) {
+        VaultWallet::open(&path, &key, *network)?
     } else {
         let birthday = birthday.ok_or_else(|| {
             anyhow!("--birthday is required the first time: a height before the vault was funded")
@@ -1201,7 +1202,7 @@ async fn propose(
         VaultWallet::create(
             &path,
             &key,
-            network.clone(),
+            *network,
             "interop",
             &seat.vault_keys()?.ufvk()?,
             birthday,
