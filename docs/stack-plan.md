@@ -39,10 +39,12 @@ Started 2026-10-01. The research and reasoning behind every item are in
       Free on 2026-10-01: `zafe-protocol`, `zafe-proto`, `zafe-coordinator`,
       `zafe-relay`, `zafe-core`, `zafe-vault`, `zafe`. Don't publish placeholder crates:
       crates.io discourages name squatting.
-- [ ] `CONTRIBUTING.md` (Conventional Commits, as frost/frost-tools use; how to run every
-      test), `SECURITY.md` (`security@zafe.cash`; matches the site's security.txt),
-      PR and issue templates. Keep MIT OR Apache-2.0: it's what ZF uses, and it links
-      into Zodl's AGPL SDK.
+- [x] `CONTRIBUTING.md` (2026-11-10): how to run every check, the money-critical files,
+      docs and release notes. Commit titles stay "Area: change" as in the history, not
+      Conventional Commits (those are for PRs to frost/frost-tools). Keep MIT OR Apache-2.0:
+      it's what ZF uses, and it links into Zodl's AGPL SDK.
+- [ ] `SECURITY.md` (`security@zafe.cash`; matches the site's security.txt), PR and issue
+      templates.
 - [ ] CI: add `cargo deny` (licences, advisories). Consider `cargo vet`, since frost-tools
       requires it for new dependencies.
 - [x] **Fix the `sk` last-contributor bias** (done 2026-10-01: `DKG_ROUND1` 3,
