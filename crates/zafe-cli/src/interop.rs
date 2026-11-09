@@ -93,6 +93,10 @@ pub enum InteropCmd {
     Cosign {
         #[arg(long, default_value = "session")]
         dir: PathBuf,
+        /// Only show what `request.json` pays (decoded with this vault's keys); signs
+        /// nothing and keeps the session. Then sign with the values you agreed on.
+        #[arg(long)]
+        inspect: bool,
         #[command(flatten)]
         expect: ExpectArgs,
     },
@@ -154,7 +158,10 @@ pub async fn run(
             print_seat(&Seat::load(state)?);
             Ok(())
         }
-        InteropCmd::Cosign { dir, expect } => {
+        InteropCmd::Cosign {
+            dir, inspect: true, ..
+        } => inspect(state, network, &dir),
+        InteropCmd::Cosign { dir, expect, .. } => {
             cosign(state, network, &dir, &expect, lightwalletd).await
         }
         InteropCmd::Coordinate {
@@ -658,6 +665,142 @@ struct CoordinateState {
     nonces: Vec<String>,
     commitments: Vec<String>,
     pczt: String,
+}
+
+/// What a request's PCZT does, read with this vault's keys: spends from the vault,
+/// each payment (recovered with the vault's outgoing viewing key), change and fee. Only
+/// a display: signing still checks the transaction against the values given on the
+/// command line.
+fn inspect(state: &Path, network: &ZafeNetwork, dir: &Path) -> Result<()> {
+    use orchard::note_encryption::IronwoodDomain;
+    use pczt::roles::verifier::Verifier;
+    use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
+
+    let seat = Seat::load(state)?;
+    let path = dir.join(REQUEST_MSG);
+    let request: RequestMessage =
+        read_json(&path)?.ok_or_else(|| anyhow!("no {} in {}", REQUEST_MSG, dir.display()))?;
+    check_kind(&request.format, &request.kind, KIND_REQUEST)?;
+    let open: Option<CosignState> = read_json(&state.join(COSIGN_FILE))?;
+    let pczt = parse_pczt(&request.pczt)?;
+    let keys = seat.vault_keys()?;
+    let fvk = keys.fvk();
+    let ovk = fvk.to_ovk(Scope::External);
+    let global = pczt.global();
+    println!(
+        "request from member {}, session {} ({})",
+        &request.identifier[..8.min(request.identifier.len())],
+        request.session,
+        match &open {
+            Some(o) if o.session == request.session => "this session",
+            Some(_) => "NOT this session: it will be refused",
+            None => "no session open here",
+        }
+    );
+    println!(
+        "  tx version {}, branch id {:#010x}, expiry height {}",
+        global.tx_version(),
+        global.consensus_branch_id(),
+        global.expiry_height()
+    );
+    if !pczt.transparent().inputs().is_empty()
+        || !pczt.transparent().outputs().is_empty()
+        || !pczt.sapling().spends().is_empty()
+        || !pczt.sapling().outputs().is_empty()
+        || !pczt.orchard().actions().is_empty()
+    {
+        println!("  WARNING: has transparent, Sapling or Orchard-pool parts (signing refuses)");
+    }
+
+    let mut lines = Vec::new();
+    let (mut spent, mut paid, mut change) = (0u64, 0u64, 0u64);
+    Verifier::new(pczt.clone())
+        .with_ironwood::<anyhow::Error, _>(|bundle| {
+            for action in bundle.actions() {
+                let spend = action.spend();
+                if spend.fvk().as_ref() == Some(fvk) {
+                    spent += spend.value().map(|v| v.inner()).unwrap_or(0);
+                }
+                let output = action.output();
+                let (Some(value), Some(recipient)) = (output.value(), output.recipient()) else {
+                    continue;
+                };
+                let value = value.inner();
+                if value == 0 {
+                    continue;
+                }
+                let domain = IronwoodDomain::for_pczt_action(action);
+                if let Some(scope) = fvk.scope_for_address(&recipient) {
+                    let ivk = fvk.to_ivk(scope).prepare();
+                    let ok = try_note_decryption(&domain, &ivk, action).is_some();
+                    change += value;
+                    lines.push(format!(
+                        "  change   {} to this vault{}",
+                        zec(value),
+                        if ok {
+                            ""
+                        } else {
+                            " (WARNING: the vault can't decrypt it)"
+                        }
+                    ));
+                    continue;
+                }
+                paid += value;
+                match try_output_recovery_with_ovk(
+                    &domain,
+                    &ovk,
+                    action,
+                    action.cv_net(),
+                    &output.encrypted_note().out_ciphertext,
+                ) {
+                    Some((_, address, memo)) => {
+                        let memo = MemoBytes::from_bytes(&memo)
+                            .ok()
+                            .and_then(|m| Memo::try_from(m).ok());
+                        let ua =
+                            UnifiedAddress::from_receivers(Some(address), None, None, None, None)
+                                .map(|a| a.encode(network))
+                                .unwrap_or_else(|| "(unencodable)".into());
+                        lines.push(format!("  pay      {} to {ua}", zec(value)));
+                        match memo {
+                            Some(Memo::Empty) | None => {}
+                            Some(Memo::Text(t)) => {
+                                lines.push(format!("           memo \"{}\"", &*t))
+                            }
+                            Some(_) => lines.push("           memo (not text)".into()),
+                        }
+                    }
+                    None => lines.push(format!(
+                        "  pay      {} to an address this vault can't recover (signing refuses)",
+                        zec(value)
+                    )),
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| anyhow!("PCZT: {e:?}"))?;
+    println!("  spend    {} from this vault", zec(spent));
+    for line in lines {
+        println!("{line}");
+    }
+    match spent.checked_sub(paid + change) {
+        Some(fee) => println!("  fee      {}", zec(fee)),
+        None => println!("  WARNING: outputs exceed the vault's inputs"),
+    }
+    println!(
+        "Nothing signed. If this is what you agreed, sign with: zafe interop cosign --dir {} \
+         --to <address> --amount <zatoshis> [--memo <text>]",
+        dir.display()
+    );
+    Ok(())
+}
+
+fn zec(zat: u64) -> String {
+    format!(
+        "{}.{:08} ZEC ({zat} zat)",
+        zat / 100_000_000,
+        zat % 100_000_000
+    )
 }
 
 async fn cosign(

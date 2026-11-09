@@ -17,6 +17,7 @@ reddsa.workspace = true
 orchard.workspace = true
 pczt.workspace = true
 zcash_keys.workspace = true
+zcash_note_encryption.workspace = true
 zcash_protocol.workspace = true
 clap.workspace = true
 anyhow.workspace = true
@@ -30,6 +31,5 @@ postcard.workspace = true
 [dev-dependencies]
 # tests/interop.rs builds a PCZT for the new vault (an invented note, never broadcast).
 zcash_primitives.workspace = true
-zcash_note_encryption.workspace = true
 incrementalmerkletree.workspace = true
 shardtree.workspace = true

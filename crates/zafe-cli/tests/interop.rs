@@ -303,6 +303,12 @@ fn two_zafe_members_keygen_and_sign_in_both_roles() {
             &["coordinate", "--dir", dir, "--pczt", pczt_arg, "--out", out],
             &expect,
         ));
+        // --inspect shows what the request pays and signs nothing.
+        let shown = cosig.ok(&["cosign", "--dir", dir, "--inspect"]);
+        assert!(shown.contains(&encode(payee())), "{shown}");
+        assert!(shown.contains(&format!("({PAY} zat)")), "{shown}");
+        assert!(shown.contains(&format!("({FEE} zat)")), "{shown}");
+        assert!(Path::new(dir).join("request.json").exists());
         cosig.ok(&with(&["cosign", "--dir", dir], &expect));
         coord.ok(&with(&["coordinate", "--dir", dir, "--out", out], &expect));
         assert_signed(Path::new(out), &fvk);
