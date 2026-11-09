@@ -74,8 +74,9 @@ rollout percent; essential must be 100). It waits for approval in the `play-prod
 environment, then `scripts/play_promote.py` assigns the internal release named `<version>` to
 production with the class's priority and notes. Its key belongs to a second service account,
 the only one with production rights in Play Console; the uploader can reach testing tracks
-only. The Console can't set the priority, so promote with the workflow, not by hand. With
-managed publishing on, an approved release still waits for **Publish** in the Console.
+only. The Console can't set the priority, so promote with the workflow, not by hand.
+Managed publishing is off (since 2026-11-10: it made every release wait on a manual
+**Publish**), so a release goes live as soon as Google approves it.
 
 ## Locally
 

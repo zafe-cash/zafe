@@ -104,7 +104,7 @@ def main():
          json={"track": "production", "releases": [release]})
     call("POST", f"/edits/{edit}:commit")
     print(f"production: {version} (codes {', '.join(codes)}), {cls}, priority {priority}, "
-          f"{percent:g}% (sent for review; with managed publishing, publish it in the Console)")
+          f"{percent:g}% (sent for review; live once Google approves it)")
 
 
 if __name__ == "__main__":

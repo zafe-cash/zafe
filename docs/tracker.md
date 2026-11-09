@@ -34,7 +34,9 @@ Ship order (relays decode envelope kinds, so an old relay rejects move messages)
 - [x] `mainnet-v0.1.26` on `65c1211` (2026-10-27; 0.1.24 and 0.1.25 stay testnet only):
       APK published, Play internal, promoted to production (code 3007, essential, 100%),
       sent for review.
-- [ ] **(you)** Publish 0.1.26 in Play Console (managed publishing) once Google approves it.
+- [x] `mainnet-v0.1.28` on `9abf6b2` (2026-11-10; testnet 0.1.27 and 0.1.28): the "New vault"
+      back fix. APK published, Play internal, promoted to production (code 3008, optional,
+      100%), in review. Managed publishing is off, so it goes live once Google approves it.
 - [x] Restore: **Paste** says when the clipboard is empty or holds something that isn't a
       backup (and never pastes that into the field); it used to do nothing (2026-10-27).
 - [x] Backup **Copy as text** and **Copy words** show "On the clipboard for 42 s", then "No
