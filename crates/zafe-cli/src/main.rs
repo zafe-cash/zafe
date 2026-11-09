@@ -6,6 +6,8 @@
 
 use std::{fs, path::PathBuf, time::Duration};
 
+mod interop;
+
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::rngs::OsRng;
@@ -30,6 +32,8 @@ const WALLET_KEY_FILE: &str = "wallet.key";
 const LOG_DIR: &str = "log";
 /// The leader's signing requests and used commitments.
 const REQUESTS_DIR: &str = "requests";
+/// A vault shared with frost-zec (`zafe interop`); its file names are in `interop.rs`.
+const INTEROP_DIR: &str = "interop";
 use zafe_proto::{Identity, IdentitySeeds};
 use zcash_protocol::memo::Memo;
 
@@ -159,6 +163,10 @@ enum Command {
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
+    /// A 2-of-2 vault shared with frost-zec through its interop files (format v0):
+    /// key generation and signing in both roles, with zafe-core's own code.
+    #[command(subcommand)]
+    Interop(interop::InteropCmd),
 }
 
 #[derive(Subcommand)]
@@ -354,6 +362,16 @@ async fn main() -> Result<()> {
             println!("identity {}", hex::encode(id.public().sig_pk));
         }
         Command::Vault(cmd) => vault(cmd, &home, &relay, &cli.lightwalletd, &mut rng).await?,
+        Command::Interop(cmd) => {
+            interop::run(
+                cmd,
+                &home.path(INTEROP_DIR),
+                home.identity().map(|id| id.public().sig_pk),
+                &network(),
+                &cli.lightwalletd,
+            )
+            .await?
+        }
         Command::Sync => {
             let material = home.material()?;
             let wallet = open_wallet(&home, &material, &cli.lightwalletd).await?;

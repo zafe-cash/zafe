@@ -3370,7 +3370,7 @@ pub struct Sent {
 }
 
 /// Extracts (fully verifying) and broadcasts a signed, proved PCZT.
-async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, NodeError> {
+pub async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, NodeError> {
     let transaction = TransactionExtractor::new(signed)
         .with_orchard(verifying_key())
         .extract(crate::zrng::zrng())
