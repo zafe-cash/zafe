@@ -283,11 +283,14 @@ Never checked on a real phone:
       (2026-09-30); desktop bench 2.85 s → 0.57 s for a warm 2-action proof. Adopting it
       means the whole `zakura-*` stack (as Vizor did). Next: a spike branch,
       `scripts/android-bench.sh`, regtest e2e and the zcash-sign cross-check.
-- [ ] frost-zec interop (zafe#8; Khadim's ZCG grant #490, approved 2026-11-09): `zafe
+- [x] frost-zec interop (zafe#8; Khadim's ZCG grant #490, approved 2026-11-09): `zafe
       interop` (CLI) speaks its `frost-zec-interop-v0` files with zafe-core's own keygen,
       signing and `verify_pczt`; `crates/zafe-cli/tests/interop.rs` covers zafe↔zafe and,
-      with `FROST_ZEC_BIN`, zafe↔frost-zec. Next: the live mainnet 2-of-2 (proposed
-      2026-11-11), Zafe co-signing a spend that goes on chain.
+      with `FROST_ZEC_BIN`, zafe↔frost-zec. Merged in #9 (2026-11-10).
+- [x] Live mainnet 2-of-2 with frost-zec (2026-11-10, vault `3698a4f9…2482`): spend 1
+      frost-zec coordinating, Zafe co-signing (`904905d8…fece8`); spend 2 Zafe proposing,
+      proving, coordinating and broadcasting, frost-zec co-signing
+      (`2e41dc225386fec1625f9b00f52b9ab8e92b7fa56656f854b5ae2bbcea23fa7e`).
 - [ ] Stack plan: become the shared multisig layer other wallets build on. Tracked in
       `docs/stack-plan.md` (research: `docs/stack-design.md`), not here.
 
