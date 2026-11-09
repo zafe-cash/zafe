@@ -33,6 +33,8 @@ cargo test -p rust_lib_zafe --test bridge_e2e -- --ignored --nocapture   # app f
 
 # Cross-check against frost-tools zcash-sign (build it from ZcashFoundation/frost-tools)
 ZCASH_SIGN_BIN=/path/to/zcash-sign cargo test -p zafe-core --test zcash_sign_crosscheck -- --ignored
+# Interop with OpenPGP-Wallet/frost-zec (`zafe interop`, its v0 files): keygen + both signing roles
+FROST_ZEC_BIN=/path/to/frost-zec cargo test -p zafe-cli --test interop -- --ignored --nocapture
 scripts/android-bench.sh                # phone benchmark over adb
 cargo test -p zafe-core --test tls -- --include-ignored   # TLS clients + live testnet lightwalletd
 
@@ -84,7 +86,8 @@ crates/zafe-proto   identities, signed/HPKE envelopes, vault log, relay API type
                     (no Zcash deps, so the relay can use it)
 crates/zafe-relay   blind axum relay on SQLite (ZAFE_RELAY_DB): FCM push, long polls,
                     limits, quotas, expiry, pruning
-crates/zafe-cli     `zafe` binary: headless member for tests (dev-only plain-file state)
+crates/zafe-cli     `zafe` binary: headless member for tests (dev-only plain-file state);
+                    `zafe interop`: a vault shared with frost-zec through its v0 files
 app/                Flutter app; app/rust = bridge crate `rust_lib_zafe` (workspace member)
 infra/regtest       regtest through `ths` (up.sh / fund.sh / down.sh)
 infra/relay         Dockerfile, vps/ (Compose + Caddy + backups, bootstrap.sh, deploy.sh)
@@ -94,7 +97,7 @@ scripts/            e2e scripts, app-harness.sh, CI checks (check_*), brand/, il
 ```
 
 State dir names live in `zafe_core::state_dir`; CLI home files are consts at the top of
-`zafe-cli/src/main.rs`. Never spell a path name inline.
+`zafe-cli/src/main.rs` (`interop/` files: top of `interop.rs`). Never spell a path name inline.
 
 ## Protocol invariants (breaking these is a security or funds bug)
 
