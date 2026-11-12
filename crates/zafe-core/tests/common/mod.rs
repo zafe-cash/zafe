@@ -217,6 +217,60 @@ pub fn build_pczt_with_fee(
     outputs: Vec<Out>,
     fixed_fee: Option<u64>,
 ) -> Pczt {
+    build_pczt_custom(
+        spend_fvk,
+        vec![(note, path)],
+        anchor,
+        outputs,
+        fixed_fee,
+        BundlePadding::DEFAULT,
+    )
+}
+
+/// A tree holding every note in `notes`, and each note's path in it (one shared anchor,
+/// so they can be spent together).
+pub fn witness_all(notes: &[Note]) -> (Anchor, Vec<MerklePath>) {
+    let mut tree =
+        ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+    let leaves: Vec<MerkleHashOrchard> = notes
+        .iter()
+        .map(|note| {
+            let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+            MerkleHashOrchard::from_cmx(&cmx)
+        })
+        .collect();
+    for leaf in &leaves {
+        tree.append(*leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+    }
+    tree.checkpoint(9_999_999).unwrap();
+    let mut anchor = None;
+    let paths = leaves
+        .iter()
+        .enumerate()
+        .map(|(i, leaf)| {
+            let path = tree
+                .witness_at_checkpoint_depth((i as u64).into(), 0)
+                .unwrap()
+                .unwrap();
+            anchor = Some(Anchor::from(path.root(*leaf)));
+            path.into()
+        })
+        .collect();
+    (anchor.unwrap(), paths)
+}
+
+/// The general fixture builder: several spends, an optional non-standard fixed fee, and
+/// the Ironwood bundle padding (a builder can pad to any number of actions; the ZIP 317
+/// fee then charges every one of them).
+pub fn build_pczt_custom(
+    spend_fvk: &FullViewingKey,
+    spends: Vec<(Note, MerklePath)>,
+    anchor: Anchor,
+    outputs: Vec<Out>,
+    fixed_fee: Option<u64>,
+    ironwood_padding: BundlePadding,
+) -> Pczt {
     use zcash_primitives::transaction::fees::fixed;
 
     let mut builder = Builder::new(
@@ -227,12 +281,14 @@ pub fn build_pczt_with_fee(
             orchard_anchor: None,
             ironwood_anchor: Some(anchor),
             orchard_padding: BundlePadding::DEFAULT,
-            ironwood_padding: BundlePadding::DEFAULT,
+            ironwood_padding,
         },
     );
-    builder
-        .add_ironwood_spend::<zip317::FeeRule>(spend_fvk.clone(), note, path)
-        .unwrap();
+    for (note, path) in spends {
+        builder
+            .add_ironwood_spend::<zip317::FeeRule>(spend_fvk.clone(), note, path)
+            .unwrap();
+    }
     for out in outputs {
         builder
             .add_ironwood_output::<zip317::FeeRule>(

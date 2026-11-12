@@ -572,7 +572,9 @@ pub struct VaultBalance {
 /// How many spendable notes the vault keeps for payments in flight at once: change is
 /// split into up to this many notes (each at least [`CHANGE_NOTE_MIN_ZAT`]) while the
 /// vault has fewer. Splitting adds outputs, so a payment that splits pays up to
-/// 5,000 zats more per extra action (members' checks compute the same ZIP 317 fee).
+/// 5,000 zats more per extra action (members' checks compute the same ZIP 317 fee, and
+/// count at most this many change outputs toward the action bound, `verify::MAX_CHANGE_OUTPUTS`:
+/// raising it needs every member updated first).
 pub const CHANGE_NOTES_TARGET: usize = 4;
 
 /// The smallest note change is split into (0.01 ZEC): below it, change stays in one note.

@@ -3,11 +3,14 @@
 
 use orchard::{
     keys::{FullViewingKey, Scope},
-    Address,
+    note::Note,
+    tree::MerklePath,
+    Address, Anchor,
 };
 use pczt::Pczt;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::verify::{verify_pczt, Expectations, Payment, VerifyError};
+use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_protocol::memo::{Memo, MemoBytes};
 
 mod common;
@@ -274,4 +277,242 @@ fn rejects_spend_from_another_wallet() {
     let pczt = build_pczt(&other, note, path, anchor, vec![out, other_change]);
     let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
     assert!(matches!(err, VerifyError::ForeignSpend(_)), "{err:?}");
+}
+
+// --- Action count: padding must not raise the fee (security report 2026-11-12) ---------
+
+/// `count` vault notes of `value` each, in one tree.
+fn vault_notes(v: &Vault, count: usize, value: u64) -> (Anchor, Vec<(Note, MerklePath)>) {
+    let notes: Vec<Note> = (0..count)
+        .map(|_| receive_ironwood_note(&v.fvk, v.fvk.address_at(0u32, Scope::External), value))
+        .collect();
+    let (anchor, paths) = witness_all(&notes);
+    (anchor, notes.into_iter().zip(paths).collect())
+}
+
+fn padded_to(actions: u8) -> BundlePadding {
+    BundlePadding {
+        bundle_required: false,
+        pad_to_minimum: Some(actions),
+    }
+}
+
+/// A transaction to the vault's own address of `value` with no memo (zero-value change).
+fn zero_change(v: &Vault) -> Out {
+    v.change(0)
+}
+
+#[test]
+fn rejects_padding_that_raises_the_fee() {
+    // One spend, a payment and change need 2 actions. The builder pads to 5 and charges the
+    // ZIP 317 fee for all 5: the payment is exact, the extra 15,000 zat come out of change.
+    let v = Vault::new(40);
+    let payee = outside_address(7);
+    let m = memo("Invoice #123");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let fee = 5 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![v.pay(payee, 400_000, &m), v.change(FUNDS - 400_000 - fee)],
+        None,
+        padded_to(5),
+    );
+    let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 5,
+            needed: 2
+        }
+    );
+}
+
+#[test]
+fn rejects_zero_value_vault_outputs_as_padding() {
+    // Padding made of zero-value outputs to the vault's own address: they decrypt like
+    // change, but no builder adds them next to real change.
+    let v = Vault::new(41);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let fee = 4 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(payee, 400_000, &m),
+            v.change(FUNDS - 400_000 - fee),
+            zero_change(&v),
+            zero_change(&v),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 4,
+            needed: 2
+        }
+    );
+}
+
+#[test]
+fn rejects_change_split_beyond_the_policy() {
+    // More change notes than the split policy ever makes (4): the extra ones only add fee.
+    let v = Vault::new(42);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let fee = 7 * 5_000;
+    let each = (FUNDS - 400_000 - fee) / 6;
+    let mut outputs = vec![v.pay(payee, 400_000, &m)];
+    outputs.extend((0..6).map(|i| {
+        v.change(if i == 0 {
+            FUNDS - 400_000 - fee - 5 * each
+        } else {
+            each
+        })
+    }));
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        outputs,
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 7,
+            needed: 5
+        }
+    );
+}
+
+#[test]
+fn change_split_into_four_notes_verifies() {
+    // `wallet::change_split_policy`: up to 4 change notes while the vault has few notes.
+    let v = Vault::new(43);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let fee = 5 * 5_000;
+    let change = FUNDS - 400_000 - fee;
+    let mut outputs = vec![v.pay(payee, 400_000, &m)];
+    outputs.extend((0..4).map(|i| {
+        v.change(if i == 0 {
+            change - 3 * (change / 4)
+        } else {
+            change / 4
+        })
+    }));
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        outputs,
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let verified = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap();
+    assert_eq!(verified.fee_zat, fee);
+}
+
+#[test]
+fn more_spends_than_outputs_verifies() {
+    // Five notes for one payment and change: 5 actions, each carrying a real spend.
+    let v = Vault::new(44);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 5, 200_000);
+    let fee = 5 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(payee, 700_000, &m),
+            v.change(1_000_000 - 700_000 - fee),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let verified = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 700_000, &m)])).unwrap();
+    assert_eq!(verified.fee_zat, fee);
+    assert_eq!(verified.spends_to_sign.len(), 5);
+}
+
+#[test]
+fn sweep_without_payments_verifies() {
+    // A cancelled proposal's notes swept back to the vault: no payments, every note spent.
+    let v = Vault::new(45);
+    let (anchor, spends) = vault_notes(&v, 3, 200_000);
+    let fee = 3 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![v.change(600_000 - fee)],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let verified = verify_pczt(&pczt, &v.fvk, &expect(vec![])).unwrap();
+    assert_eq!(verified.fee_zat, fee);
+    assert_eq!(verified.payments.len(), 0);
+}
+
+#[test]
+fn exact_spend_with_zero_change_verifies() {
+    // Two payments that use the note up exactly: the wallet still adds one zero-value
+    // change output, so 3 actions are needed.
+    let v = Vault::new(46);
+    let (a, b) = (outside_address(7), outside_address(8));
+    let (ma, mb) = (memo("a"), memo("b"));
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(a, 600_000, &ma),
+            v.pay(b, FUNDS - 600_000 - FEE_3_ACTIONS, &mb),
+            zero_change(&v),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let ok = verify_pczt(
+        &pczt,
+        &v.fvk,
+        &expect(vec![
+            payment(a, 600_000, &ma),
+            payment(b, FUNDS - 600_000 - FEE_3_ACTIONS, &mb),
+        ]),
+    );
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn unpadded_single_action_verifies() {
+    // A builder may skip padding (pad_to_minimum = 1): one note swept in one action still
+    // pays the 2-action ZIP 317 minimum, and fewer actions never raise the fee.
+    let v = Vault::new(47);
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![v.change(FUNDS - FEE_2_ACTIONS)],
+        None,
+        padded_to(1),
+    );
+    let verified = verify_pczt(&pczt, &v.fvk, &expect(vec![])).unwrap();
+    assert_eq!(verified.fee_zat, FEE_2_ACTIONS);
 }

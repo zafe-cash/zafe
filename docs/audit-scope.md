@@ -23,7 +23,7 @@ unless shown). **P0 = loss or theft of funds if wrong.**
 |---|---|---|---|
 | P0 | Vault keys (ZIP 2005 `use_qsk = true`) | `keys.rs` (326), `tests/zip2005_vectors.rs`, `scripts/check_zip2005_vectors.py` | wrong derivation = unrecoverable or unusable vault; vectors are also cross-checked in Python and against frost-tools |
 | P0 | DKG, `sk` agreement, safety words | `keygen.rs` (432), `sas.rs` (136), `node::{keygen_step, run_keygen}` | a member (or the relay) biasing or learning `sk`/the group key; echo, commitments to `sk` contributions, HPKE sealing; a relay that shows members different member lists and still gets matching words |
-| P0 | Independent verification of a PCZT | `verify.rs` (290), `tx.rs` (158) | a member approving or signing a transaction that pays anyone but the proposed payees; fee, change, spends, sighash |
+| P0 | Independent verification of a PCZT | `verify.rs` (336), `tx.rs` (158) | a member approving or signing a transaction that pays anyone but the proposed payees; fee, change, spends, sighash |
 | P0 | FROST signing, randomizer, nonces | `signing.rs` (89), `session.rs` (643), `nonce_store.rs` (367), `node::{approve, sign_own_shares, send_ready, finalize}` | nonce reuse (key leak), signing a different message, accepting a bad share, `alpha` leaking |
 | P0 | One-tap signing and replay determinism | `vault.rs` (1292): `assign_commitments`, `apply_versioned`, `ProposalState`; `node::{top_up_pool, forget_closed, propose_again}`, `PoolReset` | members computing different states; a commitment assigned twice; shares for a group the member isn't in |
 | P0 | Note reservation, sweeps, expiry | `vault.rs` (`NotesInUse`), `node::{reserve_notes, note_holds, invalidate}`, `wallet.rs` | double-spending a note into two payable proposals; a cancelled but fully signed transaction staying sendable |
@@ -81,8 +81,11 @@ the code that enforces each and the test that should catch a regression.
    actions; every spend is a vault note or a zero-value pre-signed dummy (all spends before
    any output); every payment output recovered with the vault **external OVK** and matched
    exactly (recipient, amount, memo); change belongs to the vault and decrypts with its
-   IVK; fee equals ZIP 317 (`5000 * max(2, actions)`); sums use checked arithmetic;
-   the sighash is computed locally. `verify.rs`; `tests/verify.rs` (9 negative cases).
+   IVK; fee equals ZIP 317 (`5000 * max(2, actions)`) with actions at most
+   `max(2, vault spends, payments + change outputs)` (change ≤ 4; one zero-value change
+   only when there is no other), so padding can't raise the fee; sums use checked
+   arithmetic; the sighash is computed locally. `verify.rs`; `tests/verify.rs` (12
+   negative cases).
    Verification runs again at signing time (`Member::sign`, `sign_groups`).
 4. **What to sign.** Every Ironwood action whose `spend_auth_sig` is `None`, never filtered
    by value; any unsigned Orchard-pool spend is rejected. `tx::spends_to_sign`.
@@ -171,7 +174,7 @@ Protocol and crypto (`crates/zafe-core/tests`)
   agreement on keys, rerandomized signature verifies as Orchard spend auth, equivocating
   relay, `sk` commitments), `keygen_async` (4), `session` (7), `one_tap` (5),
   `one_tap_retry` (2), `spend` (3: FROST spend of an Ironwood note, foreign note, wrong
-  alpha), `verify` (9 negative PCZT cases), `reshare` (3, reference only), `backup` (5),
+  alpha), `verify` (12 negative PCZT cases), `reshare` (3, reference only), `backup` (5),
   `zcash_sign_crosscheck` (2, one ignored: against frost-tools `zcash-sign`).
 - Coordination: `vault` (40: replay, versions, reservation, pools and partial groups,
   seat moves, repair state, unapproved-spend rules), `node_keygen` (7: members over an

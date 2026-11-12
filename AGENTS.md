@@ -142,7 +142,9 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   is a vault note (nullifier/rk vs vault FVK) or a zero-value pre-signed dummy; each payment
   output recovered with the vault **external OVK** and matched exactly (recipient, amount,
   memo); change must belong to the vault **and trial-decrypt** with its IVK; fee must
-  **equal** ZIP 317 (5000 × max(2, actions)); sighash computed locally.
+  **equal** ZIP 317 (5000 × max(2, actions)), and actions ≤ max(2, vault spends, payments +
+  change outputs ≤ 4) so padding can't raise it (`TooManyActions`; local only, never in
+  replay); sighash computed locally.
 - **Proposals use `OvkPolicy::Sender`** and Ironwood change, or verification fails. A vault can
   never pay its own addresses (`node::propose` refuses). Change is split into up to 4 notes
   (`wallet::change_split_policy`) while the vault has fewer than 4 spendable notes.

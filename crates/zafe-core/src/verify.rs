@@ -14,6 +14,10 @@
 //!    exact match (recipient, amount, memo) for one proposed payment, recovered by
 //!    decrypting with the vault's outgoing viewing key. Every payment is matched once.
 //! 5. Value: spends − outputs = fee, and the fee equals the ZIP 317 conventional fee.
+//!    The action count it is charged for may not exceed what the transaction needs:
+//!    max(2, vault spends, payments + change outputs), with at most
+//!    [`MAX_CHANGE_OUTPUTS`] change outputs, and a zero-value change output counted only
+//!    when there is no other change. Padding beyond that would raise the fee out of change.
 //! 6. Sighash: computed locally; this is the only value a member may sign.
 
 use orchard::{
@@ -31,6 +35,9 @@ use crate::tx::{self, SpendToSign, TxError};
 pub const ZIP317_MARGINAL_FEE: u64 = 5_000;
 /// ZIP 317 grace actions.
 pub const ZIP317_GRACE_ACTIONS: u64 = 2;
+/// The most change outputs a proposal may count toward its action bound: the wallet's
+/// split policy never makes more ([`crate::wallet::CHANGE_NOTES_TARGET`]).
+pub const MAX_CHANGE_OUTPUTS: u64 = crate::wallet::CHANGE_NOTES_TARGET as u64;
 
 /// A payment the proposal claims to make.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +106,8 @@ pub enum VerifyError {
     ValueOverflow,
     #[error("fee {actual} zat does not equal the ZIP 317 fee {expected} zat")]
     WrongFee { expected: u64, actual: u64 },
+    #[error("transaction has {actions} actions where {needed} suffice: padding raises the fee")]
+    TooManyActions { actions: u64, needed: u64 },
     #[error("{0}")]
     Tx(String),
 }
@@ -158,6 +167,11 @@ pub fn verify_pczt(
     let mut output_total: u64 = 0;
     let mut change_total: u64 = 0;
     let mut action_count: u64 = 0;
+    // What the transaction needs, for the action bound (step 5).
+    let mut vault_spends: u64 = 0;
+    let mut payment_outputs: u64 = 0;
+    let mut change_outputs: u64 = 0;
+    let mut zero_change_outputs: u64 = 0;
 
     Verifier::new(pczt.clone())
         .with_ironwood::<VerifyError, _>(|bundle| {
@@ -180,6 +194,7 @@ pub fn verify_pczt(
                     input_total = input_total
                         .checked_add(value)
                         .ok_or(custom(VerifyError::ValueOverflow))?;
+                    vault_spends += 1;
                 } else {
                     // A padding (dummy) spend: zero value, already signed by the IO
                     // Finalizer with its own random key, and internally consistent.
@@ -209,7 +224,12 @@ pub fn verify_pczt(
                     .recipient()
                     .expect("checked by verify_note_commitment");
                 if value == 0 {
-                    continue; // dummy or zero-value output: moves no funds
+                    // Moves no funds. A dummy goes to a random address; one to the vault is
+                    // zero-value change (the wallet adds it when nothing is left over).
+                    if vault_fvk.scope_for_address(&recipient).is_some() {
+                        zero_change_outputs += 1;
+                    }
+                    continue;
                 }
                 output_total = output_total
                     .checked_add(value)
@@ -228,6 +248,7 @@ pub fn verify_pczt(
                     change_total = change_total
                         .checked_add(value)
                         .ok_or(custom(VerifyError::ValueOverflow))?;
+                    change_outputs += 1;
                     continue;
                 }
 
@@ -250,6 +271,7 @@ pub fn verify_pczt(
                     .position(|p| p.recipient == address && p.amount_zat == value && p.memo == memo)
                     .ok_or(custom(VerifyError::UnexpectedOutput(i)))?;
                 remaining.swap_remove(pos);
+                payment_outputs += 1;
             }
             Ok(())
         })
@@ -262,7 +284,31 @@ pub fn verify_pczt(
         return Err(VerifyError::MissingPayments(remaining.len()));
     }
 
-    // 5. Fee.
+    // 5. Value, part 1: the action bound. ZIP 317 charges every action, and whoever builds
+    // the PCZT chooses how many there are: dummy spends and zero-value outputs move no
+    // funds, so without a bound a builder could pad the bundle and take the extra fee out
+    // of change. Ironwood bundles enable cross-address transfers, so the builder pairs
+    // spends with outputs and pads only up to 2 (orchard 0.16 `BundleType::num_actions`,
+    // `BundlePadding::DEFAULT`): an honest transaction has max(2, spends, outputs) actions.
+    // The wallet adds a zero-value change output only when there is no other change, and
+    // splits change into at most `MAX_CHANGE_OUTPUTS` notes. Fewer actions are fine: the
+    // fee only goes down.
+    let change_counted = if change_outputs > 0 {
+        change_outputs
+    } else {
+        zero_change_outputs.min(1)
+    };
+    let needed = ZIP317_GRACE_ACTIONS
+        .max(vault_spends)
+        .max(payment_outputs + change_counted.min(MAX_CHANGE_OUTPUTS));
+    if action_count > needed {
+        return Err(VerifyError::TooManyActions {
+            actions: action_count,
+            needed,
+        });
+    }
+
+    // 5. Value, part 2: the fee.
     let fee = input_total
         .checked_sub(output_total)
         .ok_or(VerifyError::NegativeFee)?;
