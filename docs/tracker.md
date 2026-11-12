@@ -435,11 +435,17 @@ Security audit and races (2026-10-14, fixed by 2026-10-15; `docs/audit-scope.md`
       action count from the PCZT, so a builder could add dummy actions and take 5,000 zat
       each from change. Now actions ≤ max(2, vault spends, payments + change outputs ≤ 4)
       (`VerifyError::TooManyActions`, spec §9.3 step 4). Local check only, no replay change.
+      Follow-up from the same reporter (2026-11-13): zero-value vault spends counted, and
+      need no real note (no Merkle check at v_old = 0), so padding still worked. Only vault
+      spends > 5,000 zat count now (upstream never spends dust in its own action); all are
+      still signed.
       Left: a dishonest proposer can still split change into up to 4 notes when the vault
-      already has 4 (≤ 15,000 zat, kept as vault notes), or pick extra vault notes to spend
-      (5,000 zat each; note selection is the proposer's choice, the fee row shows it).
+      already has 4 (≤ 15,000 zat, kept as vault notes; no per-note floor holds for every
+      honest builder: zcash-devtool's `--min-split-output-value` goes to 0), or pick extra
+      vault notes > 5,000 zat to spend (5,000 zat each; note selection is the proposer's
+      choice, the fee row shows it).
 - [ ] Ship the action bound in the next app release (and `zafe` CLI members): class
-      `essential` (security fix), notes credit "Daniel Gorgonha (DeegaLabs)".
+      `essential` (security fix), notes credit "@danielgorgonha from @deegalabs".
 
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,

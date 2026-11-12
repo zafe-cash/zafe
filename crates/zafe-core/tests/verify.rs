@@ -398,17 +398,21 @@ fn rejects_change_split_beyond_the_policy() {
 
 #[test]
 fn change_split_into_four_notes_verifies() {
-    // `wallet::change_split_policy`: up to 4 change notes while the vault has few notes.
+    // `wallet::change_split_policy`: up to 4 change notes while the vault has few notes,
+    // each at least `CHANGE_NOTE_MIN_ZAT`. Laid out as zcash_client_backend does: the
+    // quotient in every note, the remainder added to the first.
     let v = Vault::new(43);
     let payee = outside_address(7);
     let m = memo("x");
-    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let funds = 5_000_003;
+    let (anchor, spends) = vault_notes(&v, 1, funds);
     let fee = 5 * 5_000;
-    let change = FUNDS - 400_000 - fee;
+    let change = funds - 400_000 - fee;
+    assert!(change / 4 >= zafe_core::wallet::CHANGE_NOTE_MIN_ZAT);
     let mut outputs = vec![v.pay(payee, 400_000, &m)];
     outputs.extend((0..4).map(|i| {
         v.change(if i == 0 {
-            change - 3 * (change / 4)
+            change / 4 + change % 4
         } else {
             change / 4
         })
@@ -515,4 +519,191 @@ fn unpadded_single_action_verifies() {
     );
     let verified = verify_pczt(&pczt, &v.fvk, &expect(vec![])).unwrap();
     assert_eq!(verified.fee_zat, FEE_2_ACTIONS);
+}
+
+#[test]
+fn rejects_zero_value_vault_spends_as_padding() {
+    // Zero-value notes to a vault address verify as vault spends (they are, and members
+    // sign them), but they move no value: a builder could add any number of them and take
+    // 5,000 zat each out of change. The notes need not exist on chain (the action circuit
+    // skips the Merkle check for v_old = 0).
+    let v = Vault::new(48);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let ext = v.fvk.address_at(0u32, Scope::External);
+    let mut notes = vec![receive_ironwood_note(&v.fvk, ext, FUNDS)];
+    notes.extend((0..4).map(|_| receive_ironwood_note(&v.fvk, ext, 0)));
+    let (anchor, paths) = witness_all(&notes);
+    let fee = 5 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        notes.into_iter().zip(paths).collect(),
+        anchor,
+        vec![v.pay(payee, 400_000, &m), v.change(FUNDS - 400_000 - fee)],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 5,
+            needed: 2
+        }
+    );
+}
+
+#[test]
+fn rejects_dust_vault_spends_as_padding() {
+    // Real vault notes worth no more than the marginal fee: no honest wallet spends one in
+    // an action of its own (each costs more fee than it brings), so they don't count.
+    let v = Vault::new(49);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let ext = v.fvk.address_at(0u32, Scope::External);
+    let mut notes = vec![receive_ironwood_note(&v.fvk, ext, FUNDS)];
+    notes.extend((0..4).map(|_| receive_ironwood_note(&v.fvk, ext, 5_000)));
+    let (anchor, paths) = witness_all(&notes);
+    let fee = 5 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        notes.into_iter().zip(paths).collect(),
+        anchor,
+        vec![
+            v.pay(payee, 400_000, &m),
+            v.change(FUNDS + 4 * 5_000 - 400_000 - fee),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 5,
+            needed: 2
+        }
+    );
+}
+
+#[test]
+fn small_spends_in_free_actions_verify() {
+    // A payment and change need 2 actions; a zero-value and a 5,000-zat vault note fit in
+    // them for free (zcash_client_backend admits dust inputs exactly there), and every
+    // vault spend is still signed.
+    let v = Vault::new(50);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let ext = v.fvk.address_at(0u32, Scope::External);
+    for small in [0, 5_000] {
+        let notes = vec![
+            receive_ironwood_note(&v.fvk, ext, FUNDS),
+            receive_ironwood_note(&v.fvk, ext, small),
+        ];
+        let (anchor, paths) = witness_all(&notes);
+        let pczt = build_pczt_custom(
+            &v.fvk,
+            notes.into_iter().zip(paths).collect(),
+            anchor,
+            vec![
+                v.pay(payee, 400_000, &m),
+                v.change(FUNDS + small - 400_000 - FEE_2_ACTIONS),
+            ],
+            None,
+            BundlePadding::DEFAULT,
+        );
+        let verified =
+            verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap();
+        assert_eq!(verified.fee_zat, FEE_2_ACTIONS);
+        assert_eq!(verified.spends_to_sign.len(), 2);
+    }
+}
+
+#[test]
+fn spends_above_the_marginal_fee_count() {
+    // One zat above the marginal fee, a note counts: five spends need five actions.
+    let v = Vault::new(51);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let ext = v.fvk.address_at(0u32, Scope::External);
+    let mut notes = vec![receive_ironwood_note(&v.fvk, ext, FUNDS)];
+    notes.extend((0..4).map(|_| receive_ironwood_note(&v.fvk, ext, 5_001)));
+    let (anchor, paths) = witness_all(&notes);
+    let fee = 5 * 5_000;
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        notes.into_iter().zip(paths).collect(),
+        anchor,
+        vec![
+            v.pay(payee, 400_000, &m),
+            v.change(FUNDS + 4 * 5_001 - 400_000 - fee),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let verified = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap();
+    assert_eq!(verified.fee_zat, fee);
+    assert_eq!(verified.spends_to_sign.len(), 5);
+}
+
+#[test]
+fn rejects_two_zero_value_change_outputs() {
+    // No change left: one zero-value vault output is what the wallet adds; a second one
+    // is padding.
+    let v = Vault::new(52);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(payee, FUNDS - FEE_3_ACTIONS, &m),
+            zero_change(&v),
+            zero_change(&v),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    let err = verify_pczt(
+        &pczt,
+        &v.fvk,
+        &expect(vec![payment(payee, FUNDS - FEE_3_ACTIONS, &m)]),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 3,
+            needed: 2
+        }
+    );
+}
+
+#[test]
+fn rejects_one_action_over_the_bound() {
+    let v = Vault::new(53);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(payee, 400_000, &m),
+            v.change(FUNDS - 400_000 - FEE_3_ACTIONS),
+        ],
+        None,
+        padded_to(3),
+    );
+    let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
+    assert_eq!(
+        err,
+        VerifyError::TooManyActions {
+            actions: 3,
+            needed: 2
+        }
+    );
 }

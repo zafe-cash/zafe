@@ -15,9 +15,11 @@
 //!    decrypting with the vault's outgoing viewing key. Every payment is matched once.
 //! 5. Value: spends − outputs = fee, and the fee equals the ZIP 317 conventional fee.
 //!    The action count it is charged for may not exceed what the transaction needs:
-//!    max(2, vault spends, payments + change outputs), with at most
-//!    [`MAX_CHANGE_OUTPUTS`] change outputs, and a zero-value change output counted only
-//!    when there is no other change. Padding beyond that would raise the fee out of change.
+//!    max(2, vault spends worth more than the marginal fee, payments + change outputs),
+//!    with at most [`MAX_CHANGE_OUTPUTS`] change outputs, and a zero-value change output
+//!    counted only when there is no other change. Padding beyond that (dummy spends,
+//!    zero-value or dust vault spends, zero-value outputs) would raise the fee out of
+//!    change. Every vault spend is still verified and signed, whatever its value.
 //! 6. Sighash: computed locally; this is the only value a member may sign.
 
 use orchard::{
@@ -167,7 +169,8 @@ pub fn verify_pczt(
     let mut output_total: u64 = 0;
     let mut change_total: u64 = 0;
     let mut action_count: u64 = 0;
-    // What the transaction needs, for the action bound (step 5).
+    // What the transaction needs, for the action bound (step 5). Only vault spends worth
+    // more than the marginal fee count: see there.
     let mut vault_spends: u64 = 0;
     let mut payment_outputs: u64 = 0;
     let mut change_outputs: u64 = 0;
@@ -194,7 +197,9 @@ pub fn verify_pczt(
                     input_total = input_total
                         .checked_add(value)
                         .ok_or(custom(VerifyError::ValueOverflow))?;
-                    vault_spends += 1;
+                    if value > ZIP317_MARGINAL_FEE {
+                        vault_spends += 1;
+                    }
                 } else {
                     // A padding (dummy) spend: zero value, already signed by the IO
                     // Finalizer with its own random key, and internally consistent.
@@ -293,6 +298,17 @@ pub fn verify_pczt(
     // The wallet adds a zero-value change output only when there is no other change, and
     // splits change into at most `MAX_CHANGE_OUTPUTS` notes. Fewer actions are fine: the
     // fee only goes down.
+    //
+    // A vault spend counts only when the note is worth more than the marginal fee. A
+    // zero-value spend needs no real note (the action circuit skips the Merkle check when
+    // v_old = 0, orchard 0.16 `circuit.rs` "Either v_old = 0, or root = anchor"), so
+    // counting it would let a builder pad with vault-addressed zero-value notes. Honest
+    // builders never spend such a note in an action of its own: zcash_client_sqlite never
+    // selects notes at or below `MARGINAL_FEE` (`wallet/common.rs`, `rn.value > :min_value`),
+    // zcash_client_backend admits them only where they add no action
+    // (`fees/common.rs`, `check_for_uneconomic_inputs`), and Ironwood bundles always allow
+    // cross-address transfers, so no builder pairs change with a wallet-controlled
+    // zero-value spend (zcash_primitives `transaction/builder.rs`, `default_flags()`).
     let change_counted = if change_outputs > 0 {
         change_outputs
     } else {
