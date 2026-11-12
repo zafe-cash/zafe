@@ -431,14 +431,15 @@ Security audit and races (2026-10-14, fixed by 2026-10-15; `docs/audit-scope.md`
       former members' entries accepted (H1), M1-M5 and L1-L10 fixed (commit-reveal safety
       words, `VAULT_EVENT` 9, `SilentSigners`, encrypted nonce files, ...), app hardening.
 - [x] `sk` agreement committed in DKG round 1 (`DKG_ROUND1` 3, 2026-10-01).
-- [x] Padding could raise the fee (security report 2026-11-12): `verify_pczt` took the
+- [x] Padding could raise the fee (reported by Daniel Gorgonha (DeegaLabs), 2026-11-12, a57718b): `verify_pczt` took the
       action count from the PCZT, so a builder could add dummy actions and take 5,000 zat
       each from change. Now actions ≤ max(2, vault spends, payments + change outputs ≤ 4)
       (`VerifyError::TooManyActions`, spec §9.3 step 4). Local check only, no replay change.
       Left: a dishonest proposer can still split change into up to 4 notes when the vault
       already has 4 (≤ 15,000 zat, kept as vault notes), or pick extra vault notes to spend
       (5,000 zat each; note selection is the proposer's choice, the fee row shows it).
-- [ ] Ship the action bound in the next app release (and `zafe` CLI members).
+- [ ] Ship the action bound in the next app release (and `zafe` CLI members): class
+      `essential` (security fix), notes credit "Daniel Gorgonha (DeegaLabs)".
 
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,
