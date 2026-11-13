@@ -48,7 +48,7 @@ import 'providers/proposals_provider.dart';
 import 'providers/server_failover_provider.dart';
 import 'providers/theme_mode_provider.dart';
 import 'notifications/vault_updates.dart'
-    show kReceivedPrefix, kSeatMovePrefix, kUnapprovedPrefix;
+    show kKeepSeatPrefix, kReceivedPrefix, kSeatMovePrefix, kUnapprovedPrefix;
 import 'notifications/vault_watch.dart';
 import 'features/vaults/manage_vaults_screen.dart';
 import 'providers/app_notices_provider.dart';
@@ -104,6 +104,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
     }
     if (proposalId.startsWith(kSeatMovePrefix)) {
       router.go('/signers'); // a tab: go, never push
+      return;
+    }
+    if (proposalId.startsWith(kKeepSeatPrefix)) {
+      router.go('/home'); // the Keep my seat card
       return;
     }
     if (proposalId.startsWith(kUnapprovedPrefix)) {
@@ -330,7 +334,9 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/scan-invite',
-        pageBuilder: (_, _) => page(const ScanInviteScreen()),
+        // The camera shows someone's invite: no screenshots (SecureScreen).
+        pageBuilder: (_, _) =>
+            page(const SecureScreen(child: ScanInviteScreen())),
       ),
       GoRoute(
         path: '/scan-relay',
@@ -365,7 +371,9 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/scan-recovery',
-        pageBuilder: (_, _) => page(const ScanRecoveryScreen()),
+        // A new phone's recovery code, as secret as on its own screen (/recover).
+        pageBuilder: (_, _) =>
+            page(const SecureScreen(child: ScanRecoveryScreen())),
       ),
       GoRoute(
         path: '/scan-recipient',
@@ -426,7 +434,12 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/replace-signer',
         pageBuilder: (_, state) {
           final args = state.extra as (String, String)?;
-          return page(ReplaceSignerScreen(signer: args?.$1, code: args?.$2));
+          // The safety words, like the new phone's own screen (/recover).
+          return page(
+            SecureScreen(
+              child: ReplaceSignerScreen(signer: args?.$1, code: args?.$2),
+            ),
+          );
         },
       ),
       GoRoute(

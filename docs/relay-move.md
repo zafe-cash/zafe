@@ -302,7 +302,8 @@ versions are recorded in `AGENTS.md` ("Bumping a version").
 
 - **Labelled append:** `POST /v1/log/append-labelled`, a `Signed<LabelledAppend { mailbox,
   entry, timestamp }>` by any member of that mailbox (catch-up posts others' entries); the
-  entry's author must be a current member, as on `/v1/log/append`. `RelayClient::append_log_to`.
+  entry's author must be a current member. `RelayClient::append_log_to`. (Since relay API 2,
+  2026-11-13, the only append route; the unsigned `/v1/log/append` answers 426.)
 - **Vault id:** stored from the first entry (append or reseed); any entry of another vault is
   400 "this mailbox holds another vault". Old mailboxes were migrated with `vault_id = id`.
 - **Push forget:** never answers 404 (nothing registered is nothing to forget), so a 404 always
@@ -343,8 +344,8 @@ versions are recorded in `AGENTS.md` ("Bumping a version").
 - **Seat moves on a label needed one more relay route.** A `ReplaceApproval` is signed over
   the vault id (the same signatures are in the log), but `/v1/mailbox/replace` finds the
   mailbox by it. Added `/v1/mailbox/replace-labelled` (`LabelledReplace { mailbox,
-  approval, approvals }`), which checks the vault id the label holds; the older route is used
-  where label = vault id.
+  approval, approvals }`), which checks the vault id the label holds. (Since relay API 2,
+  2026-11-13, the only approval route, and approvals only add a pending key; see spec §10.1.)
 - **Create token:** the creator's client carries it (`with_create_token`) through create and
   every `setup_step`; it goes to the members sealed with the log key (`LOG_KEY_MESSAGE` 1;
   older creators' untagged 36-byte payload still reads) and to a recovered seat in the

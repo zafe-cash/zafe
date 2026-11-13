@@ -616,7 +616,7 @@ async fn two_switches_from_the_same_point_are_both_refused() {
         &mut rng,
     )
     .unwrap();
-    RelayClient::new(&r2).send(&env).await.unwrap();
+    RelayClient::new(&r2).send(&w.ids[2], &env).await.unwrap();
     let s = w.progress(1).await.unwrap();
     assert!(s.switched, "{s:?}");
     // Alice, on the first relay, reads the old relay's notices: two switches from one point.
@@ -684,7 +684,7 @@ async fn an_expired_or_replayed_move_is_refused() {
         &mut StdRng::seed_from_u64(1),
     )
     .unwrap();
-    RelayClient::new(&new).send(&env).await.unwrap();
+    RelayClient::new(&new).send(&w.ids[0], &env).await.unwrap();
     let err = w
         .follow(1, &MoveLink::of(&target).encode())
         .await
@@ -748,7 +748,7 @@ async fn an_envelope_from_the_old_relay_is_dropped_by_the_new_one() {
         &mut StdRng::seed_from_u64(1),
     )
     .unwrap();
-    assert!(RelayClient::new(&new).send(&env).await.is_err());
+    assert!(RelayClient::new(&new).send(&w.ids[0], &env).await.is_err());
     // And a client reading the new mailbox drops envelopes naming another one.
     assert_ne!(w.material[0].label(), started.target.label);
 }

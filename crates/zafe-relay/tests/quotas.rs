@@ -16,7 +16,8 @@ use tower::ServiceExt;
 use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CreateMailbox, InboxAck, InboxAckResponse,
-        InboxRead, InboxResponse, Join, Seal, Signed, MAX_ACK_CURSORS,
+        InboxRead, InboxResponse, Join, LabelledAppend, PostEnvelope, Seal, Signed,
+        MAX_ACK_CURSORS,
     },
     Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -108,8 +109,13 @@ fn to_all(from: &Identity, seq: u64, payload: &[u8]) -> Vec<u8> {
         .unwrap()
 }
 
-async fn post(app: &Router, envelope: Vec<u8>) -> (StatusCode, String) {
-    let (status, body) = call(app, "/v1/envelope", envelope).await;
+/// Posts `envelope` (bytes) as its sender `who` (`/v1/envelope/send`).
+async fn post(app: &Router, who: &Identity, envelope: Vec<u8>) -> (StatusCode, String) {
+    let body = Signed::new(who, PostEnvelope { envelope })
+        .unwrap()
+        .to_bytes()
+        .unwrap();
+    let (status, body) = call(app, "/v1/envelope/send", body).await;
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
@@ -126,24 +132,27 @@ async fn a_full_inbox_refuses_more_envelopes_for_that_recipient() {
 
     for seq in 1..=2 {
         let env = to_one(&ids[0], &ids[1], seq, &mut rng);
-        assert_eq!(post(&app, env).await.0, StatusCode::OK);
+        assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
     }
-    let (status, body) = post(&app, to_one(&ids[0], &ids[1], 3, &mut rng)).await;
+    let (status, body) = post(&app, &ids[0], to_one(&ids[0], &ids[1], 3, &mut rng)).await;
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert!(body.contains("inbox is full"), "{body}");
     // A broadcast reaching the full inbox is refused whole.
     assert_eq!(
-        post(&app, to_all(&ids[0], 3, b"all")).await.0,
+        post(&app, &ids[0], to_all(&ids[0], 3, b"all")).await.0,
         StatusCode::INSUFFICIENT_STORAGE
     );
     assert_eq!(relay.usage(&MAILBOX).unwrap().deliveries, 2);
 
     // Other recipients still receive, and the refused sends did not use up seq 3.
     let env = to_one(&ids[0], &ids[2], 3, &mut rng);
-    assert_eq!(post(&app, env).await.0, StatusCode::OK);
+    assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
     // Another sender filling the same inbox is refused too (the cap is per recipient).
     let env = to_one(&ids[2], &ids[1], 1, &mut rng);
-    assert_eq!(post(&app, env).await.0, StatusCode::INSUFFICIENT_STORAGE);
+    assert_eq!(
+        post(&app, &ids[2], env).await.0,
+        StatusCode::INSUFFICIENT_STORAGE
+    );
 }
 
 #[tokio::test]
@@ -163,7 +172,7 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
 
     for seq in 1..=2 {
         assert_eq!(
-            post(&app, to_all(&ids[0], seq, &payload)).await.0,
+            post(&app, &ids[0], to_all(&ids[0], seq, &payload)).await.0,
             StatusCode::OK
         );
     }
@@ -176,7 +185,7 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
         },
         "a broadcast counts once per recipient"
     );
-    let (status, body) = post(&app, to_all(&ids[0], 3, &payload)).await;
+    let (status, body) = post(&app, &ids[0], to_all(&ids[0], 3, &payload)).await;
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert!(body.contains("undelivered"), "{body}");
     assert_eq!(relay.usage(&MAILBOX).unwrap().delivery_bytes, 4 * len);
@@ -185,7 +194,7 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     now.store(T0 + 86_400, Ordering::SeqCst);
     let small = to_one(&ids[0], &ids[1], 3, &mut rng);
     let small_len = small.len() as u64;
-    assert_eq!(post(&app, small).await.0, StatusCode::OK);
+    assert_eq!(post(&app, &ids[0], small).await.0, StatusCode::OK);
     now.store(T0 + DELIVERY_RETENTION_SECS + 1, Ordering::SeqCst);
     assert_eq!(relay.prune().unwrap(), 4);
     assert_eq!(
@@ -197,13 +206,21 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
         }
     );
     assert_eq!(
-        post(&app, to_all(&ids[0], 4, &payload)).await.0,
+        post(&app, &ids[0], to_all(&ids[0], 4, &payload)).await.0,
         StatusCode::OK
     );
 }
 
-async fn append(app: &Router, entry: &LogEntry) -> (StatusCode, Vec<u8>) {
-    call(app, "/v1/log/append", entry.to_bytes().unwrap()).await
+/// Appends `entry` through `who` (`/v1/log/append-labelled`, now: these relays use the
+/// system clock).
+async fn append(app: &Router, who: &Identity, entry: &LogEntry) -> (StatusCode, Vec<u8>) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let request = LabelledAppend::new(MAILBOX, entry, now).unwrap();
+    let body = Signed::new(who, request).unwrap().to_bytes().unwrap();
+    call(app, "/v1/log/append-labelled", body).await
 }
 
 #[tokio::test]
@@ -221,7 +238,7 @@ async fn the_log_is_capped() {
     let app = relay.clone().router();
     mailbox(&app, &ids).await;
 
-    let (status, _) = append(&app, &first).await;
+    let (status, _) = append(&app, &ids[0], &first).await;
     assert_eq!(status, StatusCode::OK);
     let second = LogEntry::create(
         &ids[1],
@@ -233,7 +250,7 @@ async fn the_log_is_capped() {
         &mut rng,
     )
     .unwrap();
-    let (_, body) = append(&app, &second).await;
+    let (_, body) = append(&app, &ids[1], &second).await;
     assert_eq!(
         decode_body::<AppendResult>(&body).unwrap(),
         AppendResult::Appended { index: 1 }
@@ -250,7 +267,7 @@ async fn the_log_is_capped() {
         &mut rng,
     )
     .unwrap();
-    let (status, body) = append(&app, &third).await;
+    let (status, body) = append(&app, &ids[0], &third).await;
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert!(String::from_utf8_lossy(&body).contains("vault log"));
     assert_eq!(relay.usage(&MAILBOX).unwrap().log_bytes, 2 * len);
@@ -265,12 +282,12 @@ async fn fill(relay: &Relay, rng: &mut StdRng) -> Usage {
     let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(rng)).collect();
     mailbox(&app, &ids).await;
     assert_eq!(
-        post(&app, to_all(&ids[0], 1, &[5; 300])).await.0,
+        post(&app, &ids[0], to_all(&ids[0], 1, &[5; 300])).await.0,
         StatusCode::OK
     );
     let key = LogKey::generate(0, rng);
     let entry = LogEntry::create(&ids[0], &key, MAILBOX, 0, [0; 32], b"created", rng).unwrap();
-    assert_eq!(append(&app, &entry).await.0, StatusCode::OK);
+    assert_eq!(append(&app, &ids[0], &entry).await.0, StatusCode::OK);
     let usage = relay.usage(&MAILBOX).unwrap();
     assert_eq!(usage.deliveries, 2);
     assert!(
@@ -492,10 +509,10 @@ async fn acknowledged_deliveries_are_deleted_and_free_their_bytes() {
     mailbox(&app, &ids).await;
     for seq in 1..=3 {
         let env = to_one(&ids[0], &ids[1], seq, &mut rng);
-        assert_eq!(post(&app, env).await.0, StatusCode::OK);
+        assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
     }
     let env = to_one(&ids[0], &ids[2], 4, &mut rng);
-    assert_eq!(post(&app, env).await.0, StatusCode::OK);
+    assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
     let before = relay.usage(&MAILBOX).unwrap();
     assert_eq!(before.deliveries, 4);
 

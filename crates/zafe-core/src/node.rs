@@ -341,12 +341,13 @@ impl SeqCounter {
 /// reordered envelope").
 pub async fn send_fresh(
     relay: &RelayClient,
+    me: &Identity,
     seq: &mut SeqCounter,
     mut seal: impl FnMut(u64) -> Result<Envelope, NodeError>,
 ) -> Result<(), NodeError> {
     let mut attempt = 0;
     loop {
-        match relay.send(&seal(seq.next_seq())?).await {
+        match relay.send(me, &seal(seq.next_seq())?).await {
             Err(RelayClientError::Status { status: 409, .. }) if attempt < 3 => attempt += 1,
             result => return Ok(result?),
         }
@@ -771,7 +772,7 @@ async fn safety_check(
         if SAFETY_SENT.lock().expect("not poisoned").contains(&key) {
             return Ok::<_, NodeError>(());
         }
-        send_fresh(relay, &mut SeqCounter::default(), |seq| {
+        send_fresh(relay, me, &mut SeqCounter::default(), |seq| {
             Envelope::public(me, label, seq, kind, &payload).map_err(proto)
         })
         .await?;
@@ -1144,6 +1145,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     if st.sent & SENT_ROUND1 == 0 {
         send_fresh(
             relay,
+            me,
             &mut seq,
             public(Kind::DkgRound1, st.round1_msg.clone()),
         )
@@ -1222,7 +1224,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     // Members also agree on every `sk` commitment before any contribution counts.
     let echo = crate::keygen::echo_with_commitments(&round2.echo(), &commitments);
     if st.sent & SENT_ROUND2 == 0 {
-        send_fresh(relay, &mut seq, public(Kind::DkgEcho, echo.to_vec())).await?;
+        send_fresh(relay, me, &mut seq, public(Kind::DkgEcho, echo.to_vec())).await?;
         for (to_id, package) in &outgoing {
             let to = by_pk[&id_to_pk[to_id]];
             let bytes = package.serialize().map_err(proto)?;
@@ -1230,7 +1232,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
                 (Kind::DkgRound2, bytes.as_slice()),
                 (Kind::SkContribution, contribution.as_bytes().as_slice()),
             ] {
-                send_fresh(relay, &mut seq, |n| {
+                send_fresh(relay, me, &mut seq, |n| {
                     Envelope::sealed(me, &to, invite.label, n, kind, payload, rng).map_err(proto)
                 })
                 .await?;
@@ -1316,6 +1318,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     if st.sent & SENT_SIGNATURE == 0 {
         send_fresh(
             relay,
+            me,
             &mut seq,
             public(Kind::DescriptorSignature, my_sig.clone()),
         )
@@ -1354,7 +1357,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         if st.sent & SENT_LOG == 0 {
             let bytes = encode_log_key_message(&log_key, create_token.as_deref())?;
             for pk in &others {
-                send_fresh(relay, &mut seq, |n| {
+                send_fresh(relay, me, &mut seq, |n| {
                     Envelope::sealed(me, &by_pk[pk], invite.label, n, Kind::LogKey, &bytes, rng)
                         .map_err(proto)
                 })
@@ -1454,8 +1457,7 @@ fn decode_log_key_message(bytes: &[u8]) -> Result<(LogKey, Option<String>), Node
     Ok((LogKey::from_bytes(m.epoch, m.key), token))
 }
 
-/// Appends `entry` to the vault's mailbox: by the entry's vault id where the label is the
-/// vault id (`/v1/log/append`), else to the label (`/v1/log/append-labelled`, signed by
+/// Appends `entry` to the vault's mailbox `ids.label` (`/v1/log/append-labelled`, signed by
 /// `me`, a member of that mailbox).
 async fn append_entry(
     relay: &RelayClient,
@@ -1463,11 +1465,7 @@ async fn append_entry(
     ids: VaultIds,
     entry: &LogEntry,
 ) -> Result<AppendResult, RelayClientError> {
-    if ids.label == entry.header.mailbox {
-        relay.append_log(entry).await
-    } else {
-        relay.append_log_to(me, ids.label, entry).await
-    }
+    relay.append_log_to(me, ids.label, entry).await
 }
 
 /// The creator locks membership as soon as every seat is taken (no tap: the safety words
@@ -1821,8 +1819,11 @@ fn membership_checks() -> &'static MembershipChecks {
 /// Compares the relay's member list and threshold for the vault's mailbox `label` with
 /// the membership the replayed log ends with (spec §6.3). `reseed` lets whoever restores a
 /// relay choose both, and the relay can't read the log to check them, so every member
-/// does. A seat move the relay hasn't applied yet (log ahead of the relay) is tolerated:
-/// the old key may still hold the seat. A relay without the route (older) is checked on its
+/// does. A seat move the relay hasn't finished yet (log ahead of the relay) is tolerated:
+/// the old key may still hold the seat. Keys the relay holds as seat moves' pending keys
+/// aren't compared: they can't write, read only ciphertext and their own inbox, and honest
+/// phones address one only for a move pending in their log. Any other difference in the
+/// member list is [`NodeError::RelayMembership`]. A relay without the route (older) is checked on its
 /// member list alone; the threshold is then unknown.
 pub async fn check_relay_membership(
     relay: &RelayClient,
@@ -1872,7 +1873,7 @@ async fn check_relay_membership_with(
     state: &VaultState,
     fetched: Option<Result<RelayMembers, NodeError>>,
 ) -> Result<(), NodeError> {
-    let moves = state.replacements.len();
+    let moves = state.seat_changes as usize;
     let cache_key = (relay.base_url().to_string(), label);
     if let Some((at, seen)) = membership_checks().lock().expect("lock").get(&cache_key) {
         if *seen == moves && at.elapsed() < MEMBERSHIP_RECHECK {
@@ -1888,9 +1889,17 @@ async fn check_relay_membership_with(
     for want in &state.descriptor.members {
         let want = want.identity;
         let exact = held.iter().position(|h| *h == want);
+        // Log ahead of the relay, possibly by several moves of the seat (Y <- X <- A): any
+        // earlier key of the seat may still hold it on the relay.
         let moved = || {
-            let old = state.replacement_to(&want.sig_pk)?.old;
-            held.iter().position(|h| h.sig_pk == old)
+            let mut key = want.sig_pk;
+            for _ in 0..=state.replacements.len() {
+                key = state.replacement_to(&key)?.old;
+                if let Some(i) = held.iter().position(|h| h.sig_pk == key) {
+                    return Some(i);
+                }
+            }
+            None
         };
         match exact.or_else(moved) {
             Some(i) => {
@@ -3911,7 +3920,7 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
             rng,
         )
         .map_err(proto)?;
-        relay.send(&env).await?;
+        relay.send(me, &env).await?;
     }
     let used_commitments = chosen.iter().map(|id| hash_of[id]).collect();
     Ok(SentRequest {
@@ -4047,7 +4056,7 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
             Ok(reply) => {
                 // The nonces are spent: these shares must get out (sealed again on a 409
                 // rather than lost).
-                send_fresh(relay, &mut seq, |n| {
+                send_fresh(relay, me, &mut seq, |n| {
                     Envelope::sealed(
                         me,
                         &leader,

@@ -48,6 +48,14 @@ const kSeatMoveMarker = 'mv:*';
 String seatMoveKey(rust.SeatMove m) =>
     '$kSeatMovePrefix${m.oldKeyHex}:${m.newKeyHex}';
 
+/// Snapshot keys of this phone's own seat moving (every approval is in: the old phone can
+/// keep its seat) start with this, and so does the notification's id (opens Home, where
+/// the Keep my seat card is).
+const kKeepSeatPrefix = 'ks:';
+
+String keepSeatKey(rust.PendingSeatMove m) =>
+    '$kKeepSeatPrefix${m.replacement}:${m.newKeyHex}';
+
 /// Snapshot keys of unapproved spends (vault money that left with no approved payment in
 /// the log; spec §10.4.4) start with this, and so does the [VaultUpdate.proposalId] of
 /// their notification (opens the activity list).
@@ -96,6 +104,7 @@ List<VaultUpdate> vaultUpdates({
   List<rust.ReceivedInfo> received = const [],
   Map<String, String> names = const {},
   List<rust.SeatMove> seatMoves = const [],
+  List<rust.PendingSeatMove> pendingSeatMoves = const [],
   List<rust.UnapprovedSpendInfo> unapprovedSpends = const [],
   DateTime? unapprovedFromCopyAt,
   String? me,
@@ -122,6 +131,19 @@ List<VaultUpdate> vaultUpdates({
       ),
     );
   }
+  // This phone's own seat is moving: never held back either (a phone restored from a
+  // backup holds the seat too). Only its owner's tap keeps it.
+  for (final m in pendingSeatMoves) {
+    if (m.oldKeyHex != me || !m.canKeep) continue;
+    if (previous?.containsKey(keepSeatKey(m)) ?? false) continue;
+    out.add(
+      VaultUpdate(
+        proposalId: keepSeatKey(m),
+        title: '$vaultName: your seat is moving to a new phone',
+        body: 'Still your phone? Open Zafe and tap Keep my seat.',
+      ),
+    );
+  }
   if (previous == null) return out;
   if (previous.containsKey(kReceivedMarker)) {
     for (final r in received) {
@@ -143,10 +165,18 @@ List<VaultUpdate> vaultUpdates({
   if (previous.containsKey(kSeatMoveMarker)) {
     for (final m in seatMoves) {
       final key = seatMoveKey(m);
-      // The lost seat's own (old) key and members who already approved needn't act.
-      if (previous.containsKey(key) ||
-          m.oldKeyHex == me ||
-          m.approvals.contains(me)) {
+      // Members who already approved needn't act.
+      if (previous.containsKey(key) || m.approvals.contains(me)) continue;
+      // The seat's own phone hears first: if it is still in its owner's hands, someone
+      // is asking for its seat.
+      if (m.oldKeyHex == me) {
+        out.add(
+          VaultUpdate(
+            proposalId: key,
+            title: '$vaultName: someone asked to move your seat',
+            body: 'If this is still your phone, call your co-signers now.',
+          ),
+        );
         continue;
       }
       final who = nameOf(m.oldKeyHex) ?? 'A signer';
@@ -250,6 +280,7 @@ SeenSnapshot snapshotOf(
   List<rust.ProposalInfo>? proposals, {
   List<rust.ReceivedInfo>? received,
   List<rust.SeatMove>? seatMoves,
+  List<rust.PendingSeatMove>? pendingSeatMoves,
   List<rust.UnapprovedSpendInfo>? unapprovedSpends,
   SeenSnapshot previous = const {},
 }) => {
@@ -257,8 +288,14 @@ SeenSnapshot snapshotOf(
     for (final e in previous.entries)
       if (!e.key.startsWith(kReceivedPrefix) &&
           !e.key.startsWith(kSeatMovePrefix) &&
+          !e.key.startsWith(kKeepSeatPrefix) &&
           !e.key.startsWith(kUnapprovedPrefix))
         e.key: e.value,
+  if (pendingSeatMoves == null)
+    for (final e in previous.entries)
+      if (e.key.startsWith(kKeepSeatPrefix)) e.key: e.value,
+  if (pendingSeatMoves != null)
+    for (final m in pendingSeatMoves) keepSeatKey(m): '',
   if (unapprovedSpends == null)
     for (final e in previous.entries)
       if (e.key.startsWith(kUnapprovedPrefix)) e.key: e.value,

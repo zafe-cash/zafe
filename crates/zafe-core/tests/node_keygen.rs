@@ -432,8 +432,8 @@ async fn a_full_relay_gets_a_typed_error() {
         )
         .unwrap()
     };
-    relay.send(&envelope(1)).await.unwrap();
-    let err = relay.send(&envelope(2)).await.unwrap_err();
+    relay.send(&a, &envelope(1)).await.unwrap();
+    let err = relay.send(&a, &envelope(2)).await.unwrap_err();
     assert!(
         matches!(&err, RelayClientError::StorageFull { detail } if detail.contains("inbox")),
         "{err:?}"

@@ -17,12 +17,14 @@ class VaultShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // A dot on Signers only for what waits on you there: a seat move to approve, or
-    // this phone's own backup.
+    // A dot on Signers only for what waits on you there: a seat move to approve, this
+    // phone's own seat moving, or this phone's own backup.
     final me = ref.watch(vaultProvider).myKeyHex;
-    final moves = ref.watch(proposalsProvider).seatMoves;
+    final proposals = ref.watch(proposalsProvider);
+    final moves = proposals.seatMoves;
     final signers =
         moves.any((m) => m.oldKeyHex != me && !m.approvals.contains(me)) ||
+        proposals.myPendingSeat(me) != null ||
         ref.watch(backupStatusProvider).value == false;
     return AppMobileShell(
       body: shell,

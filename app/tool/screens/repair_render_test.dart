@@ -126,6 +126,44 @@ void main() {
         ),
       ),
       (
+        'pending',
+        'Signers',
+        const Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            PendingSeatCard(
+              who: 'You',
+              mine: true,
+              canKeep: true,
+              left: '2 d 5 h',
+              helped: 0,
+              helpers: 2,
+              onKeep: _keep,
+            ),
+            SizedBox(height: AppSpacing.md),
+            PendingSeatCard(
+              who: 'Alice',
+              mine: false,
+              canKeep: false,
+              keptOn: '13 Nov',
+              left: '2 d 5 h',
+              helped: 1,
+              helpers: 2,
+              stopped: ['Cara'],
+              onStop: _keep,
+            ),
+            SizedBox(height: AppSpacing.md),
+            SeatMoveCard(
+              who: 'Alice',
+              approvals: 1,
+              needed: 2,
+              keptOn: '13 Nov',
+              onApprove: _noop,
+            ),
+          ],
+        ),
+      ),
+      (
         'restart',
         'Signers',
         RepairCard(
@@ -194,3 +232,5 @@ void _noop() {}
 Future<void> _takeOver(String key, String name) async {}
 
 Future<void> _agree() async {}
+
+Future<void> _keep() async {}

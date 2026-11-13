@@ -13,8 +13,8 @@ use tower::ServiceExt;
 use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, InboxRead,
-        InboxResponse, Join, LogRead, LogResponse, MembersRead, MembersResponse, Remove,
-        RenewInvite, Seal, Signed, INVITE_TTL_SECS,
+        InboxResponse, Join, LabelledAppend, LogRead, LogResponse, MembersRead, MembersResponse,
+        PostEnvelope, Remove, RenewInvite, Seal, Signed, INVITE_TTL_SECS,
     },
     Chain, Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -54,6 +54,18 @@ async fn signed<T: serde::Serialize + serde::de::DeserializeOwned>(
         Signed::new(who, payload).unwrap().to_bytes().unwrap(),
     )
     .await
+}
+
+/// Posts `env` as its sender `who` (`/v1/envelope/send`).
+async fn post_env(app: &Router, who: &Identity, env: &Envelope) -> (StatusCode, Vec<u8>) {
+    let envelope = env.to_bytes().unwrap();
+    signed(app, "/v1/envelope/send", who, PostEnvelope { envelope }).await
+}
+
+/// Appends `entry` through `who` (`/v1/log/append-labelled`; label = the entry's vault id).
+async fn append(app: &Router, who: &Identity, entry: &LogEntry) -> (StatusCode, Vec<u8>) {
+    let request = LabelledAppend::new(entry.header.mailbox, entry, NOW).unwrap();
+    signed(app, "/v1/log/append-labelled", who, request).await
 }
 
 struct World {
@@ -257,12 +269,7 @@ async fn envelopes_are_routed_to_the_right_inboxes() {
     .unwrap();
     let public = Envelope::public(&w.ids[0], MAILBOX, 2, Kind::DkgRound1, b"for all").unwrap();
     for env in [&sealed, &public] {
-        assert_eq!(
-            call(&w.app, "/v1/envelope", env.to_bytes().unwrap())
-                .await
-                .0,
-            StatusCode::OK
-        );
+        assert_eq!(post_env(&w.app, &w.ids[0], env).await.0, StatusCode::OK);
     }
 
     let inbox1 = w.inbox(1).await;
@@ -284,17 +291,13 @@ async fn envelopes_are_routed_to_the_right_inboxes() {
 
     // Replay of an already-delivered envelope is refused.
     assert_eq!(
-        call(&w.app, "/v1/envelope", sealed.to_bytes().unwrap())
-            .await
-            .0,
+        post_env(&w.app, &w.ids[0], &sealed).await.0,
         StatusCode::CONFLICT
     );
     // Outsiders cannot post or read.
     let intruder = Envelope::public(&w.ids[3], MAILBOX, 1, Kind::Approval, b"x").unwrap();
     assert_eq!(
-        call(&w.app, "/v1/envelope", intruder.to_bytes().unwrap())
-            .await
-            .0,
+        post_env(&w.app, &w.ids[3], &intruder).await.0,
         StatusCode::FORBIDDEN
     );
     let read = signed(
@@ -309,14 +312,17 @@ async fn envelopes_are_routed_to_the_right_inboxes() {
     )
     .await;
     assert_eq!(read.0, StatusCode::FORBIDDEN);
-    // A forged envelope claiming a member as sender fails verification.
+    // A forged envelope claiming a member as sender fails verification, and a request
+    // must come from the envelope's sender.
     let mut forged = Envelope::public(&w.ids[3], MAILBOX, 9, Kind::Approval, b"x").unwrap();
     forged.header.from = w.ids[1].public().sig_pk;
     assert_eq!(
-        call(&w.app, "/v1/envelope", forged.to_bytes().unwrap())
-            .await
-            .0,
+        post_env(&w.app, &w.ids[1], &forged).await.0,
         StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        post_env(&w.app, &w.ids[3], &forged).await.0,
+        StatusCode::FORBIDDEN
     );
 }
 
@@ -336,9 +342,7 @@ async fn log_appends_must_extend_the_head() {
     .unwrap();
     // No log before membership is sealed.
     assert_eq!(
-        call(&w.app, "/v1/log/append", first.to_bytes().unwrap())
-            .await
-            .0,
+        append(&w.app, &w.ids[0], &first).await.0,
         StatusCode::FORBIDDEN
     );
 
@@ -354,7 +358,7 @@ async fn log_appends_must_extend_the_head() {
     )
     .await;
 
-    let (_, body) = call(&w.app, "/v1/log/append", first.to_bytes().unwrap()).await;
+    let (_, body) = append(&w.app, &w.ids[0], &first).await;
     assert_eq!(
         decode_body::<AppendResult>(&body).unwrap(),
         AppendResult::Appended { index: 0 }
@@ -364,8 +368,8 @@ async fn log_appends_must_extend_the_head() {
     let head = first.hash().unwrap();
     let a = LogEntry::create(&w.ids[1], &key, MAILBOX, 1, head, b"proposal A", &mut w.rng).unwrap();
     let b = LogEntry::create(&w.ids[2], &key, MAILBOX, 1, head, b"proposal B", &mut w.rng).unwrap();
-    let (_, ra) = call(&w.app, "/v1/log/append", a.to_bytes().unwrap()).await;
-    let (_, rb) = call(&w.app, "/v1/log/append", b.to_bytes().unwrap()).await;
+    let (_, ra) = append(&w.app, &w.ids[1], &a).await;
+    let (_, rb) = append(&w.app, &w.ids[2], &b).await;
     assert_eq!(
         decode_body::<AppendResult>(&ra).unwrap(),
         AppendResult::Appended { index: 1 }
@@ -376,11 +380,15 @@ async fn log_appends_must_extend_the_head() {
     );
 
     // A non-member who knows a member's key can't probe the log length: an entry signed
-    // by someone else, at a wrong index, is refused before any conflict is reported.
+    // by someone else, at a wrong index, is refused before any conflict is reported, also
+    // when a member relays it.
     let mut probe =
         LogEntry::create(&w.ids[3], &key, MAILBOX, 9, head, b"probe", &mut w.rng).unwrap();
     probe.header.author = w.ids[1].public().sig_pk;
-    let (status, body) = call(&w.app, "/v1/log/append", probe.to_bytes().unwrap()).await;
+    let (status, body) = append(&w.app, &w.ids[3], &probe).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(decode_body::<AppendResult>(&body).is_err());
+    let (status, body) = append(&w.app, &w.ids[2], &probe).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(decode_body::<AppendResult>(&body).is_err());
 
@@ -610,7 +618,7 @@ async fn a_sealed_setup_can_be_cancelled_until_the_vault_exists() {
         &mut w.rng,
     )
     .unwrap();
-    let (status, _) = call(&w.app, "/v1/log/append", first.to_bytes().unwrap()).await;
+    let (status, _) = append(&w.app, &w.ids[0], &first).await;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = signed(&w.app, "/v1/mailbox/cancel", &w.ids[0], cancel()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -717,30 +725,46 @@ async fn too_new_versions_get_upgrade_required() {
         )
     );
 
+    // Envelopes in a newer version, inside the signed request.
     let envelope = Envelope::public(&w.ids[1], MAILBOX, 1, Kind::DkgEcho, b"hi")
         .unwrap()
         .to_bytes()
         .unwrap();
+    let post = |envelope| {
+        Signed::new(&w.ids[1], PostEnvelope { envelope })
+            .unwrap()
+            .to_bytes()
+            .unwrap()
+    };
     assert_eq!(
-        call_full(&w.app, "/v1/envelope", bump(envelope)).await,
+        call_full(&w.app, "/v1/envelope/send", post(bump(envelope.clone()))).await,
         (
             StatusCode::UPGRADE_REQUIRED,
             Some(version::ENVELOPE.to_string())
         )
     );
 
+    // The routes relay API 2 retired answer 426 with the API version whatever the body (an
+    // older app reads it as "update Zafe"), never 404.
     let key = LogKey::generate(0, &mut w.rng);
     let entry = LogEntry::create(&w.ids[0], &key, MAILBOX, 0, [0; 32], b"x", &mut w.rng)
         .unwrap()
         .to_bytes()
         .unwrap();
-    assert_eq!(
-        call_full(&w.app, "/v1/log/append", bump(entry)).await,
-        (
-            StatusCode::UPGRADE_REQUIRED,
-            Some(version::LOG_ENTRY.to_string())
-        )
-    );
+    for (path, body) in [
+        ("/v1/envelope", envelope),
+        ("/v1/log/append", entry),
+        ("/v1/mailbox/replace", Vec::new()),
+    ] {
+        assert_eq!(
+            call_full(&w.app, path, body).await,
+            (
+                StatusCode::UPGRADE_REQUIRED,
+                Some(version::RELAY_API.to_string())
+            ),
+            "{path}"
+        );
+    }
 }
 
 // --- Limits -----------------------------------------------------------------------------
@@ -931,7 +955,7 @@ async fn oversized_bodies_are_refused() {
     let app = Relay::with_clock(Arc::new(|| NOW)).router();
     let (status, _) = call(
         &app,
-        "/v1/log/append",
+        "/v1/log/append-labelled",
         vec![0u8; zafe_relay::MAX_BODY_BYTES + 1],
     )
     .await;

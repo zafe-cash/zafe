@@ -75,6 +75,9 @@ enum ZafeErrorKind {
   /// expire (30 days), or whoever runs the relay raises it.
   relayStorageFull,
 
+  /// The server already holds the most open moves it takes for this seat.
+  tooManySeatMoves,
+
   /// The relay has fewer log entries than this device saw: it lost data or was rewound
   /// to an older backup. Nothing it says about the vault can be trusted until a member
   /// restores the log on it from a device copy.

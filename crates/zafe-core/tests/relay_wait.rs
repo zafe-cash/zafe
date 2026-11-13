@@ -69,7 +69,7 @@ async fn long_polls_answer_on_activity_and_time_out_otherwise() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     let key = LogKey::generate(0, &mut rng);
     let entry = LogEntry::create(&ids[0], &key, mailbox, 0, [0; 32], b"created", &mut rng).unwrap();
-    relay.append_log(&entry).await.unwrap();
+    relay.append_log_to(&ids[0], mailbox, &entry).await.unwrap();
     let (answer, took) = waiting.await.unwrap();
     let answer = answer.unwrap().unwrap();
     assert_eq!(answer.log_len, 1);
@@ -91,7 +91,7 @@ async fn long_polls_answer_on_activity_and_time_out_otherwise() {
         &mut rng,
     )
     .unwrap();
-    relay.send(&envelope).await.unwrap();
+    relay.send(&ids[2], &envelope).await.unwrap();
     let answer = waiting.await.unwrap().unwrap().unwrap();
     assert_eq!(answer.log_len, 1);
     assert!(answer.inbox_cursor > 0);

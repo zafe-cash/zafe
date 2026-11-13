@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `updated_material`, `visible_text`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `kept_at`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `pending_seat_moves`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `updated_material`, `visible_text`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Proposed`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
@@ -447,6 +447,79 @@ class PaymentInput {
           memo == other.memo;
 }
 
+/// A seat move with every approval: the old key still holds the seat until every helper
+/// waited 72 h (by its own clock) and logged its part.
+class PendingSeatMove {
+  /// The move (pass to `retry_repair`).
+  final BigInt replacement;
+
+  /// The signer whose seat moves (hex key); this phone's own when it is the old phone.
+  final String oldKeyHex;
+
+  /// The new phone's key (hex).
+  final String newKeyHex;
+
+  /// The old phone can still keep the seat (first round only).
+  final bool canKeep;
+
+  /// When the old phone said it still has this seat before this round, if it did.
+  final BigInt? keptAt;
+
+  /// The members rebuilding the key (hex keys) and those of them whose part is logged.
+  final List<String> helpers;
+  final List<String> helped;
+
+  /// When this phone first saw the move with every approval (unix seconds; `None` until
+  /// its next refresh records it) and when its 72 h end from then.
+  final BigInt? seenAt;
+  final BigInt? completesAt;
+
+  /// Helpers who stopped helping this move (hex keys), for good.
+  final List<String> stopped;
+
+  const PendingSeatMove({
+    required this.replacement,
+    required this.oldKeyHex,
+    required this.newKeyHex,
+    required this.canKeep,
+    this.keptAt,
+    required this.helpers,
+    required this.helped,
+    this.seenAt,
+    this.completesAt,
+    required this.stopped,
+  });
+
+  @override
+  int get hashCode =>
+      replacement.hashCode ^
+      oldKeyHex.hashCode ^
+      newKeyHex.hashCode ^
+      canKeep.hashCode ^
+      keptAt.hashCode ^
+      helpers.hashCode ^
+      helped.hashCode ^
+      seenAt.hashCode ^
+      completesAt.hashCode ^
+      stopped.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PendingSeatMove &&
+          runtimeType == other.runtimeType &&
+          replacement == other.replacement &&
+          oldKeyHex == other.oldKeyHex &&
+          newKeyHex == other.newKeyHex &&
+          canKeep == other.canKeep &&
+          keptAt == other.keptAt &&
+          helpers == other.helpers &&
+          helped == other.helped &&
+          seenAt == other.seenAt &&
+          completesAt == other.completesAt &&
+          stopped == other.stopped;
+}
+
 class ProposalInfo {
   final String id;
   final String author;
@@ -597,10 +670,23 @@ class ProposalList {
   /// (backup health, spec §12.2).
   final List<String> backedUp;
 
+  /// This phone's seat switched to it in the log and the server is still finishing the
+  /// move: it reads but can't write yet (not an error; the next refresh tries again).
+  final bool seatFinishing;
+
   /// Seat moves waiting for approvals (a signer who lost their phone, spec §10.1).
   final List<SeatMove> seatMoves;
 
-  /// Moved seats whose key isn't rebuilt yet (a helper may have stalled).
+  /// Seat moves with every approval, waiting for the helpers (72 h each) and for the old
+  /// phone, which can keep the seat in the first round.
+  final List<PendingSeatMove> pendingSeatMoves;
+
+  /// Seats whose old phone said it still has them (`KeepSeat`): whoever approves moving
+  /// one again must call its owner first.
+  final List<SeatKeep> seatKeeps;
+
+  /// Seat moves whose key isn't rebuilt yet, pending ones included (a helper may have
+  /// stalled; a restart works for either).
   final List<RepairInfo> repairs;
 
   /// The vault's switches to other relays, in log order.
@@ -616,7 +702,10 @@ class ProposalList {
     required this.newerVersionEntries,
     required this.sharedNames,
     required this.backedUp,
+    required this.seatFinishing,
     required this.seatMoves,
+    required this.pendingSeatMoves,
+    required this.seatKeeps,
     required this.repairs,
     required this.moves,
     this.updatedMaterial,
@@ -628,7 +717,10 @@ class ProposalList {
       newerVersionEntries.hashCode ^
       sharedNames.hashCode ^
       backedUp.hashCode ^
+      seatFinishing.hashCode ^
       seatMoves.hashCode ^
+      pendingSeatMoves.hashCode ^
+      seatKeeps.hashCode ^
       repairs.hashCode ^
       moves.hashCode ^
       updatedMaterial.hashCode;
@@ -642,7 +734,10 @@ class ProposalList {
           newerVersionEntries == other.newerVersionEntries &&
           sharedNames == other.sharedNames &&
           backedUp == other.backedUp &&
+          seatFinishing == other.seatFinishing &&
           seatMoves == other.seatMoves &&
+          pendingSeatMoves == other.pendingSeatMoves &&
+          seatKeeps == other.seatKeeps &&
           repairs == other.repairs &&
           moves == other.moves &&
           updatedMaterial == other.updatedMaterial;
@@ -725,10 +820,13 @@ class RelayMoveRecord {
           logIndex == other.logIndex;
 }
 
-/// A moved seat whose key the helpers are still rebuilding on the new phone.
+/// A seat move whose key the helpers are still rebuilding on the new phone.
 class RepairInfo {
   /// The move (pass to `retry_repair`).
   final BigInt replacement;
+
+  /// The seat hasn't switched yet (see [`PendingSeatMove`]).
+  final bool pending;
 
   /// The new phone's key (hex).
   final String newKeyHex;
@@ -744,6 +842,7 @@ class RepairInfo {
 
   const RepairInfo({
     required this.replacement,
+    required this.pending,
     required this.newKeyHex,
     required this.helpers,
     required this.attempt,
@@ -753,6 +852,7 @@ class RepairInfo {
   @override
   int get hashCode =>
       replacement.hashCode ^
+      pending.hashCode ^
       newKeyHex.hashCode ^
       helpers.hashCode ^
       attempt.hashCode ^
@@ -764,6 +864,7 @@ class RepairInfo {
       other is RepairInfo &&
           runtimeType == other.runtimeType &&
           replacement == other.replacement &&
+          pending == other.pending &&
           newKeyHex == other.newKeyHex &&
           helpers == other.helpers &&
           attempt == other.attempt &&
@@ -908,6 +1009,28 @@ class ScannedRequest {
           problem == other.problem;
 }
 
+/// The last time a seat's old phone kept it.
+class SeatKeep {
+  /// The seat (hex key of the phone that kept it).
+  final String oldKeyHex;
+
+  /// Its clock, unix seconds (display only).
+  final BigInt at;
+
+  const SeatKeep({required this.oldKeyHex, required this.at});
+
+  @override
+  int get hashCode => oldKeyHex.hashCode ^ at.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SeatKeep &&
+          runtimeType == other.runtimeType &&
+          oldKeyHex == other.oldKeyHex &&
+          at == other.at;
+}
+
 /// A signer moving to a new phone, waiting for approvals.
 class SeatMove {
   /// The signer who lost their phone (hex key).
@@ -923,12 +1046,17 @@ class SeatMove {
   /// The recovery code, rebuilt from the log, for approving from this list.
   final String code;
 
+  /// When the old phone last said it still has this seat (`KeepSeat`, its clock, unix
+  /// seconds): approvers must call its owner first. `None` in the first round.
+  final BigInt? keptAt;
+
   const SeatMove({
     required this.oldKeyHex,
     required this.newKeyHex,
     required this.approvals,
     required this.needed,
     required this.code,
+    this.keptAt,
   });
 
   @override
@@ -937,7 +1065,8 @@ class SeatMove {
       newKeyHex.hashCode ^
       approvals.hashCode ^
       needed.hashCode ^
-      code.hashCode;
+      code.hashCode ^
+      keptAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -948,7 +1077,8 @@ class SeatMove {
           newKeyHex == other.newKeyHex &&
           approvals == other.approvals &&
           needed == other.needed &&
-          code == other.code;
+          code == other.code &&
+          keptAt == other.keptAt;
 }
 
 class SendProgress {

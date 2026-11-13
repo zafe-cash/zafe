@@ -25,7 +25,8 @@ struct Log {
 impl Log {
     fn new() -> Self {
         let mut rng = StdRng::seed_from_u64(8);
-        let ids = (0..4).map(|_| Identity::generate(&mut rng)).collect();
+        // Members are 0..3; 3..6 are outsiders (new phones in seat moves).
+        let ids = (0..6).map(|_| Identity::generate(&mut rng)).collect();
         let key = LogKey::generate(0, &mut rng);
         Self {
             rng,
@@ -367,7 +368,67 @@ fn members_attest_backups() {
 }
 
 impl Log {
-    /// Member `author` approves moving `old`'s seat to `ids[new]`.
+    /// Version 12: member `author` approves moving `old`'s seat to `ids[new]` in `round`.
+    fn approve(&mut self, author: usize, old: usize, new: usize, round: u32) {
+        let approval = zafe_proto::relay::SeatMoveApproval {
+            vault_id: MAILBOX,
+            old: self.ids[old].public().sig_pk,
+            new: *self.ids[new].public(),
+            round,
+        };
+        let event = VaultEvent::ReplaceApproval {
+            old: approval.old,
+            new: approval.new,
+            signature: approval.sign(&self.ids[author]).unwrap(),
+        };
+        self.push_v(author, &event, 12);
+    }
+
+    /// Version 12: `author` logs its part in the move at `replacement`, attempt `attempt`.
+    fn helped(&mut self, author: usize, replacement: u64, attempt: u32) {
+        let event = VaultEvent::RepairHelped {
+            replacement,
+            attempt,
+        };
+        self.push_v(author, &event, 12);
+    }
+
+    /// Version 12: `author` logs a keep of the move at `replacement` signed by `signer`
+    /// (the old key's signature over the move's `SeatCancel`, whoever logs it).
+    fn keep_by(&mut self, author: usize, signer: usize, replacement: u64) {
+        let state = self.replay().unwrap();
+        let r = state
+            .replacements
+            .iter()
+            .find(|r| r.index == replacement)
+            .expect("a move to keep");
+        let cancel = zafe_proto::relay::SeatCancel {
+            mailbox: [9; 16], // any label: the log keeps the one it was signed for
+            vault_id: MAILBOX,
+            move_id: r.move_id(&MAILBOX).unwrap(),
+            old: r.old,
+            new: r.new.sig_pk,
+            at: 1_790_000_000,
+        };
+        let event = VaultEvent::KeepSeat {
+            replacement,
+            at: cancel.at,
+            mailbox: cancel.mailbox,
+            signature: cancel.sign(&self.ids[signer]).unwrap(),
+        };
+        self.push_v(author, &event, 12);
+    }
+
+    /// The old key keeps its own seat.
+    fn keep(&mut self, author: usize, replacement: u64) {
+        self.keep_by(author, author, replacement);
+    }
+
+    fn pk(&self, i: usize) -> [u8; 32] {
+        self.ids[i].public().sig_pk
+    }
+
+    /// Old format (versions 4-11): member `author` approves moving `old`'s seat to `ids[new]`.
     fn replace(&mut self, author: usize, old: usize, new: usize) {
         let approval = zafe_proto::relay::ReplaceApproval {
             mailbox: MAILBOX,
@@ -1547,4 +1608,300 @@ fn members_needing_an_update_are_the_ones_without_a_version_10_event() {
     let mut want = vec![pk[0], pk[2]];
     want.sort();
     assert_eq!(behind, want);
+}
+
+/// Version 12 (finding A): the threshold of approvals leaves the move pending; the seat
+/// switches only once every helper of the current attempt logged `RepairHelped`. Nobody
+/// else's word (the old key, the new key, a helper twice or for another attempt) counts.
+#[test]
+fn a_seat_move_is_pending_until_every_helper_helped() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push(0, &name("Alice"));
+    log.approve(1, 0, 3, 0);
+    log.approve(2, 0, 3, 0);
+    let state = log.replay().unwrap();
+    let r = state
+        .pending_seat_move(&log.pk(0))
+        .expect("pending")
+        .clone();
+    assert!(
+        state.descriptor.member(&log.pk(0)).is_some(),
+        "the old key holds the seat"
+    );
+    assert!(state.descriptor.member(&log.pk(3)).is_none());
+    assert!(state.replacement_to(&log.pk(3)).is_none());
+    assert_eq!(
+        (r.helpers.clone(), r.round),
+        (vec![log.pk(1), log.pk(2)], Some(0))
+    );
+    assert!(state.pending_replacements.is_empty());
+
+    let at = log.chain.len();
+    log.helped(0, r.index, 0); // the old key isn't a helper
+    log.helped(3, r.index, 0); // nor the new key (not a member)
+    log.push_v(
+        3,
+        &VaultEvent::RepairDone {
+            replacement: r.index,
+        },
+        12,
+    );
+    log.helped(1, r.index, 1); // another attempt
+    log.helped(1, r.index + 1, 0); // another move
+    log.helped(1, r.index, 0); // valid
+    log.helped(1, r.index, 0); // twice
+    let state = log.replay().unwrap();
+    let ignored: Vec<u64> = state.ignored.iter().map(|(i, _)| *i).collect();
+    assert_eq!(ignored, vec![at, at + 1, at + 2, at + 3, at + 4, at + 6]);
+    assert!(
+        state.pending_seat_move(&log.pk(0)).is_some(),
+        "one helper isn't enough"
+    );
+    assert!(state.descriptor.member(&log.pk(0)).is_some());
+
+    log.helped(2, r.index, 0);
+    let state = log.replay().unwrap();
+    assert!(state.pending_seat_move(&log.pk(0)).is_none());
+    assert!(state.descriptor.member(&log.pk(0)).is_none());
+    assert_eq!(
+        state.descriptor.member(&log.pk(3)).unwrap().frost_id,
+        vec![0]
+    );
+    assert_eq!(state.names[&log.pk(3)], "Alice");
+    let moved = state.replacement_to(&log.pk(3)).unwrap();
+    assert!(moved.switched && moved.index == r.index);
+    // Now the new key can say it's done.
+    log.push_v(
+        3,
+        &VaultEvent::RepairDone {
+            replacement: r.index,
+        },
+        12,
+    );
+    assert!(log.replay().unwrap().replacements[0].done);
+}
+
+/// Version 12: only the old key's `KeepSeat` voids a pending move, and only a first-round
+/// one. Its ordinary entries don't; afterwards a second round of approvals (signed for
+/// round 1) may move the seat, and that round can't be kept.
+#[test]
+fn only_the_old_key_keeps_its_seat_and_only_once() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.approve(1, 0, 3, 0);
+    log.approve(2, 0, 3, 0);
+    let index = log.replay().unwrap().replacements[0].index;
+    log.push_v(0, &name("Still here"), 12); // an ordinary entry doesn't void it
+    log.keep(1, index); // another member can't
+    let state = log.replay().unwrap();
+    assert!(state.pending_seat_move(&log.pk(0)).is_some());
+    assert!(matches!(
+        state.ignored.last(),
+        Some((_, VaultError::BadRepair(_)))
+    ));
+
+    log.keep(0, index);
+    let state = log.replay().unwrap();
+    assert!(state.pending_seat_move(&log.pk(0)).is_none(), "kept");
+    assert!(state.replacements.is_empty());
+    assert!(state.descriptor.member(&log.pk(0)).is_some());
+    assert_eq!(state.seat_round(&log.pk(0)), 1);
+    assert_eq!(state.seat_keeps[&log.pk(0)][0].replacement, index);
+    // The first round's approvals are spent: signed for round 0, they don't count again.
+    log.approve(1, 0, 3, 0);
+    assert!(matches!(
+        log.replay().unwrap().ignored.last(),
+        Some((_, VaultError::BadReplacement(_)))
+    ));
+    // A second round, even to the same key, is a new move the old key can't keep.
+    log.approve(1, 0, 3, 1);
+    log.approve(2, 0, 3, 1);
+    let state = log.replay().unwrap();
+    let r = state
+        .pending_seat_move(&log.pk(0))
+        .expect("second round")
+        .clone();
+    assert_eq!(r.round, Some(1));
+    log.keep(0, r.index);
+    let state = log.replay().unwrap();
+    assert!(
+        state.pending_seat_move(&log.pk(0)).is_some(),
+        "can't be kept twice"
+    );
+    log.helped(1, r.index, 0);
+    log.helped(2, r.index, 0);
+    assert!(log
+        .replay()
+        .unwrap()
+        .descriptor
+        .member(&log.pk(3))
+        .is_some());
+}
+
+/// Version 12: one pending move per seat and per new key, and the old key can't be a
+/// helper of its own seat (it is still a member while the move is pending).
+#[test]
+fn one_pending_move_per_seat_and_the_old_key_never_helps() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.approve(1, 0, 3, 0);
+    log.approve(2, 0, 3, 0);
+    let index = log.replay().unwrap().replacements[0].index;
+    let at = log.chain.len();
+    log.approve(1, 0, 4, 0); // the same seat to another key, while pending
+    log.approve(0, 1, 3, 0); // another seat to the same new key
+    let retry = VaultEvent::RepairRetry {
+        replacement: index,
+        helpers: vec![log.pk(1), log.pk(0)],
+    };
+    log.push_v(1, &retry, 12); // the old key as a helper of its own seat
+    let state = log.replay().unwrap();
+    assert_eq!(
+        state.ignored,
+        vec![
+            (at, VaultError::BadReplacement(at)),
+            (at + 1, VaultError::BadReplacement(at + 1)),
+            (at + 2, VaultError::BadRepair(at + 2)),
+        ]
+    );
+    assert_eq!(state.replacements.len(), 1);
+}
+
+/// Finding E, in the log: a helper's seat switching gives every other unfinished repair it
+/// helps with a new attempt under the helper's new key, with no restarts or parts carried
+/// over from the old attempt.
+#[test]
+fn a_helpers_seat_switching_restarts_the_repair_it_helps() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    // Seat 2 moves to 3: helpers 0 and 1. Helper 0 logs its part; a restart is asked.
+    log.approve(0, 2, 3, 0);
+    log.approve(1, 2, 3, 0);
+    let carol = log.replay().unwrap().replacements[0].index;
+    log.helped(0, carol, 0);
+    let retry = VaultEvent::RepairRetry {
+        replacement: carol,
+        helpers: vec![log.pk(0), log.pk(1)],
+    };
+    log.push_v(0, &retry, 12);
+    let r = log.replay().unwrap().replacements[0].clone();
+    assert_eq!((r.attempt, r.helped.len(), r.retries.len()), (0, 1, 1));
+    // Seat 1 (a helper of that repair) moves to 4 and switches.
+    log.approve(0, 1, 4, 0);
+    log.approve(2, 1, 4, 0);
+    let bob = log.replay().unwrap().replacements[1].index;
+    log.helped(0, bob, 0);
+    log.helped(2, bob, 0);
+    let state = log.replay().unwrap();
+    assert!(state.descriptor.member(&log.pk(4)).is_some());
+    let r = &state.replacements[0];
+    assert_eq!(r.helpers, vec![log.pk(0), log.pk(4)]);
+    assert_eq!(r.attempt, 1, "a new attempt");
+    assert!(r.helped.is_empty() && r.retries.is_empty());
+    assert!(r.is_pending());
+}
+
+/// Version 12 rules apply from the first current member's version 12 entry on: an
+/// approval tagged 11 after it is checked as a version 12 one, so an old-format signature
+/// doesn't count (an older app's approvals can't move a seat at once).
+#[test]
+fn after_a_version_12_entry_old_format_approvals_dont_count() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push_v(0, &name("Alice"), 12);
+    let approval = zafe_proto::relay::ReplaceApproval {
+        mailbox: MAILBOX,
+        old: log.pk(0),
+        new: *log.ids[3].public(),
+    };
+    for i in [1, 2] {
+        let event = VaultEvent::ReplaceApproval {
+            old: approval.old,
+            new: approval.new,
+            signature: approval.sign(&log.ids[i]).unwrap(),
+        };
+        log.push_v(i, &event, 11);
+    }
+    let state = log.replay().unwrap();
+    assert!(state.replacements.is_empty());
+    assert!(state.descriptor.member(&log.pk(0)).is_some());
+    assert_eq!(state.ignored.len(), 2);
+}
+
+/// Coordinator item 6: a helper stops helping a pending move for good. Its `RepairHelped`
+/// no longer counts, no restart may name it (nor its new key once its own seat moves), and
+/// only a helper of a pending move can stop (never after the switch).
+#[test]
+fn a_helper_that_stopped_stays_stopped() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.approve(1, 0, 3, 0);
+    log.approve(2, 0, 3, 0);
+    let index = log.replay().unwrap().replacements[0].index;
+    let stop = VaultEvent::StopHelping { replacement: index };
+    let at = log.chain.len();
+    log.push_v(0, &stop, 12); // the old key isn't a helper
+    log.push_v(2, &stop, 12); // valid
+    log.helped(2, index, 0); // its part no longer counts
+    let retry = |helpers: Vec<[u8; 32]>| VaultEvent::RepairRetry {
+        replacement: index,
+        helpers,
+    };
+    log.push_v(1, &retry(vec![log.pk(1), log.pk(2)]), 12); // names the stopped helper
+    log.helped(1, index, 0);
+    let state = log.replay().unwrap();
+    let ignored: Vec<u64> = state.ignored.iter().map(|(i, _)| *i).collect();
+    assert_eq!(ignored, vec![at, at + 2, at + 3]);
+    let r = state.pending_seat_move(&log.pk(0)).expect("can't switch");
+    assert_eq!(r.stopped, vec![log.pk(2)]);
+    assert_eq!(r.helped, vec![log.pk(1)]);
+}
+
+/// Item 6 with seat moves: a stopped helper's own seat moving keeps its new key stopped for
+/// that move, and a stop after the switch is ignored.
+#[test]
+fn a_stopped_helpers_new_key_stays_stopped() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    // Seat 0 -> 3 (helpers 1, 2); helper 2 stops.
+    log.approve(1, 0, 3, 0);
+    log.approve(2, 0, 3, 0);
+    let first = log.replay().unwrap().replacements[0].index;
+    log.push_v(2, &VaultEvent::StopHelping { replacement: first }, 12);
+    // Seat 2 -> 4 (helpers 0, 1) switches.
+    log.approve(0, 2, 4, 0);
+    log.approve(1, 2, 4, 0);
+    let second = log.replay().unwrap().replacements[1].index;
+    log.helped(0, second, 0);
+    log.helped(1, second, 0);
+    let state = log.replay().unwrap();
+    assert!(state.descriptor.member(&log.pk(4)).is_some());
+    let r = &state.replacements[0];
+    assert_eq!(r.stopped, vec![log.pk(4)], "the new key is stopped too");
+    let at = log.chain.len();
+    log.helped(4, first, r.attempt); // the new key's part doesn't count
+    log.push_v(
+        1,
+        &VaultEvent::RepairRetry {
+            replacement: first,
+            helpers: vec![log.pk(1), log.pk(4)],
+        },
+        12,
+    );
+    log.push_v(
+        0,
+        &VaultEvent::StopHelping {
+            replacement: second,
+        },
+        12,
+    ); // after the switch
+    let ignored: Vec<u64> = log
+        .replay()
+        .unwrap()
+        .ignored
+        .iter()
+        .map(|(i, _)| *i)
+        .collect();
+    assert!(ignored.ends_with(&[at, at + 1, at + 2]), "{ignored:?}");
 }

@@ -78,11 +78,6 @@ async fn labelled_appends_reads_and_push_forget() {
     );
     let log = client.read_log(&ids[2], LABEL, 0).await.unwrap();
     assert_eq!(log, vec![first.clone(), second]);
-    // The old route files by vault id: it can't reach the label.
-    assert!(matches!(
-        client.append_log(&first).await,
-        Err(RelayClientError::Status { status: 404, .. })
-    ));
     // A label this relay doesn't have is a missing mailbox, not an old relay.
     match client.append_log_to(&ids[1], [9; 16], &first).await {
         Err(RelayClientError::Status { status: 404, body }) => {

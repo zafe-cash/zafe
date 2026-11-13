@@ -171,7 +171,7 @@ pub struct MembersRead {
 }
 
 /// Records the vault's approval threshold `t` on the relay, so that moving a lost member's
-/// seat to a new key ([`ReplaceMember`]) later needs `t` members' approvals. Signed by the
+/// seat to a new key ([`LabelledReplace`]) later needs `t` members' approvals. Signed by the
 /// creator, before sealing (`POST /v1/mailbox/threshold`, a newer route: a relay without it
 /// answers 404 and its vaults can't move seats).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,9 +182,9 @@ pub struct SetThreshold {
 
 const REPLACE_DOMAIN: &[u8] = b"Zafe replace member v1";
 
-/// What a member signs to approve moving the seat of `old` (a member who lost their
-/// device) to the new key `new` (spec §10.1). The same signature goes into the vault log
-/// (every member checks it there) and to the relay ([`ReplaceMember`]).
+/// The approval format before seat moves became pending (vault event versions 4 to 11):
+/// a member's signature over moving the seat of `old` to `new`. Kept only so old vault
+/// logs still replay; new apps never sign it and relays no longer take it (spec §10.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplaceApproval {
     pub mailbox: MailboxId,
@@ -199,6 +199,7 @@ impl ReplaceApproval {
         Ok(out)
     }
 
+    /// Signs the old format (tests that build old logs only).
     pub fn sign(&self, identity: &Identity) -> Result<Vec<u8>, ProtoError> {
         Ok(identity.sign(&self.signing_bytes()?).to_vec())
     }
@@ -206,6 +207,158 @@ impl ReplaceApproval {
     pub fn verify(&self, by: &IdentityPublic, signature: &[u8]) -> Result<(), ProtoError> {
         by.verify(&self.signing_bytes()?, signature)
     }
+}
+
+const SEAT_APPROVAL_DOMAIN: &[u8] = b"Zafe seat move approval v2";
+const SEAT_FINISH_DOMAIN: &[u8] = b"Zafe seat move finish v1";
+const SEAT_CANCEL_DOMAIN: &[u8] = b"Zafe seat move cancel v1";
+
+/// Identifies one seat move: `H(vault id, old, new, round)`, where `round` is how many
+/// times the seat's owner kept the seat (`VaultEvent::KeepSeat`) before this move. A move
+/// asked again after a keep is a different move, even to the same new key.
+pub fn seat_move_id(
+    vault_id: &MailboxId,
+    old: &[u8; 32],
+    new: &IdentityPublic,
+    round: u32,
+) -> [u8; 32] {
+    let mut h = blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"Zafe_SeatMoveId_")
+        .to_state();
+    h.update(vault_id);
+    h.update(old);
+    h.update(&new.sig_pk);
+    h.update(&new.enc_pk);
+    h.update(&round.to_le_bytes());
+    h.finalize().as_bytes().try_into().expect("32 bytes")
+}
+
+fn domain_bytes<T: Serialize>(domain: &[u8], value: &T) -> Result<Vec<u8>, ProtoError> {
+    let mut out = domain.to_vec();
+    out.extend_from_slice(&encode(value)?);
+    Ok(out)
+}
+
+/// What a member signs to approve moving the seat of `old` (a member who lost their
+/// device) to the new key `new` (spec §10.1), in round `round` of that seat. The same
+/// signature goes into the vault log (every member checks it there) and to the relay
+/// ([`LabelledReplace`]). Signed over the vault id, not a relay label: the log carries it
+/// across relays. Vault event version 12 on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatMoveApproval {
+    pub vault_id: MailboxId,
+    pub old: [u8; 32],
+    pub new: IdentityPublic,
+    pub round: u32,
+}
+
+impl SeatMoveApproval {
+    pub fn move_id(&self) -> [u8; 32] {
+        seat_move_id(&self.vault_id, &self.old, &self.new, self.round)
+    }
+
+    pub fn sign(&self, identity: &Identity) -> Result<Vec<u8>, ProtoError> {
+        Ok(identity
+            .sign(&domain_bytes(SEAT_APPROVAL_DOMAIN, self)?)
+            .to_vec())
+    }
+
+    pub fn verify(&self, by: &IdentityPublic, signature: &[u8]) -> Result<(), ProtoError> {
+        by.verify(&domain_bytes(SEAT_APPROVAL_DOMAIN, self)?, signature)
+    }
+}
+
+/// A seat move's finish, signed by a helper once its part is in the vault log and the log
+/// switched the seat (`VaultEvent::RepairHelped`). The relay takes the old key off the
+/// mailbox, and makes the new key a full member, only on the threshold of these from
+/// current members other than `old`. Relay-only, so it names the relay's label as well as
+/// the vault id: it can't be replayed to the vault's mailbox on another relay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatFinish {
+    pub mailbox: MailboxId,
+    pub vault_id: MailboxId,
+    pub move_id: [u8; 32],
+    pub old: [u8; 32],
+    pub new: [u8; 32],
+}
+
+impl SeatFinish {
+    pub fn sign(&self, identity: &Identity) -> Result<Vec<u8>, ProtoError> {
+        Ok(identity
+            .sign(&domain_bytes(SEAT_FINISH_DOMAIN, self)?)
+            .to_vec())
+    }
+
+    pub fn verify(&self, by: &IdentityPublic, signature: &[u8]) -> Result<(), ProtoError> {
+        by.verify(&domain_bytes(SEAT_FINISH_DOMAIN, self)?, signature)
+    }
+}
+
+/// The seat's owner keeps its seat: signed by `old`, one object for the log and the relay.
+/// The same signature is the `VaultEvent::KeepSeat` (any member may log it) and the relay's
+/// cancel (any member may post it): the relay takes the pending key `new` of that one move
+/// off (its finishes still count) and never takes that move id again. Only a first-round
+/// move (round 0) can be kept. Signed over the relay label it was made for as well as the vault
+/// id: the relay takes it only for that mailbox; the log keeps the label with it
+/// (`VaultEvent::KeepSeat`), so replay rebuilds the signed bytes after a relay move too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatCancel {
+    pub mailbox: MailboxId,
+    pub vault_id: MailboxId,
+    pub move_id: [u8; 32],
+    pub old: [u8; 32],
+    pub new: [u8; 32],
+    /// The old phone's clock, unix seconds (display only: "kept it on <date>").
+    pub at: u64,
+}
+
+impl SeatCancel {
+    pub fn sign(&self, identity: &Identity) -> Result<Vec<u8>, ProtoError> {
+        Ok(identity
+            .sign(&domain_bytes(SEAT_CANCEL_DOMAIN, self)?)
+            .to_vec())
+    }
+
+    pub fn verify(&self, by: &IdentityPublic, signature: &[u8]) -> Result<(), ProtoError> {
+        by.verify(&domain_bytes(SEAT_CANCEL_DOMAIN, self)?, signature)
+    }
+}
+
+/// `POST /v1/seat/finish`: one member's [`SeatFinish`] (body tagged [`version::RELAY_API`];
+/// the signature is its own, so no request signature on top).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatFinishPost {
+    pub finish: SeatFinish,
+    pub by: IdentityPublic,
+    pub signature: Vec<u8>,
+}
+
+/// `POST /v1/seat/cancel`: the old key's [`SeatCancel`], posted by anyone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeatCancelPost {
+    /// For this relay's mailbox `cancel.mailbox` (its vault id must be `cancel.vault_id`).
+    pub cancel: SeatCancel,
+    /// `cancel.old`'s signature. Posted by any member (or the old key itself).
+    pub signature: Vec<u8>,
+}
+
+/// A first-round seat move whose owner kept the seat ([`SeatCancel`]): the relay shows the
+/// signed cancel, so any member can log the `KeepSeat` it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelledSeat {
+    pub cancel: SeatCancel,
+    pub signature: Vec<u8>,
+}
+
+/// A seat move the relay holds as pending: `new` may read its inbox and receive
+/// deliveries, nothing else, until the move finishes ([`SeatFinish`]) or is cancelled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingSeat {
+    pub move_id: [u8; 32],
+    pub old: [u8; 32],
+    pub new: IdentityPublic,
+    pub round: u32,
 }
 
 /// Which value of a seat recovery's safety check a record holds. The new phone and each
@@ -253,26 +406,17 @@ pub struct RecoveryValues {
     pub values: Vec<Vec<u8>>,
 }
 
-/// Moves a seat on the relay: `approval.old` leaves the member list and `approval.new`
-/// joins, given approvals (signatures over `approval`) from at least the mailbox's
-/// threshold of current members other than `old`. Signed by a current member or by `new`
-/// (`POST /v1/mailbox/replace`). Repeating a replacement that already happened succeeds.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplaceMember {
-    pub approval: ReplaceApproval,
-    /// `(approver sig_pk, signature)`.
-    pub approvals: Vec<([u8; 32], Vec<u8>)>,
-}
-
-/// [`ReplaceMember`] on a labelled mailbox (`POST /v1/mailbox/replace-labelled`, a newer
-/// route: an older relay answers 404 with no body). The approvals are signed over
-/// `approval`, whose `mailbox` is the **vault id** (the same signatures are in the vault
-/// log); `mailbox` here is this relay's label for the vault, and the relay requires
-/// `approval.mailbox` to be the vault id it stored from the mailbox's first entry.
+/// Approves a seat move on the relay (`POST /v1/mailbox/replace-labelled`): given
+/// approvals (signatures over `approval`) from at least the mailbox's threshold of current
+/// members other than `old`, the relay adds `approval.new` as a pending member
+/// ([`PendingSeat`]). `old` stays a member until the move finishes ([`SeatFinish`]).
+/// `mailbox` is this relay's label for the vault; `approval.vault_id` must be the vault id
+/// the relay stored from the mailbox's first entry. Signed by a current member.
+/// Repeating an approval the relay already holds succeeds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LabelledReplace {
     pub mailbox: MailboxId,
-    pub approval: ReplaceApproval,
+    pub approval: SeatMoveApproval,
     /// `(approver sig_pk, signature)`.
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
 }
@@ -317,7 +461,8 @@ pub struct ReseedResponse {
     pub restored: bool,
 }
 
-/// Lists the mailboxes the signer is a member of (`POST /v1/mailboxes`): a device that
+/// Lists the mailboxes the signer is a member of, or the key of a pending seat move in
+/// (`POST /v1/mailboxes`): a device that
 /// recovers a lost member's seat finds its vault once the seat has moved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MailboxesRead {
@@ -382,6 +527,10 @@ pub struct MailboxInfo {
     pub sealed: bool,
     /// The approvals the relay wants to move a seat (0: unknown, seats can't move).
     pub threshold: u16,
+    /// Seat moves approved on the relay and not finished or cancelled yet.
+    pub pending: Vec<PendingSeat>,
+    /// First-round seat moves their owner kept, with the signed cancel.
+    pub cancelled: Vec<CancelledSeat>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -494,12 +643,12 @@ pub struct ForgetPush {
 }
 
 /// Appends a log entry to the mailbox `mailbox` names on this relay (`POST
-/// /v1/log/append-labelled`, a newer route: an older relay answers 404 with no body).
-/// Signed by a member of that mailbox, who need not be the entry's author (catching a relay
-/// up copies other members' entries). The mailbox id is this relay's label for the vault and
-/// may differ from the vault id the entry carries (`EntryHeader::mailbox`); the relay keeps
-/// the vault id of the mailbox's first entry and refuses entries of any other vault.
-/// Answers [`AppendResult`], like `/v1/log/append`.
+/// /v1/log/append-labelled`; the only append route since relay API version 2, which retired
+/// the unsigned `/v1/log/append`). Signed by a member of that mailbox, who need not be the
+/// entry's author (catching a relay up copies other members' entries). The mailbox id is
+/// this relay's label for the vault and may differ from the vault id the entry carries
+/// (`EntryHeader::mailbox`); the relay keeps the vault id of the mailbox's first entry and
+/// refuses entries of any other vault. Answers [`AppendResult`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LabelledAppend {
     pub mailbox: MailboxId,
@@ -518,10 +667,26 @@ impl LabelledAppend {
     }
 }
 
+/// Delivers an envelope (`POST /v1/envelope/send`). Signed by the envelope's sender, so the
+/// body carries the relay API version like every other request; the envelope's own
+/// signature and sequence number are checked as before.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostEnvelope {
+    /// [`Envelope::to_bytes`].
+    pub envelope: Vec<u8>,
+}
+
 /// Request header carrying a private relay's create token (`ZAFE_RELAY_CREATE_TOKEN`), sent
 /// with `/v1/mailbox/create` and `/v1/mailbox/reseed`. A relay that needs one and didn't get
 /// the right one answers 401 with `www-authenticate:` [`CREATE_TOKEN_HEADER`].
 pub const CREATE_TOKEN_HEADER: &str = "zafe-create-token";
+
+/// The body of the relay's 409 when a seat already has [`MAX_PENDING_SEAT_MOVES`] moves
+/// pending: one seat's junk approvals never block another seat's real move.
+pub const TOO_MANY_SEAT_MOVES: &str = "too many open moves for this seat";
+
+/// Most seat moves the relay holds pending per seat (old key) of a mailbox.
+pub const MAX_PENDING_SEAT_MOVES: usize = 16;
 
 /// The body of the relay's 404 for a mailbox it doesn't hold. A 404 without it comes from a
 /// relay (or proxy) that doesn't have the route at all.

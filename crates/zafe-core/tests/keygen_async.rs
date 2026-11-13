@@ -251,14 +251,14 @@ async fn a_send_overtaken_by_a_later_seq_is_sealed_again() {
     let public = |seq| Envelope::public(me, invite.label, seq, Kind::DkgEcho, &[0; 32]).unwrap();
     let mut seq = SeqCounter::default();
     let (earlier, later) = (seq.next_seq(), seq.next_seq());
-    relay.send(&public(later)).await.unwrap();
+    relay.send(me, &public(later)).await.unwrap();
     assert!(matches!(
-        relay.send(&public(earlier)).await,
+        relay.send(me, &public(earlier)).await,
         Err(RelayClientError::Status { status: 409, .. })
     ));
 
     let mut first = true;
-    send_fresh(&relay, &mut SeqCounter::default(), |n| {
+    send_fresh(&relay, me, &mut SeqCounter::default(), |n| {
         let n = if std::mem::take(&mut first) {
             earlier
         } else {
@@ -392,7 +392,7 @@ async fn a_commitment_served_again_after_the_reveal_stops_the_setup() {
         (Kind::SafetyReveal, value),
     ] {
         let envelope = Envelope::public(m, invite.label, seq.next_seq(), kind, &payload).unwrap();
-        relay.send(&envelope).await.unwrap();
+        relay.send(m, &envelope).await.unwrap();
     }
     let again = membership(&relay, &a.id, &invite, &a.dir, &a.key(&invite)).await;
     assert!(

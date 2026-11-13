@@ -20,6 +20,7 @@ import '../../rust/api/proposals.dart' as rust show RepairInfo, RepairRestart;
 import '../home/rename_sheet.dart';
 import '../../core/widgets/line_icon.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
+import 'keep_seat.dart';
 
 /// The vault's signers and its approval rule (a tab). Signer management, such as
 /// rotating a key, will live here.
@@ -66,12 +67,49 @@ class SignersScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
+                  for (final m in proposals.pendingSeatMoves) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    PendingSeatCard(
+                      who: memberLabel(m.oldKeyHex, me: me, names: names),
+                      mine: m.oldKeyHex == me,
+                      canKeep: m.canKeep,
+                      left: timeLeft(m.completesAt),
+                      keptOn: dayOf(m.keptAt),
+                      helped: m.helped.length,
+                      helpers: m.helpers.length,
+                      stopped: [
+                        for (final k in m.stopped)
+                          memberLabel(k, me: me, names: names),
+                      ],
+                      onKeep: m.oldKeyHex == me && m.canKeep
+                          ? () => keepMySeatOrThrow(context, ref)
+                          : null,
+                      onStop: m.helpers.contains(me) && !m.stopped.contains(me)
+                          ? () => _stopHelping(
+                              context,
+                              ref,
+                              m.replacement,
+                              memberLabel(m.oldKeyHex, me: me, names: names),
+                            )
+                          : null,
+                    ),
+                  ],
+                  if (proposals.seatFinishing) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      'Your seat is still finishing on the server.',
+                      style: AppTypography.bodySmall.copyWith(
+                        color: colors.text.secondary,
+                      ),
+                    ),
+                  ],
                   for (final move in proposals.seatMoves) ...[
                     const SizedBox(height: AppSpacing.md),
                     SeatMoveCard(
                       who: memberLabel(move.oldKeyHex, me: me, names: names),
                       approvals: move.approvals.length,
                       needed: move.needed,
+                      keptOn: dayOf(move.keptAt),
                       // The signer who lost the phone can't approve; nor twice.
                       onApprove:
                           move.oldKeyHex == me || move.approvals.contains(me)
@@ -82,8 +120,18 @@ class SignersScreen extends ConsumerWidget {
                             ),
                     ),
                   ],
+                  // A pending move's helpers show on its card until its wait is over
+                  // here; after that one who never logged its part can be replaced.
                   for (final r in proposals.repairs)
-                    if (r.newKeyHex != me) ...[
+                    if (r.newKeyHex != me &&
+                        (!r.pending ||
+                            proposals.pendingSeatMoves.any(
+                              (m) =>
+                                  m.replacement == r.replacement &&
+                                  m.oldKeyHex != me &&
+                                  m.completesAt != null &&
+                                  timeLeft(m.completesAt) == null,
+                            ))) ...[
                       const SizedBox(height: AppSpacing.md),
                       RepairCard(
                         who: memberLabel(r.newKeyHex, me: me, names: names),
@@ -170,6 +218,28 @@ class SignersScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Stop helping a pending seat move, for good: a confirm (it can't be undone), then the
+/// unlock. Throws [ActionCancelled] when either is declined (for an [ActionButton]).
+Future<void> _stopHelping(
+  BuildContext context,
+  WidgetRef ref,
+  BigInt replacement,
+  String who,
+) async {
+  final ok = await showAppConfirm(
+    context,
+    title: 'Stop helping move $who\'s seat?',
+    body:
+        'Only if $who says they didn\'t lose their phone. You can\'t help this move again.',
+    confirmLabel: 'Stop helping',
+  );
+  if (!ok || !context.mounted) throw const ActionCancelled();
+  if (!await confirmUnlock(context, ref, reason: 'Stop helping this move')) {
+    throw const ActionCancelled();
+  }
+  await ref.read(proposalsProvider.notifier).stopHelping(replacement);
 }
 
 /// The one helper a restart replaces and the member taking its place, when it changes
@@ -396,12 +466,16 @@ class SeatMoveCard extends StatelessWidget {
     required this.who,
     required this.approvals,
     required this.needed,
+    this.keptOn,
     this.onApprove,
   });
 
   final String who;
   final int approvals;
   final int needed;
+
+  /// The day the seat's old phone said it still has the seat ("13 Nov"), if it did.
+  final String? keptOn;
 
   /// Null when this member can't approve (it's their seat, or they already did).
   final VoidCallback? onApprove;
@@ -428,6 +502,15 @@ class SeatMoveCard extends StatelessWidget {
               ),
             ],
           ),
+          if (keptOn case final day?) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'The old phone said it still has this seat on $day: call $who first.',
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.warning,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.xs),
           Text(
             onApprove == null
@@ -447,6 +530,126 @@ class SeatMoveCard extends StatelessWidget {
                 size: AppButtonSize.medium,
                 onPressed: onApprove,
                 child: const Text('Check and approve'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A seat move with every approval, waiting out the helpers' 72 h. On the old phone it
+/// offers Keep my seat (first round only); elsewhere it shows the countdown by this
+/// phone's clock.
+class PendingSeatCard extends StatelessWidget {
+  const PendingSeatCard({
+    super.key,
+    required this.who,
+    required this.mine,
+    required this.canKeep,
+    required this.left,
+    required this.helped,
+    required this.helpers,
+    this.stopped = const [],
+    this.keptOn,
+    this.onKeep,
+    this.onStop,
+  });
+
+  final String who;
+
+  /// This phone's own seat.
+  final bool mine;
+  final bool canKeep;
+
+  /// Time left ("2 d 5 h"); null once over or before this phone counted.
+  final String? left;
+  final int helped;
+  final int helpers;
+  final String? keptOn;
+
+  /// Helpers who stopped helping (labels): the seat can't switch while they are named.
+  final List<String> stopped;
+  final Future<void> Function()? onKeep;
+
+  /// This phone helps and may stop (only if the seat's owner says they still have it).
+  final Future<void> Function()? onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final when = left == null ? 'soon' : 'in $left';
+    final text = mine
+        ? canKeep
+              ? 'Every approval is in. It moves $when unless you keep it.'
+              : 'You kept it on $keptOn; your co-signers asked again. Call them.'
+        : canKeep
+        ? 'Every approval is in. It moves $when unless their old phone keeps it. '
+              'Helpers done: $helped of $helpers.'
+        : 'Asked again after the old phone kept it on $keptOn. It moves $when. '
+              'Helpers done: $helped of $helpers.';
+    return MobileSurfaceCard(
+      cornerRadius: AppRadii.large,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              AppIcon(AppIcons.renew, size: 22, color: colors.icon.accent),
+              const SizedBox(width: AppSpacing.s),
+              Expanded(
+                child: Text(
+                  mine
+                      ? 'Your seat is moving to a new phone'
+                      : '$who is moving to a new phone',
+                  style: AppTypography.labelLarge.copyWith(
+                    color: colors.text.accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            text,
+            style: AppTypography.bodySmall.copyWith(
+              color: mine ? colors.text.warning : colors.text.secondary,
+            ),
+          ),
+          for (final who in stopped) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '$who stopped helping',
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.warning,
+              ),
+            ),
+          ],
+          if (onStop != null) ...[
+            const SizedBox(height: AppSpacing.s),
+            SizedBox(
+              width: double.infinity,
+              child: ActionButton(
+                label: 'Stop helping',
+                doneLabel: 'Stopped',
+                variant: AppButtonVariant.secondary,
+                size: AppButtonSize.medium,
+                errorFallback: 'Couldn\'t stop. Try again.',
+                onPressed: onStop!,
+              ),
+            ),
+          ],
+          if (onKeep != null) ...[
+            const SizedBox(height: AppSpacing.s),
+            SizedBox(
+              width: double.infinity,
+              child: ActionButton(
+                label: 'Keep my seat',
+                doneLabel: 'Kept',
+                size: AppButtonSize.medium,
+                errorFallback: 'Couldn\'t keep your seat. Try again.',
+                onPressed: onKeep!,
               ),
             ),
           ],

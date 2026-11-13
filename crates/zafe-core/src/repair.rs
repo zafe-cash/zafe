@@ -3,13 +3,19 @@
 //! 1. The new device makes a fresh identity and shows a [`RecoveryRequest`] (a code to send
 //!    to a co-signer) plus a short [`RecoveryRequest::safety_code`] to read out.
 //! 2. Other members approve the move in the vault log ([`approve_replacement`]); the same
-//!    signatures let the relay swap the member's key ([`push_seat_moves`]). At the vault's
-//!    threshold of approvals the seat moves (`VaultState::replacements`).
+//!    signatures make the relay add the new key as a pending member ([`sync_seat_moves`]).
+//!    At the vault's threshold of approvals the move is *pending* (event version 12): the
+//!    old key is still the member, and the old phone is asked whether it still has the
+//!    seat. Its owner's tap voids a first-round move ([`keep_seat`]).
 //! 3. The approvers repair the member's FROST share with the repairable threshold scheme
 //!    (RTS, ePrint 2017/1155; `frost_core::keys::repairable`) without anyone learning it:
-//!    each helper splits its share into deltas for the other helpers, each sums what it
-//!    gets into a sigma for the new device, which also receives the vault secret, the log
-//!    key and the public key package ([`help_repairs`]).
+//!    each helper splits its share into deltas for the other helpers (these may go at
+//!    once), and sums what it gets into a sigma for the new device, which also receives
+//!    the vault secret, the log key and the public key package ([`help_repairs`]). The
+//!    sigma is the leak, so a helper first waits [`SEAT_MOVE_WAIT`] from when it first saw
+//!    the move pending, then logs `RepairHelped` and checks it counted (no `KeepSeat`
+//!    first). The seat switches once every helper logged it, and only then do sigmas go;
+//!    members then sign the relay's finish, which takes the old key off the relay.
 //! 4. The new device sums the sigmas, checks the result against the member's public share
 //!    and every helper's copy of the vault data against each other and the vault's viewing
 //!    key, and stores its material ([`try_recover`]).
@@ -32,7 +38,7 @@ use reddsa::frost::redpallas::{
 };
 use serde::{Deserialize, Serialize};
 use zafe_proto::{
-    relay::{RecoveryPut, RecoveryValueKind, ReplaceApproval, Signed},
+    relay::{RecoveryPut, RecoveryValueKind, SeatCancel, SeatFinish, SeatMoveApproval, Signed},
     version::{self, Format},
     Chain, Envelope, Identity, IdentityPublic, Kind, LogKey, MailboxId,
 };
@@ -333,8 +339,9 @@ pub async fn new_phone_words(
 
 /// Member: approves moving `old`'s seat to the device that made `request`, after its
 /// owner compared `confirmed_words` with the new phone ([`new_phone_words`]; checked again
-/// here). Returns whether the seat has moved (this approval completed it); the relay is
-/// then told right away.
+/// here). The approval is for the seat's current round (how often its owner kept it).
+/// Returns whether this approval completed the approvals (the move is pending now); the
+/// relay is then told right away. The seat itself switches only after the helpers' wait.
 #[allow(clippy::too_many_arguments)]
 pub async fn approve_replacement<R: RngCore + CryptoRng>(
     relay: &RelayClient,
@@ -358,10 +365,11 @@ pub async fn approve_replacement<R: RngCore + CryptoRng>(
         ));
     }
     let (mut chain, mut state) = loaded?;
-    let approval = ReplaceApproval {
-        mailbox: state.descriptor.vault_id,
+    let approval = SeatMoveApproval {
+        vault_id: state.descriptor.vault_id,
         old,
         new: request.identity,
+        round: state.seat_round(&old),
     };
     let event = VaultEvent::ReplaceApproval {
         old,
@@ -369,38 +377,280 @@ pub async fn approve_replacement<R: RngCore + CryptoRng>(
         signature: approval.sign(me).map_err(proto)?,
     };
     append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
-    let moved = state.replacement_to(&request.identity.sig_pk).is_some();
-    if moved {
-        push_seat_moves(relay, me, material.label(), &state).await?;
+    let pending = state
+        .pending_seat_move(&old)
+        .is_some_and(|r| r.new == request.identity);
+    if pending {
+        // Best effort: the approval is in the log, and every member's refresh retries the
+        // relay (another move's refusal must not fail this approval).
+        let _ = sync_seat_moves(relay, me, material, &mut chain, &mut state, rng).await;
     }
-    Ok(moved)
+    Ok(pending)
 }
 
-/// Tells the relay, which files the vault under `label`, about seat moves it hasn't made
-/// yet (idempotent; any member can). The approvals are signed over the vault id.
-pub async fn push_seat_moves(
+/// Brings the log and the relay up to date with each other's seat moves (idempotent; any
+/// member can, since everything it sends was signed by someone else or is its own finish):
+/// - a first-round move the relay shows kept (the old key's signed cancel) that the log
+///   still has pending is logged as the `KeepSeat` it is; a keep the log has that the relay
+///   still lists pending is posted as its cancel (a keep is one object, [`SeatCancel`]);
+/// - a pending move the relay doesn't hold gets its approvals, so the new key can receive
+///   the helpers' parts;
+/// - a move the log switched that the relay hasn't finished gets this member's finish
+///   ([`SeatFinish`]). A member signs a finish only for a switch it read in the log, so the
+///   relay never drops the old key before the log did.
+///
+/// `chain` and `state` take any entry appended here. One move's error doesn't stop the
+/// others; the first one is returned at the end. Old-format moves (event version 11 and
+/// before) aren't sent: relays no longer take them.
+pub async fn sync_seat_moves<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
-    label: MailboxId,
-    state: &VaultState,
+    material: &VaultMaterial,
+    chain: &mut Chain,
+    state: &mut VaultState,
+    rng: &mut R,
 ) -> Result<(), NodeError> {
-    if state.replacements.is_empty() {
+    let my_pk = me.public().sig_pk;
+    let vault_id = state.descriptor.vault_id;
+    let label = material.label();
+    let live = |state: &VaultState| -> Vec<(Replacement, [u8; 32])> {
+        state
+            .replacements
+            .iter()
+            .filter(|r| !r.done)
+            .filter_map(|r| Some((r.clone(), r.move_id(&vault_id)?)))
+            .collect()
+    };
+    if state.descriptor.member(&my_pk).is_none()
+        || (live(state).is_empty() && state.seat_keeps.is_empty())
+    {
         return Ok(());
     }
-    let on_relay = relay.members(me, label).await?.members;
-    for r in &state.replacements {
-        if on_relay.iter().any(|m| m.sig_pk == r.old) {
-            let approval = ReplaceApproval {
-                mailbox: state.descriptor.vault_id,
+    let mut info = relay.mailbox_info(me, label).await?;
+    let mut first_error: Option<NodeError> = None;
+    let mut note = |e: NodeError| {
+        first_error.get_or_insert(e);
+    };
+    // Kept on the relay, still pending in the log: log the keep the old key signed.
+    for c in &info.cancelled {
+        let Some(index) = state
+            .replacements
+            .iter()
+            .find(|r| r.is_pending() && r.move_id(&vault_id) == Some(c.cancel.move_id))
+            .map(|r| r.index)
+        else {
+            continue;
+        };
+        let event = VaultEvent::KeepSeat {
+            replacement: index,
+            at: c.cancel.at,
+            mailbox: c.cancel.mailbox,
+            signature: c.signature.clone(),
+        };
+        if state.check(my_pk, &event).is_err() {
+            continue; // not this move's owner's signature: nothing to log
+        }
+        if let Err(e) = append_event(relay, me, material, chain, state, &event, rng).await {
+            note(e);
+        }
+    }
+    // Kept in the log, still pending on the relay: post the cancel.
+    let keeps: Vec<(SeatCancel, Vec<u8>)> = state
+        .seat_keeps
+        .values()
+        .flatten()
+        .map(|k| (k.cancel, k.signature.clone()))
+        .collect();
+    for (cancel, signature) in keeps {
+        // Signed for this relay's mailbox (a keep from before a relay move stays in the log).
+        if cancel.mailbox == label && info.pending.iter().any(|p| p.move_id == cancel.move_id) {
+            if let Err(e) = relay.cancel_seat_move(cancel, signature).await {
+                note(e.into());
+            }
+        }
+    }
+    // Oldest first, re-reading the relay after a finish lands: a seat that moved twice
+    // while the relay lagged (A -> X -> Y) is carried forward in one pass.
+    for (r, move_id) in live(state) {
+        if !info.members.iter().any(|m| m.sig_pk == r.old) {
+            continue; // finished (or its old key isn't the relay's member yet)
+        }
+        let has_row = info.pending.iter().any(|p| p.move_id == move_id)
+            || info.cancelled.iter().any(|c| c.cancel.move_id == move_id);
+        let sent = if r.is_pending() {
+            // The seat's own phone never helps a move of its seat along.
+            if r.old == my_pk || has_row {
+                continue;
+            }
+            let approval = SeatMoveApproval {
+                vault_id,
                 old: r.old,
                 new: r.new,
+                round: r.round.unwrap_or_default(),
             };
             relay
                 .replace_member_at(me, label, approval, r.approvals.clone())
-                .await?;
+                .await
+        } else if r.switched && r.new.sig_pk != my_pk {
+            // The log switched it before the relay ever held it (its old key only now
+            // became the relay's member): its approvals first, then the finish.
+            if !has_row {
+                let approval = SeatMoveApproval {
+                    vault_id,
+                    old: r.old,
+                    new: r.new,
+                    round: r.round.unwrap_or_default(),
+                };
+                if let Err(e) = relay
+                    .replace_member_at(me, label, approval, r.approvals.clone())
+                    .await
+                {
+                    note(e.into());
+                    continue;
+                }
+            }
+            let finish = SeatFinish {
+                mailbox: label,
+                vault_id,
+                move_id,
+                old: r.old,
+                new: r.new.sig_pk,
+            };
+            let finished = relay.finish_seat_move(me, finish).await;
+            if finished.is_ok() {
+                if let Ok(now) = relay.mailbox_info(me, label).await {
+                    info = now;
+                }
+            }
+            finished
+        } else {
+            continue;
+        };
+        if let Err(e) = sent {
+            note(e.into());
         }
     }
-    Ok(())
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// How long an honest helper waits, from when its phone first saw a seat move pending,
+/// before its part can complete the move: the old phone's owner has this long to tap
+/// **Keep my seat** after the push. The app and the CLI use it; tests pass zero.
+pub const SEAT_MOVE_WAIT: std::time::Duration = std::time::Duration::from_secs(72 * 3600);
+
+/// When this phone first saw a seat move pending (sealed, `<move id>.seen` in the repair
+/// directory). The phone's own clock, never an entry's timestamp.
+#[derive(Serialize, Deserialize)]
+struct SeatMoveSeen {
+    at: u64,
+}
+
+fn seen_name(move_id: &[u8; 32]) -> String {
+    format!("{}.seen", hex::encode(move_id))
+}
+
+fn seen_key(me: &Identity, vault_id: &MailboxId) -> NonceKey {
+    NonceKey::derive(&me.seeds().to_bytes(), vault_id)
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// When this phone first saw the move `move_id` pending, if it recorded it ([`help_repairs`]
+/// records it for every pending move). The countdown on every member's phone is its own.
+pub fn seat_move_seen(
+    dir: &Path,
+    me: &Identity,
+    vault_id: &MailboxId,
+    move_id: &[u8; 32],
+) -> Option<u64> {
+    let name = seen_name(move_id);
+    let bytes = std::fs::read(dir.join(&name)).ok()?;
+    let plain = seen_key(me, vault_id).open(&name, &bytes)?;
+    let seen: SeatMoveSeen = version::decode(Format::SeatMoveSeen, &plain).ok()?;
+    Some(seen.at)
+}
+
+/// [`seat_move_seen`], recording `now` first if there is no readable record. A record that
+/// was lost or can't be read restarts the wait (the safe side: never shorter).
+fn record_seen(
+    dir: &Path,
+    me: &Identity,
+    vault_id: &MailboxId,
+    move_id: &[u8; 32],
+    now: u64,
+) -> Result<u64, NodeError> {
+    if let Some(at) = seat_move_seen(dir, me, vault_id, move_id) {
+        return Ok(at);
+    }
+    let path = dir.join(seen_name(move_id));
+    if path.exists() {
+        crate::durable::remove(&path).map_err(|e| NodeError::Io(e.to_string()))?;
+    }
+    let sealed = seen_key(me, vault_id).seal(
+        &seen_name(move_id),
+        &version::encode(Format::SeatMoveSeen, &SeatMoveSeen { at: now })?,
+    );
+    std::fs::create_dir_all(dir).map_err(|e| NodeError::Io(e.to_string()))?;
+    crate::durable::create_new(&path, &sealed).map_err(|e| NodeError::Io(e.to_string()))?;
+    seat_move_seen(dir, me, vault_id, move_id)
+        .ok_or_else(|| NodeError::Io("seat move record".into()))
+}
+
+/// Old phone: its owner still has it and keeps the seat, voiding the pending first-round
+/// move of it: signs the [`SeatCancel`], logs it as `VaultEvent::KeepSeat` and posts it to
+/// the relay (the same object; any member finishes either half if this phone stops
+/// between them). Only ever called from the owner's tap (behind unlock), never in the
+/// background: the signature is created here and nowhere else. Returns whether a move was
+/// voided now; with none pending it only brings the relay up to date. A second round
+/// (asked after a keep) can't be kept: [`NodeError::NotReady`].
+pub async fn keep_seat<R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    rng: &mut R,
+) -> Result<bool, NodeError> {
+    let (mut chain, mut state) = load_state(relay, me, material).await?;
+    let my_pk = me.public().sig_pk;
+    let vault_id = state.descriptor.vault_id;
+    let voided =
+        match state.pending_seat_move(&my_pk) {
+            Some(r) if r.round == Some(0) => {
+                let cancel = SeatCancel {
+                    mailbox: material.label(),
+                    vault_id,
+                    move_id: r.move_id(&vault_id).ok_or_else(|| proto("move id"))?,
+                    old: my_pk,
+                    new: r.new.sig_pk,
+                    at: unix_now(),
+                };
+                let event = VaultEvent::KeepSeat {
+                    replacement: r.index,
+                    at: cancel.at,
+                    mailbox: cancel.mailbox,
+                    signature: cancel.sign(me).map_err(proto)?,
+                };
+                append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+                true
+            }
+            Some(_) => return Err(NodeError::NotReady(
+                "your co-signers asked again after you kept this seat; it can't be kept twice: \
+                 call them"
+                    .into(),
+            )),
+            None => false,
+        };
+    // The relay drops the pending key (the same signed cancel). Best effort: the keep is in
+    // the log, and any member's refresh posts it.
+    let _ = sync_seat_moves(relay, me, material, &mut chain, &mut state, rng).await;
+    Ok(voided)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -488,6 +738,10 @@ type DeltaKey = (u64, u32, [u8; 32]);
 pub struct RepairReport {
     /// Moves this member sent its deltas for.
     pub deltas_sent: usize,
+    /// Pending moves this member is still waiting out ([`SEAT_MOVE_WAIT`]).
+    pub held: usize,
+    /// Pending moves this member logged `RepairHelped` for.
+    pub helped: usize,
     /// Moves this member finished (sigma sent to the new device).
     pub sigmas_sent: usize,
     /// Moves waiting for other helpers' deltas.
@@ -523,11 +777,22 @@ fn repair_ids(
     Ok((helpers, participant))
 }
 
-/// Helper: does this member's part in repairing the share of every moved seat it helps
+/// Helper: does this member's part in repairing the share of every seat move it helps
 /// with (spec §10.4.2). Safe to call on every refresh: each step is recorded in `dir`
 /// (secret: the deltas are shares of the member's key share; deleted once done). `chain`
 /// and `state` are the loaded log (`load_state`): the sigma carries its length and head,
 /// which the new phone's first load must hold.
+///
+/// For a pending move (event version 12) the deltas go at once; this member's
+/// `RepairHelped` only after `wait` from when this phone first saw the move pending, and
+/// checked to count in the log (no `KeepSeat` came first); and the sigma (the part that
+/// leaks the share to the new key) only once the seat switched, that is once every helper
+/// of the attempt logged its part. So a valid `KeepSeat` always means no honest helper's
+/// sigma went out, and once the seat switched a `KeepSeat` is refused. Every member's
+/// phone records that first sighting, so each shows its own countdown. Also brings the
+/// relay up to date ([`sync_seat_moves`]). One move's error doesn't stop the others; the
+/// first one is returned at the end.
+#[allow(clippy::too_many_arguments)]
 pub async fn help_repairs<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -535,29 +800,46 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
     chain: &Chain,
     state: &VaultState,
     dir: &Path,
+    wait: std::time::Duration,
     rng: &mut R,
 ) -> Result<RepairReport, NodeError> {
     let my_pk = me.public().sig_pk;
-    let mine: Vec<&Replacement> = state
+    let vault_id = state.descriptor.vault_id;
+    let now = unix_now();
+    let mut report = RepairReport::default();
+    let (mut chain, mut state) = (chain.clone(), state.clone());
+    let mailbox = material.label();
+    // The relay first (keeps both ways, approvals, finishes); its error doesn't stop the
+    // repairs below.
+    let mut first_error = sync_seat_moves(relay, me, material, &mut chain, &mut state, rng)
+        .await
+        .err();
+    // Every pending move's first sighting, each on its own: one that can't be recorded
+    // (its helper step fails the same way below) doesn't stop the others.
+    for r in state.replacements.iter().filter(|r| r.is_pending()) {
+        if let Some(move_id) = r.move_id(&vault_id) {
+            if let Err(e) = record_seen(dir, me, &vault_id, &move_id, now) {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    let mine: Vec<u64> = state
         .replacements
         .iter()
-        .filter(|r| !r.done && r.helpers().contains(&my_pk))
+        .filter(|r| !r.done && r.helpers().contains(&my_pk) && !r.stopped.contains(&my_pk))
         .filter(|r| !helper_path(dir, r, DONE_EXT).exists())
+        .map(|r| r.index)
         .collect();
-    let mut report = RepairReport::default();
     if mine.is_empty() {
-        return Ok(report);
+        return first_error.map_or(Ok(report), Err);
     }
     std::fs::create_dir_all(dir).map_err(proto)?;
-    let mailbox = material.label();
-    push_seat_moves(relay, me, mailbox, state).await?;
     let key_package = material.key_package()?;
-    let members = members_by_pk(state);
     let mut seq = SeqCounter::default();
 
     // Deltas other helpers sent us, by move, attempt and sender.
     let mut received: BTreeMap<DeltaKey, (u64, Vec<u8>)> = BTreeMap::new();
-    for (cursor, from, env) in read_inbox(relay, me, mailbox, &members, 0).await? {
+    for (cursor, from, env) in read_inbox(relay, me, mailbox, &members_by_pk(&state), 0).await? {
         if env.header.kind != Kind::RepairDelta {
             continue;
         }
@@ -572,103 +854,225 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
             .or_insert((cursor, msg.delta));
     }
 
-    for r in mine {
-        let (helper_ids, participant) = repair_ids(state, r)?;
-        let helpers = r.helpers();
-        let state_path = helper_path(dir, r, DELTA_EXT);
-        let mut hs: HelperState = match std::fs::read(&state_path) {
-            Ok(bytes) => decode_repair(&bytes)?,
-            Err(_) => {
-                let deltas = repairable::repair_share_part1::<PallasBlake2b512, _>(
-                    &helper_ids,
-                    &key_package,
-                    rng,
-                    participant,
-                )
-                .map_err(proto)?;
-                let deltas = helpers
-                    .iter()
-                    .zip(&helper_ids)
-                    .map(|(pk, id)| {
-                        Ok((
-                            *pk,
-                            deltas.get(id).ok_or_else(|| proto("delta"))?.serialize(),
-                        ))
-                    })
-                    .collect::<Result<_, NodeError>>()?;
-                let hs = HelperState {
-                    deltas,
-                    sent: false,
-                };
-                // Saved before anything is sent: a second part 1 would not match.
-                write_atomic(&state_path, &version::encode(Format::Repair, &hs)?)?;
-                hs
-            }
-        };
-        if !hs.sent {
-            for pk in helpers.iter().filter(|pk| **pk != my_pk) {
-                let to = members
-                    .get(pk)
-                    .ok_or_else(|| NodeError::Protocol("a helper is no longer a member".into()))?;
-                let msg = DeltaMsg {
-                    replacement: r.index,
-                    attempt: r.attempt,
-                    delta: hs.deltas[pk].clone(),
-                };
-                let payload = version::encode(Format::Repair, &msg)?;
-                send_fresh(relay, &mut seq, |n| {
-                    Envelope::sealed(me, to, mailbox, n, Kind::RepairDelta, &payload, rng)
-                        .map_err(proto)
-                })
-                .await?;
-            }
-            hs.sent = true;
-            write_atomic(&state_path, &version::encode(Format::Repair, &hs)?)?;
-            report.deltas_sent += 1;
-        }
-
-        // Part 2 once every other helper's delta is here.
-        let mut deltas = vec![Delta::deserialize(&hs.deltas[&my_pk]).map_err(proto)?];
-        let mut cursors = Vec::new();
-        for pk in helpers.iter().filter(|pk| **pk != my_pk) {
-            match received.get(&(r.index, r.attempt, *pk)) {
-                Some((cursor, bytes)) => {
-                    deltas.push(Delta::deserialize(bytes).map_err(proto)?);
-                    cursors.push(*cursor);
-                }
-                None => break,
+    let mut switched = false;
+    for index in mine {
+        let step = Box::pin(help_one(
+            relay,
+            me,
+            material,
+            &mut chain,
+            &mut state,
+            index,
+            &received,
+            &key_package,
+            dir,
+            HelperClock { now, wait },
+            &mut seq,
+            &mut report,
+            rng,
+        ))
+        .await;
+        match step {
+            Ok(s) => switched |= s,
+            Err(e) => {
+                first_error.get_or_insert(e);
             }
         }
-        if deltas.len() < helpers.len() {
-            report.waiting += 1;
-            continue;
-        }
-        let sigma = repairable::repair_share_part2(&deltas);
-        let msg = SigmaMsg {
-            replacement: r.index,
-            attempt: r.attempt,
-            sigma: sigma.serialize(),
-            data: VaultData {
-                public_key_package: material.public_key_package.clone(),
-                vault_secret: material.vault_secret,
-                log_key_epoch: material.log_key_epoch,
-                log_key: material.log_key,
-            },
-            anchor: Some(LogAnchor::of(chain)),
-            create_token: material.relay.create_token.clone(),
-        };
-        let payload = version::encode(Format::Repair, &msg)?;
-        send_fresh(relay, &mut seq, |n| {
-            Envelope::sealed(me, &r.new, mailbox, n, Kind::RepairSigma, &payload, rng)
-                .map_err(proto)
-        })
-        .await?;
-        write_atomic(&helper_path(dir, r, DONE_EXT), b"")?;
-        let _ = std::fs::remove_file(&state_path);
-        let _ = relay.ack_inbox(me, mailbox, &cursors).await;
-        report.sigmas_sent += 1;
     }
-    Ok(report)
+    // A switch this member's own `RepairHelped` made: the relay gets its finish now.
+    if switched {
+        if let Err(e) = sync_seat_moves(relay, me, material, &mut chain, &mut state, rng).await {
+            first_error.get_or_insert(e);
+        }
+    }
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(report),
+    }
+}
+
+/// When a helper is (`now`, unix seconds) and how long it waits.
+#[derive(Clone, Copy)]
+struct HelperClock {
+    now: u64,
+    wait: std::time::Duration,
+}
+
+/// One move's step for [`help_repairs`] (the move at `index`, looked up in the current
+/// `state`, which an append here updates). Returns whether this member's `RepairHelped`
+/// switched the seat.
+#[allow(clippy::too_many_arguments)]
+async fn help_one<R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    chain: &mut Chain,
+    state: &mut VaultState,
+    index: u64,
+    received: &BTreeMap<DeltaKey, (u64, Vec<u8>)>,
+    key_package: &reddsa::frost::redpallas::keys::KeyPackage,
+    dir: &Path,
+    clock: HelperClock,
+    seq: &mut SeqCounter,
+    report: &mut RepairReport,
+    rng: &mut R,
+) -> Result<bool, NodeError> {
+    let my_pk = me.public().sig_pk;
+    let vault_id = state.descriptor.vault_id;
+    let mailbox = material.label();
+    let current = |state: &VaultState| {
+        state
+            .replacements
+            .iter()
+            .find(|r| {
+                r.index == index
+                    && !r.done
+                    && r.helpers.contains(&my_pk)
+                    && !r.stopped.contains(&my_pk)
+            })
+            .cloned()
+    };
+    // Gone (kept, done) or no longer ours since the caller read the log: nothing to do.
+    let Some(mut r) = current(state) else {
+        return Ok(false);
+    };
+    let (helper_ids, participant) = repair_ids(state, &r)?;
+    let helpers = r.helpers();
+    let state_path = helper_path(dir, &r, DELTA_EXT);
+    let mut hs: HelperState = match std::fs::read(&state_path) {
+        Ok(bytes) => decode_repair(&bytes)?,
+        Err(_) => {
+            let deltas = repairable::repair_share_part1::<PallasBlake2b512, _>(
+                &helper_ids,
+                key_package,
+                rng,
+                participant,
+            )
+            .map_err(proto)?;
+            let deltas = helpers
+                .iter()
+                .zip(&helper_ids)
+                .map(|(pk, id)| {
+                    Ok((
+                        *pk,
+                        deltas.get(id).ok_or_else(|| proto("delta"))?.serialize(),
+                    ))
+                })
+                .collect::<Result<_, NodeError>>()?;
+            let hs = HelperState {
+                deltas,
+                sent: false,
+            };
+            // Saved before anything is sent: a second part 1 would not match.
+            write_atomic(&state_path, &version::encode(Format::Repair, &hs)?)?;
+            hs
+        }
+    };
+    // A saved part 1 is for exactly this attempt's helpers; one made for others (an older
+    // app rekeyed a helper without a new attempt) can't be used.
+    let delta_for = |pk: &[u8; 32]| {
+        hs.deltas.get(pk).cloned().ok_or_else(|| {
+            NodeError::Protocol("this repair's saved part is for other helpers".into())
+        })
+    };
+    if !hs.sent {
+        let members = members_by_pk(state);
+        for pk in helpers.iter().filter(|pk| **pk != my_pk) {
+            let to = members
+                .get(pk)
+                .ok_or_else(|| NodeError::Protocol("a helper is no longer a member".into()))?;
+            let msg = DeltaMsg {
+                replacement: r.index,
+                attempt: r.attempt,
+                delta: delta_for(pk)?,
+            };
+            let payload = version::encode(Format::Repair, &msg)?;
+            send_fresh(relay, me, seq, |n| {
+                Envelope::sealed(me, to, mailbox, n, Kind::RepairDelta, &payload, rng)
+                    .map_err(proto)
+            })
+            .await?;
+        }
+        hs.sent = true;
+        write_atomic(&state_path, &version::encode(Format::Repair, &hs)?)?;
+        report.deltas_sent += 1;
+    }
+
+    // A pending move: the wait, then this member's `RepairHelped`, checked in the log.
+    let mut switched = false;
+    if r.is_pending() {
+        let move_id = r.move_id(&vault_id).ok_or_else(|| proto("move id"))?;
+        let seen = record_seen(dir, me, &vault_id, &move_id, clock.now)?;
+        if clock.now < seen.saturating_add(clock.wait.as_secs()) {
+            report.held += 1;
+            return Ok(false);
+        }
+        if !r.helped.contains(&my_pk) {
+            let event = VaultEvent::RepairHelped {
+                replacement: r.index,
+                attempt: r.attempt,
+            };
+            // On a conflict this reads the new entries and checks again: a `KeepSeat`
+            // (or a restart) that came first makes the append fail, and nothing is sent.
+            let at = append_event(relay, me, material, chain, state, &event, rng).await?;
+            let counted = !state.ignored.iter().any(|(i, _)| *i == at);
+            r = current(state)
+                .filter(|now| counted && now.attempt == r.attempt && now.helped.contains(&my_pk))
+                .ok_or_else(|| {
+                    NodeError::Protocol("this helper's part didn't count in the log".into())
+                })?;
+            switched = r.switched;
+            report.helped += 1;
+        }
+        // The sigma waits for the switch: a co-helper holding back its part must not leave
+        // the share with the new key while the seat still looks pending (and keepable).
+        if !r.switched {
+            report.waiting += 1;
+            return Ok(switched);
+        }
+    }
+
+    // Part 2 once every other helper's delta is here.
+    let mut deltas = vec![Delta::deserialize(&delta_for(&my_pk)?).map_err(proto)?];
+    let mut cursors = Vec::new();
+    for pk in helpers.iter().filter(|pk| **pk != my_pk) {
+        match received.get(&(r.index, r.attempt, *pk)) {
+            Some((cursor, bytes)) => {
+                deltas.push(Delta::deserialize(bytes).map_err(proto)?);
+                cursors.push(*cursor);
+            }
+            None => break,
+        }
+    }
+    if deltas.len() < helpers.len() {
+        report.waiting += 1;
+        return Ok(switched);
+    }
+    let sigma = repairable::repair_share_part2(&deltas);
+    let msg = SigmaMsg {
+        replacement: r.index,
+        attempt: r.attempt,
+        sigma: sigma.serialize(),
+        data: VaultData {
+            public_key_package: material.public_key_package.clone(),
+            vault_secret: material.vault_secret,
+            log_key_epoch: material.log_key_epoch,
+            log_key: material.log_key,
+        },
+        anchor: Some(LogAnchor::of(chain)),
+        create_token: material.relay.create_token.clone(),
+    };
+    let payload = version::encode(Format::Repair, &msg)?;
+    // To the new key directly (a pending member on the relay), never through the members.
+    send_fresh(relay, me, seq, |n| {
+        Envelope::sealed(me, &r.new, mailbox, n, Kind::RepairSigma, &payload, rng).map_err(proto)
+    })
+    .await?;
+    write_atomic(&helper_path(dir, &r, DONE_EXT), b"")?;
+    let _ = std::fs::remove_file(&state_path);
+    let _ = relay.ack_inbox(me, mailbox, &cursors).await;
+    report.sigmas_sent += 1;
+    Ok(switched)
 }
 
 /// Where a recovering device is.
@@ -676,6 +1080,9 @@ pub async fn help_repairs<R: RngCore + CryptoRng>(
 pub enum RecoveryStatus {
     /// No vault has moved a seat to this device yet (co-signers haven't approved).
     Waiting,
+    /// Co-signers approved: the relay holds this device as a seat move's pending key, and
+    /// the helpers wait (up to 3 days, each on its own clock) before their parts go.
+    Pending,
     /// The seat moved; the helpers' repair messages are arriving.
     SeatMoved { received: usize, needed: usize },
     /// Recovered: the device's vault material and an invite describing the vault (its
@@ -707,7 +1114,10 @@ pub async fn try_recover(
         match recover_from(relay, me, mailbox, confirmed).await? {
             done @ RecoveryStatus::Done { .. } => return Ok(done),
             s @ RecoveryStatus::SeatMoved { .. } => status = s,
-            RecoveryStatus::Waiting => {}
+            RecoveryStatus::Pending if matches!(status, RecoveryStatus::Waiting) => {
+                status = RecoveryStatus::Pending
+            }
+            RecoveryStatus::Pending | RecoveryStatus::Waiting => {}
         }
     }
     Ok(status)
@@ -726,7 +1136,9 @@ async fn recover_from(
         .into_iter()
         .map(|m| (m.sig_pk, m))
         .collect();
-    let mut messages: BTreeMap<([u8; 32], u32), (u64, SigmaMsg)> = BTreeMap::new();
+    // By (sender, move, attempt): a seat asked again after a keep is another move, even to
+    // the same new key, and its sigmas must not be shadowed by the first move's.
+    let mut messages: BTreeMap<([u8; 32], u64, u32), (u64, SigmaMsg)> = BTreeMap::new();
     for (cursor, from, env) in read_inbox(relay, me, label, &on_relay, 0).await? {
         if env.header.kind != Kind::RepairSigma {
             continue;
@@ -736,19 +1148,27 @@ async fn recover_from(
         };
         if let Ok(msg) = decode_sigma(&bytes) {
             messages
-                .entry((from.sig_pk, msg.attempt))
+                .entry((from.sig_pk, msg.replacement, msg.attempt))
                 .or_insert((cursor, msg));
         }
     }
     // The relay lists the members, so it could add senders of its own: the log key and
     // the vault id come only from a co-signer the person confirmed.
-    let Some((voucher, anchor, vouched)) = messages.iter().rev().find_map(|((from, _), (_, m))| {
-        let anchor = m.anchor.filter(|_| confirmed.contains(from))?;
-        Some((*from, anchor, m))
-    }) else {
-        return Ok(RecoveryStatus::SeatMoved {
-            received: 0,
-            needed: 0,
+    let Some((voucher, anchor, vouched)) =
+        messages.iter().rev().find_map(|((from, _, _), (_, m))| {
+            let anchor = m.anchor.filter(|_| confirmed.contains(from))?;
+            Some((*from, anchor, m))
+        })
+    else {
+        // Before any confirmed co-signer's part: still a pending key on the relay, or a
+        // member whose helpers haven't sent theirs yet.
+        return Ok(if on_relay.contains_key(&me.public().sig_pk) {
+            RecoveryStatus::SeatMoved {
+                received: 0,
+                needed: 0,
+            }
+        } else {
+            RecoveryStatus::Pending
         });
     };
     let key = LogKey::from_bytes(vouched.data.log_key_epoch, vouched.data.log_key);
@@ -780,7 +1200,7 @@ async fn recover_from(
     let helpers = r.helpers();
     let from_helpers: Vec<&SigmaMsg> = helpers
         .iter()
-        .filter_map(|pk| messages.get(&(*pk, r.attempt)).map(|(_, m)| m))
+        .filter_map(|pk| messages.get(&(*pk, r.index, r.attempt)).map(|(_, m)| m))
         .filter(|m| m.replacement == r.index && m.attempt == r.attempt)
         .collect();
     if from_helpers.len() < helpers.len() {
@@ -863,7 +1283,7 @@ async fn recover_from(
     };
     let cursors: Vec<u64> = helpers
         .iter()
-        .filter_map(|pk| messages.get(&(*pk, r.attempt)).map(|(c, _)| *c))
+        .filter_map(|pk| messages.get(&(*pk, r.index, r.attempt)).map(|(c, _)| *c))
         .collect();
     let _ = relay.ack_inbox(me, label, &cursors).await;
     Ok(RecoveryStatus::Done {
@@ -953,8 +1373,9 @@ pub async fn retry_repair<R: RngCore + CryptoRng>(
         .ok_or_else(|| NodeError::NotReady("that key repair is already finished".into()))?;
     // Every app must count restarts the same way; the new phone can't write before its key
     // is back, and the stalled helper may never return, so neither is waited for.
+    // A pending move's old key is still a member but takes no part (it may be lost).
     let mut behind = state.members_below(REPAIR_QUORUM_FROM);
-    behind.retain(|pk| ![my_pk, r.new.sig_pk, stalled].contains(pk));
+    behind.retain(|pk| ![my_pk, r.new.sig_pk, r.old, stalled].contains(pk));
     if !behind.is_empty() {
         return Err(NodeError::MembersMustUpdate(behind));
     }
@@ -976,7 +1397,61 @@ pub async fn retry_repair<R: RngCore + CryptoRng>(
     Ok(())
 }
 
-/// New device, once its key checked out: tells the others the repair is finished.
+/// Helper: stops helping the pending move `replacement`, for good (`VaultEvent::
+/// StopHelping`, logged so a restored phone stays stopped): the person whose seat it is
+/// said they didn't lose their phone. The seat can't switch with this member named; the
+/// others may name another helper. Only from the member's tap (behind a confirm and the
+/// unlock).
+pub async fn stop_helping<R: RngCore + CryptoRng>(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    replacement: u64,
+    rng: &mut R,
+) -> Result<(), NodeError> {
+    let (mut chain, mut state) = load_state(relay, me, material).await?;
+    let event = VaultEvent::StopHelping { replacement };
+    append_event(relay, me, material, &mut chain, &mut state, &event, rng).await?;
+    Ok(())
+}
+
+/// This device holds a seat the log switched to it (it is the member in the log) while the
+/// relay still lists it as that move's pending key (the helpers' finishes are still
+/// arriving): it can read, not write. Retry later; nothing is wrong. Anything else, such as
+/// this phone's own seat having moved away, is not "finishing".
+pub async fn seat_finishing(
+    relay: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    state: &VaultState,
+) -> bool {
+    let my_pk = me.public().sig_pk;
+    let Some(r) = state.replacement_to(&my_pk).filter(|r| !r.done) else {
+        return false;
+    };
+    let Some(move_id) = r.move_id(&state.descriptor.vault_id) else {
+        return false;
+    };
+    state.descriptor.member(&my_pk).is_some()
+        && relay
+            .mailbox_info(me, material.label())
+            .await
+            .is_ok_and(|i| {
+                i.pending
+                    .iter()
+                    .any(|p| p.move_id == move_id && p.new.sig_pk == my_pk)
+            })
+}
+
+/// [`NodeError::NotReady`] for a seat [`seat_finishing`].
+pub fn finishing() -> NodeError {
+    NodeError::NotReady(
+        "your seat is still finishing on the server; this phone retries on its own".into(),
+    )
+}
+
+/// New device, once its key checked out: tells the others the repair is finished. While
+/// the relay hasn't finished the move ([`seat_finishing`]): [`finishing`], to retry.
 pub async fn mark_repair_done<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -989,6 +1464,9 @@ pub async fn mark_repair_done<R: RngCore + CryptoRng>(
     };
     if r.done {
         return Ok(());
+    }
+    if seat_finishing(relay, me, material, &state).await {
+        return Err(finishing());
     }
     let event = VaultEvent::RepairDone {
         replacement: r.index,

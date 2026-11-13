@@ -15,8 +15,8 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tower::ServiceExt;
 use zafe_proto::{
     relay::{
-        decode_body, join_token_hash, AppendResult, CreateMailbox, Join, Seal, Signed, WaitRequest,
-        WaitResponse,
+        decode_body, join_token_hash, AppendResult, CreateMailbox, Join, LabelledAppend,
+        PostEnvelope, Seal, Signed, WaitRequest, WaitResponse,
     },
     Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -142,7 +142,14 @@ impl World {
             &mut self.rng,
         )
         .unwrap();
-        let (status, body) = call(&self.app, "/v1/log/append", entry.to_bytes().unwrap()).await;
+        let request = LabelledAppend::new(MAILBOX, &entry, NOW).unwrap();
+        let (status, body) = signed(
+            &self.app,
+            "/v1/log/append-labelled",
+            &self.ids[author],
+            request,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             decode_body::<AppendResult>(&body).unwrap(),
@@ -164,7 +171,14 @@ impl World {
             &mut self.rng,
         )
         .unwrap();
-        let (status, _) = call(&self.app, "/v1/envelope", envelope.to_bytes().unwrap()).await;
+        let envelope = envelope.to_bytes().unwrap();
+        let (status, _) = signed(
+            &self.app,
+            "/v1/envelope/send",
+            &self.ids[from],
+            PostEnvelope { envelope },
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
     }
 }

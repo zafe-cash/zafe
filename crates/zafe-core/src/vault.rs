@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use zafe_proto::{
-    relay::ReplaceApproval,
+    relay::{ReplaceApproval, SeatCancel, SeatMoveApproval},
     version::{self, DecodeError, Format, UnsupportedVersion},
     IdentityPublic, LogEntry, LogKey,
 };
@@ -331,9 +331,12 @@ pub enum VaultEvent {
         at: u64,
     },
     /// The author approves moving the seat of `old` (a member who lost their device) to
-    /// the key `new` (spec §10.1). `signature` is the author's signature over the
-    /// [`ReplaceApproval`] for this vault, which also goes to the relay. Once the vault's
-    /// threshold of other members approved the same move, the seat moves. Event version 4.
+    /// the key `new` (spec §10.1). Event version 4. Up to version 11 `signature` is over
+    /// the old [`ReplaceApproval`] and the threshold of approvals moves the seat at once.
+    /// From version 12 it is over [`SeatMoveApproval`] for the seat's current round (how
+    /// often its owner kept it, [`VaultEvent::KeepSeat`]), which also goes to the relay,
+    /// and the threshold of approvals makes the move *pending*: the old key stays a member,
+    /// the new key isn't one, until every helper logged [`VaultEvent::RepairHelped`].
     ReplaceApproval {
         old: [u8; 32],
         new: IdentityPublic,
@@ -350,7 +353,7 @@ pub enum VaultEvent {
         helpers: Vec<[u8; 32]>,
     },
     /// The moved seat's new device has its repaired key (checked): helpers stop. Only the
-    /// new key may log it. Event version 5.
+    /// new key may log it (so only after the seat switched). Event version 5.
     RepairDone {
         replacement: u64,
     },
@@ -372,6 +375,40 @@ pub enum VaultEvent {
         /// Author's clock, unix seconds: must fall within the move's lifetime.
         at: u64,
     },
+    /// The seat's owner still has its phone: the pending first-round move of its seat
+    /// (`replacement`, [`Replacement::index`]) is void. `signature` is the old key's over
+    /// [`SeatCancel`] for that move, the same object the relay takes as the cancel, so any
+    /// member may log it (the old phone usually does, a member who saw the cancel on the
+    /// relay otherwise). Only the old phone's tap ever creates the signature. After it, a
+    /// new round of approvals may move the seat again, and that round can't be kept. Event
+    /// version 12.
+    KeepSeat {
+        replacement: u64,
+        /// The old phone's clock, unix seconds (signed; display only: "the old phone said
+        /// it still has this seat on <date>").
+        at: u64,
+        /// The relay label the cancel was signed for (signed; it may differ from the
+        /// vault's current one after a relay move).
+        mailbox: [u8; 16],
+        signature: Vec<u8>,
+    },
+    /// A helper of the pending move `replacement` stops helping it, for good: the person
+    /// whose seat it is said they didn't lose their phone (round 1 can't be kept). From
+    /// then on its `RepairHelped` for the move is invalid and no restart may name it (nor
+    /// its key after its own seat moves), so the seat doesn't switch with it named. Only
+    /// from a helper of the current attempt, only while the move is pending. Event version
+    /// 12.
+    StopHelping {
+        replacement: u64,
+    },
+    /// A helper of the pending move `replacement` waited its time (72 h from when it first
+    /// saw the move pending, its own clock) and is about to send its part to the new key,
+    /// in repair attempt `attempt`. The seat switches once every helper of the current
+    /// attempt logged it. Event version 12.
+    RepairHelped {
+        replacement: u64,
+        attempt: u32,
+    },
 }
 
 /// A switch to another relay that the log accepted ([`VaultEvent::VaultMoved`]).
@@ -392,14 +429,20 @@ pub struct Moved {
 pub struct PendingReplacement {
     pub old: [u8; 32],
     pub new: IdentityPublic,
+    /// The seat's round the approvals are for (version 12 on); `None`: the old format.
+    pub round: Option<u32>,
     /// `(approver sig_pk, signature)`, in log order.
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
 }
 
-/// A seat that moved to a new key (a lost device replaced, spec §10.1).
+/// A seat move that has its threshold of approvals (a lost device replaced, spec §10.1).
+/// Up to event version 11 the seat switched at once. From version 12 it is pending
+/// (`switched == false`: the old key is still the member) until every helper of the
+/// current attempt logged `RepairHelped`; the old key's `KeepSeat` voids a first-round
+/// one (it then leaves this list).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Replacement {
-    /// Log index of the approval that completed it (identifies the move).
+    /// Log index of the approval that completed the approvals (identifies the move).
     pub index: u64,
     pub old: [u8; 32],
     pub new: IdentityPublic,
@@ -418,6 +461,15 @@ pub struct Replacement {
     pub retries: BTreeMap<Vec<[u8; 32]>, Vec<[u8; 32]>>,
     /// The new device logged `RepairDone`.
     pub done: bool,
+    /// The seat's round the approvals were for (version 12 on); `None`: an old-format move
+    /// that switched at once.
+    pub round: Option<u32>,
+    /// Helpers of the current attempt that logged `RepairHelped`, in log order.
+    pub helped: Vec<[u8; 32]>,
+    /// The seat switched: the new key holds it.
+    pub switched: bool,
+    /// Helpers who stopped helping this move (`StopHelping`), for good, across attempts.
+    pub stopped: Vec<[u8; 32]>,
 }
 
 impl Replacement {
@@ -425,6 +477,33 @@ impl Replacement {
     pub fn helpers(&self) -> Vec<[u8; 32]> {
         self.helpers.clone()
     }
+
+    /// The move's id on the relay ([`zafe_proto::relay::seat_move_id`]); `None` for an
+    /// old-format move.
+    pub fn move_id(&self, vault_id: &[u8; 16]) -> Option<[u8; 32]> {
+        self.round
+            .map(|round| zafe_proto::relay::seat_move_id(vault_id, &self.old, &self.new, round))
+    }
+
+    /// A version 12 move still waiting for its helpers.
+    pub fn is_pending(&self) -> bool {
+        self.round.is_some() && !self.switched
+    }
+}
+
+/// The owner of a seat kept it ([`VaultEvent::KeepSeat`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeatKept {
+    /// Index of the `KeepSeat` entry.
+    pub index: u64,
+    /// The move it voided ([`Replacement::index`]) and the key it would have gone to.
+    pub replacement: u64,
+    pub new: IdentityPublic,
+    /// The signed cancel (the relay takes the same object) and the old key's signature.
+    pub cancel: SeatCancel,
+    pub signature: Vec<u8>,
+    /// The old phone's clock (display only).
+    pub at: u64,
 }
 
 /// A member's latest backup attestation.
@@ -558,9 +637,16 @@ pub struct VaultState {
     pub backups: BTreeMap<[u8; 32], BackupRecord>,
     /// Seat moves waiting for approvals, by `(old, new sig_pk)`.
     pub pending_replacements: BTreeMap<([u8; 32], [u8; 32]), PendingReplacement>,
-    /// Seat moves that happened, in log order. `descriptor.members` already holds the new
-    /// keys: the state's descriptor is the current membership, not the signed original.
+    /// Seat moves with their threshold of approvals, in log order: switched ones and (from
+    /// version 12) pending ones. `descriptor.members` holds the keys of switched ones: the
+    /// state's descriptor is the current membership, not the signed original.
     pub replacements: Vec<Replacement>,
+    /// Seats whose owner kept them ([`VaultEvent::KeepSeat`]), by the owner's key; their
+    /// count is the seat's round.
+    pub seat_keeps: BTreeMap<[u8; 32], Vec<SeatKept>>,
+    /// Valid seat-move entries applied (approvals, keeps, helped): a membership check is
+    /// due again when it changes.
+    pub seat_changes: u64,
     /// Identities whose seat moved away. Their log entries still chain (see
     /// [`VaultState::log_authors`]) and replay ignores them as `NotAMember`.
     pub former_members: Vec<IdentityPublic>,
@@ -613,6 +699,8 @@ impl VaultState {
             backups: BTreeMap::new(),
             pending_replacements: BTreeMap::new(),
             replacements: Vec::new(),
+            seat_keeps: BTreeMap::new(),
+            seat_changes: 0,
             former_members: Vec::new(),
             max_event_version: 0,
             member_versions: BTreeMap::from([(first.header.author, first_version)]),
@@ -950,7 +1038,8 @@ impl VaultState {
                 signature,
             } => {
                 let bad = || VaultError::BadReplacement(index);
-                let was_member = |pk: &[u8; 32]| self.replacements.iter().any(|r| &r.old == pk);
+                let was_member =
+                    |pk: &[u8; 32]| self.former_members.iter().any(|m| &m.sig_pk == pk);
                 if author == old
                     || self.descriptor.member(&old).is_none()
                     || self.descriptor.member(&new.sig_pk).is_some()
@@ -959,32 +1048,87 @@ impl VaultState {
                 {
                     return Err(bad());
                 }
-                let approval = ReplaceApproval {
-                    mailbox: self.descriptor.vault_id,
-                    old,
-                    new,
-                };
                 let by = self
                     .descriptor
                     .member(&author)
                     .expect("checked above")
                     .identity;
-                approval.verify(&by, &signature).map_err(|_| bad())?;
+                let round = if event_version >= PENDING_SEATS_FROM {
+                    // One pending move per seat, and one per new key.
+                    if self
+                        .replacements
+                        .iter()
+                        .any(|r| r.is_pending() && (r.old == old || r.new.sig_pk == new.sig_pk))
+                    {
+                        return Err(bad());
+                    }
+                    let round = self.seat_round(&old);
+                    let approval = SeatMoveApproval {
+                        vault_id: self.descriptor.vault_id,
+                        old,
+                        new,
+                        round,
+                    };
+                    approval.verify(&by, &signature).map_err(|_| bad())?;
+                    Some(round)
+                } else {
+                    let approval = ReplaceApproval {
+                        mailbox: self.descriptor.vault_id,
+                        old,
+                        new,
+                    };
+                    approval.verify(&by, &signature).map_err(|_| bad())?;
+                    None
+                };
                 let pending = self
                     .pending_replacements
                     .entry((old, new.sig_pk))
                     .or_insert_with(|| PendingReplacement {
                         old,
                         new,
+                        round,
                         approvals: Vec::new(),
                     });
+                // Approvals of another round or format don't add up with these: the
+                // relay counts only signatures over this round's approval.
+                if pending.round != round {
+                    pending.round = round;
+                    pending.approvals.clear();
+                }
                 if pending.new != new || pending.approvals.iter().any(|(pk, _)| *pk == author) {
                     return Err(bad());
                 }
                 pending.approvals.push((author, signature));
+                self.seat_changes += 1;
                 if pending.approvals.len() >= threshold {
                     let approvals = pending.approvals.clone();
-                    self.move_seat(index, old, new, approvals);
+                    let frost_id = self
+                        .descriptor
+                        .member(&old)
+                        .map(|m| m.frost_id.clone())
+                        .unwrap_or_default();
+                    let helpers = approvals.iter().map(|(pk, _)| *pk).collect();
+                    // The seat's other moves are moot while this one is pending (or done).
+                    self.pending_replacements.retain(|(o, _), _| *o != old);
+                    let switched = round.is_none();
+                    if switched {
+                        self.move_seat(old, new, event_version);
+                    }
+                    self.replacements.push(Replacement {
+                        index,
+                        old,
+                        new,
+                        frost_id,
+                        approvals,
+                        helpers,
+                        attempt: 0,
+                        retries: BTreeMap::new(),
+                        done: false,
+                        round,
+                        helped: Vec::new(),
+                        switched,
+                        stopped: Vec::new(),
+                    });
                 }
             }
             VaultEvent::RepairRetry {
@@ -1000,8 +1144,16 @@ impl VaultState {
                     .iter()
                     .position(|r| r.index == replacement && !r.done)
                     .ok_or_else(bad)?;
-                let new = self.replacements[r].new.sig_pk;
+                let (new, old) = (self.replacements[r].new.sig_pk, self.replacements[r].old);
+                // The old key can't help rebuild its own seat (version 12: it is still a
+                // member while the move is pending).
+                let own_seat = event_version >= PENDING_SEATS_FROM && helpers.contains(&old);
+                let stopped = helpers
+                    .iter()
+                    .any(|h| self.replacements[r].stopped.contains(h));
                 if author == new
+                    || own_seat
+                    || stopped
                     || !helpers.contains(&author)
                     || distinct.len() != helpers.len()
                     || helpers.len() != threshold
@@ -1025,12 +1177,15 @@ impl VaultState {
                 r.helpers = helpers;
                 r.attempt += 1;
                 r.retries.clear();
+                r.helped.clear();
             }
             VaultEvent::RepairDone { replacement } => {
                 let r = self
                     .replacements
                     .iter_mut()
-                    .find(|r| r.index == replacement && !r.done && r.new.sig_pk == author)
+                    .find(|r| {
+                        r.index == replacement && !r.done && r.switched && r.new.sig_pk == author
+                    })
                     .ok_or(VaultError::BadRepair(index))?;
                 r.done = true;
             }
@@ -1060,6 +1215,93 @@ impl VaultState {
                     arrived,
                     at,
                 });
+            }
+            VaultEvent::KeepSeat {
+                replacement,
+                at,
+                mailbox,
+                signature,
+            } => {
+                // Only a version 12 app can write it.
+                if event_version < PENDING_SEATS_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                let bad = || VaultError::BadRepair(index);
+                let pos = self
+                    .replacements
+                    .iter()
+                    .position(|r| r.index == replacement && r.is_pending())
+                    .ok_or_else(bad)?;
+                let r = &self.replacements[pos];
+                // Only the first round: a thief holding the old phone can't keep the seat
+                // for good (rule 4).
+                if r.round != Some(0) {
+                    return Err(bad());
+                }
+                let old = self.descriptor.member(&r.old).ok_or_else(bad)?.identity;
+                let cancel = SeatCancel {
+                    mailbox,
+                    vault_id: self.descriptor.vault_id,
+                    move_id: r.move_id(&self.descriptor.vault_id).ok_or_else(bad)?,
+                    old: r.old,
+                    new: r.new.sig_pk,
+                    at,
+                };
+                // The old key's word, whoever logs it.
+                cancel.verify(&old, &signature).map_err(|_| bad())?;
+                let r = self.replacements.remove(pos);
+                self.pending_replacements.retain(|(o, _), _| *o != r.old);
+                self.seat_keeps.entry(r.old).or_default().push(SeatKept {
+                    index,
+                    replacement,
+                    new: r.new,
+                    cancel,
+                    signature,
+                    at,
+                });
+                self.seat_changes += 1;
+            }
+            VaultEvent::StopHelping { replacement } => {
+                if event_version < PENDING_SEATS_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                let r = self
+                    .replacements
+                    .iter_mut()
+                    .find(|r| r.index == replacement && r.is_pending() && !r.done)
+                    .filter(|r| r.helpers.contains(&author) && !r.stopped.contains(&author))
+                    .ok_or(VaultError::BadRepair(index))?;
+                r.stopped.push(author);
+                self.seat_changes += 1;
+            }
+            VaultEvent::RepairHelped {
+                replacement,
+                attempt,
+            } => {
+                if event_version < PENDING_SEATS_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                let bad = || VaultError::BadRepair(index);
+                let r = self
+                    .replacements
+                    .iter_mut()
+                    .find(|r| r.index == replacement && r.is_pending() && !r.done)
+                    .ok_or_else(bad)?;
+                if attempt != r.attempt
+                    || !r.helpers.contains(&author)
+                    || r.helped.contains(&author)
+                    || r.stopped.contains(&author)
+                {
+                    return Err(bad());
+                }
+                r.helped.push(author);
+                self.seat_changes += 1;
+                // The new key's word never completes anything (rule 4): only every helper's.
+                if r.helpers.iter().all(|h| r.helped.contains(h)) {
+                    r.switched = true;
+                    let (old, new) = (r.old, r.new);
+                    self.move_seat(old, new, event_version);
+                }
             }
         }
         Ok(())
@@ -1126,36 +1368,41 @@ impl VaultState {
         authors
     }
 
-    /// The seat move that gave `new` its seat, if any (the latest one).
+    /// The seat move that gave `new` its seat, if any (the latest one; switched only).
     pub fn replacement_to(&self, new: &[u8; 32]) -> Option<&Replacement> {
         self.replacements
             .iter()
             .rev()
-            .find(|r| &r.new.sig_pk == new)
+            .find(|r| &r.new.sig_pk == new && r.switched)
+    }
+
+    /// The pending move of `old`'s seat, if any (version 12: at most one).
+    pub fn pending_seat_move(&self, old: &[u8; 32]) -> Option<&Replacement> {
+        self.replacements
+            .iter()
+            .find(|r| r.is_pending() && &r.old == old)
+    }
+
+    /// The round a new move of `old`'s seat would be in: how often its owner kept it.
+    pub fn seat_round(&self, old: &[u8; 32]) -> u32 {
+        self.seat_keeps.get(old).map_or(0, |k| k.len() as u32)
     }
 
     /// Moves `old`'s seat to `new`: the member keeps its FROST identifier, its votes,
     /// shares and place in signer groups, and its shared name, under the new key. Its
     /// pre-published commitments are dropped (their nonces were on the lost device) and
-    /// so is its backup attestation (the new device has no backup yet).
-    fn move_seat(
-        &mut self,
-        index: u64,
-        old: [u8; 32],
-        new: IdentityPublic,
-        approvals: Vec<([u8; 32], Vec<u8>)>,
-    ) {
+    /// so is its backup attestation (the new device has no backup yet). Called when the
+    /// seat switches (`event_version`: the version of the entry that switched it).
+    fn move_seat(&mut self, old: [u8; 32], new: IdentityPublic, event_version: u16) {
         let rekey = |pk: &mut [u8; 32]| {
             if *pk == old {
                 *pk = new.sig_pk;
             }
         };
-        let mut frost_id = Vec::new();
         for m in &mut self.descriptor.members {
             if m.identity.sig_pk == old {
                 self.former_members.push(m.identity);
                 m.identity = new;
-                frost_id = m.frost_id.clone();
             }
         }
         let threshold = usize::from(self.descriptor.threshold);
@@ -1191,8 +1438,20 @@ impl VaultState {
         }
         self.backups.remove(&old);
         // A helper of another seat's unfinished repair keeps helping under its new key.
+        // From version 12 that repair starts a new attempt (finding E): the helper's part
+        // of the old attempt was made by the lost key, and messages are keyed by attempt.
         for r in self.replacements.iter_mut().filter(|r| !r.done) {
+            // A helper who stopped stays stopped under its new key.
+            r.stopped.iter_mut().for_each(rekey);
+            if !r.helpers.contains(&old) {
+                continue;
+            }
             r.helpers.iter_mut().for_each(rekey);
+            if event_version >= PENDING_SEATS_FROM {
+                r.attempt += 1;
+                r.retries.clear();
+                r.helped.clear();
+            }
         }
         // Other moves of this seat are moot; the old key's approvals of others' moves go
         // (the relay no longer counts that key).
@@ -1200,18 +1459,6 @@ impl VaultState {
         for p in self.pending_replacements.values_mut() {
             p.approvals.retain(|(pk, _)| *pk != old);
         }
-        let helpers = approvals.iter().map(|(pk, _)| *pk).collect();
-        self.replacements.push(Replacement {
-            index,
-            old,
-            new,
-            frost_id,
-            approvals,
-            helpers,
-            attempt: 0,
-            retries: BTreeMap::new(),
-            done: false,
-        });
     }
 
     /// Fixes the signing commitments of a new proposal: for every signer group (t-subset of
@@ -1313,6 +1560,12 @@ const CURRENT_AUTHORS_FROM: u16 = 11;
 /// helper it names logged it. Offered only once every member's app writes it
 /// ([`VaultState::members_below`]).
 pub const REPAIR_QUORUM_FROM: u16 = 11;
+
+/// First `VAULT_EVENT` version whose seat moves are pending at the threshold of approvals
+/// (new approval format with the seat's round), switch once every helper logged
+/// `RepairHelped`, can be voided by the old key's `KeepSeat`, and restart other repairs a
+/// switched seat helped with.
+pub const PENDING_SEATS_FROM: u16 = 12;
 
 /// First `VAULT_EVENT` version after which versions only go up (see
 /// `VaultState::max_event_version`), and proposals must carry a usable PCZT.

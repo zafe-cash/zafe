@@ -36,8 +36,8 @@ Future<String?> newPhoneWords({
 );
 
 /// Approves moving the seat of `old_key_hex` (a signer who lost their phone) to the phone
-/// that showed `code`. Returns whether the seat has moved (this was the last approval
-/// needed); the share repair then starts on the helpers' next refresh.
+/// that showed `code`. Returns whether this was the last approval needed: the move is then
+/// pending (the old phone is asked first; the helpers' parts complete it after their 72 h).
 Future<bool> approveSeatMove({
   required String relayUrl,
   required List<int> seeds,
@@ -52,6 +52,33 @@ Future<bool> approveSeatMove({
   oldKeyHex: oldKeyHex,
   code: code,
   words: words,
+);
+
+/// The old phone: its owner still has it and keeps the seat, voiding the pending move of it
+/// (only a first-round move; behind unlock, never automatic). Returns whether a move was
+/// voided now.
+Future<bool> keepSeat({
+  required String relayUrl,
+  required List<int> seeds,
+  required List<int> material,
+}) => RustLib.instance.api.crateApiRepairKeepSeat(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  material: material,
+);
+
+/// A helper stops helping the pending move at `replacement`, for good (its owner says they
+/// didn't lose their phone). Behind a confirm and the unlock; never automatic.
+Future<void> stopHelping({
+  required String relayUrl,
+  required List<int> seeds,
+  required List<int> material,
+  required BigInt replacement,
+}) => RustLib.instance.api.crateApiRepairStopHelping(
+  relayUrl: relayUrl,
+  seeds: seeds,
+  material: material,
+  replacement: replacement,
 );
 
 /// The co-signer's link for a phone recovering a seat in this vault: the vault's relay
@@ -201,6 +228,10 @@ class RecoveryProgress {
 enum RecoveryStage {
   /// No vault has moved a seat to this phone yet: waiting for co-signers to approve.
   waiting,
+
+  /// Co-signers approved; their phones wait up to 3 days before finishing, in case the old
+  /// phone still works.
+  pending,
 
   /// The seat moved; the co-signers' phones are repairing the key.
   repairing,

@@ -23,6 +23,7 @@ import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/proposals_provider.dart';
+import 'keep_seat.dart' show dayOf;
 import '../../providers/endpoints_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../providers/vault_relay.dart';
@@ -156,6 +157,10 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
     final who = _signer == null
         ? 'them'
         : memberLabel(_signer!, me: me, names: names);
+    // Asked again after the old phone kept this seat: the human check comes first.
+    final keptOn = _signer == null
+        ? null
+        : dayOf(ref.watch(proposalsProvider).seatKeeps[_signer!]);
     final relayUrl =
         ref.watch(activeVaultRelayProvider)?.url ??
         ref.watch(endpointsProvider).relayUrl;
@@ -213,6 +218,15 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
             ],
           ),
         ),
+        if (keptOn != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'The old phone said it still has this seat on $keptOn: call $who first.',
+            style: AppTypography.bodyMedium.copyWith(
+              color: colors.text.warning,
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpacing.md),
         Text(
           'Code from their new phone',

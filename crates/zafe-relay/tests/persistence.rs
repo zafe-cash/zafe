@@ -16,8 +16,8 @@ use tower::ServiceExt;
 use zafe_proto::{
     relay::{
         decode_body, join_token_hash, AppendResult, CreateMailbox, InboxRead, InboxResponse, Join,
-        LogRead, LogResponse, MembersRead, MembersResponse, PushPlatform, RegisterPush, Seal,
-        Signed,
+        LabelledAppend, LogRead, LogResponse, MembersRead, MembersResponse, PostEnvelope,
+        PushPlatform, RegisterPush, Seal, Signed,
     },
     Envelope, Identity, Kind, LogEntry, LogKey,
 };
@@ -51,6 +51,18 @@ async fn signed<T: serde::Serialize + serde::de::DeserializeOwned>(
         Signed::new(who, payload).unwrap().to_bytes().unwrap(),
     )
     .await
+}
+
+/// Posts `env` as its sender `who` (`/v1/envelope/send`).
+async fn post_env(app: &Router, who: &Identity, env: &Envelope) -> (StatusCode, Vec<u8>) {
+    let envelope = env.to_bytes().unwrap();
+    signed(app, "/v1/envelope/send", who, PostEnvelope { envelope }).await
+}
+
+/// Appends `entry` through its author (`/v1/log/append-labelled`, at `T0`).
+async fn append(app: &Router, who: &Identity, entry: &LogEntry) -> (StatusCode, Vec<u8>) {
+    let request = LabelledAppend::new(MAILBOX, entry, T0).unwrap();
+    signed(app, "/v1/log/append-labelled", who, request).await
 }
 
 fn clock(now: &Arc<AtomicU64>) -> Arc<dyn Fn() -> u64 + Send + Sync> {
@@ -122,13 +134,10 @@ async fn populate_with_head(
         rng,
     )
     .unwrap();
-    assert_eq!(
-        call(app, "/v1/envelope", env.to_bytes().unwrap()).await.0,
-        StatusCode::OK
-    );
+    assert_eq!(post_env(app, &ids[0], &env).await.0, StatusCode::OK);
     let key = LogKey::generate(0, rng);
     let entry = LogEntry::create(&ids[0], &key, MAILBOX, 0, [0; 32], b"created", rng).unwrap();
-    let (_, body) = call(app, "/v1/log/append", entry.to_bytes().unwrap()).await;
+    let (_, body) = append(app, &ids[0], &entry).await;
     assert_eq!(
         decode_body::<AppendResult>(&body).unwrap(),
         AppendResult::Appended { index: 0 }
@@ -213,14 +222,12 @@ async fn state_survives_a_restart() {
     )
     .unwrap();
     assert_eq!(
-        call(&app, "/v1/envelope", replay.to_bytes().unwrap())
-            .await
-            .0,
+        post_env(&app, &ids[0], &replay).await.0,
         StatusCode::CONFLICT
     );
     // And the log head: appending at index 0 again conflicts.
     let dup = LogEntry::create(&ids[1], &key, MAILBOX, 0, [0; 32], b"x", &mut rng).unwrap();
-    let (_, body) = call(&app, "/v1/log/append", dup.to_bytes().unwrap()).await;
+    let (_, body) = append(&app, &ids[1], &dup).await;
     assert_eq!(
         decode_body::<AppendResult>(&body).unwrap(),
         AppendResult::Conflict { len: 1 }
@@ -318,10 +325,7 @@ async fn deliveries_push_to_registered_recipients_only() {
         &mut rng,
     )
     .unwrap();
-    assert_eq!(
-        call(&app, "/v1/envelope", env.to_bytes().unwrap()).await.0,
-        StatusCode::OK
-    );
+    assert_eq!(post_env(&app, &ids[0], &env).await.0, StatusCode::OK);
     assert_eq!(
         *recorder.0.lock().unwrap(),
         vec![(PushPlatform::Fcm, "fcm-token-B".to_owned())]
@@ -364,10 +368,7 @@ async fn an_installation_id_replaces_the_old_token() {
         &mut rng,
     )
     .unwrap();
-    assert_eq!(
-        call(&app, "/v1/envelope", env.to_bytes().unwrap()).await.0,
-        StatusCode::OK
-    );
+    assert_eq!(post_env(&app, &ids[0], &env).await.0, StatusCode::OK);
     assert_eq!(
         *recorder.0.lock().unwrap(),
         vec![(PushPlatform::FcmFid, "fid-1".to_owned())]
@@ -396,7 +397,7 @@ async fn log_appends_push_every_other_member() {
         );
     }
     let entry = LogEntry::create(&ids[1], &key, MAILBOX, 1, head, b"vote", &mut rng).unwrap();
-    let (_, body) = call(&app, "/v1/log/append", entry.to_bytes().unwrap()).await;
+    let (_, body) = append(&app, &ids[1], &entry).await;
     assert_eq!(
         decode_body::<AppendResult>(&body).unwrap(),
         AppendResult::Appended { index: 1 }
@@ -428,7 +429,7 @@ async fn log_appends_push_every_other_member() {
         &mut rng,
     )
     .unwrap();
-    call(&app, "/v1/log/append", next.to_bytes().unwrap()).await;
+    append(&app, &ids[1], &next).await;
     assert_eq!(
         *recorder.0.lock().unwrap(),
         vec![(PushPlatform::Fcm, "tok-2".to_owned())]

@@ -51,6 +51,14 @@ Future<void> main() async {
   // This phone's copy of each vault's log, before anything can reach the relay: a relay
   // that lost or rewound the log is refused against it.
   initLogCache(dir: (await ZafePaths.get()).logDir);
+  // Test devices only: a shorter seat-move wait (the Rust side ignores it in release).
+  const seatWait = int.fromEnvironment(
+    'ZAFE_SEAT_MOVE_WAIT_SECS',
+    defaultValue: -1,
+  );
+  if (kDebugMode && seatWait >= 0) {
+    debugSeatMoveWait(secs: BigInt.from(seatWait));
+  }
   // "Use Tor": switch the route before anything can connect (fail-closed). Bootstrapping
   // starts later (`torLifecycleProvider`); nothing waits for it here.
   if ((await SharedPreferences.getInstance()).getBool(kUseTorKey) ?? false) {

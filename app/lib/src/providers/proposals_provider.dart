@@ -50,6 +50,9 @@ class ProposalsState {
     this.sharedNames = const {},
     this.backedUp = const {},
     this.seatMoves = const [],
+    this.pendingSeatMoves = const [],
+    this.seatKeeps = const {},
+    this.seatFinishing = false,
     this.repairs = const [],
     this.relayMoves = const [],
   });
@@ -78,6 +81,26 @@ class ProposalsState {
   /// Signers moving to a new phone, waiting for approvals.
   final List<rust.SeatMove> seatMoves;
 
+  /// Seat moves with every approval: they complete after the helpers' 72 h unless the
+  /// old phone keeps its seat.
+  final List<rust.PendingSeatMove> pendingSeatMoves;
+
+  /// This phone's seat switched to it and the server is still finishing the move: it
+  /// reads but can't write yet (not an error).
+  final bool seatFinishing;
+
+  /// When each seat's old phone last said it still has the seat (key hex → Unix
+  /// seconds): approving to move it again must start with a call.
+  final Map<String, BigInt> seatKeeps;
+
+  /// The move of this phone's own seat that it can still keep, if any.
+  rust.PendingSeatMove? myPendingSeat(String? me) {
+    for (final m in pendingSeatMoves) {
+      if (m.oldKeyHex == me && m.canKeep) return m;
+    }
+    return null;
+  }
+
   /// Moved seats whose key isn't rebuilt on the new phone yet.
   final List<rust.RepairInfo> repairs;
 
@@ -102,6 +125,9 @@ class ProposalsState {
     Map<String, String>? sharedNames,
     Set<String>? backedUp,
     List<rust.SeatMove>? seatMoves,
+    List<rust.PendingSeatMove>? pendingSeatMoves,
+    Map<String, BigInt>? seatKeeps,
+    bool? seatFinishing,
     List<rust.RepairInfo>? repairs,
     List<rust.RelayMoveRecord>? relayMoves,
   }) => ProposalsState(
@@ -114,6 +140,9 @@ class ProposalsState {
     sharedNames: sharedNames ?? this.sharedNames,
     backedUp: backedUp ?? this.backedUp,
     seatMoves: seatMoves ?? this.seatMoves,
+    pendingSeatMoves: pendingSeatMoves ?? this.pendingSeatMoves,
+    seatKeeps: seatKeeps ?? this.seatKeeps,
+    seatFinishing: seatFinishing ?? this.seatFinishing,
     repairs: repairs ?? this.repairs,
     relayMoves: relayMoves ?? this.relayMoves,
   );
@@ -209,6 +238,9 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         sharedNames: {for (final n in list.sharedNames) n.keyHex: n.name},
         backedUp: list.backedUp.toSet(),
         seatMoves: list.seatMoves,
+        pendingSeatMoves: list.pendingSeatMoves,
+        seatKeeps: {for (final k in list.seatKeeps) k.oldKeyHex: k.at},
+        seatFinishing: list.seatFinishing,
         repairs: list.repairs,
         relayMoves: list.moves,
       );
@@ -231,7 +263,12 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       // the foreground; a refresh running in the background must not swallow news.
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         unawaited(
-          recordSeen(vault.activeId!, items, seatMoves: list.seatMoves),
+          recordSeen(
+            vault.activeId!,
+            items,
+            seatMoves: list.seatMoves,
+            pendingSeatMoves: list.pendingSeatMoves,
+          ),
         );
       }
       unawaited(
@@ -495,8 +532,8 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
   );
 
   /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`, after its owner
-  /// read out the same `words`. Returns whether the seat moved (this was the last
-  /// approval needed).
+  /// read out the same `words`. Returns whether this was the last approval needed (the
+  /// move is then pending: it completes after the helpers' wait).
   Future<bool> approveSeatMove(
     String oldKeyHex,
     String code,
@@ -513,6 +550,31 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     );
     await refreshFresh();
     return moved;
+  }
+
+  /// This phone still holds its seat: voids the pending move of it (the owner's tap only,
+  /// behind unlock; never from a background check).
+  Future<void> keepSeat() async {
+    final vault = _vault;
+    await rust_repair.keepSeat(
+      relayUrl: _endpoints.relayUrl,
+      seeds: vault.identity!,
+      material: vault.material!,
+    );
+    await refreshFresh();
+  }
+
+  /// This phone stops helping the pending move at `replacement`, for good (its owner says
+  /// they didn't lose their phone). Behind a confirm and the unlock.
+  Future<void> stopHelping(BigInt replacement) async {
+    final vault = _vault;
+    await rust_repair.stopHelping(
+      relayUrl: _endpoints.relayUrl,
+      seeds: vault.identity!,
+      material: vault.material!,
+      replacement: replacement,
+    );
+    await refreshFresh();
   }
 
   /// Asks to restart rebuilding the key of the seat moved at `replacement` with

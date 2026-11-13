@@ -167,7 +167,7 @@ fn vault_watch_reports_activity_and_stops() {
         &mut rng,
     )
     .unwrap();
-    rt.block_on(relay.send(&envelope)).unwrap();
+    rt.block_on(relay.send(&ids[1], &envelope)).unwrap();
     assert_eq!(next(&events), VaultActivityKind::Activity);
 
     // Stopping ends the loop (its callback is dropped) and reports nothing more.
@@ -192,7 +192,7 @@ fn vault_watch_reports_activity_and_stops() {
         &mut rng,
     )
     .unwrap();
-    rt.block_on(relay.send(&envelope)).unwrap();
+    rt.block_on(relay.send(&ids[1], &envelope)).unwrap();
     assert_eq!(next(&second), VaultActivityKind::Activity);
     stop_vault_watch(3);
     assert_ended(&second);

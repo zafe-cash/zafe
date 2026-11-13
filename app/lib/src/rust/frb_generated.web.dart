@@ -124,6 +124,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<PaymentInput> dco_decode_list_payment_input(dynamic raw);
 
   @protected
+  List<PendingSeatMove> dco_decode_list_pending_seat_move(dynamic raw);
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
@@ -146,6 +149,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ScannedPayment> dco_decode_list_scanned_payment(dynamic raw);
+
+  @protected
+  List<SeatKeep> dco_decode_list_seat_keep(dynamic raw);
 
   @protected
   List<SeatMove> dco_decode_list_seat_move(dynamic raw);
@@ -200,6 +206,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaymentInput dco_decode_payment_input(dynamic raw);
+
+  @protected
+  PendingSeatMove dco_decode_pending_seat_move(dynamic raw);
 
   @protected
   ProposalInfo dco_decode_proposal_info(dynamic raw);
@@ -260,6 +269,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ScannedRequest dco_decode_scanned_request(dynamic raw);
+
+  @protected
+  SeatKeep dco_decode_seat_keep(dynamic raw);
 
   @protected
   SeatLinkInfo dco_decode_seat_link_info(dynamic raw);
@@ -422,6 +434,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<PendingSeatMove> sse_decode_list_pending_seat_move(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
@@ -454,6 +471,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ScannedPayment> sse_decode_list_scanned_payment(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<SeatKeep> sse_decode_list_seat_keep(SseDeserializer deserializer);
 
   @protected
   List<SeatMove> sse_decode_list_seat_move(SseDeserializer deserializer);
@@ -520,6 +540,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PaymentInput sse_decode_payment_input(SseDeserializer deserializer);
 
   @protected
+  PendingSeatMove sse_decode_pending_seat_move(SseDeserializer deserializer);
+
+  @protected
   ProposalInfo sse_decode_proposal_info(SseDeserializer deserializer);
 
   @protected
@@ -578,6 +601,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ScannedRequest sse_decode_scanned_request(SseDeserializer deserializer);
+
+  @protected
+  SeatKeep sse_decode_seat_keep(SseDeserializer deserializer);
 
   @protected
   SeatLinkInfo sse_decode_seat_link_info(SseDeserializer deserializer);
@@ -766,6 +792,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_pending_seat_move(
+    List<PendingSeatMove> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
@@ -809,6 +841,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     List<ScannedPayment> self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_list_seat_keep(List<SeatKeep> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_seat_move(List<SeatMove> self, SseSerializer serializer);
@@ -887,6 +922,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_payment_input(PaymentInput self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_pending_seat_move(
+    PendingSeatMove self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_proposal_info(ProposalInfo self, SseSerializer serializer);
@@ -977,6 +1018,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ScannedRequest self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_seat_keep(SeatKeep self, SseSerializer serializer);
 
   @protected
   void sse_encode_seat_link_info(SeatLinkInfo self, SseSerializer serializer);

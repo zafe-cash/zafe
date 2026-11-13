@@ -161,6 +161,9 @@ Done:
 
 - [ ] Android Back with the keyboard open pops a pushed screen (seen on Send and the server
       list over adb). Check with a real gesture before changing anything.
+- [ ] Replace lost phone (1080x1920, 1.0 text): the safety-words card's "Their new phone
+      shows these words" row starts under the pinned **Approve move** bar and only toggles
+      after scrolling (live run 2026-11-14). Pad the content by the bar's height.
 - [ ] Proposals refresh takes 6-11 s over Tor (pool top-up and log read are sequential
       round trips): batch or parallelise the relay requests.
 - [ ] The vault's approval window isn't shown anywhere after creation.
@@ -465,6 +468,27 @@ Security review 2026-11, batch 1: safety words, recovery and address
 - [ ] Ship with the relay first: the new app needs `/v1/seat-check/*` (an older relay
       answers 404, "doesn't support safe seat recovery yet"), and an older app's seat
       recovery fails on the new relay the same way.
+
+Security review 2026-11, batch 2: seat moves (findings A, B, E; not committed yet,
+2026-11-13):
+- [x] t approvals leave a move pending; the seat switches once every helper logged
+      `RepairHelped` after its 72 h (its own clock, `<move id>.seen`); only the old key's
+      `KeepSeat` voids a first-round move, a second round can't be kept (`VAULT_EVENT` 12).
+      A helper's seat switching restarts the repairs it helps (new attempt).
+- [x] Relay follows signatures (`RELAY_API` 2, `RELAY_DB` 6): approvals add a pending key,
+      t finishes from members who read the switch remove the old key, the old key cancels;
+      `/v1/envelope`, `/v1/log/append`, `/v1/mailbox/replace` answer 426.
+- [x] App: the old phone is told first (push, **Keep my seat** card, every unlocked action
+      asks); Signers shows the countdown; second-round approvers see when it was kept.
+- [ ] Ship the relay first, and self-hosted relays with the app: an older app gets "update
+      Zafe" from the new relay for everything, a new app `RelayOutdated` from an older one.
+- [x] Second pass after review (2026-11-14): sigma only after the switch; a keep is one
+      signed object (log + relay, carried by any member); `StopHelping`; per-move errors;
+      the new phone's pending text and "still finishing"; narrower relay pending check.
+- [ ] A pending move's stalled helper: **Help instead of** shows only after this phone's
+      countdown ends; a restart then waits again only for helpers who never saw the move.
+- [ ] Live emulator run of the second pass (the first pass ran 2026-11-13: keep from the
+      old phone, round-2 warning, CLI keep, countdown; recovery to the end not live).
 
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,

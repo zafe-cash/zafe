@@ -263,11 +263,53 @@ void main() {
       expect(moves(after, [move()]), isEmpty);
     });
 
-    test('not to the lost seat, nor to members who already approved', () {
+    test('the seat\'s own phone hears first; approvers don\'t again', () {
       final before = snapshotOf(const [], seatMoves: const []);
-      expect(moves(before, [move()], me: 'aa'), isEmpty);
+      final own = moves(before, [move()], me: 'aa');
+      expect(own.single.title, 'Grants: someone asked to move your seat');
+      expect(own.single.body, contains('call your co-signers'));
       expect(moves(before, [move()], me: 'bb'), isEmpty);
     });
+
+    PendingSeatMove pending({bool canKeep = true}) => PendingSeatMove(
+      replacement: BigInt.from(7),
+      oldKeyHex: 'aa',
+      newKeyHex: 'ff',
+      canKeep: canKeep,
+      helpers: const ['bb', 'cc'],
+      helped: const [],
+      stopped: const [],
+    );
+    List<VaultUpdate> keeps(
+      SeenSnapshot? previous, {
+      String me = 'aa',
+      bool canKeep = true,
+    }) => vaultUpdates(
+      previous: previous,
+      proposals: const [],
+      vaultName: 'Grants',
+      hideAmounts: false,
+      pendingSeatMoves: [pending(canKeep: canKeep)],
+      me: me,
+    );
+
+    test(
+      'the old phone is told its seat is moving, once, even on a fresh install',
+      () {
+        final fresh = keeps(null);
+        expect(
+          fresh.single.title,
+          'Grants: your seat is moving to a new phone',
+        );
+        expect(fresh.single.body, contains('Keep my seat'));
+        expect(fresh.single.proposalId, startsWith(kKeepSeatPrefix));
+        final seen = snapshotOf(const [], pendingSeatMoves: [pending()]);
+        expect(keeps(seen), isEmpty);
+        // Other members aren't asked; nor is the old phone once it can't keep the seat.
+        expect(keeps(const {}, me: 'bb'), isEmpty);
+        expect(keeps(const {}, canKeep: false), isEmpty);
+      },
+    );
 
     test('snapshots from before moves were tracked announce none', () {
       expect(moves(snapshotOf(const []), [move()]), isEmpty);

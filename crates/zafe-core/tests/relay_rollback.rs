@@ -792,6 +792,7 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
             &chain,
             &state,
             &dir,
+            std::time::Duration::ZERO,
             &mut rng,
         )
         .await

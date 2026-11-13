@@ -52,11 +52,24 @@ pub const LOG_ENTRY: u16 = 1;
 /// once every helper it names logged the same list for the current attempt; versions 5-10
 /// restart at once. Restarting is offered only once every current member has written a
 /// version 11 event (as for moves).
-pub const VAULT_EVENT: u16 = 11;
+/// 12 (2026-11-13): seat moves wait for the owner (security review 2026-11, "Seat
+/// moves"). A version 12 `ReplaceApproval` signs the new approval format
+/// (`relay::SeatMoveApproval`, with the seat's round) and t of them make the move pending:
+/// the old key stays a member and the new key isn't one. `VaultEvent::RepairHelped`
+/// (appended): the seat switches once every helper of the current attempt logged it.
+/// `VaultEvent::KeepSeat` (appended): the old key voids a pending first-round move. A
+/// helper's seat switching restarts every other repair it helps with (new attempt). Gated
+/// by tag and floor like 6-11; relays speaking `RELAY_API` 2 serve only apps that write it.
+pub const VAULT_EVENT: u16 = 12;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).
-pub const RELAY_API: u16 = 1;
+/// 2 (2026-11-13): seat moves are pending until finished (`relay::SeatMoveApproval`,
+/// `SeatFinish`, `SeatCancel`; `MailboxInfo::pending`). Envelopes go through the signed
+/// `/v1/envelope/send` and appends through `/v1/log/append-labelled`; the unsigned
+/// `/v1/envelope` and `/v1/log/append` and the old `/v1/mailbox/replace` answer 426, so an
+/// older app gets "update Zafe" for everything. No version 1 body is read.
+pub const RELAY_API: u16 = 2;
 /// Invites (`zafe-invite-v<INVITE>:` text prefix). 2 (2026-10-15): same body; setups
 /// compare commit-then-reveal safety words (`zafe_core::sas`) instead of a 12-digit hash
 /// of the member keys, so an older app must not join (it would show a number nobody else
@@ -106,6 +119,10 @@ pub const SAFETY_SECRET: u16 = 1;
 /// co-signer's commitment and challenge), written before the value leaves the phone
 /// (2026-11-13).
 pub const RECOVERY_PIN: u16 = 1;
+/// When this phone first saw a seat move reach its threshold of approvals
+/// (`repair::help_repairs`, `<move id>.seen` in the repair directory, sealed): a helper
+/// waits from then before its part can complete the move (2026-11-13).
+pub const SEAT_MOVE_SEEN: u16 = 1;
 /// This device's copy of a vault's log (`log_cache::LogCache`, `<mailbox>.log`).
 pub const LOG_CACHE: u16 = 1;
 /// Encrypted vault backups (`ZAFEBAK`; the tag is a single byte there). 2 added signer
@@ -121,7 +138,9 @@ pub const BACKUP: u16 = 3;
 /// `created_day` and `shared` for expiry (migrated from 1-3; existing rows get
 /// `vault_id = id`, today as last seen, and count as shared). 5 (2026-11-13): seat-recovery
 /// values keyed per (new phone, co-signer) (`recovery_values` is dropped and made again).
-pub const RELAY_DB: u16 = 5;
+/// 6 (2026-11-13): pending seat moves and their finishes (`seat_moves`, `seat_finishes`,
+/// new tables; nothing to migrate).
+pub const RELAY_DB: u16 = 6;
 /// Share repair envelope payloads (RTS deltas and sigmas) and a helper's saved deltas.
 /// 2 (2026-10-01): both carry the repair attempt. 3 (2026-10-25): a sigma also carries the
 /// helper's log anchor (length and head hash), which the recovering phone's first load
@@ -173,6 +192,7 @@ pub enum Format {
     SafetyPin,
     SafetySecret,
     RecoveryPin,
+    SeatMoveSeen,
     LogCache,
     Backup,
     RelayDb,
@@ -209,6 +229,7 @@ impl Format {
             Format::SafetyPin => SAFETY_PIN,
             Format::SafetySecret => SAFETY_SECRET,
             Format::RecoveryPin => RECOVERY_PIN,
+            Format::SeatMoveSeen => SEAT_MOVE_SEEN,
             Format::LogCache => LOG_CACHE,
             Format::Backup => BACKUP,
             Format::RelayDb => RELAY_DB,
@@ -245,6 +266,7 @@ impl Format {
             Format::SafetyPin => "safety word pin",
             Format::SafetySecret => "safety value",
             Format::RecoveryPin => "seat recovery pin",
+            Format::SeatMoveSeen => "seat move first seen",
             Format::LogCache => "log copy",
             Format::Backup => "backup",
             Format::RelayDb => "relay database",

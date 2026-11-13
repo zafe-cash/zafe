@@ -36,6 +36,8 @@ fn start_relay() -> String {
 
 #[test]
 fn a_lost_phone_is_replaced_through_the_bridge() {
+    // The helpers' 72 h wait is tested in zafe-core; here the flow after it.
+    rust_lib_zafe::testing::set_seat_move_wait(std::time::Duration::ZERO);
     let relay = start_relay();
     let tmp = std::env::temp_dir().join(format!("zafe-repair-bridge-{}", std::process::id()));
     rust_lib_zafe::api::app::init_log_cache(tmp.join("log").to_string_lossy().into_owned());
@@ -156,7 +158,8 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     assert_eq!(pending[0].old_key_hex, old);
     assert_eq!((pending[0].approvals.len(), pending[0].needed), (1, 2));
 
-    // Member 2 approves from the pending move's code, with its own words: the seat moves.
+    // Member 2 approves from the move's code, with its own words: every approval is in,
+    // and the move is pending. The old phone (member 0) sees it and could keep its seat.
     let words_2 = words_of(2, &pending[0].code);
     assert!(repair::approve_seat_move(
         relay.clone(),
@@ -167,6 +170,15 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         words_2,
     )
     .unwrap());
+    let on_old = list(0, &seeds[0], &materials[0]).pending_seat_moves;
+    assert_eq!(on_old.len(), 1);
+    assert_eq!(on_old[0].old_key_hex, old);
+    assert!(on_old[0].can_keep);
+    assert_eq!(on_old[0].kept_at, None);
+    assert!(
+        on_old[0].seen_at.is_some(),
+        "its refresh recorded when it saw it"
+    );
 
     // The helpers' regular refreshes repair the key; their material picks up the move.
     // The new phone takes the vault only once the person tapped "Words match" on a row.

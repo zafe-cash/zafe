@@ -177,7 +177,7 @@ async fn send_move_message<R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<(), NodeError> {
     let payload = msg.to_padded();
-    send_fresh(relay, seq, |n| {
+    send_fresh(relay, me, seq, |n| {
         Envelope::sealed(me, to, label, n, kind, &payload, rng).map_err(proto)
     })
     .await

@@ -15,8 +15,8 @@ use rand::{rngs::StdRng, SeedableRng};
 use tower::ServiceExt;
 use zafe_proto::{
     relay::{
-        join_token_hash, CreateMailbox, Join, LogRead, PushPlatform, RegisterPush, RenewInvite,
-        Reseed, Seal, Signed,
+        join_token_hash, CreateMailbox, Join, LabelledAppend, LogRead, PostEnvelope, PushPlatform,
+        RegisterPush, RenewInvite, Reseed, Seal, Signed,
     },
     Envelope, Identity, Kind, LogEntry, LogKey, MailboxId,
 };
@@ -167,17 +167,21 @@ impl World {
         let key = LogKey::generate(0, &mut self.rng);
         let entry =
             LogEntry::create(&self.ids[0], &key, mailbox, 0, [0; 32], b"c", &mut self.rng).unwrap();
+        let append = LabelledAppend::new(mailbox, &entry, self.time()).unwrap();
         assert_eq!(
-            call(&self.app, "/v1/log/append", entry.to_bytes().unwrap())
-                .await
-                .0,
+            signed(&self.app, "/v1/log/append-labelled", &self.ids[0], append).await,
             StatusCode::OK
         );
         let env = Envelope::public(&self.ids[1], mailbox, 1, Kind::Approval, b"hi").unwrap();
+        let envelope = env.to_bytes().unwrap();
         assert_eq!(
-            call(&self.app, "/v1/envelope", env.to_bytes().unwrap())
-                .await
-                .0,
+            signed(
+                &self.app,
+                "/v1/envelope/send",
+                &self.ids[1],
+                PostEnvelope { envelope }
+            )
+            .await,
             StatusCode::OK
         );
         let push = RegisterPush {

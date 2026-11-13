@@ -5,14 +5,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{de::DeserializeOwned, Serialize};
 use zafe_proto::{
     relay::{
-        decode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, ForgetPush,
-        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
+        decode_body, encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox,
+        ForgetPush, InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
         LabelledReplace, LogRead, LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse,
-        MembersRead, MembersResponse, PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind,
-        RecoveryValues, RegisterPush, RelayInfo, Remove, RenewInvite, ReplaceApproval,
-        ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold, Signed, WaitRequest,
-        WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_WAIT_SECS, UNKNOWN_MAILBOX,
-        UNSUPPORTED_VERSION_HEADER,
+        MembersRead, MembersResponse, PostEnvelope, PushPlatform, RecoveryPut, RecoveryRead,
+        RecoveryValueKind, RecoveryValues, RegisterPush, RelayInfo, Remove, RenewInvite, Reseed,
+        ReseedResponse, Seal, SeatCancel, SeatCancelPost, SeatFinish, SeatFinishPost,
+        SeatMoveApproval, SetThreshold, Signed, WaitRequest, WaitResponse, CREATE_TOKEN_HEADER,
+        MAX_ACK_CURSORS, MAX_WAIT_SECS, UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
     },
     version::{Format, UnsupportedVersion},
     Envelope, Identity, LogEntry, MailboxId, ProtoError,
@@ -61,6 +61,9 @@ pub enum RelayClientError {
     /// zafe-create-token`; see [`RelayClient::with_create_token`]).
     #[error("this relay needs a create token")]
     CreateTokenRefused,
+    /// The relay already holds its cap of pending moves for this seat (HTTP 409).
+    #[error("the server holds too many open moves for this seat")]
+    TooManySeatMoves,
 }
 
 /// Development only: connect to `to` whenever a relay move names `from`. One relay can have
@@ -137,13 +140,9 @@ fn decoding(e: ProtoError) -> RelayClientError {
     }
 }
 
-/// The format a request body to `path` is tagged with.
-fn body_format(path: &str) -> Format {
-    match path {
-        "/v1/envelope" => Format::Envelope,
-        "/v1/log/append" => Format::LogEntry,
-        _ => Format::RelayApi,
-    }
+/// The format a request body to `path` is tagged with (every route since relay API 2).
+fn body_format(_path: &str) -> Format {
+    Format::RelayApi
 }
 
 #[derive(Clone)]
@@ -530,6 +529,9 @@ impl RelayClient {
                 detail: String::from_utf8_lossy(&bytes).into_owned(),
             });
         }
+        if status == 409 && bytes == zafe_proto::relay::TOO_MANY_SEAT_MOVES.as_bytes() {
+            return Err(RelayClientError::TooManySeatMoves);
+        }
         if !(200..300).contains(&status) {
             return Err(RelayClientError::Status {
                 status,
@@ -656,40 +658,17 @@ impl RelayClient {
         }
     }
 
-    /// Moves a lost member's seat to a new key on the relay, with the approvals of at least
-    /// the vault's threshold of other members. Succeeds if it already moved.
-    pub async fn replace_member(
-        &self,
-        who: &Identity,
-        approval: ReplaceApproval,
-        approvals: Vec<([u8; 32], Vec<u8>)>,
-    ) -> Result<(), RelayClientError> {
-        self.signed(
-            "/v1/mailbox/replace",
-            who,
-            ReplaceMember {
-                approval,
-                approvals,
-            },
-        )
-        .await
-    }
-
-    /// [`RelayClient::replace_member`] for the vault this relay files under `mailbox` (its
-    /// label there). The approvals are signed over `approval`, which names the vault id:
-    /// where the label is the vault id the older route is used; otherwise
-    /// `/v1/mailbox/replace-labelled` ([`RelayClientError::RelayTooOld`] on a relay
-    /// without it).
+    /// Approves a seat move on the relay that files the vault under `mailbox` (its label
+    /// there), with the approvals of at least the vault's threshold of other members: the
+    /// new key becomes a pending member (see [`LabelledReplace`]). Succeeds if the relay
+    /// already holds the move.
     pub async fn replace_member_at(
         &self,
         who: &Identity,
         mailbox: MailboxId,
-        approval: ReplaceApproval,
+        approval: SeatMoveApproval,
         approvals: Vec<([u8; 32], Vec<u8>)>,
     ) -> Result<(), RelayClientError> {
-        if mailbox == approval.mailbox {
-            return self.replace_member(who, approval, approvals).await;
-        }
         const ROUTE: &str = "/v1/mailbox/replace-labelled";
         self.signed(
             ROUTE,
@@ -702,6 +681,35 @@ impl RelayClient {
         )
         .await
         .map_err(route_missing(ROUTE))
+    }
+
+    /// Posts `who`'s finish of a pending seat move (see [`SeatFinish`]).
+    pub async fn finish_seat_move(
+        &self,
+        who: &Identity,
+        finish: SeatFinish,
+    ) -> Result<(), RelayClientError> {
+        const ROUTE: &str = "/v1/seat/finish";
+        let post = SeatFinishPost {
+            finish,
+            by: *who.public(),
+            signature: finish.sign(who).map_err(|_| RelayClientError::Encoding)?,
+        };
+        let body = encode_body(&post).map_err(|_| RelayClientError::Encoding)?;
+        decode_body(&self.post(ROUTE, body).await.map_err(route_missing(ROUTE))?).map_err(decoding)
+    }
+
+    /// Posts the old key's signed cancel of a pending first-round move of its seat (see
+    /// [`SeatCancel`]; it names the mailbox). Anyone may post it.
+    pub async fn cancel_seat_move(
+        &self,
+        cancel: SeatCancel,
+        signature: Vec<u8>,
+    ) -> Result<(), RelayClientError> {
+        const ROUTE: &str = "/v1/seat/cancel";
+        let post = SeatCancelPost { cancel, signature };
+        let body = encode_body(&post).map_err(|_| RelayClientError::Encoding)?;
+        decode_body(&self.post(ROUTE, body).await.map_err(route_missing(ROUTE))?).map_err(decoding)
     }
 
     /// Leaves one value of the safety check between `subject`'s new phone and the
@@ -835,11 +843,13 @@ impl RelayClient {
         .await
     }
 
-    pub async fn send(&self, envelope: &Envelope) -> Result<(), RelayClientError> {
-        let body = envelope
+    /// Delivers `envelope`, whose sender is `who` (the request is signed by it).
+    pub async fn send(&self, who: &Identity, envelope: &Envelope) -> Result<(), RelayClientError> {
+        let envelope = envelope
             .to_bytes()
             .map_err(|_| RelayClientError::Encoding)?;
-        decode_body(&self.post("/v1/envelope", body).await?).map_err(decoding)
+        self.signed("/v1/envelope/send", who, PostEnvelope { envelope })
+            .await
     }
 
     /// Envelopes delivered to `who` after cursor `after`, oldest first. Envelopes in a
@@ -897,15 +907,9 @@ impl RelayClient {
         Ok(deleted)
     }
 
-    pub async fn append_log(&self, entry: &LogEntry) -> Result<AppendResult, RelayClientError> {
-        let body = entry.to_bytes().map_err(|_| RelayClientError::Encoding)?;
-        decode_body(&self.post("/v1/log/append", body).await?).map_err(decoding)
-    }
-
     /// Appends `entry` to the mailbox this relay files the vault under (`mailbox`, its label
     /// there, which may differ from the vault id the entry carries). `who` is a member of
-    /// that mailbox, not necessarily the entry's author. A relay older than labelled
-    /// mailboxes fails with [`RelayClientError::RelayTooOld`].
+    /// that mailbox, not necessarily the entry's author.
     pub async fn append_log_to(
         &self,
         who: &Identity,

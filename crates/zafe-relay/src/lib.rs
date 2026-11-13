@@ -21,11 +21,22 @@
 //! the log entries carry (`EntryHeader::mailbox`), so a vault can move to a mailbox nobody
 //! could create first (`docs/relay-move.md` §4.6). The relay keeps the vault id of a
 //! mailbox's first entry (`mailboxes.vault_id`) and refuses entries of any other vault.
-//! `/v1/log/append` finds the mailbox from the entry, so it only reaches mailboxes whose
-//! label is the vault id; `/v1/log/append-labelled` takes the label. Seat moves are signed
-//! over the vault id: `/v1/mailbox/replace` finds the mailbox by it, and
+//! `/v1/log/append-labelled` takes the label. Seat moves are signed over the vault id:
 //! `/v1/mailbox/replace-labelled` takes the label and checks the vault id it holds. Every
 //! other route takes the mailbox from the request or the envelope header.
+//!
+//! Seat moves (spec §10.1; security review 2026-11, "Seat moves"): the relay follows
+//! signatures, never the log. The threshold of approvals adds the new key as a *pending*
+//! member (`seat_moves`): it may receive deliveries and read its inbox, the member list,
+//! the (encrypted) log and the mailboxes it is pending in; it may not write. The
+//! old key leaves only on the threshold of finish signatures from current members
+//! (`seat_finishes`, which honest members sign once the log switched the seat, counted on a
+//! cancelled row too), and the old key's signature cancels one first-round move.
+//!
+//! Relay API 2 retired the routes that took a raw envelope or log entry
+//! (`/v1/envelope`, `/v1/log/append`) and the old seat approval (`/v1/mailbox/replace`):
+//! they answer 426, so an older app is told to update instead of writing to a vault whose
+//! seat moves it would count differently.
 
 use std::{
     path::Path,
@@ -57,14 +68,15 @@ use wait::Waiters;
 use zafe_proto::{
     log::GENESIS_PREV_HASH,
     relay::{
-        encode_body, join_token_hash, AppendResult, CancelSetup, CreateMailbox, ForgetPush,
-        InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
+        encode_body, join_token_hash, AppendResult, CancelSetup, CancelledSeat, CreateMailbox,
+        ForgetPush, InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
         LabelledReplace, LogRead, LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse,
-        MembersRead, MembersResponse, PushPlatform, RecoveryPut, RecoveryRead, RecoveryValueKind,
-        RecoveryValues, RegisterPush, RelayExpiry, RelayInfo, RelayLimits, RelayVersions, Remove,
-        RenewInvite, ReplaceApproval, ReplaceMember, Reseed, ReseedResponse, Seal, SetThreshold,
-        Signed, WaitRequest, WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS,
-        MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS, UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
+        MembersRead, MembersResponse, PendingSeat, PostEnvelope, PushPlatform, RecoveryPut,
+        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, RelayExpiry, RelayInfo,
+        RelayLimits, RelayVersions, Remove, RenewInvite, Reseed, ReseedResponse, Seal, SeatCancel,
+        SeatCancelPost, SeatFinishPost, SeatMoveApproval, SetThreshold, Signed, WaitRequest,
+        WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
+        UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -158,6 +170,10 @@ pub enum RelayError {
     InviteExpired,
     #[error("mailbox already exists")]
     Exists,
+    /// The seat already has its cap of pending moves (HTTP 409, body
+    /// [`zafe_proto::relay::TOO_MANY_SEAT_MOVES`]).
+    #[error("{}", zafe_proto::relay::TOO_MANY_SEAT_MOVES)]
+    TooManySeatMoves,
     #[error("request timestamp outside the allowed window")]
     Stale,
     #[error("replayed or reordered envelope")]
@@ -228,7 +244,9 @@ impl IntoResponse for RelayError {
             RelayError::Forbidden => StatusCode::FORBIDDEN,
             RelayError::NotFound => StatusCode::NOT_FOUND,
             RelayError::InviteExpired => StatusCode::GONE,
-            RelayError::Exists | RelayError::Replay => StatusCode::CONFLICT,
+            RelayError::Exists | RelayError::Replay | RelayError::TooManySeatMoves => {
+                StatusCode::CONFLICT
+            }
             RelayError::Storage | RelayError::UnsupportedVersion(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -246,6 +264,8 @@ type RelayResult = Result<Vec<u8>, RelayError>;
 // and by pruning (see `quota`). `vault_id`: the vault id of the first log entry (NULL until
 // there is one; the id is only a label). `last_seen_day` / `created_day`: day numbers for
 // expiry; `shared`: a member other than the creator has made a request (see `expiry`).
+// `seat_moves.status`: [`SEAT_PENDING`], [`SEAT_CANCELLED`] or [`SEAT_FINISHED`];
+// `seat_finishes`: who signed a pending move's finish.
 // No SQL comments inside the schema: SQLite keeps the CREATE text and re-parses it on
 // ALTER TABLE.
 const SCHEMA: &str = "
@@ -301,6 +321,24 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     platform TEXT NOT NULL,
     token TEXT NOT NULL,
     PRIMARY KEY (mailbox, member)
+);
+CREATE TABLE IF NOT EXISTS seat_moves (
+    mailbox BLOB NOT NULL,
+    move_id BLOB NOT NULL,
+    old BLOB NOT NULL,
+    new_sig BLOB NOT NULL,
+    new_enc BLOB NOT NULL,
+    round INTEGER NOT NULL,
+    status INTEGER NOT NULL,
+    cancel_at INTEGER,
+    cancel_sig BLOB,
+    PRIMARY KEY (mailbox, move_id)
+);
+CREATE TABLE IF NOT EXISTS seat_finishes (
+    mailbox BLOB NOT NULL,
+    move_id BLOB NOT NULL,
+    signer BLOB NOT NULL,
+    PRIMARY KEY (mailbox, move_id, signer)
 );
 CREATE TABLE IF NOT EXISTS recovery_values (
     subject BLOB NOT NULL,
@@ -362,7 +400,7 @@ impl Relay {
         // Version 0 with tables: written before versioning (unversioned envelopes and log
         // entries), refused; delete it. Older schemas migrate from `found` here.
         match found {
-            1..=4 => {
+            1..=5 => {
                 if found == 1 {
                     migrate_from_v1(&conn)?;
                 }
@@ -372,7 +410,10 @@ impl Relay {
                 if found <= 3 {
                     migrate_from_v3(&conn, day(clock()))?;
                 }
-                migrate_from_v4(&conn)?;
+                if found <= 4 {
+                    migrate_from_v4(&conn)?;
+                }
+                // 5 → 6 only adds tables, which `SCHEMA` creates below.
             }
             0 if !has_tables => {}
             _ => version::check(version::Format::RelayDb, found)?,
@@ -496,21 +537,24 @@ impl Relay {
             .route("/v1/mailbox/members", post(members))
             .route("/v1/mailbox/info", post(mailbox_info))
             .route("/v1/mailbox/threshold", post(set_threshold))
-            .route("/v1/mailbox/replace", post(replace_member))
+            .route("/v1/mailbox/replace", post(retired))
             .route(
                 "/v1/mailbox/replace-labelled",
                 post(replace_member_labelled),
             )
+            .route("/v1/seat/finish", post(seat_finish))
+            .route("/v1/seat/cancel", post(seat_cancel))
             .route("/v1/mailbox/reseed", post(reseed))
             .route("/v1/mailboxes", post(mailboxes))
             .route("/v1/seat-check/put", post(recovery_put))
             .route("/v1/seat-check/read", post(recovery_read))
             .route("/v1/push/register", post(register_push))
             .route("/v1/push/forget", post(forget_push))
-            .route("/v1/envelope", post(post_envelope))
+            .route("/v1/envelope", post(retired))
+            .route("/v1/envelope/send", post(post_envelope))
             .route("/v1/inbox", post(inbox))
             .route("/v1/inbox/ack", post(inbox_ack))
-            .route("/v1/log/append", post(log_append))
+            .route("/v1/log/append", post(retired))
             .route("/v1/log/append-labelled", post(log_append_labelled))
             .route("/v1/log/read", post(log_read))
             .route("/v1/wait", post(wait))
@@ -719,6 +763,8 @@ fn delete_mailbox(tx: &Connection, id: &MailboxId) -> Result<(), RelayError> {
         "sender_seqs",
         "push_tokens",
         "log_entries",
+        "seat_moves",
+        "seat_finishes",
     ] {
         tx.execute(
             &format!("DELETE FROM {table} WHERE mailbox = ?1"),
@@ -1125,13 +1171,18 @@ async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&())
 }
 
+/// The mailbox's members, for a member or a pending seat key (it holds approvals from
+/// those members already, and a recovering phone uses the list to read its inbox and say
+/// where its move stands).
 async fn members(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<MembersRead>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
     let mb = mailbox(&db, &req.payload.mailbox)?;
     let members = members_of(&db, &req.payload.mailbox)?;
-    if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk) {
+    if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk)
+        && pending_member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none()
+    {
         return Err(RelayError::Forbidden);
     }
     relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
@@ -1147,14 +1198,22 @@ async fn mailbox_info(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let db = relay.db.lock().expect("lock");
     let mb = mailbox(&db, &req.payload.mailbox)?;
     let members = members_of(&db, &req.payload.mailbox)?;
-    if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk) {
+    // Members, and a pending seat key (it learns whether its move finished here).
+    if !members.iter().any(|m| m.sig_pk == req.signer.sig_pk)
+        && pending_member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none()
+    {
         return Err(RelayError::Forbidden);
     }
     relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
+    let pending = pending_seats(&db, &req.payload.mailbox)?;
+    let vault_id = mb.vault_id.unwrap_or(req.payload.mailbox);
+    let cancelled = cancelled_seats(&db, &vault_id, &req.payload.mailbox)?;
     ok(&MailboxInfo {
         members,
         sealed: mb.sealed,
         threshold: mb.threshold,
+        pending,
+        cancelled,
     })
 }
 
@@ -1177,26 +1236,132 @@ async fn set_threshold(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&())
 }
 
-/// Moves a lost member's seat to a new key, given approvals from the vault's threshold of
-/// other current members (spec §10.1). The relay can't read the vault log, so it checks
-/// the approvals itself; members check the same signatures in the log.
-async fn replace_member(State(relay): State<Relay>, body: Bytes) -> RelayResult {
-    let req = verified::<ReplaceMember>(&relay, &body)?;
-    let a = req.payload.approval;
-    replace_in(
-        &relay,
-        &req.signer.sig_pk,
-        &a.mailbox,
-        a,
-        &req.payload.approvals,
-    )
+/// A route relay API 2 retired (`/v1/envelope`, `/v1/log/append`, `/v1/mailbox/replace`):
+/// 426 with the version this relay speaks, so an older app says "update Zafe" (it reads the
+/// header as newer than the format it posted) instead of "relay too old".
+async fn retired() -> RelayResult {
+    Err(RelayError::UnsupportedVersion(UnsupportedVersion {
+        format: version::Format::RelayApi,
+        found: version::RELAY_API - 1,
+        supported: version::RELAY_API,
+    }))
 }
 
-/// [`replace_member`] on a labelled mailbox (see [`LabelledReplace`]): the approvals are
-/// signed over the vault id, which must be the one this mailbox holds.
+/// `seat_moves.status`: approved on the relay; `new` is a pending member.
+const SEAT_PENDING: i64 = 0;
+/// The old key kept its seat (a first-round move only): the pending key lost its access.
+/// The same move id is never taken again.
+const SEAT_CANCELLED: i64 = 1;
+/// The threshold of finishes moved the seat.
+const SEAT_FINISHED: i64 = 2;
+
+/// A row of `seat_moves`.
+struct SeatRow {
+    old: [u8; 32],
+    new: IdentityPublic,
+    round: u32,
+    status: i64,
+}
+
+fn seat_row(
+    db: &Connection,
+    id: &MailboxId,
+    move_id: &[u8; 32],
+) -> Result<Option<SeatRow>, RelayError> {
+    let row = db
+        .query_row(
+            "SELECT old, new_sig, new_enc, round, status FROM seat_moves
+             WHERE mailbox = ?1 AND move_id = ?2",
+            params![&id[..], &move_id[..]],
+            |r| {
+                Ok((
+                    r.get::<_, Vec<u8>>(0)?,
+                    r.get::<_, Vec<u8>>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|(old, sig, enc, round, status)| {
+        Ok(SeatRow {
+            old: arr32(old)?,
+            new: IdentityPublic {
+                sig_pk: arr32(sig)?,
+                enc_pk: arr32(enc)?,
+            },
+            round: u32::try_from(round).map_err(|_| RelayError::Storage)?,
+            status,
+        })
+    })
+    .transpose()
+}
+
+/// The seat moves pending in mailbox `id`.
+fn pending_seats(db: &Connection, id: &MailboxId) -> Result<Vec<PendingSeat>, RelayError> {
+    let mut stmt = db.prepare(
+        "SELECT move_id, old, new_sig, new_enc, round FROM seat_moves
+         WHERE mailbox = ?1 AND status = ?2 ORDER BY move_id",
+    )?;
+    let rows = stmt.query_map(params![&id[..], SEAT_PENDING], |r| {
+        Ok((
+            r.get::<_, Vec<u8>>(0)?,
+            r.get::<_, Vec<u8>>(1)?,
+            r.get::<_, Vec<u8>>(2)?,
+            r.get::<_, Vec<u8>>(3)?,
+            r.get::<_, i64>(4)?,
+        ))
+    })?;
+    rows.map(|r| {
+        let (move_id, old, sig, enc, round) = r?;
+        Ok(PendingSeat {
+            move_id: arr32(move_id)?,
+            old: arr32(old)?,
+            new: IdentityPublic {
+                sig_pk: arr32(sig)?,
+                enc_pk: arr32(enc)?,
+            },
+            round: u32::try_from(round).map_err(|_| RelayError::Storage)?,
+        })
+    })
+    .collect()
+}
+
+/// `pk` is the new key of a seat move pending in mailbox `id`: it may read its inbox and
+/// receive deliveries, nothing else.
+fn pending_member(
+    db: &Connection,
+    id: &MailboxId,
+    pk: &[u8; 32],
+) -> Result<Option<IdentityPublic>, RelayError> {
+    Ok(pending_seats(db, id)?
+        .into_iter()
+        .find(|p| &p.new.sig_pk == pk)
+        .map(|p| p.new))
+}
+
+/// Deletes the finishes of every move in `moves`.
+fn drop_finishes(tx: &Connection, id: &MailboxId, moves: &[[u8; 32]]) -> Result<(), RelayError> {
+    for move_id in moves {
+        tx.execute(
+            "DELETE FROM seat_finishes WHERE mailbox = ?1 AND move_id = ?2",
+            params![&id[..], &move_id[..]],
+        )?;
+    }
+    Ok(())
+}
+
+/// Approves a seat move (see [`LabelledReplace`]): the threshold of current members other
+/// than the old key signed it, so the new key becomes a pending member. The approvals are
+/// signed over the vault id, which must be the one this mailbox holds. The relay can't read
+/// the vault log; members check the same signatures there.
 async fn replace_member_labelled(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<LabelledReplace>(&relay, &body)?;
     let p = req.payload;
+    if p.approvals.len() > usize::from(MAX_MEMBERS) {
+        return Err(RelayError::BadRequest);
+    }
     replace_in(
         &relay,
         &req.signer.sig_pk,
@@ -1206,32 +1371,51 @@ async fn replace_member_labelled(State(relay): State<Relay>, body: Bytes) -> Rel
     )
 }
 
-/// Moves `approval.old`'s seat in mailbox `label` to `approval.new`.
+/// Adds `a.new` as a pending member of mailbox `label`.
 fn replace_in(
     relay: &Relay,
     signer: &[u8; 32],
     label: &MailboxId,
-    a: ReplaceApproval,
+    a: SeatMoveApproval,
     approvals: &[([u8; 32], Vec<u8>)],
 ) -> RelayResult {
+    let move_id = a.move_id();
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let mb = mailbox(&tx, label)?;
     // The approvals name the vault: they must be for the one this mailbox holds (before
     // its first entry, a mailbox holds the vault its id names).
-    if mb.vault_id.unwrap_or(*label) != a.mailbox {
+    if mb.vault_id.unwrap_or(*label) != a.vault_id {
         return Err(RelayError::OtherVault);
     }
     let current = members_of(&tx, label)?;
     let is_member = |pk: &[u8; 32]| current.iter().any(|m| &m.sig_pk == pk);
-    if *signer != a.new.sig_pk && !is_member(signer) {
+    // Members push approvals; a pending key writes nothing, not even its own move.
+    if !is_member(signer) {
         return Err(RelayError::Forbidden);
     }
-    if !is_member(&a.old) && current.contains(&a.new) {
-        return ok(&()); // already moved
+    match seat_row(&tx, label, &move_id)? {
+        // Already approved (or done): nothing changes.
+        Some(row) if row.status != SEAT_CANCELLED => return ok(&()),
+        Some(_) => return Err(RelayError::Forbidden),
+        None => {}
     }
-    if !mb.sealed || mb.threshold == 0 || !is_member(&a.old) || is_member(&a.new.sig_pk) {
+    if !mb.sealed
+        || mb.threshold == 0
+        || !is_member(&a.old)
+        || is_member(&a.new.sig_pk)
+        || a.new.sig_pk == a.old
+    {
         return Err(RelayError::Forbidden);
+    }
+    // A cap per seat, so junk rows of one seat never block another seat's move.
+    let pending: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM seat_moves WHERE mailbox = ?1 AND old = ?2 AND status = ?3",
+        params![&label[..], &a.old[..], SEAT_PENDING],
+        |r| r.get(0),
+    )?;
+    if pending as usize >= zafe_proto::relay::MAX_PENDING_SEAT_MOVES {
+        return Err(RelayError::TooManySeatMoves);
     }
     let mut approvers = std::collections::BTreeSet::new();
     for (pk, signature) in approvals {
@@ -1249,22 +1433,198 @@ fn replace_in(
         return Err(RelayError::Forbidden);
     }
     tx.execute(
-        "DELETE FROM members WHERE mailbox = ?1 AND sig_pk = ?2",
-        params![&label[..], &a.old[..]],
-    )?;
-    tx.execute(
-        "DELETE FROM push_tokens WHERE mailbox = ?1 AND member = ?2",
-        params![&label[..], &a.old[..]],
-    )?;
-    tx.execute(
-        "INSERT INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
-        params![&label[..], &a.new.sig_pk[..], &a.new.enc_pk[..]],
+        "INSERT INTO seat_moves (mailbox, move_id, old, new_sig, new_enc, round, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            &label[..],
+            &move_id[..],
+            &a.old[..],
+            &a.new.sig_pk[..],
+            &a.new.enc_pk[..],
+            i64::from(a.round),
+            SEAT_PENDING
+        ],
     )?;
     relay.touch(&tx, label, &mb, signer)?;
     tx.commit()?;
     drop(db);
     relay.waiters.signal(label);
     ok(&())
+}
+
+/// One member's finish of a pending seat move (see [`zafe_proto::relay::SeatFinish`]). On
+/// the threshold of finishes from current members other than the old key, the old key
+/// leaves and the new key becomes a full member; the seat's other pending moves go.
+async fn seat_finish(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let post: SeatFinishPost = zafe_proto::relay::decode_body(&body).map_err(bad_request)?;
+    let f = post.finish;
+    f.verify(&post.by, &post.signature)
+        .map_err(|_| RelayError::Unauthenticated)?;
+    relay.limit_key(&post.by.sig_pk)?;
+    let by = post.by.sig_pk;
+    let mut db = relay.db.lock().expect("lock");
+    let tx = db.transaction()?;
+    let mb = mailbox(&tx, &f.mailbox)?;
+    if mb.vault_id.unwrap_or(f.mailbox) != f.vault_id {
+        return Err(RelayError::OtherVault);
+    }
+    let current = members_of(&tx, &f.mailbox)?;
+    let is_member = |pk: &[u8; 32]| current.iter().any(|m| &m.sig_pk == pk);
+    if !is_member(&by) || by == f.old {
+        return Err(RelayError::Forbidden);
+    }
+    let row = seat_row(&tx, &f.mailbox, &f.move_id)?.ok_or(RelayError::Forbidden)?;
+    if row.old != f.old || row.new.sig_pk != f.new {
+        return Err(RelayError::Forbidden);
+    }
+    // A cancelled row still counts finishes: honest members sign one only after the log
+    // switched the seat, and a logged keep means no honest finish, so a cancel posted after
+    // the switch (by a thief holding the old key) can't strand the seat.
+    if row.status == SEAT_FINISHED {
+        return ok(&());
+    }
+    tx.execute(
+        "INSERT OR IGNORE INTO seat_finishes (mailbox, move_id, signer) VALUES (?1, ?2, ?3)",
+        params![&f.mailbox[..], &f.move_id[..], &by[..]],
+    )?;
+    let finishers: Vec<[u8; 32]> = {
+        let mut stmt =
+            tx.prepare("SELECT signer FROM seat_finishes WHERE mailbox = ?1 AND move_id = ?2")?;
+        let rows = stmt.query_map(params![&f.mailbox[..], &f.move_id[..]], |r| {
+            r.get::<_, Vec<u8>>(0)
+        })?;
+        rows.map(|r| arr32(r?)).collect::<Result<_, _>>()?
+    };
+    let counted = finishers
+        .iter()
+        .filter(|pk| is_member(pk) && **pk != f.old)
+        .count();
+    if counted >= usize::from(mb.threshold) && mb.threshold != 0 && is_member(&f.old) {
+        tx.execute(
+            "DELETE FROM members WHERE mailbox = ?1 AND sig_pk = ?2",
+            params![&f.mailbox[..], &f.old[..]],
+        )?;
+        tx.execute(
+            "DELETE FROM push_tokens WHERE mailbox = ?1 AND member = ?2",
+            params![&f.mailbox[..], &f.old[..]],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO members (mailbox, sig_pk, enc_pk) VALUES (?1, ?2, ?3)",
+            params![&f.mailbox[..], &row.new.sig_pk[..], &row.new.enc_pk[..]],
+        )?;
+        tx.execute(
+            "UPDATE seat_moves SET status = ?3 WHERE mailbox = ?1 AND move_id = ?2",
+            params![&f.mailbox[..], &f.move_id[..], SEAT_FINISHED],
+        )?;
+        // The seat's other moves, and other moves to the same key, are moot.
+        let moot: Vec<[u8; 32]> = pending_seats(&tx, &f.mailbox)?
+            .into_iter()
+            .filter(|p| p.old == f.old || p.new.sig_pk == f.new)
+            .map(|p| p.move_id)
+            .collect();
+        for move_id in &moot {
+            tx.execute(
+                "DELETE FROM seat_moves WHERE mailbox = ?1 AND move_id = ?2",
+                params![&f.mailbox[..], &move_id[..]],
+            )?;
+        }
+        drop_finishes(&tx, &f.mailbox, &moot)?;
+        drop_finishes(&tx, &f.mailbox, &[f.move_id])?;
+    }
+    relay.touch(&tx, &f.mailbox, &mb, &by)?;
+    tx.commit()?;
+    drop(db);
+    relay.waiters.signal(&f.mailbox);
+    ok(&())
+}
+
+/// The old key keeps its seat (see [`zafe_proto::relay::SeatCancel`]): the pending
+/// first-round move it names loses its pending key; nothing else changes (its finishes
+/// stay and still count, see [`seat_finish`]). The old key's signature is the authority, whoever posts it (a member whose log holds the `KeepSeat`
+/// that carries it); it is kept on the row and shown in `/v1/mailbox/info`, so members can
+/// log the keep it is when the old phone only reached the relay.
+async fn seat_cancel(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let post: SeatCancelPost = zafe_proto::relay::decode_body(&body).map_err(bad_request)?;
+    let (c, label) = (post.cancel, post.cancel.mailbox);
+    if post.signature.len() > 128 {
+        return Err(RelayError::BadRequest);
+    }
+    let mut db = relay.db.lock().expect("lock");
+    let tx = db.transaction()?;
+    let mb = mailbox(&tx, &label)?;
+    if mb.vault_id.unwrap_or(label) != c.vault_id {
+        return Err(RelayError::OtherVault);
+    }
+    // Only the old key, while it holds the seat here, signs a cancel.
+    let old = member(&tx, &label, &c.old)?.ok_or(RelayError::Forbidden)?;
+    c.verify(&old, &post.signature)
+        .map_err(|_| RelayError::Unauthenticated)?;
+    relay.limit_key(&old.sig_pk)?;
+    // Only a move the relay holds: a cancel can't close a round that was never asked.
+    let row = seat_row(&tx, &label, &c.move_id)?.ok_or(RelayError::Forbidden)?;
+    if row.old != c.old || row.new.sig_pk != c.new || row.round != 0 {
+        return Err(RelayError::Forbidden);
+    }
+    match row.status {
+        SEAT_CANCELLED => return ok(&()),
+        SEAT_PENDING => {}
+        _ => return Err(RelayError::Forbidden),
+    }
+    // Only the move it names: its pending key loses access. Other rows of the seat are left
+    // alone (the log refuses any first-round approval after a keep, so another first-round
+    // row is junk that no honest phone addresses, and the real move must keep its row).
+    tx.execute(
+        "UPDATE seat_moves SET status = ?3, cancel_at = ?4, cancel_sig = ?5
+         WHERE mailbox = ?1 AND move_id = ?2",
+        params![
+            &label[..],
+            &c.move_id[..],
+            SEAT_CANCELLED,
+            i64::try_from(c.at).unwrap_or(i64::MAX),
+            &post.signature[..]
+        ],
+    )?;
+    relay.touch(&tx, &label, &mb, &c.old)?;
+    tx.commit()?;
+    drop(db);
+    relay.waiters.signal(&label);
+    ok(&())
+}
+
+/// The signed cancels of mailbox `id`'s kept seat moves.
+fn cancelled_seats(
+    db: &Connection,
+    vault_id: &MailboxId,
+    id: &MailboxId,
+) -> Result<Vec<CancelledSeat>, RelayError> {
+    let mut stmt = db.prepare(
+        "SELECT move_id, old, new_sig, cancel_at, cancel_sig FROM seat_moves
+         WHERE mailbox = ?1 AND status = ?2 AND cancel_sig IS NOT NULL ORDER BY move_id",
+    )?;
+    let rows = stmt.query_map(params![&id[..], SEAT_CANCELLED], |r| {
+        Ok((
+            r.get::<_, Vec<u8>>(0)?,
+            r.get::<_, Vec<u8>>(1)?,
+            r.get::<_, Vec<u8>>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, Vec<u8>>(4)?,
+        ))
+    })?;
+    rows.map(|r| {
+        let (move_id, old, new, at, signature) = r?;
+        Ok(CancelledSeat {
+            cancel: SeatCancel {
+                mailbox: *id,
+                vault_id: *vault_id,
+                move_id: arr32(move_id)?,
+                old: arr32(old)?,
+                new: arr32(new)?,
+                at: u64::try_from(at).unwrap_or(0),
+            },
+            signature,
+        })
+    })
+    .collect()
 }
 
 /// Restores a vault from a member's saved copy of its log (see [`Reseed`]). The relay is
@@ -1454,11 +1814,14 @@ async fn mailboxes(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<MailboxesRead>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
+    // Where the signer is a member, or the key of a pending seat move.
     let mut stmt = db.prepare(
-        "SELECT mailbox FROM members WHERE sig_pk = ?1 AND enc_pk = ?2 ORDER BY mailbox",
+        "SELECT mailbox FROM members WHERE sig_pk = ?1 AND enc_pk = ?2
+         UNION SELECT mailbox FROM seat_moves WHERE new_sig = ?1 AND new_enc = ?2 AND status = ?3
+         ORDER BY mailbox",
     )?;
     let rows = stmt.query_map(
-        params![&req.signer.sig_pk[..], &req.signer.enc_pk[..]],
+        params![&req.signer.sig_pk[..], &req.signer.enc_pk[..], SEAT_PENDING],
         |r| r.get::<_, Vec<u8>>(0),
     )?;
     let mailboxes = rows
@@ -1580,9 +1943,16 @@ async fn forget_push(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&())
 }
 
+/// Delivers an envelope (see [`PostEnvelope`]): the request is signed by the envelope's
+/// sender, a member; a pending member of a seat move may receive it, never send.
 async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
-    let envelope = Envelope::from_bytes(&body).map_err(bad_request)?;
+    let req = verified::<PostEnvelope>(&relay, &body)?;
+    let envelope = Envelope::from_bytes(&req.payload.envelope).map_err(bad_request)?;
+    let body = &req.payload.envelope;
     let h = &envelope.header;
+    if h.from != req.signer.sig_pk {
+        return Err(RelayError::Forbidden);
+    }
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let mb = mailbox(&tx, &h.mailbox)?;
@@ -1594,10 +1964,16 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     envelope
         .verify(sender)
         .map_err(|_| RelayError::Unauthenticated)?;
-    relay.limit_key(&sender.sig_pk)?;
 
     let recipients: Vec<[u8; 32]> = match h.to {
         Recipient::One(pk) if pk != sender.sig_pk && members.iter().any(|m| m.sig_pk == pk) => {
+            vec![pk]
+        }
+        // A seat move's pending key: the helpers' repair messages reach it before it is
+        // a member.
+        Recipient::One(pk)
+            if pk != sender.sig_pk && pending_member(&tx, &h.mailbox, &pk)?.is_some() =>
+        {
             vec![pk]
         }
         Recipient::One(_) => return Err(RelayError::Forbidden),
@@ -1688,7 +2064,10 @@ async fn inbox(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
     let mb = mailbox(&db, &req.payload.mailbox)?;
-    if member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
+    let who = &req.signer.sig_pk;
+    if member(&db, &req.payload.mailbox, who)?.is_none()
+        && pending_member(&db, &req.payload.mailbox, who)?.is_none()
+    {
         return Err(RelayError::Forbidden);
     }
     relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
@@ -1723,7 +2102,10 @@ async fn inbox_ack(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let mb = mailbox(&tx, &req.payload.mailbox)?;
-    if member(&tx, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
+    let who = &req.signer.sig_pk;
+    if member(&tx, &req.payload.mailbox, who)?.is_none()
+        && pending_member(&tx, &req.payload.mailbox, who)?.is_none()
+    {
         return Err(RelayError::Forbidden);
     }
     relay.touch(&tx, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
@@ -1756,14 +2138,6 @@ async fn inbox_ack(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&InboxAckResponse { deleted })
 }
 
-/// `/v1/log/append`: the body is the entry, and the mailbox is the one named by the entry's
-/// vault id (a mailbox whose label is its vault id). The entry's author is the requester.
-async fn log_append(State(relay): State<Relay>, body: Bytes) -> RelayResult {
-    let entry = LogEntry::from_bytes(&body).map_err(bad_request)?;
-    let label = entry.header.mailbox;
-    append_entry(&relay, &label, &entry, &body, None)
-}
-
 /// `/v1/log/append-labelled` (see [`LabelledAppend`]): the signed request names the mailbox,
 /// and its signer, a member, is the requester.
 async fn log_append_labelled(State(relay): State<Relay>, body: Bytes) -> RelayResult {
@@ -1775,27 +2149,24 @@ async fn log_append_labelled(State(relay): State<Relay>, body: Bytes) -> RelayRe
         &req.payload.mailbox,
         &entry,
         &req.payload.entry,
-        Some(&req.signer.sig_pk),
+        &req.signer.sig_pk,
     )
 }
 
 /// Appends `entry` (`bytes` as received) to the log of mailbox `label`. `poster`: the member
-/// who signed a labelled request (already charged to its rate limit); `None` charges the
-/// entry's author instead.
+/// who signed the request (already charged to its rate limit).
 fn append_entry(
     relay: &Relay,
     label: &MailboxId,
     entry: &LogEntry,
     bytes: &[u8],
-    poster: Option<&[u8; 32]>,
+    poster: &[u8; 32],
 ) -> RelayResult {
     let h = &entry.header;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let mb = mailbox(&tx, label)?;
-    if let Some(poster) = poster {
-        member(&tx, label, poster)?.ok_or(RelayError::Forbidden)?;
-    }
+    member(&tx, label, poster)?.ok_or(RelayError::Forbidden)?;
     if !mb.sealed {
         return Err(RelayError::Forbidden);
     }
@@ -1805,13 +2176,10 @@ fn append_entry(
     entry
         .verify_signature(&author)
         .map_err(|_| RelayError::Unauthenticated)?;
-    if poster.is_none() {
-        relay.limit_key(&author.sig_pk)?;
-    }
     if mb.vault_id.is_some_and(|v| v != h.mailbox) {
         return Err(RelayError::OtherVault);
     }
-    relay.touch(&tx, label, &mb, poster.unwrap_or(&author.sig_pk))?;
+    relay.touch(&tx, label, &mb, poster)?;
 
     let len: i64 = tx.query_row(
         "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
@@ -1895,12 +2263,16 @@ async fn health(State(relay): State<Relay>) -> Response {
     }
 }
 
+/// The (encrypted) log, for a member or a pending seat key: once the switch is in the log
+/// and the helpers' parts arrived, the new phone checks the log before the relay's finish.
 async fn log_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<LogRead>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
     let mb = mailbox(&db, &req.payload.mailbox)?;
-    if member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none() {
+    if member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none()
+        && pending_member(&db, &req.payload.mailbox, &req.signer.sig_pk)?.is_none()
+    {
         return Err(RelayError::Forbidden);
     }
     relay.touch(&db, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;

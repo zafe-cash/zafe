@@ -24,6 +24,7 @@ import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/proposals.dart' as rust;
 import '../proposals/proposal_status.dart';
+import '../signers/keep_seat.dart';
 
 /// Declines in flight (hidden at once, so the card leaves on the tap), and the ones that
 /// failed (the card comes back with the reason).
@@ -113,6 +114,25 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
   bool _following = false;
   String? _followError;
 
+  /// Keep my seat running on its card, and why the last try failed.
+  bool _keeping = false;
+  String? _keepError;
+
+  Future<void> _keep() async {
+    if (_keeping) return;
+    setState(() {
+      _keeping = true;
+      _keepError = null;
+    });
+    final error = await keepMySeat(context, ref);
+    if (mounted) {
+      setState(() {
+        _keeping = false;
+        _keepError = error;
+      });
+    }
+  }
+
   /// Move, on a move card: the unlock, then the first contact with the new server
   /// (nothing connects to it before this tap). The card leaves once the phone moved.
   Future<void> _follow(String link, String vaultName, String host) async {
@@ -166,8 +186,10 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
         ref.watch(vaultProvider.select((v) => v.summary?.name)) ??
         '';
     final move = moveRequest(ref.watch(relayMoveProvider));
+    final mySeat = proposals.myPendingSeat(me);
     final waiting =
         (move == null ? 0 : 1) +
+        (mySeat == null ? 0 : 1) +
         proposals.items
             .where(
               (p) =>
@@ -201,6 +223,21 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
       }
     }
     final cards = <Widget>[
+      // This phone's own seat is moving: first, and only its owner's tap keeps it.
+      if (mySeat case final m?)
+        RequestCard(
+          key: ValueKey('keep:${m.replacement}'),
+          tileKey: m.newKeyHex,
+          who: 'Your seat is moving to a new phone',
+          detail: switch (timeLeft(m.completesAt)) {
+            final left? => 'Every approval is in · moves in $left',
+            null => 'Every approval is in',
+          },
+          action: _keeping ? 'Keeping...' : 'Keep my seat',
+          onTap: tap(() => context.go('/signers')),
+          onAction: _keep,
+          error: _keepError,
+        ),
       for (final p in proposals.items)
         if (needsMyAction(p, height: height) &&
             !declines.pending.contains(p.id))
@@ -267,8 +304,11 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
             key: ValueKey('m:${m.oldKeyHex}:${m.newKeyHex}'),
             tileKey: m.oldKeyHex,
             who: memberLabel(m.oldKeyHex, me: me, names: names),
-            detail:
+            detail: switch (dayOf(m.keptAt)) {
+              final day? => 'Old phone kept the seat on $day · call them first',
+              null =>
                 'Moving to a new phone · ${m.approvals.length} of ${m.needed} approved',
+            },
             action: 'Compare safety words',
             onTap: tap(
               () =>

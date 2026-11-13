@@ -401,9 +401,19 @@ pub struct ProposalList {
     /// Members (hex signing keys) who attested a backup of their current keys
     /// (backup health, spec §12.2).
     pub backed_up: Vec<String>,
+    /// This phone's seat switched to it in the log and the server is still finishing the
+    /// move: it reads but can't write yet (not an error; the next refresh tries again).
+    pub seat_finishing: bool,
     /// Seat moves waiting for approvals (a signer who lost their phone, spec §10.1).
     pub seat_moves: Vec<SeatMove>,
-    /// Moved seats whose key isn't rebuilt yet (a helper may have stalled).
+    /// Seat moves with every approval, waiting for the helpers (72 h each) and for the old
+    /// phone, which can keep the seat in the first round.
+    pub pending_seat_moves: Vec<PendingSeatMove>,
+    /// Seats whose old phone said it still has them (`KeepSeat`): whoever approves moving
+    /// one again must call its owner first.
+    pub seat_keeps: Vec<SeatKeep>,
+    /// Seat moves whose key isn't rebuilt yet, pending ones included (a helper may have
+    /// stalled; a restart works for either).
     pub repairs: Vec<RepairInfo>,
     /// The vault's switches to other relays, in log order.
     pub moves: Vec<RelayMoveRecord>,
@@ -413,10 +423,12 @@ pub struct ProposalList {
     pub updated_material: Option<Vec<u8>>,
 }
 
-/// A moved seat whose key the helpers are still rebuilding on the new phone.
+/// A seat move whose key the helpers are still rebuilding on the new phone.
 pub struct RepairInfo {
     /// The move (pass to `retry_repair`).
     pub replacement: u64,
+    /// The seat hasn't switched yet (see [`PendingSeatMove`]).
+    pub pending: bool,
     /// The new phone's key (hex).
     pub new_key_hex: String,
     /// The members rebuilding it in the current attempt (hex keys).
@@ -446,6 +458,41 @@ pub struct SeatMove {
     pub needed: u32,
     /// The recovery code, rebuilt from the log, for approving from this list.
     pub code: String,
+    /// When the old phone last said it still has this seat (`KeepSeat`, its clock, unix
+    /// seconds): approvers must call its owner first. `None` in the first round.
+    pub kept_at: Option<u64>,
+}
+
+/// The last time a seat's old phone kept it.
+pub struct SeatKeep {
+    /// The seat (hex key of the phone that kept it).
+    pub old_key_hex: String,
+    /// Its clock, unix seconds (display only).
+    pub at: u64,
+}
+
+/// A seat move with every approval: the old key still holds the seat until every helper
+/// waited 72 h (by its own clock) and logged its part.
+pub struct PendingSeatMove {
+    /// The move (pass to `retry_repair`).
+    pub replacement: u64,
+    /// The signer whose seat moves (hex key); this phone's own when it is the old phone.
+    pub old_key_hex: String,
+    /// The new phone's key (hex).
+    pub new_key_hex: String,
+    /// The old phone can still keep the seat (first round only).
+    pub can_keep: bool,
+    /// When the old phone said it still has this seat before this round, if it did.
+    pub kept_at: Option<u64>,
+    /// The members rebuilding the key (hex keys) and those of them whose part is logged.
+    pub helpers: Vec<String>,
+    pub helped: Vec<String>,
+    /// When this phone first saw the move with every approval (unix seconds; `None` until
+    /// its next refresh records it) and when its 72 h end from then.
+    pub seen_at: Option<u64>,
+    pub completes_at: Option<u64>,
+    /// Helpers who stopped helping this move (hex keys), for good.
+    pub stopped: Vec<String>,
 }
 
 /// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
@@ -495,6 +542,11 @@ pub fn list_proposals(
         // whatever it appends (it used to load the log a second time).
         let (mut chain, mut state) = node::load_state(&relay, &me, &m).await?;
         watch.lap("log");
+        // This phone's seat switched to it but the server hasn't finished the move: it can
+        // read, not write (writes would answer 403); the next refresh tries again.
+        if repair::seat_finishing(&relay, &me, &m, &state).await {
+            return Ok::<_, ZafeError>((state, true));
+        }
         match node::top_up_pool_loaded(
             &relay, &me, &m, &mut pool, reset, notes, &mut chain, &mut state, &mut OsRng,
         )
@@ -527,8 +579,17 @@ pub fn list_proposals(
         // This member's part in repairing a moved seat's key (best effort: retried on
         // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
-        if let Err(e) =
-            repair::help_repairs(&relay, &me, &m, &chain, &state, &repair_dir, &mut OsRng).await
+        if let Err(e) = repair::help_repairs(
+            &relay,
+            &me,
+            &m,
+            &chain,
+            &state,
+            &repair_dir,
+            crate::testing::seat_move_wait(),
+            &mut OsRng,
+        )
+        .await
         {
             eprintln!("share repair: {e}");
         }
@@ -541,12 +602,12 @@ pub fn list_proposals(
                 eprintln!("repair done: {e}");
             }
             let (_, fresh) = node::load_state(&relay, &me, &m).await?;
-            return Ok::<_, ZafeError>(fresh);
+            return Ok::<_, ZafeError>((fresh, false));
         }
-        Ok::<_, ZafeError>(state)
+        Ok::<_, ZafeError>((state, false))
     });
     watch.finish();
-    let state = state?;
+    let (state, seat_finishing) = state?;
     node::forget_closed(&state, &me.public().sig_pk, tip_height, &mut pool);
     node::forget_closed_nonces(&state, tip_height, &mut nonce_store(&state_dir, &seeds, &m));
     Ok(ProposalList {
@@ -554,7 +615,23 @@ pub fn list_proposals(
         newer_version_entries: state.newer_version_entries() as u32,
         shared_names: shared_names(&state),
         backed_up: backed_up(&state),
+        seat_finishing,
         seat_moves: seat_moves(&state),
+        seat_keeps: state
+            .seat_keeps
+            .iter()
+            .filter_map(|(old, keeps)| {
+                Some(SeatKeep {
+                    old_key_hex: hex::encode(old),
+                    at: keeps.last()?.at,
+                })
+            })
+            .collect(),
+        pending_seat_moves: pending_seat_moves(
+            &state,
+            &me,
+            &PathBuf::from(&state_dir).join(state_dir::REPAIR),
+        ),
         repairs: repairs(&state),
         moves: state
             .moves
@@ -603,6 +680,7 @@ fn repairs(state: &VaultState) -> Vec<RepairInfo> {
         .filter(|r| !r.done)
         .map(|r| RepairInfo {
             replacement: r.index,
+            pending: r.is_pending(),
             new_key_hex: hex::encode(r.new.sig_pk),
             helpers: r.helpers.iter().map(hex::encode).collect(),
             attempt: r.attempt,
@@ -650,6 +728,11 @@ pub fn retry_repair(
     Ok(())
 }
 
+/// When the owner of `old`'s seat last kept it, if ever.
+fn kept_at(state: &VaultState, old: &[u8; 32]) -> Option<u64> {
+    state.seat_keeps.get(old)?.last().map(|k| k.at)
+}
+
 fn seat_moves(state: &VaultState) -> Vec<SeatMove> {
     state
         .pending_replacements
@@ -662,6 +745,38 @@ fn seat_moves(state: &VaultState) -> Vec<SeatMove> {
                 approvals: p.approvals.iter().map(|(pk, _)| hex::encode(pk)).collect(),
                 needed: u32::from(state.descriptor.threshold),
                 code: request.encode(),
+                kept_at: kept_at(state, &p.old),
+            }
+        })
+        .collect()
+}
+
+fn pending_seat_moves(
+    state: &VaultState,
+    me: &Identity,
+    repair_dir: &std::path::Path,
+) -> Vec<PendingSeatMove> {
+    let vault_id = state.descriptor.vault_id;
+    let wait = crate::testing::seat_move_wait().as_secs();
+    state
+        .replacements
+        .iter()
+        .filter(|r| r.is_pending())
+        .map(|r| {
+            let seen_at = r
+                .move_id(&vault_id)
+                .and_then(|id| repair::seat_move_seen(repair_dir, me, &vault_id, &id));
+            PendingSeatMove {
+                replacement: r.index,
+                old_key_hex: hex::encode(r.old),
+                new_key_hex: hex::encode(r.new.sig_pk),
+                can_keep: r.round == Some(0),
+                kept_at: kept_at(state, &r.old),
+                helpers: r.helpers.iter().map(hex::encode).collect(),
+                helped: r.helped.iter().map(hex::encode).collect(),
+                seen_at,
+                completes_at: seen_at.map(|at| at.saturating_add(wait)),
+                stopped: r.stopped.iter().map(hex::encode).collect(),
             }
         })
         .collect()

@@ -185,6 +185,66 @@ on their own. This is the revised design.
   and clears its retries (deterministic, gated); one move's error never stops another's;
   a missing delta is an error, never a panic.
 
+Status 2026-11-14 (implemented, not committed; second pass after review):
+- [x] A live seat doesn't move (`VAULT_EVENT` 12): t approvals over `SeatMoveApproval`
+  (vault id, old, new, round) make the move pending; it switches on the last
+  `RepairHelped` of the current attempt; one pending move per seat and per new key; the
+  old key never helps its own seat. Gated by tag and floor.
+- [x] Helpers: deltas at once; `RepairHelped` after 72 h from their own first sighting
+  (`<move id>.seen`, sealed, `durable::create_new`), checked to count; **the sigma only
+  once the seat switched** (review fix 1: with sigma-at-`RepairHelped`, a co-helper holding
+  back its own part left the share with the new key while the seat still looked pending,
+  and the owner's later keep was accepted after the leak). So a valid keep always means no
+  honest sigma went out, and after the switch a keep is refused.
+- [x] A keep is one signed object (review fix 2): the old key signs `SeatCancel` (label,
+  vault id, move id, old, new, at); the log's `KeepSeat` carries it with the label (any
+  current member may log it; replay checks it against the old member's key) and the relay
+  takes the same signature as the cancel from anyone and shows it in `mailbox_info`.
+  `repair::sync_seat_moves` carries a relay-only cancel into the log and a log-only keep to
+  the relay, so the old key can't close round 0 on the relay alone and freeze the seat.
+  Only the old phone's tap creates the signature.
+- [x] `StopHelping` (logged, for good, across attempts, rekeyed with a seat move): that
+  helper's part no longer counts and no restart may name it, so it stops a move in any
+  round, round 1 included. App: **Stop helping** behind a confirm and the unlock.
+- [x] The old phone is told first (push on the first approval and when pending, **Keep my
+  seat** card, and every `confirmUnlock` action asks while its seat is pending); members
+  see the pending move, their own countdown and who stopped; second-round approvers see
+  the keep's date. The app never writes `KeepSeat` or `StopHelping` on its own.
+- [x] Relay follows signatures (`RELAY_API` 2, `RELAY_DB` 6): approvals add a pending key
+  (receives, reads its inbox, the members, the encrypted log, its mailboxes; never writes);
+  t finishes remove the old key; signed cancels close round 0. `/v1/envelope`,
+  `/v1/log/append` and `/v1/mailbox/replace` answer 426.
+- [x] Finding E: a helper's seat switching bumps the attempt of every repair it helps and
+  clears its restarts and logged parts; a saved part 1 for other helpers is an error.
+- [x] One move's error never stops another (review fix 3 and item 4): relay sync and first
+  sightings collect errors per move and return the first at the end.
+- [x] The new phone: "your co-signers wait up to 3 days before finishing" until sigmas
+  arrive (it has no log key before), reaches its key before the relay's finish, and its
+  writes until then are "still finishing" (only when the log says its seat switched and
+  the relay lists it pending for that move), never an error screen.
+- Deviation: **members sign a finish only once the log switched the seat**, not at their
+  `RepairHelped`: finishes posted earlier let one dishonest helper's finish plus an honest
+  one take the old key off the relay while the log stays pending, locking every member out
+  (`RelayMembership`). Any current member who read the switch may sign one.
+- [x] Relay seat rules are per move (review round 2): a cancel affects only the move it
+  names (no seat-wide closed round 0, so a cancelled junk row never strands the real
+  move); finishes count on a cancelled row (a thief's cancel after the log switched can't
+  strand the seat; a logged keep means no honest finish, so it gives nothing away); the
+  pending cap is per seat with its own 409 and message. Only members push approvals.
+- [x] Chained moves while the relay lags (review round 3): a seat that moves A -> X -> Y
+  while the relay still has A (one member holds its finish) no longer locks members out:
+  the membership check walks the seat's switches back to any key the relay still holds,
+  and members' refreshes give the relay a switched move's approvals once its old key is the
+  relay's member, then their finish, oldest move first.
+- [x] The client doesn't check the relay's pending keys any more, only its member list (the
+  earlier case list still locked members out when the log dropped an approval the relay
+  had a row for). A pending key can't write, reads only ciphertext and its own inbox, and
+  honest phones address one only for a log-pending move; tests show an unexplained one
+  gets nothing.
+- Deviation: the pending key also reads the encrypted log (not only its inbox and the
+  member list): `recover_from` must check the log before the relay's finish, and the log
+  is ciphertext to anyone without the log key.
+
 ### Proposals (rules 4, 5)
 
 - **Possibly signed.** Replay records, once and for good, when a proposal reached Approved
@@ -239,6 +299,15 @@ on their own. This is the revised design.
   fixed sizes so entry lengths don't show who approved.
 
 ## Residuals (accepted, with reasons)
+
+- A keep counts for the seat's lifetime: round 1 can't be kept, so it rests on the
+  approvers' warning ("call them first") plus any one helper's **Stop helping**.
+- In a 2-of-3 a stop freezes that seat for good, since no other helper exists (as for a
+  helper that never returns). The other two can still sign and move the funds to a new
+  vault.
+- The owner is assumed to open the app within the 72 h after the push; a relay that
+  withholds the push and the keep (with a dishonest member and a fooled co-signer) still
+  takes the seat (below).
 
 - A seat can still be taken by a dishonest member, a fooled co-signer and a colluding
   relay together: the relay can withhold the old phone's push and its `KeepSeat`. The

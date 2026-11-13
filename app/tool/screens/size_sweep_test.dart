@@ -110,6 +110,50 @@ final _cases = <(String, String?, Widget)>[
     ),
   ),
   (
+    'pending',
+    'Signers',
+    const PendingSeatCard(
+      who: 'Your seat',
+      mine: true,
+      canKeep: true,
+      left: '2 d 23 h',
+      helped: 0,
+      helpers: 2,
+      onKeep: _keepSeat,
+    ),
+  ),
+  (
+    'asked_again',
+    'Signers',
+    const Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PendingSeatCard(
+          who: 'Alexandra',
+          mine: false,
+          canKeep: false,
+          keptOn: '13 Nov',
+          left: '2 d 23 h',
+          helped: 1,
+          helpers: 2,
+          stopped: ['Bartholomew (7a07dc...0049)'],
+          onStop: _keepSeat,
+        ),
+      ],
+    ),
+  ),
+  (
+    'kept_approve',
+    'Signers',
+    const SeatMoveCard(
+      who: 'Alexandra',
+      approvals: 1,
+      needed: 2,
+      keptOn: '13 Nov',
+      onApprove: _noop,
+    ),
+  ),
+  (
     'replace',
     'Replace lost phone',
     const Column(
@@ -698,3 +742,5 @@ void main() {
 }
 
 void _noop() {}
+
+Future<void> _keepSeat() async {}

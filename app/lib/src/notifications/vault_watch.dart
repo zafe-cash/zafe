@@ -247,6 +247,7 @@ Future<void> recordSeen(
   List<rust.ProposalInfo>? proposals, {
   List<rust_received.ReceivedInfo>? received,
   List<rust.SeatMove>? seatMoves,
+  List<rust.PendingSeatMove>? pendingSeatMoves,
   List<rust_spends.UnapprovedSpendInfo>? unapprovedSpends,
 }) {
   final write = _seenWrites.then((_) async {
@@ -261,6 +262,7 @@ Future<void> recordSeen(
             proposals,
             received: received,
             seatMoves: seatMoves,
+            pendingSeatMoves: pendingSeatMoves,
             unapprovedSpends: unapprovedSpends,
             previous: previous,
           ),
@@ -604,6 +606,7 @@ Future<void> _checkVault(
       hideAmounts: hideAmounts,
       received: received ?? const [],
       seatMoves: list.seatMoves,
+      pendingSeatMoves: list.pendingSeatMoves,
       unapprovedSpends: unapproved ?? const [],
       unapprovedFromCopyAt: unapprovedFromCopyAt,
       me: rust_vault.identityPublicKey(seeds: seeds),
@@ -642,6 +645,7 @@ Future<void> _checkVault(
       proposals,
       received: received,
       seatMoves: list.seatMoves,
+      pendingSeatMoves: list.pendingSeatMoves,
       unapprovedSpends: unapproved,
     );
     debugPrint(

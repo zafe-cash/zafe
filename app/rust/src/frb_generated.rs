@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1276159574;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -346413672;
 
 // Section: executor
 
@@ -635,6 +635,38 @@ fn wire__crate__api__vault__create_vault_impl(
         },
     )
 }
+fn wire__crate__api__app__debug_seat_move_wait_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "debug_seat_move_wait",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_secs = <u64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok({
+                    crate::api::app::debug_seat_move_wait(api_secs);
+                })?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__proposals__estimate_fee_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1123,6 +1155,44 @@ fn wire__crate__api__vault__join_vault_impl(
                         crate::api::vault::join_vault(api_relay_url, api_seeds, api_invite)?;
                     Ok(output_ok)
                 })())
+            }
+        },
+    )
+}
+fn wire__crate__api__repair__keep_seat_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "keep_seat",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_relay_url = <String>::sse_decode(&mut deserializer);
+            let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_material = <Vec<u8>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::repair::keep_seat(api_relay_url, api_seeds, api_material)?;
+                        Ok(output_ok)
+                    })(),
+                )
             }
         },
     )
@@ -2483,6 +2553,49 @@ fn wire__crate__api__relay_move__start_relay_move_impl(
         },
     )
 }
+fn wire__crate__api__repair__stop_helping_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "stop_helping",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_relay_url = <String>::sse_decode(&mut deserializer);
+            let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_material = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_replacement = <u64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::repair::stop_helping(
+                            api_relay_url,
+                            api_seeds,
+                            api_material,
+                            api_replacement,
+                        )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__mempool__stop_mempool_watch_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3361,6 +3474,20 @@ impl SseDecode for Vec<crate::api::proposals::PaymentInput> {
     }
 }
 
+impl SseDecode for Vec<crate::api::proposals::PendingSeatMove> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::proposals::PendingSeatMove>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3452,6 +3579,18 @@ impl SseDecode for Vec<crate::api::proposals::ScannedPayment> {
             ans_.push(<crate::api::proposals::ScannedPayment>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::proposals::SeatKeep> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::proposals::SeatKeep>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -3689,6 +3828,34 @@ impl SseDecode for crate::api::proposals::PaymentInput {
     }
 }
 
+impl SseDecode for crate::api::proposals::PendingSeatMove {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_replacement = <u64>::sse_decode(deserializer);
+        let mut var_oldKeyHex = <String>::sse_decode(deserializer);
+        let mut var_newKeyHex = <String>::sse_decode(deserializer);
+        let mut var_canKeep = <bool>::sse_decode(deserializer);
+        let mut var_keptAt = <Option<u64>>::sse_decode(deserializer);
+        let mut var_helpers = <Vec<String>>::sse_decode(deserializer);
+        let mut var_helped = <Vec<String>>::sse_decode(deserializer);
+        let mut var_seenAt = <Option<u64>>::sse_decode(deserializer);
+        let mut var_completesAt = <Option<u64>>::sse_decode(deserializer);
+        let mut var_stopped = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::proposals::PendingSeatMove {
+            replacement: var_replacement,
+            old_key_hex: var_oldKeyHex,
+            new_key_hex: var_newKeyHex,
+            can_keep: var_canKeep,
+            kept_at: var_keptAt,
+            helpers: var_helpers,
+            helped: var_helped,
+            seen_at: var_seenAt,
+            completes_at: var_completesAt,
+            stopped: var_stopped,
+        };
+    }
+}
+
 impl SseDecode for crate::api::proposals::ProposalInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3750,7 +3917,11 @@ impl SseDecode for crate::api::proposals::ProposalList {
         let mut var_newerVersionEntries = <u32>::sse_decode(deserializer);
         let mut var_sharedNames = <Vec<crate::api::names::SignerName>>::sse_decode(deserializer);
         let mut var_backedUp = <Vec<String>>::sse_decode(deserializer);
+        let mut var_seatFinishing = <bool>::sse_decode(deserializer);
         let mut var_seatMoves = <Vec<crate::api::proposals::SeatMove>>::sse_decode(deserializer);
+        let mut var_pendingSeatMoves =
+            <Vec<crate::api::proposals::PendingSeatMove>>::sse_decode(deserializer);
+        let mut var_seatKeeps = <Vec<crate::api::proposals::SeatKeep>>::sse_decode(deserializer);
         let mut var_repairs = <Vec<crate::api::proposals::RepairInfo>>::sse_decode(deserializer);
         let mut var_moves = <Vec<crate::api::proposals::RelayMoveRecord>>::sse_decode(deserializer);
         let mut var_updatedMaterial = <Option<Vec<u8>>>::sse_decode(deserializer);
@@ -3759,7 +3930,10 @@ impl SseDecode for crate::api::proposals::ProposalList {
             newer_version_entries: var_newerVersionEntries,
             shared_names: var_sharedNames,
             backed_up: var_backedUp,
+            seat_finishing: var_seatFinishing,
             seat_moves: var_seatMoves,
+            pending_seat_moves: var_pendingSeatMoves,
+            seat_keeps: var_seatKeeps,
             repairs: var_repairs,
             moves: var_moves,
             updated_material: var_updatedMaterial,
@@ -3869,8 +4043,9 @@ impl SseDecode for crate::api::repair::RecoveryStage {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
             0 => crate::api::repair::RecoveryStage::Waiting,
-            1 => crate::api::repair::RecoveryStage::Repairing,
-            2 => crate::api::repair::RecoveryStage::Done,
+            1 => crate::api::repair::RecoveryStage::Pending,
+            2 => crate::api::repair::RecoveryStage::Repairing,
+            3 => crate::api::repair::RecoveryStage::Done,
             _ => unreachable!("Invalid variant for RecoveryStage: {}", inner),
         };
     }
@@ -4006,6 +4181,7 @@ impl SseDecode for crate::api::proposals::RepairInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_replacement = <u64>::sse_decode(deserializer);
+        let mut var_pending = <bool>::sse_decode(deserializer);
         let mut var_newKeyHex = <String>::sse_decode(deserializer);
         let mut var_helpers = <Vec<String>>::sse_decode(deserializer);
         let mut var_attempt = <u32>::sse_decode(deserializer);
@@ -4013,6 +4189,7 @@ impl SseDecode for crate::api::proposals::RepairInfo {
             <Vec<crate::api::proposals::RepairRestart>>::sse_decode(deserializer);
         return crate::api::proposals::RepairInfo {
             replacement: var_replacement,
+            pending: var_pending,
             new_key_hex: var_newKeyHex,
             helpers: var_helpers,
             attempt: var_attempt,
@@ -4088,6 +4265,18 @@ impl SseDecode for crate::api::proposals::ScannedRequest {
     }
 }
 
+impl SseDecode for crate::api::proposals::SeatKeep {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_oldKeyHex = <String>::sse_decode(deserializer);
+        let mut var_at = <u64>::sse_decode(deserializer);
+        return crate::api::proposals::SeatKeep {
+            old_key_hex: var_oldKeyHex,
+            at: var_at,
+        };
+    }
+}
+
 impl SseDecode for crate::api::repair::SeatLinkInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4108,12 +4297,14 @@ impl SseDecode for crate::api::proposals::SeatMove {
         let mut var_approvals = <Vec<String>>::sse_decode(deserializer);
         let mut var_needed = <u32>::sse_decode(deserializer);
         let mut var_code = <String>::sse_decode(deserializer);
+        let mut var_keptAt = <Option<u64>>::sse_decode(deserializer);
         return crate::api::proposals::SeatMove {
             old_key_hex: var_oldKeyHex,
             new_key_hex: var_newKeyHex,
             approvals: var_approvals,
             needed: var_needed,
             code: var_code,
+            kept_at: var_keptAt,
         };
     }
 }
@@ -4371,30 +4562,31 @@ impl SseDecode for crate::api::error::ZafeErrorKind {
             7 => crate::api::error::ZafeErrorKind::UpdateRequired,
             8 => crate::api::error::ZafeErrorKind::RelayOutdated,
             9 => crate::api::error::ZafeErrorKind::RelayStorageFull,
-            10 => crate::api::error::ZafeErrorKind::RelayRolledBack,
-            11 => crate::api::error::ZafeErrorKind::RelayForked,
-            12 => crate::api::error::ZafeErrorKind::LogCopyInvalid,
-            13 => crate::api::error::ZafeErrorKind::RelayMembership,
-            14 => crate::api::error::ZafeErrorKind::RelayLostVault,
-            15 => crate::api::error::ZafeErrorKind::Tls,
-            16 => crate::api::error::ZafeErrorKind::NetworkTimeout,
-            17 => crate::api::error::ZafeErrorKind::ServerBehind,
-            18 => crate::api::error::ZafeErrorKind::WrongNetwork,
-            19 => crate::api::error::ZafeErrorKind::WalletDatabase,
-            20 => crate::api::error::ZafeErrorKind::TorConnecting,
-            21 => crate::api::error::ZafeErrorKind::TorFailed,
-            22 => crate::api::error::ZafeErrorKind::VaultNotOnRelay,
-            23 => crate::api::error::ZafeErrorKind::Other,
-            24 => crate::api::error::ZafeErrorKind::KeygenIncomplete,
-            25 => crate::api::error::ZafeErrorKind::InviteExpired,
-            26 => crate::api::error::ZafeErrorKind::CreateTokenRefused,
-            27 => crate::api::error::ZafeErrorKind::VaultMoved,
-            28 => crate::api::error::ZafeErrorKind::MoveInProgress,
-            29 => crate::api::error::ZafeErrorKind::MembersMustUpdate,
-            30 => crate::api::error::ZafeErrorKind::MoveNotFound,
-            31 => crate::api::error::ZafeErrorKind::MoveExpired,
-            32 => crate::api::error::ZafeErrorKind::MoveStale,
-            33 => crate::api::error::ZafeErrorKind::TwoMoves,
+            10 => crate::api::error::ZafeErrorKind::TooManySeatMoves,
+            11 => crate::api::error::ZafeErrorKind::RelayRolledBack,
+            12 => crate::api::error::ZafeErrorKind::RelayForked,
+            13 => crate::api::error::ZafeErrorKind::LogCopyInvalid,
+            14 => crate::api::error::ZafeErrorKind::RelayMembership,
+            15 => crate::api::error::ZafeErrorKind::RelayLostVault,
+            16 => crate::api::error::ZafeErrorKind::Tls,
+            17 => crate::api::error::ZafeErrorKind::NetworkTimeout,
+            18 => crate::api::error::ZafeErrorKind::ServerBehind,
+            19 => crate::api::error::ZafeErrorKind::WrongNetwork,
+            20 => crate::api::error::ZafeErrorKind::WalletDatabase,
+            21 => crate::api::error::ZafeErrorKind::TorConnecting,
+            22 => crate::api::error::ZafeErrorKind::TorFailed,
+            23 => crate::api::error::ZafeErrorKind::VaultNotOnRelay,
+            24 => crate::api::error::ZafeErrorKind::Other,
+            25 => crate::api::error::ZafeErrorKind::KeygenIncomplete,
+            26 => crate::api::error::ZafeErrorKind::InviteExpired,
+            27 => crate::api::error::ZafeErrorKind::CreateTokenRefused,
+            28 => crate::api::error::ZafeErrorKind::VaultMoved,
+            29 => crate::api::error::ZafeErrorKind::MoveInProgress,
+            30 => crate::api::error::ZafeErrorKind::MembersMustUpdate,
+            31 => crate::api::error::ZafeErrorKind::MoveNotFound,
+            32 => crate::api::error::ZafeErrorKind::MoveExpired,
+            33 => crate::api::error::ZafeErrorKind::MoveStale,
+            34 => crate::api::error::ZafeErrorKind::TwoMoves,
             _ => unreachable!("Invalid variant for ZafeErrorKind: {}", inner),
         };
     }
@@ -4430,60 +4622,62 @@ fn pde_ffi_dispatcher_primary_impl(
         13 => wire__crate__api__repair__check_recovery_impl(port, ptr, rust_vec_len, data_len),
         14 => wire__crate__api__endpoints__check_relay_impl(port, ptr, rust_vec_len, data_len),
         15 => wire__crate__api__vault__create_vault_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__proposals__estimate_fee_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__history__export_history_csv_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__backup__export_vault_backup_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__relay_log__follow_relay_impl(port, ptr, rust_vec_len, data_len),
-        20 => {
+        17 => wire__crate__api__proposals__estimate_fee_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__history__export_history_csv_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__backup__export_vault_backup_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__relay_log__follow_relay_impl(port, ptr, rust_vec_len, data_len),
+        21 => {
             wire__crate__api__relay_move__follow_relay_move_impl(port, ptr, rust_vec_len, data_len)
         }
-        21 => wire__crate__api__vault__forget_keygen_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__backup__import_vault_backup_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__app__init_app_impl(port, ptr, rust_vec_len, data_len),
-        27 => {
+        22 => wire__crate__api__vault__forget_keygen_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__backup__import_vault_backup_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__app__init_app_impl(port, ptr, rust_vec_len, data_len),
+        28 => {
             wire__crate__api__proposals__invalidate_proposal_impl(port, ptr, rust_vec_len, data_len)
         }
-        28 => wire__crate__api__vault__join_vault_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__proposals__list_proposals_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__received__list_received_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__proposals__mark_pool_reset_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__repair__new_phone_words_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__proposals__propose_again_impl(port, ptr, rust_vec_len, data_len),
-        45 => {
+        29 => wire__crate__api__vault__join_vault_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__repair__keep_seat_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__proposals__list_proposals_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__received__list_received_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__proposals__mark_pool_reset_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__repair__new_phone_words_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__proposals__prewarm_prover_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__proposals__propose_again_impl(port, ptr, rust_vec_len, data_len),
+        47 => {
             wire__crate__api__proposals__propose_and_approve_impl(port, ptr, rust_vec_len, data_len)
         }
-        46 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__relay_move__relay_move_blockers_impl(
+        48 => wire__crate__api__proposals__propose_payment_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__vault__register_push_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__proposals__reject_proposal_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__relay_move__relay_move_blockers_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => {
+        53 => {
             wire__crate__api__relay_move__relay_move_notice_impl(port, ptr, rust_vec_len, data_len)
         }
-        52 => {
+        54 => {
             wire__crate__api__relay_move__relay_move_status_impl(port, ptr, rust_vec_len, data_len)
         }
-        53 => wire__crate__api__vault__renew_invite_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__vault__setup_step_impl(port, ptr, rust_vec_len, data_len),
-        63 => {
+        55 => wire__crate__api__vault__renew_invite_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__relay_log__restore_relay_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__proposals__retry_repair_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__proposals__review_proposal_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__proposals__send_proposal_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__proposals__set_my_name_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__vault__setup_step_impl(port, ptr, rust_vec_len, data_len),
+        65 => {
             wire__crate__api__relay_move__start_relay_move_impl(port, ptr, rust_vec_len, data_len)
         }
-        67 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__repair__stop_helping_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__vault__sync_vault_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__api__tor__tor_enable_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__spends__unapproved_spends_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__mempool__watch_mempool_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__watch__watch_vault_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__api__price__zec_usd_price_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -4499,35 +4693,36 @@ fn pde_ffi_dispatcher_sync_impl(
         5 => wire__crate__api__mempool__begin_mempool_watch_impl(ptr, rust_vec_len, data_len),
         10 => wire__crate__api__proposals__check_address_impl(ptr, rust_vec_len, data_len),
         11 => wire__crate__api__backup__check_backup_passphrase_impl(ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__vault__generate_identity_impl(ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__vault__identity_public_key_impl(ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__app__init_log_cache_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__proposals__memo_length_impl(ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__relay_move__move_share_text_impl(ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__proposals__nu7_activation_height_impl(ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__vault__parse_invite_impl(ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__relay_move__parse_move_link_impl(ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__repair__parse_seat_link_impl(ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__vault__pin_vault_relay_impl(ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__repair__seat_link_impl(ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__vault__set_vault_create_token_impl(ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
-        71 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
-        72 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__vault__vault_relay_settings_impl(ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__vault__vault_relay_status_impl(ptr, rust_vec_len, data_len),
-        76 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
-        77 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
-        78 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__app__debug_seat_move_wait_impl(ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__vault__generate_identity_impl(ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__vault__identity_public_key_impl(ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__app__init_log_cache_impl(ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__proposals__memo_length_impl(ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__relay_move__move_share_text_impl(ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__proposals__nu7_activation_height_impl(ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__vault__parse_invite_impl(ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__relay_move__parse_move_link_impl(ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__proposals__parse_payment_request_impl(ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__repair__parse_recovery_code_impl(ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__repair__parse_seat_link_impl(ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__proposals__parse_zec_impl(ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__vault__pin_vault_relay_impl(ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__repair__recovery_code_impl(ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__proposals__restart_signing_impl(ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__repair__seat_link_impl(ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__vault__set_vault_create_token_impl(ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__mempool__stop_mempool_watch_impl(ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__watch__stop_vault_watch_impl(ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__backup__suggest_backup_passphrase_impl(ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__tor__tor_disable_impl(ptr, rust_vec_len, data_len),
+        73 => wire__crate__api__tor__tor_request_impl(ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__tor__tor_set_dormant_impl(ptr, rust_vec_len, data_len),
+        75 => wire__crate__api__tor__tor_state_impl(ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__vault__vault_relay_settings_impl(ptr, rust_vec_len, data_len),
+        78 => wire__crate__api__vault__vault_relay_status_impl(ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__vault__vault_summary_impl(ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__vault__vault_viewing_key_impl(ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__vault__wallet_db_key_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -4862,6 +5057,35 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::proposals::PaymentInput>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::proposals::PendingSeatMove {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.replacement.into_into_dart().into_dart(),
+            self.old_key_hex.into_into_dart().into_dart(),
+            self.new_key_hex.into_into_dart().into_dart(),
+            self.can_keep.into_into_dart().into_dart(),
+            self.kept_at.into_into_dart().into_dart(),
+            self.helpers.into_into_dart().into_dart(),
+            self.helped.into_into_dart().into_dart(),
+            self.seen_at.into_into_dart().into_dart(),
+            self.completes_at.into_into_dart().into_dart(),
+            self.stopped.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::proposals::PendingSeatMove
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::proposals::PendingSeatMove>
+    for crate::api::proposals::PendingSeatMove
+{
+    fn into_into_dart(self) -> crate::api::proposals::PendingSeatMove {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::proposals::ProposalInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4911,7 +5135,10 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::ProposalList {
             self.newer_version_entries.into_into_dart().into_dart(),
             self.shared_names.into_into_dart().into_dart(),
             self.backed_up.into_into_dart().into_dart(),
+            self.seat_finishing.into_into_dart().into_dart(),
             self.seat_moves.into_into_dart().into_dart(),
+            self.pending_seat_moves.into_into_dart().into_dart(),
+            self.seat_keeps.into_into_dart().into_dart(),
             self.repairs.into_into_dart().into_dart(),
             self.moves.into_into_dart().into_dart(),
             self.updated_material.into_into_dart().into_dart(),
@@ -5069,8 +5296,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::repair::RecoveryStage {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::Waiting => 0.into_dart(),
-            Self::Repairing => 1.into_dart(),
-            Self::Done => 2.into_dart(),
+            Self::Pending => 1.into_dart(),
+            Self::Repairing => 2.into_dart(),
+            Self::Done => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5244,6 +5472,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::RepairInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.replacement.into_into_dart().into_dart(),
+            self.pending.into_into_dart().into_dart(),
             self.new_key_hex.into_into_dart().into_dart(),
             self.helpers.into_into_dart().into_dart(),
             self.attempt.into_into_dart().into_dart(),
@@ -5357,6 +5586,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::proposals::ScannedRequest>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::proposals::SeatKeep {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.old_key_hex.into_into_dart().into_dart(),
+            self.at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::proposals::SeatKeep
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::proposals::SeatKeep>
+    for crate::api::proposals::SeatKeep
+{
+    fn into_into_dart(self) -> crate::api::proposals::SeatKeep {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::repair::SeatLinkInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5386,6 +5636,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::SeatMove {
             self.approvals.into_into_dart().into_dart(),
             self.needed.into_into_dart().into_dart(),
             self.code.into_into_dart().into_dart(),
+            self.kept_at.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5704,30 +5955,31 @@ impl flutter_rust_bridge::IntoDart for crate::api::error::ZafeErrorKind {
             Self::UpdateRequired => 7.into_dart(),
             Self::RelayOutdated => 8.into_dart(),
             Self::RelayStorageFull => 9.into_dart(),
-            Self::RelayRolledBack => 10.into_dart(),
-            Self::RelayForked => 11.into_dart(),
-            Self::LogCopyInvalid => 12.into_dart(),
-            Self::RelayMembership => 13.into_dart(),
-            Self::RelayLostVault => 14.into_dart(),
-            Self::Tls => 15.into_dart(),
-            Self::NetworkTimeout => 16.into_dart(),
-            Self::ServerBehind => 17.into_dart(),
-            Self::WrongNetwork => 18.into_dart(),
-            Self::WalletDatabase => 19.into_dart(),
-            Self::TorConnecting => 20.into_dart(),
-            Self::TorFailed => 21.into_dart(),
-            Self::VaultNotOnRelay => 22.into_dart(),
-            Self::Other => 23.into_dart(),
-            Self::KeygenIncomplete => 24.into_dart(),
-            Self::InviteExpired => 25.into_dart(),
-            Self::CreateTokenRefused => 26.into_dart(),
-            Self::VaultMoved => 27.into_dart(),
-            Self::MoveInProgress => 28.into_dart(),
-            Self::MembersMustUpdate => 29.into_dart(),
-            Self::MoveNotFound => 30.into_dart(),
-            Self::MoveExpired => 31.into_dart(),
-            Self::MoveStale => 32.into_dart(),
-            Self::TwoMoves => 33.into_dart(),
+            Self::TooManySeatMoves => 10.into_dart(),
+            Self::RelayRolledBack => 11.into_dart(),
+            Self::RelayForked => 12.into_dart(),
+            Self::LogCopyInvalid => 13.into_dart(),
+            Self::RelayMembership => 14.into_dart(),
+            Self::RelayLostVault => 15.into_dart(),
+            Self::Tls => 16.into_dart(),
+            Self::NetworkTimeout => 17.into_dart(),
+            Self::ServerBehind => 18.into_dart(),
+            Self::WrongNetwork => 19.into_dart(),
+            Self::WalletDatabase => 20.into_dart(),
+            Self::TorConnecting => 21.into_dart(),
+            Self::TorFailed => 22.into_dart(),
+            Self::VaultNotOnRelay => 23.into_dart(),
+            Self::Other => 24.into_dart(),
+            Self::KeygenIncomplete => 25.into_dart(),
+            Self::InviteExpired => 26.into_dart(),
+            Self::CreateTokenRefused => 27.into_dart(),
+            Self::VaultMoved => 28.into_dart(),
+            Self::MoveInProgress => 29.into_dart(),
+            Self::MembersMustUpdate => 30.into_dart(),
+            Self::MoveNotFound => 31.into_dart(),
+            Self::MoveExpired => 32.into_dart(),
+            Self::MoveStale => 33.into_dart(),
+            Self::TwoMoves => 34.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5933,6 +6185,16 @@ impl SseEncode for Vec<crate::api::proposals::PaymentInput> {
     }
 }
 
+impl SseEncode for Vec<crate::api::proposals::PendingSeatMove> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::proposals::PendingSeatMove>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5999,6 +6261,16 @@ impl SseEncode for Vec<crate::api::proposals::ScannedPayment> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::proposals::ScannedPayment>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::proposals::SeatKeep> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::proposals::SeatKeep>::sse_encode(item, serializer);
         }
     }
 }
@@ -6195,6 +6467,22 @@ impl SseEncode for crate::api::proposals::PaymentInput {
     }
 }
 
+impl SseEncode for crate::api::proposals::PendingSeatMove {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.replacement, serializer);
+        <String>::sse_encode(self.old_key_hex, serializer);
+        <String>::sse_encode(self.new_key_hex, serializer);
+        <bool>::sse_encode(self.can_keep, serializer);
+        <Option<u64>>::sse_encode(self.kept_at, serializer);
+        <Vec<String>>::sse_encode(self.helpers, serializer);
+        <Vec<String>>::sse_encode(self.helped, serializer);
+        <Option<u64>>::sse_encode(self.seen_at, serializer);
+        <Option<u64>>::sse_encode(self.completes_at, serializer);
+        <Vec<String>>::sse_encode(self.stopped, serializer);
+    }
+}
+
 impl SseEncode for crate::api::proposals::ProposalInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6231,7 +6519,13 @@ impl SseEncode for crate::api::proposals::ProposalList {
         <u32>::sse_encode(self.newer_version_entries, serializer);
         <Vec<crate::api::names::SignerName>>::sse_encode(self.shared_names, serializer);
         <Vec<String>>::sse_encode(self.backed_up, serializer);
+        <bool>::sse_encode(self.seat_finishing, serializer);
         <Vec<crate::api::proposals::SeatMove>>::sse_encode(self.seat_moves, serializer);
+        <Vec<crate::api::proposals::PendingSeatMove>>::sse_encode(
+            self.pending_seat_moves,
+            serializer,
+        );
+        <Vec<crate::api::proposals::SeatKeep>>::sse_encode(self.seat_keeps, serializer);
         <Vec<crate::api::proposals::RepairInfo>>::sse_encode(self.repairs, serializer);
         <Vec<crate::api::proposals::RelayMoveRecord>>::sse_encode(self.moves, serializer);
         <Option<Vec<u8>>>::sse_encode(self.updated_material, serializer);
@@ -6314,8 +6608,9 @@ impl SseEncode for crate::api::repair::RecoveryStage {
         <i32>::sse_encode(
             match self {
                 crate::api::repair::RecoveryStage::Waiting => 0,
-                crate::api::repair::RecoveryStage::Repairing => 1,
-                crate::api::repair::RecoveryStage::Done => 2,
+                crate::api::repair::RecoveryStage::Pending => 1,
+                crate::api::repair::RecoveryStage::Repairing => 2,
+                crate::api::repair::RecoveryStage::Done => 3,
                 _ => {
                     unimplemented!("");
                 }
@@ -6404,6 +6699,7 @@ impl SseEncode for crate::api::proposals::RepairInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <u64>::sse_encode(self.replacement, serializer);
+        <bool>::sse_encode(self.pending, serializer);
         <String>::sse_encode(self.new_key_hex, serializer);
         <Vec<String>>::sse_encode(self.helpers, serializer);
         <u32>::sse_encode(self.attempt, serializer);
@@ -6452,6 +6748,14 @@ impl SseEncode for crate::api::proposals::ScannedRequest {
     }
 }
 
+impl SseEncode for crate::api::proposals::SeatKeep {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.old_key_hex, serializer);
+        <u64>::sse_encode(self.at, serializer);
+    }
+}
+
 impl SseEncode for crate::api::repair::SeatLinkInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6468,6 +6772,7 @@ impl SseEncode for crate::api::proposals::SeatMove {
         <Vec<String>>::sse_encode(self.approvals, serializer);
         <u32>::sse_encode(self.needed, serializer);
         <String>::sse_encode(self.code, serializer);
+        <Option<u64>>::sse_encode(self.kept_at, serializer);
     }
 }
 
@@ -6682,30 +6987,31 @@ impl SseEncode for crate::api::error::ZafeErrorKind {
                 crate::api::error::ZafeErrorKind::UpdateRequired => 7,
                 crate::api::error::ZafeErrorKind::RelayOutdated => 8,
                 crate::api::error::ZafeErrorKind::RelayStorageFull => 9,
-                crate::api::error::ZafeErrorKind::RelayRolledBack => 10,
-                crate::api::error::ZafeErrorKind::RelayForked => 11,
-                crate::api::error::ZafeErrorKind::LogCopyInvalid => 12,
-                crate::api::error::ZafeErrorKind::RelayMembership => 13,
-                crate::api::error::ZafeErrorKind::RelayLostVault => 14,
-                crate::api::error::ZafeErrorKind::Tls => 15,
-                crate::api::error::ZafeErrorKind::NetworkTimeout => 16,
-                crate::api::error::ZafeErrorKind::ServerBehind => 17,
-                crate::api::error::ZafeErrorKind::WrongNetwork => 18,
-                crate::api::error::ZafeErrorKind::WalletDatabase => 19,
-                crate::api::error::ZafeErrorKind::TorConnecting => 20,
-                crate::api::error::ZafeErrorKind::TorFailed => 21,
-                crate::api::error::ZafeErrorKind::VaultNotOnRelay => 22,
-                crate::api::error::ZafeErrorKind::Other => 23,
-                crate::api::error::ZafeErrorKind::KeygenIncomplete => 24,
-                crate::api::error::ZafeErrorKind::InviteExpired => 25,
-                crate::api::error::ZafeErrorKind::CreateTokenRefused => 26,
-                crate::api::error::ZafeErrorKind::VaultMoved => 27,
-                crate::api::error::ZafeErrorKind::MoveInProgress => 28,
-                crate::api::error::ZafeErrorKind::MembersMustUpdate => 29,
-                crate::api::error::ZafeErrorKind::MoveNotFound => 30,
-                crate::api::error::ZafeErrorKind::MoveExpired => 31,
-                crate::api::error::ZafeErrorKind::MoveStale => 32,
-                crate::api::error::ZafeErrorKind::TwoMoves => 33,
+                crate::api::error::ZafeErrorKind::TooManySeatMoves => 10,
+                crate::api::error::ZafeErrorKind::RelayRolledBack => 11,
+                crate::api::error::ZafeErrorKind::RelayForked => 12,
+                crate::api::error::ZafeErrorKind::LogCopyInvalid => 13,
+                crate::api::error::ZafeErrorKind::RelayMembership => 14,
+                crate::api::error::ZafeErrorKind::RelayLostVault => 15,
+                crate::api::error::ZafeErrorKind::Tls => 16,
+                crate::api::error::ZafeErrorKind::NetworkTimeout => 17,
+                crate::api::error::ZafeErrorKind::ServerBehind => 18,
+                crate::api::error::ZafeErrorKind::WrongNetwork => 19,
+                crate::api::error::ZafeErrorKind::WalletDatabase => 20,
+                crate::api::error::ZafeErrorKind::TorConnecting => 21,
+                crate::api::error::ZafeErrorKind::TorFailed => 22,
+                crate::api::error::ZafeErrorKind::VaultNotOnRelay => 23,
+                crate::api::error::ZafeErrorKind::Other => 24,
+                crate::api::error::ZafeErrorKind::KeygenIncomplete => 25,
+                crate::api::error::ZafeErrorKind::InviteExpired => 26,
+                crate::api::error::ZafeErrorKind::CreateTokenRefused => 27,
+                crate::api::error::ZafeErrorKind::VaultMoved => 28,
+                crate::api::error::ZafeErrorKind::MoveInProgress => 29,
+                crate::api::error::ZafeErrorKind::MembersMustUpdate => 30,
+                crate::api::error::ZafeErrorKind::MoveNotFound => 31,
+                crate::api::error::ZafeErrorKind::MoveExpired => 32,
+                crate::api::error::ZafeErrorKind::MoveStale => 33,
+                crate::api::error::ZafeErrorKind::TwoMoves => 34,
                 _ => {
                     unimplemented!("");
                 }

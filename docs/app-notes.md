@@ -524,11 +524,19 @@ Learned while studying it:
   `material.descriptor` (which the app refreshes from `ProposalList.updated_material`, and
   `load_state` only compares on group key + UFVK). Flow: new phone shows a recovery code
   (`RecoveryRequest`); each approving co-signer runs the **safety words** check with it
-  (below), then logs `ReplaceApproval` (signature over
-  `relay::ReplaceApproval`, reused for the relay), at t the seat moves (votes/shares/groups/
-  name re-keyed; interactive approvals voided; pool + backup attestation dropped); the
-  relay swaps keys on `/v1/mailbox/replace` with t signatures (t recorded by the creator via
-  `/v1/mailbox/threshold`, called by `node::create_vault`; 0 = can't move);
+  (below), then logs `ReplaceApproval` (from event version 12 the signature is over
+  `relay::SeatMoveApproval` with the seat's round, reused for the relay); at t the move is
+  **pending** (2026-11-13): the old key keeps the seat, the old phone gets a push and a
+  **Keep my seat** card (Needs you; also asked before any `confirmUnlock` action while
+  pending, `checkSeat`), and each helper waits 72 h from its own first sighting before
+  `RepairHelped`; the seat switches on the last helper's (votes/shares/groups/name re-keyed;
+  interactive approvals voided; pool + backup attestation dropped). The relay adds the new
+  key as pending on `/v1/mailbox/replace-labelled` with t signatures (t recorded by the
+  creator via `/v1/mailbox/threshold`, called by `node::create_vault`; 0 = can't move) and
+  swaps keys on t `/v1/seat/finish` signatures; Signers shows `PendingSeatCard` (countdown by
+  this phone's clock, `ProposalList.pending_seat_moves`); second-round approvers see
+  `seat_keeps` ("the old phone said it still has this seat on <date>"). Bridge tests set the
+  wait with `rust_lib_zafe::testing::set_seat_move_wait`;
   `repair::help_repairs` (run by the bridge's `list_proposals`, CLI `zafe seat repair`)
   does the first t approvers' RTS rounds (own deltas saved in `<state>/repair/<index>.delta`
   before sending, `.done` after the sigma); `repair::try_recover` (bridge `check_recovery`,
@@ -710,7 +718,12 @@ Learned while studying it:
   (internal app sharing or an internal testing track).
 - **Secret screens** block capture: wrap a route's page in `SecureScreen`
   (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
-  in `MainActivity.kt` (`FLAG_SECURE`). `xyz.zafe/haptics` and `modal_corners` have no
+  in `MainActivity.kt` (`FLAG_SECURE`; screenshots and recordings come out black). The
+  list (`app.dart`): `/join`, `/setup` (invite, safety words), `/export`, `/restore`
+  (backup), `/recover`, `/scan-recovery` (recovery code), `/replace-signer` (the seat
+  move's safety words), `/scan-invite` (the camera shows an invite), `/viewing-key`. Not
+  secret, so capture stays on: balances, payments, receive addresses, seat and move links
+  (relay + mailbox only). `xyz.zafe/haptics` and `modal_corners` have no
   Android handler (Dart swallows `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
 - **Settings** (`/settings` tab; groups in "Settings and sheets" above; font licences and
   `NOTICE` registered in `main.dart` for the licenses page). Other vaults live in **Manage

@@ -27,7 +27,24 @@ import Doc from '../../layouts/Doc.astro';
   </ol>
   <p>
     The other co-signers see the move under <strong>Needs you</strong> and tap <strong>Compare safety words</strong>
-    to do the same. Once enough approve, their phones rebuild the key share on the new phone.
+    to do the same. Once enough approve, the move waits 3 days: each helper’s phone counts them
+    from when it saw the last approval, and <strong>Signers</strong> shows the time left. Then their
+    phones rebuild the key share on the new phone. The new phone waits until then.
+  </p>
+
+  <h2>If it’s your seat and you still have the phone</h2>
+  <p>
+    Someone may be asking for your seat. Your phone hears first: a notification, and under
+    <strong>Needs you</strong> a card with <strong>Keep my seat</strong>. Tap it and unlock: the move is
+    void. Then call your co-signers.
+  </p>
+  <p>
+    Co-signers can ask once more after that, and that second time it can’t be kept. Whoever
+    approves it sees the day your phone kept the seat and is asked to call you first.
+  </p>
+  <p>
+    If you still have your phone and the move is asked again, tell a helper (Signers shows who
+    helps). Their <strong>Stop helping</strong> stops the move for good while they are named.
   </p>
   <h3>Back on the new phone</h3>
   <ol class="doc-steps">
@@ -40,6 +57,7 @@ import Doc from '../../layouts/Doc.astro';
   <dl class="doc-fixes">
     <div><dt>The words differ, or someone you didn’t ask appears</dt><dd>Stop and don’t approve. Start over with a new code.</dd></div>
     <div><dt>A co-signer’s phone doesn’t do its part</dt><dd>Another co-signer can offer to take over from <strong>Signers</strong> with <strong>Help instead of …</strong>. The rebuild starts over once the other helpers tap <strong>Agree</strong>.</dd></div>
+    <div><dt>A move nobody asked for</dt><dd>On the old phone, tap <strong>Keep my seat</strong> within the 3 days, then call your co-signers. After the wait the key share has already gone to the new phone.</dd></div>
     <div><dt>The old phone turns up somewhere else</dt><dd>Its key share still works if someone unlocks Zafe on it, though they would still need enough other members. To rule it out, move the funds to a new vault.</dd></div>
   </dl>
   <p class="doc-note">If more phones are lost than the vault’s rule allows, and none of them had a backup, the funds can’t be recovered.</p>

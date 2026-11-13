@@ -190,10 +190,21 @@ enum SeatCmd {
         #[arg(long, default_value_t = 60)]
         timeout_secs: u64,
     },
-    /// Seat moves waiting for approvals.
+    /// Seat moves waiting for approvals, pending moves and repairs.
     List,
     /// Do this member's part in repairing a moved seat's key (and save the new membership).
-    Repair,
+    /// A pending move's part completes only `wait_secs` after this home first saw it
+    /// pending (72 h; tests pass 0).
+    Repair {
+        #[arg(long, default_value_t = repair::SEAT_MOVE_WAIT.as_secs())]
+        wait_secs: u64,
+    },
+    /// This member still has its device: keep its seat, voiding the pending move of it
+    /// (only a first-round move; the co-signers can ask once more after this).
+    Keep,
+    /// Stop helping the pending move at `replacement`, for good (its owner says they didn't
+    /// lose their phone): the seat can't switch with this member as a helper.
+    Stop { replacement: u64 },
     /// Take over from a helper who stalled the repair of the seat moved at `replacement`;
     /// a helper passes `--taker` to agree to another member's offer.
     Retry {
@@ -222,7 +233,8 @@ enum VaultCmd {
     Join { invite: String },
     /// Show members, whether membership is sealed, and (once every member's part of the
     /// check is in) the safety words. With `--wait`, keep going until the words are known
-    /// (each call sends this member's part; the others can take part at any time).
+    /// (each call sends this member's part; the others can take part at any time). Once
+    /// the vault exists: the current members from the log.
     Members {
         #[arg(long)]
         wait: bool,
@@ -714,7 +726,14 @@ async fn main() -> Result<()> {
                         &relay, &me, &material, old, &request, &words, &mut rng,
                     )
                     .await?;
-                    println!("approved{}", if moved { "; the seat moved" } else { "" });
+                    println!(
+                        "approved{}",
+                        if moved {
+                            "; the move is pending (the helpers wait, the owner can keep the seat)"
+                        } else {
+                            ""
+                        }
+                    );
                 }
                 SeatCmd::Words { code, timeout_secs } => {
                     let request = RecoveryRequest::decode(&code)?;
@@ -744,14 +763,36 @@ async fn main() -> Result<()> {
                             state.descriptor.threshold
                         );
                     }
+                    for (old, keeps) in &state.seat_keeps {
+                        for k in keeps {
+                            println!(
+                                "{} kept its seat at {} (move {})",
+                                hex::encode(old),
+                                k.at,
+                                k.replacement
+                            );
+                        }
+                    }
                     for r in state.replacements.iter().filter(|r| !r.done) {
                         let helpers: Vec<String> = r.helpers.iter().map(hex::encode).collect();
+                        let helped: Vec<String> = r.helped.iter().map(hex::encode).collect();
+                        for s in &r.stopped {
+                            println!("  {} stopped helping move {}", hex::encode(s), r.index);
+                        }
                         println!(
-                            "repairing {} (move {}, attempt {}): helpers {}",
+                            "{} {} -> {} (move {}, round {}, attempt {}): helpers {}; helped {}",
+                            if r.is_pending() {
+                                "pending"
+                            } else {
+                                "repairing"
+                            },
+                            hex::encode(r.old),
                             hex::encode(r.new.sig_pk),
                             r.index,
+                            r.round.map_or("-".into(), |n| n.to_string()),
                             r.attempt,
-                            helpers.join(", ")
+                            helpers.join(", "),
+                            helped.join(", ")
                         );
                         for (list, asked) in &r.retries {
                             let list: Vec<String> = list.iter().map(hex::encode).collect();
@@ -796,7 +837,22 @@ async fn main() -> Result<()> {
                         repair::SeatLink::for_vault(&material, &cli.relay).encode()
                     );
                 }
-                SeatCmd::Repair => {
+                SeatCmd::Stop { replacement } => {
+                    repair::stop_helping(&relay, &me, &material, replacement, &mut rng).await?;
+                    println!("stopped helping move {replacement}");
+                }
+                SeatCmd::Keep => {
+                    let voided = repair::keep_seat(&relay, &me, &material, &mut rng).await?;
+                    println!(
+                        "{}",
+                        if voided {
+                            "kept: the pending move of this seat is void"
+                        } else {
+                            "no pending move of this seat"
+                        }
+                    );
+                }
+                SeatCmd::Repair { wait_secs } => {
                     let (chain, state) = node::load_state(&relay, &me, &material).await?;
                     let report = repair::help_repairs(
                         &relay,
@@ -805,6 +861,7 @@ async fn main() -> Result<()> {
                         &chain,
                         &state,
                         &home.path(state_dir::REPAIR),
+                        Duration::from_secs(wait_secs),
                         &mut rng,
                     )
                     .await?;
@@ -980,6 +1037,16 @@ async fn vault(
             node::join_vault(relay, &home.identity()?, &parsed).await?;
             fs::write(home.path(INVITE_FILE), parsed.encode())?;
             println!("joined vault {}", parsed.name);
+        }
+        VaultCmd::Members { .. } if home.path(VAULT_FILE).exists() => {
+            // After setup: the current members from the log (seat moves change them).
+            // Never the setup check again: it would start a new safety value and compare
+            // its pin with a member list that moved on.
+            let material = home.material()?;
+            let (_, state) = node::load_state(relay, &home.identity()?, &material).await?;
+            for member in &state.descriptor.members {
+                println!("member {}", hex::encode(member.identity.sig_pk));
+            }
         }
         VaultCmd::Members { wait } => {
             let (me, invite) = (home.identity()?, home.invite()?);

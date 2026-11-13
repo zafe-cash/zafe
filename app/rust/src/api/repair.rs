@@ -84,8 +84,8 @@ fn decode(text: &str) -> Result<RecoveryRequest> {
 }
 
 /// Approves moving the seat of `old_key_hex` (a signer who lost their phone) to the phone
-/// that showed `code`. Returns whether the seat has moved (this was the last approval
-/// needed); the share repair then starts on the helpers' next refresh.
+/// that showed `code`. Returns whether this was the last approval needed: the move is then
+/// pending (the old phone is asked first; the helpers' parts complete it after their 72 h).
 pub fn approve_seat_move(
     relay_url: String,
     seeds: Vec<u8>,
@@ -120,9 +120,50 @@ pub fn approve_seat_move(
     Ok(moved?)
 }
 
+/// The old phone: its owner still has it and keeps the seat, voiding the pending move of it
+/// (only a first-round move; behind unlock, never automatic). Returns whether a move was
+/// voided now.
+pub fn keep_seat(relay_url: String, seeds: Vec<u8>, material: Vec<u8>) -> Result<bool> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
+    let mut watch = crate::diag::Stopwatch::new("seat-keep");
+    let kept = runtime().block_on(repair::keep_seat(
+        &vault_relay(&relay_url, &m),
+        &me,
+        &m,
+        &mut OsRng,
+    ));
+    watch.lap("relay");
+    watch.finish();
+    Ok(kept?)
+}
+
+/// A helper stops helping the pending move at `replacement`, for good (its owner says they
+/// didn't lose their phone). Behind a confirm and the unlock; never automatic.
+pub fn stop_helping(
+    relay_url: String,
+    seeds: Vec<u8>,
+    material: Vec<u8>,
+    replacement: u64,
+) -> Result<()> {
+    let me = identity(&seeds)?;
+    let m = self::material(&material)?;
+    runtime().block_on(repair::stop_helping(
+        &vault_relay(&relay_url, &m),
+        &me,
+        &m,
+        replacement,
+        &mut OsRng,
+    ))?;
+    Ok(())
+}
+
 pub enum RecoveryStage {
     /// No vault has moved a seat to this phone yet: waiting for co-signers to approve.
     Waiting,
+    /// Co-signers approved; their phones wait up to 3 days before finishing, in case the old
+    /// phone still works.
+    Pending,
     /// The seat moved; the co-signers' phones are repairing the key.
     Repairing,
     /// Done: `material` and `invite` hold the vault (save them like a restored backup).
@@ -244,6 +285,7 @@ pub fn check_recovery(
     };
     Ok(match status {
         RecoveryStatus::Waiting => waiting(RecoveryStage::Waiting, 0, 0),
+        RecoveryStatus::Pending => waiting(RecoveryStage::Pending, 0, 0),
         RecoveryStatus::SeatMoved { received, needed } => {
             waiting(RecoveryStage::Repairing, received as u32, needed as u32)
         }

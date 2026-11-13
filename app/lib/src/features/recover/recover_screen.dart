@@ -350,6 +350,8 @@ class RecoverBody extends StatelessWidget {
             ? 'Approved. Your co-signers\' phones are rebuilding your key.'
             : 'Approved. Rebuilding your key: $received of $needed co-signers done.',
       rust.RecoveryStage.done => 'Done. Saving the vault on this phone.',
+      rust.RecoveryStage.pending =>
+        'Your co-signers wait up to 3 days before finishing, in case the old phone still works.',
       _ => 'Waiting for your co-signers to approve.',
     };
     return Column(

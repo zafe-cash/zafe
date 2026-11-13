@@ -30,6 +30,8 @@ pub enum ZafeErrorKind {
     /// The relay's storage quota for this vault is full; it frees up as old messages
     /// expire (30 days), or whoever runs the relay raises it.
     RelayStorageFull,
+    /// The server already holds the most open moves it takes for this seat.
+    TooManySeatMoves,
     /// The relay has fewer log entries than this device saw: it lost data or was rewound
     /// to an older backup. Nothing it says about the vault can be trusted until a member
     /// restores the log on it from a device copy.
@@ -202,6 +204,7 @@ impl From<NodeError> for ZafeError {
             NodeError::Relay(RelayClientError::StorageFull { .. }) => {
                 ZafeErrorKind::RelayStorageFull
             }
+            NodeError::Relay(RelayClientError::TooManySeatMoves) => ZafeErrorKind::TooManySeatMoves,
             NodeError::RelayRolledBack { .. } => ZafeErrorKind::RelayRolledBack,
             NodeError::RelayForked { .. } => ZafeErrorKind::RelayForked,
             NodeError::LogCopyInvalid(_) => ZafeErrorKind::LogCopyInvalid,

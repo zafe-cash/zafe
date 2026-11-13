@@ -125,6 +125,19 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   pins each co-signer's commitment + challenge (`state_dir::RECOVERY`, a file per (new
   identity, co-signer)) before revealing and shows words only over the pin; relay
   `/v1/seat-check/put|read`. Unreadable pin = error, never a fresh start.
+- **A live seat doesn't move** (`VAULT_EVENT` 12; security review "Seat moves"): t
+  approvals (signed over `SeatMoveApproval` with the seat's round) make a move *pending*;
+  the seat switches only once every helper of the current attempt logged `RepairHelped`.
+  Helpers send deltas at once, `RepairHelped` after `repair::SEAT_MOVE_WAIT` from their own
+  first sighting (`<move id>.seen`, sealed; lost = restart, never an entry timestamp), and
+  the **sigma only after the switch** (so a valid keep means no honest sigma left). A
+  **keep is one signed object** (`SeatCancel`, label inside): `KeepSeat` in the log (any
+  member may log it, replay checks the old key's signature, round 0 only) and the relay's
+  cancel (any member may post it); `repair::sync_seat_moves` carries it either way. **Only
+  the old phone's tap creates the signature.** `StopHelping` (logged, for good, rekeyed
+  with seat moves) blocks a helper's part and any restart naming it. One pending move per
+  seat and per new key; the old key never helps its own seat; a helper's seat switching
+  bumps the attempt of every repair it helps; one move's error never stops another's.
 - **Recovering phone trusts only a confirmed co-signer** (`repair::try_recover(.., confirmed)`):
   the person taps **Words match** per row (kept in `ZafeSecureStore` with the recovery
   identity); log key and vault id come from that co-signer's sigma, never another sender's,
@@ -255,6 +268,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     gate: `retry_repair` needs v11 from every member but the new key and the stalled helper,
     `VaultState::members_below`), and from v11 only current members' entries raise the floor
     and `member_versions` or count in `newer_version_entries` (an "update Zafe" hint only).
+    12 pending seat moves: new approval format with round, `RepairHelped`, `KeepSeat`
+    (the old key's signed cancel, with its label), `StopHelping`, sigma after the switch,
+    helper-move restarts (gate by tag and floor; no member-version gate: relays on
+    `RELAY_API` 2 serve only apps that write it).
   - **Version transitions**: shipped older apps keep acting on the old rules. For repair that
     is a stall, never a leak: messages are keyed by (index, attempt, sender), a re-run of
     part 1 is a fresh additive sharing, and a helper named in a retry learns nothing RTS
@@ -264,9 +281,11 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     reuse (`sign_groups` deletes each nonce before sending a share), which is why any change
     to one-tap assignment must be gated on every member. Never make core refuse or fall back
     on a newer tag (one entry would freeze the vault; interactive fallback deadlocks a 2-of-2).
-  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 5 (4: vault
+  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 6 (4: vault
     id + expiry columns, migrated from 1-3, old rows get `vault_id = id`, seen today, shared;
-    5: `recovery_values` per (new phone, co-signer), dropped and made again),
+    5: `recovery_values` per (new phone, co-signer), dropped and made again; 6:
+    `seat_moves` + `seat_finishes`, new tables, in `delete_mailbox`), `RELAY_API` 2 (every
+    body; no version 1 read),
     `REPAIR` 3 (sigma carries the helper's `LogAnchor` + create token; v2 still read),
     `INVITE` 3 (2: safety words; 3: vault id + label + relay URL, v2 reads as label = vault
     id on the default relay), `VAULT_MATERIAL` 2 (`relay`; v1 reads as legacy),
@@ -275,7 +294,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     reads), `SEAT_LINK` 1 (`zafe-seat-v1:`), `RELAY_STATUS` 1, `MOVE_MESSAGE` 1 (arrival /
     notice / cancel payloads, padded to 1 KiB), `MOVE_STATE` 1 (`<vault id>.move`,
     encrypted with a key from the vault secret), `MOVE_LINK` 1 (`zafe.cash/move#` fragment),
-    `SAFETY_PIN` 1, `SAFETY_SECRET` 1, `RECOVERY_PIN` 1 (2026-11-13).
+    `SAFETY_PIN` 1, `SAFETY_SECRET` 1, `RECOVERY_PIN` 1, `SEAT_MOVE_SEEN` 1 (2026-11-13).
 
 ### Relay and client
 - **Relay is blind**: it sees public keys, ciphertext, metadata. Clients drop envelopes for
@@ -312,6 +331,27 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   app saved the last switch never sends the phone back to an older relay.
 - **Relay membership check**: `reseed` lets the restorer pick members, so
   `node::check_relay_membership` compares the relay's list with the replayed log (`RelayMembership`).
+  Only the *member* list is compared (log ahead tolerated, never the reverse: any earlier
+  key of a seat that moved several times while the relay lagged, Y <- X <- A, may stand in
+  for the current one); a relay's
+  pending seat keys aren't: one can't write, reads only ciphertext and its own inbox, and
+  honest phones address one only for a move pending in their own log.
+- **Seat moves on the relay follow signatures** (`RELAY_API` 2): t approvals add a pending
+  key (it receives and reads, never writes); t `SeatFinish` from current members ≠ old
+  remove the old key, and **members sign a finish only once the log switched the seat**
+  (`repair::sync_seat_moves`, oldest move first, re-reading the relay after each finish; a
+  switched move the relay never held gets its approvals once its old key is the relay's
+  member, then the finish), so one dishonest helper can't take the old key off before the
+  log. **Relay seat rules are per move**: the old key's signed `SeatCancel` (posted by
+  anyone) takes the pending access of the one move it names (that move id is never taken
+  again) and stays readable (`MailboxInfo::cancelled`); finishes count on a cancelled row
+  too (a cancel after the switch can't strand the seat); the pending cap is per seat
+  (`MAX_PENDING_SEAT_MOVES`, 409 `TOO_MANY_SEAT_MOVES` → `TooManySeatMoves`). Only members
+  push approvals. Until the relay's
+  finish a recovered phone reads but can't write: `repair::seat_finishing`, only when the
+  log says its seat switched and the relay lists it pending for that move.
+  Raw `/v1/envelope`, `/v1/log/append` and `/v1/mailbox/replace` answer 426 (old apps must
+  update); envelopes go through `RelayClient::send(who, ..)` (`/v1/envelope/send`).
 - **Relay hardening**: client reads at most 64 MiB per response; `log_append` verifies and
   charges **before** answering `Conflict`; joiners refuse a creator birthday above tip +
   leeway; `VaultKeys`'s `Debug` shows only `ak`.

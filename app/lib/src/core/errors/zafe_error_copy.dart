@@ -48,6 +48,8 @@ String zafeErrorMessage(
       'This server is private: it needs its create token. Ask whoever runs it.',
     ZafeErrorKind.relayStorageFull =>
       'The server\'s storage for this vault is full. Old messages expire after 30 days; if it keeps happening, ask the server\'s operator for more space.',
+    ZafeErrorKind.tooManySeatMoves =>
+      'The server holds too many open moves for this seat. Ask the server\'s operator, or move the vault to another server.',
     ZafeErrorKind.relayRolledBack =>
       'The server lost part of this vault\'s history, so Zafe ignores it. A member with the full history can restore it from the sync status on Home.',
     ZafeErrorKind.relayLostVault =>

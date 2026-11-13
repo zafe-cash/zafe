@@ -12,3 +12,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// client made before this runs has no such protection.
 void initLogCache({required String dir}) =>
     RustLib.instance.api.crateApiAppInitLogCache(dir: dir);
+
+/// Debug builds only (no effect in a release build): helpers wait `secs` instead of 72 h
+/// before their part can complete a pending seat move, for live runs on test devices
+/// (`--dart-define=ZAFE_SEAT_MOVE_WAIT_SECS=...`).
+void debugSeatMoveWait({required BigInt secs}) =>
+    RustLib.instance.api.crateApiAppDebugSeatMoveWait(secs: secs);
