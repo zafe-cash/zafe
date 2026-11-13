@@ -828,7 +828,17 @@ Learned while studying it:
   between `onPause` and `onResume` (never clearing one a `SecureScreen` asked for:
   `secureRequested`). That flag doesn't hide the **live** tile Android 13+ shows for the
   running app, so `AppLockGate` also draws `PrivacyCover` whenever the lifecycle isn't
-  `resumed` (switcher, notification shade, system dialogs, the unlock prompt). iOS:
+  `resumed` (never for our unlock prompt) and, when it only lost focus (`inactive`), only
+  if another activity is on top (`privacyCoverFor`; `onTopResumedActivityChanged` on
+  `xyz.zafe/privacy`, Android 10+). The switcher puts the launcher on top; the
+  **screenshot** overlay and the notification shade take focus but leave Zafe on top
+  (checked with `dumpsys activity`, API 35). Covering on focus alone put the lock tile on
+  screen right after every screenshot (Flutter maps resumed + no focus to `inactive`,
+  `LifecycleChannel.java`), as if capture were blocked. Rejected: Android 14's
+  `registerScreenCaptureCallback` reports the capture 1.1-1.4 s after the focus loss and
+  makes the system show "Zafe detected this screenshot.". The switcher's live tile keeps
+  the activity `RESUMED`, so `onPause` can't tell either. Android 9 and older: cover on
+  any focus loss. iOS:
   `SceneDelegate` adds a launch-screen cover on `sceneWillResignActive` (untested: iOS
   has never been built). Verified on the emulator 2026-10-04: blank recents card,
   cover gone on return. Emulator test: the

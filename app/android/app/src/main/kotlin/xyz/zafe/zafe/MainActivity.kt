@@ -39,6 +39,18 @@ class MainActivity : FlutterFragmentActivity() {
     /// The unlock waiting for the PIN screen's answer (Android 10 and older).
     private var pendingUnlock: MethodChannel.Result? = null
 
+    /// Tells Dart whether this is the top activity (`xyz.zafe/privacy`): the app switcher
+    /// puts the launcher on top, the screenshot overlay and the notification shade don't
+    /// (AppLockGate covers only for the first). Null before Android 10.
+    private var privacyChannel: MethodChannel? = null
+    private var topResumed: Boolean? = null
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        topResumed = isTopResumedActivity
+        privacyChannel?.invokeMethod("topResumed", isTopResumedActivity)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Edge to edge on every Android version, not only 15+ (where targetSdk 35+ forces
         // it): one layout everywhere, Flutter's padding handles the bars (Play's
@@ -239,6 +251,15 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         loadPaymentSounds()
+        privacyChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "xyz.zafe/privacy")
+            .also { channel ->
+                channel.setMethodCallHandler { call, result ->
+                    when (call.method) {
+                        "isTopResumed" -> result.success(topResumed)
+                        else -> result.notImplemented()
+                    }
+                }
+            }
         // The unlock prompt for approving, sending and the app lock.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "xyz.zafe/device_auth")
             .setMethodCallHandler { call, result ->

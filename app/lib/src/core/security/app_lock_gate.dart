@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/device_lock_provider.dart';
@@ -37,14 +38,49 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   /// the screen so the recent-apps card and anyone glancing at it see no balances.
   bool _covered = false;
 
+  /// Whether this activity is the top one (Android 10+, `xyz.zafe/privacy`); null
+  /// where the platform doesn't say.
+  bool? _topResumed;
+  AppLifecycleState _state = AppLifecycleState.resumed;
+
+  static const _privacy = MethodChannel('xyz.zafe/privacy');
+
   void _cover(bool covered) {
     if (covered != _covered && mounted) setState(() => _covered = covered);
+  }
+
+  void _updateCover() => _cover(
+    privacyCoverFor(
+          _state,
+          prompting: DeviceAuth.prompting,
+          topResumed: _topResumed,
+        ) ==
+        CoverMode.now,
+  );
+
+  Future<void> _onPrivacyCall(MethodCall call) async {
+    if (call.method != 'topResumed') return;
+    _topResumed = call.arguments as bool?;
+    _updateCover();
+  }
+
+  Future<void> _readTopResumed() async {
+    try {
+      _topResumed = await _privacy.invokeMethod<bool>('isTopResumed');
+    } on MissingPluginException {
+      // Tests, iOS: no answer, cover on any focus loss.
+    } on PlatformException {
+      // Same.
+    }
+    _updateCover();
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _privacy.setMethodCallHandler(_onPrivacyCall);
+    unawaited(_readTopResumed());
     if (ref.read(appLockedProvider)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_unlock()));
     }
@@ -53,6 +89,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _privacy.setMethodCallHandler(null);
     super.dispose();
   }
 
@@ -61,7 +98,8 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     // Not for our own unlock prompt: it makes the app inactive for a moment, and the
     // cover then showed for a frame as the prompt closed (before `resumed` arrived).
     // The recent-apps card stays blank anyway (no recents screenshot, MainActivity).
-    _cover(state != AppLifecycleState.resumed && !DeviceAuth.prompting);
+    _state = state;
+    _updateCover();
     switch (state) {
       case AppLifecycleState.hidden || AppLifecycleState.paused:
         if (_awaySince == null) {
