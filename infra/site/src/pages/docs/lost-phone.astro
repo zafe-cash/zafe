@@ -16,6 +16,7 @@ import Doc from '../../layouts/Doc.astro';
     <li>Install Zafe and tap <strong>I’m already in a vault</strong>, then <strong>No, ask my co-signers</strong>.</li>
     <li>On <strong>Recover your seat</strong>, tap <strong>Send code to a co-signer</strong>.</li>
     <li>When they send back the vault link, add it with <strong>Paste link</strong> or <strong>Scan</strong>.</li>
+    <li>On the call with each co-signer, find the row with their key. If it shows the same words as their phone, tap <strong>Words match</strong> on it. The phone only takes the vault from a co-signer you confirmed.</li>
   </ol>
   <h3>On a co-signer’s phone</h3>
   <ol class="doc-steps">
@@ -38,7 +39,7 @@ import Doc from '../../layouts/Doc.astro';
   <h2>If it goes wrong</h2>
   <dl class="doc-fixes">
     <div><dt>The words differ, or someone you didn’t ask appears</dt><dd>Stop and don’t approve. Start over with a new code.</dd></div>
-    <div><dt>A co-signer’s phone doesn’t do its part</dt><dd>Another co-signer can take over from <strong>Signers</strong> with <strong>Help instead of …</strong>.</dd></div>
+    <div><dt>A co-signer’s phone doesn’t do its part</dt><dd>Another co-signer can offer to take over from <strong>Signers</strong> with <strong>Help instead of …</strong>. The rebuild starts over once the other helpers tap <strong>Agree</strong>.</dd></div>
     <div><dt>The old phone turns up somewhere else</dt><dd>Its key share still works if someone unlocks Zafe on it, though they would still need enough other members. To rule it out, move the funds to a new vault.</dd></div>
   </dl>
   <p class="doc-note">If more phones are lost than the vault’s rule allows, and none of them had a backup, the funds can’t be recovered.</p>

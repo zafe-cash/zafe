@@ -54,8 +54,9 @@ impl Member {
         words: Option<&str>,
     ) -> Result<(Option<String>, KeygenProgress), NodeError> {
         let relay = RelayClient::new(relay_url.to_owned());
-        let m = membership(&relay, &self.id, invite).await?;
-        let m = seal_when_full(&relay, &self.id, invite, m).await?;
+        let key = self.key(invite);
+        let m = membership(&relay, &self.id, invite, &self.dir, &key).await?;
+        let m = seal_when_full(&relay, &self.id, invite, m, &self.dir, &key).await?;
         let progress = keygen_step(
             &relay,
             &self.id,
@@ -209,7 +210,15 @@ async fn a_state_file_that_does_not_decrypt_is_an_error_not_a_fresh_start() {
     members[1].step(&url, &invite, Some(&words)).await.unwrap();
     // Same member, another key (say, a broken restore): it must not start over.
     let relay = RelayClient::new(url.clone());
-    let m = membership(&relay, &members[1].id, &invite).await.unwrap();
+    let m = membership(
+        &relay,
+        &members[1].id,
+        &invite,
+        &members[1].dir,
+        &members[1].key(&invite),
+    )
+    .await
+    .unwrap();
     let err = keygen_step(
         &relay,
         &members[1].id,
@@ -259,4 +268,226 @@ async fn a_send_overtaken_by_a_later_seq_is_sealed_again() {
     })
     .await
     .unwrap();
+}
+
+/// A sealed setup on `relay` for `vault_id` under `label`: what one member list looks like
+/// to its members (the first creates and seals it).
+async fn view(
+    relay: &RelayClient,
+    ids: &[&Identity],
+    vault_id: [u8; 16],
+    label: [u8; 16],
+) -> Invite {
+    let token = [label[0]; 32];
+    relay
+        .create_mailbox(ids[0], label, &token, ids.len() as u16)
+        .await
+        .unwrap();
+    for id in &ids[1..] {
+        relay.join(id, label, token).await.unwrap();
+    }
+    let members = ids.iter().map(|id| id.public().sig_pk).collect();
+    relay.seal(ids[0], label, members).await.unwrap();
+    Invite {
+        vault_id,
+        label,
+        relay_url: Some(relay.base_url().to_owned()),
+        join_token: token,
+        creator: ids[0].public().sig_pk,
+        threshold: 2,
+        members: ids.len() as u16,
+        name: "Grants".into(),
+    }
+}
+
+/// Every member's safety words for `invite`, polled together (A from its own state dir);
+/// they must agree.
+async fn all_words(
+    relay: &RelayClient,
+    a: &Member,
+    others: &[&Identity],
+    invite: &Invite,
+) -> String {
+    let key = a.key(invite);
+    let (mine, theirs) = tokio::join!(
+        zafe_core::node::wait_for_safety_words(
+            relay,
+            &a.id,
+            invite,
+            &a.dir,
+            &key,
+            Duration::from_secs(30),
+        ),
+        futures::future::join_all(others.iter().map(|id| safety_words(relay, id, invite)))
+    );
+    let mine = mine.unwrap();
+    assert!(theirs.into_iter().all(|w| w.unwrap() == mine));
+    mine
+}
+
+/// Rule 1: a member pins the member list it revealed its safety value against. Here A
+/// sees {A, B, C} and reveals; a relay that then shows A {A, B, M} (where it could pick M's
+/// value knowing A's) gets a hard stop, and so does A's key generation.
+#[tokio::test]
+async fn a_member_list_switched_after_the_reveal_stops_the_setup() {
+    let url = start_relay().await;
+    let relay = RelayClient::new(url.clone());
+    let mut rng = StdRng::seed_from_u64(74);
+    let ids: Vec<Identity> = (0..4).map(|_| Identity::generate(&mut rng)).collect();
+    let (b, c, m) = (&ids[1], &ids[2], &ids[3]);
+    let a = Member {
+        id: Identity::from_seeds(ids[0].seeds().clone()),
+        dir: tempfile::tempdir().unwrap().keep(),
+    };
+    let vault_id = [9; 16];
+    let honest = view(&relay, &[&ids[0], b, c], vault_id, [1; 16]).await;
+    let first = all_words(&relay, &a, &[b, c], &honest).await;
+    a.step(&url, &honest, Some(&first)).await.unwrap();
+
+    let switched = view(&relay, &[&ids[0], b, m], vault_id, [2; 16]).await;
+    assert!(matches!(
+        membership(&relay, &a.id, &switched, &a.dir, &a.key(&switched)).await,
+        Err(NodeError::Verification(_))
+    ));
+    assert!(matches!(
+        a.step(&url, &switched, None).await,
+        Err(NodeError::Verification(_))
+    ));
+}
+
+/// Rule 1: a member pins the commitments it revealed against. After A revealed, the relay
+/// drops M's commitment and value from A's inbox and serves new ones, chosen knowing A's
+/// value: A refuses instead of showing words over them. Finishing the setup deletes the pin.
+#[tokio::test]
+async fn a_commitment_served_again_after_the_reveal_stops_the_setup() {
+    use zafe_core::node::SeqCounter;
+    use zafe_proto::envelope::{Envelope, Kind};
+    let url = start_relay().await;
+    let relay = RelayClient::new(url.clone());
+    let mut rng = StdRng::seed_from_u64(77);
+    let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(&mut rng)).collect();
+    let (b, m) = (&ids[1], &ids[2]);
+    let a = Member {
+        id: Identity::from_seeds(ids[0].seeds().clone()),
+        dir: tempfile::tempdir().unwrap().keep(),
+    };
+    let invite = view(&relay, &[&ids[0], b, m], [9; 16], [3; 16]).await;
+    let words = all_words(&relay, &a, &[b, m], &invite).await;
+
+    // Gone from A's inbox: M's commitment and value (the relay can drop anything).
+    let theirs: Vec<u64> = relay
+        .inbox(&a.id, invite.label, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|(_, e)| e.header.from == m.public().sig_pk)
+        .map(|(cursor, _)| cursor)
+        .collect();
+    relay.ack_inbox(&a.id, invite.label, &theirs).await.unwrap();
+    let value = [5; 32];
+    let commitment = zafe_core::sas::commitment(&invite.vault_id, &m.public().sig_pk, &value);
+    let mut seq = SeqCounter::default();
+    for (kind, payload) in [
+        (Kind::SafetyCommit, commitment),
+        (Kind::SafetyReveal, value),
+    ] {
+        let envelope = Envelope::public(m, invite.label, seq.next_seq(), kind, &payload).unwrap();
+        relay.send(&envelope).await.unwrap();
+    }
+    let again = membership(&relay, &a.id, &invite, &a.dir, &a.key(&invite)).await;
+    assert!(
+        matches!(again, Err(NodeError::Verification(_))),
+        "words {:?} instead of {words}",
+        again.map(|m| m.safety_words)
+    );
+
+    zafe_core::node::forget_keygen(&a.dir).unwrap();
+    assert!(!a.dir.join(zafe_core::state_dir::SAFETY_PIN).exists());
+}
+
+/// Rule 1: a revealed safety value never comes back. A member who leaves a setup (its state
+/// dir is deleted) and joins the same invite again commits to a new value and never sends
+/// the old one again; the others, whose pins hold the old commitment, stop.
+#[tokio::test]
+async fn rejoining_a_setup_never_reveals_the_old_value_again() {
+    use zafe_proto::envelope::Kind;
+    let url = start_relay().await;
+    let relay = RelayClient::new(url.clone());
+    let mut rng = StdRng::seed_from_u64(79);
+    let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(&mut rng)).collect();
+    let (b, c) = (&ids[1], &ids[2]);
+    let a = Member {
+        id: Identity::from_seeds(ids[0].seeds().clone()),
+        dir: tempfile::tempdir().unwrap().keep(),
+    };
+    let b_side = Member {
+        id: Identity::from_seeds(b.seeds().clone()),
+        dir: tempfile::tempdir().unwrap().keep(),
+    };
+    let invite = view(&relay, &[&ids[0], b, c], [9; 16], [4; 16]).await;
+    let key = b_side.key(&invite);
+    let (b_words, c_words, words) = tokio::join!(
+        zafe_core::node::wait_for_safety_words(
+            &relay,
+            &b_side.id,
+            &invite,
+            &b_side.dir,
+            &key,
+            Duration::from_secs(30),
+        ),
+        safety_words(&relay, c, &invite),
+        all_words(&relay, &a, &[], &invite),
+    );
+    assert_eq!((b_words.unwrap(), c_words.unwrap()), (words.clone(), words));
+
+    // "Leave": the setup's state dir is deleted; the same invite is opened again.
+    std::fs::remove_dir_all(&a.dir).unwrap();
+    let _ = membership(&relay, &a.id, &invite, &a.dir, &a.key(&invite)).await;
+
+    let (label, a_pub) = (invite.label, *a.id.public());
+    let from_a = |kind| {
+        let relay = &relay;
+        async move {
+            relay
+                .inbox(c, label, 0)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|(_, e)| e.header.kind == kind && e.header.from == a_pub.sig_pk)
+                .map(|(_, e)| e.open(c, &a_pub).unwrap())
+                .collect::<Vec<_>>()
+        }
+    };
+    let commits = from_a(Kind::SafetyCommit).await;
+    assert_eq!(commits.len(), 2, "a new commitment after rejoining");
+    assert_ne!(commits[0], commits[1]);
+    let reveals = from_a(Kind::SafetyReveal).await;
+    assert!(
+        reveals.iter().skip(1).all(|r| *r != reveals[0]),
+        "the old value is never sent again"
+    );
+    // B pinned A's first commitment: it stops.
+    assert!(matches!(
+        membership(&relay, &b_side.id, &invite, &b_side.dir, &key).await,
+        Err(NodeError::Verification(_))
+    ));
+}
+
+/// One member's safety words for `invite`, polled with its own state dir for the pin.
+async fn safety_words(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+    invite: &zafe_core::node::Invite,
+) -> Result<String, zafe_core::node::NodeError> {
+    let dir = tempfile::tempdir().unwrap().keep();
+    let key = zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, &invite.vault_id);
+    zafe_core::node::wait_for_safety_words(
+        relay,
+        id,
+        invite,
+        &dir,
+        &key,
+        std::time::Duration::from_secs(30),
+    )
+    .await
 }

@@ -120,7 +120,20 @@ class ZafeSecureStore {
   Future<void> deleteRecoveryIdentity() async {
     await _storage.delete(key: _recoveryKey);
     await _storage.delete(key: _recoveryLinkKey);
+    await _storage.delete(key: _recoveryConfirmedKey);
   }
+
+  static const _recoveryConfirmedKey = 'zafe_recovery_confirmed';
+
+  /// Co-signers (hex keys) whose safety words the person confirmed on the recovering
+  /// phone: the vault is taken only through one of them. Kept with the recovery identity.
+  Future<List<String>> readRecoveryConfirmed() async {
+    final raw = await _storage.read(key: _recoveryConfirmedKey);
+    return raw == null || raw.isEmpty ? const [] : raw.split(',');
+  }
+
+  Future<void> writeRecoveryConfirmed(List<String> keys) =>
+      _storage.write(key: _recoveryConfirmedKey, value: keys.join(','));
 
   static const _recoveryLinkKey = 'zafe_recovery_seat_link';
 

@@ -1,6 +1,6 @@
 // Renders the lost-phone flow without a device: the new phone's recovery screen (waiting,
 // repairing, checking the vault), a co-signer's safety-code check, and the Signers tab's
-// pending move card, in both themes. Not part of `flutter test`; run it explicitly (from app/):
+// pending move and key-rebuild cards, in both themes. Not part of `flutter test`; run it explicitly (from app/):
 //
 //   flutter test tool/screens/repair_render_test.dart
 //
@@ -55,15 +55,24 @@ void main() {
       (
         'waiting',
         'Recover your seat',
-        const RecoverBody(
+        RecoverBody(
           code: _code,
-          checks: [
+          checks: const [
             CosignerWords(
               cosignerKeyHex:
                   '97c9ce4b0d2f6a1e8c3b5d7f9a1c3e5f7b9d1f3a5c7e9b1d3f5a7c9e1b3d123e',
               words: 'ancient cinnamon zebra legend',
             ),
+            CosignerWords(
+              cosignerKeyHex:
+                  '41d07a9e3c5b7d9f1e3a5c7b9d1f3e5a7c9b1d3f5e7a9c1b3d5f7e9a1c3b8f02',
+              words: 'harbor velvet orbit candle',
+            ),
           ],
+          confirmed: const [
+            '97c9ce4b0d2f6a1e8c3b5d7f9a1c3e5f7b9d1f3a5c7e9b1d3f5a7c9e1b3d123e',
+          ],
+          onConfirm: (_) {},
         ),
       ),
       (
@@ -112,6 +121,22 @@ void main() {
               helpers: [('b', 'Bob'), ('c', 'Cara')],
               meHelping: false,
               onTakeOver: _takeOver,
+            ),
+          ],
+        ),
+      ),
+      (
+        'restart',
+        'Signers',
+        RepairCard(
+          who: 'Alice',
+          helpers: const [('b', 'You'), ('c', 'Cara')],
+          meHelping: true,
+          offers: [
+            (
+              text: 'Dan offers to help instead of Cara.',
+              waitingFor: 'you',
+              onAgree: _agree,
             ),
           ],
         ),
@@ -167,3 +192,5 @@ void main() {
 void _noop() {}
 
 Future<void> _takeOver(String key, String name) async {}
+
+Future<void> _agree() async {}

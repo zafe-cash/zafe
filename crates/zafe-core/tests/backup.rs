@@ -4,8 +4,9 @@
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     backup::{self, BackupError, Contents, KdfParams},
+    keys::{VaultKeys, VaultSecret},
     node::VaultMaterial,
-    vault::{MemberInfo, VaultDescriptor},
+    vault::{MemberInfo, VaultDescriptor, VaultEvent},
 };
 use zafe_proto::{
     version::{self, Format, UnsupportedVersion},
@@ -15,7 +16,36 @@ use zafe_proto::{
 const PASS: &str =
     "correct horse battery staple orbit lantern violet echo marble quiet river north";
 
+/// A vault's `ak`, viewing key and address (the external one at index 0, Orchard only) for
+/// the vault secret `[secret; 32]`.
+fn keys(secret: u8) -> ([u8; 32], String, String) {
+    use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+    let net = zafe_core::wallet::regtest_network();
+    let sk = (0u8..)
+        .find_map(|i| Option::<SpendingKey>::from(SpendingKey::from_bytes([i; 32])))
+        .unwrap();
+    let ak: [u8; 32] = FullViewingKey::from(&sk).to_bytes()[..32]
+        .try_into()
+        .unwrap();
+    let keys = VaultKeys::derive(&VaultSecret::from_bytes([secret; 32]), &ak).unwrap();
+    let address = zcash_keys::address::UnifiedAddress::from_receivers(
+        Some(keys.fvk().address_at(0u32, Scope::External)),
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .encode(&net);
+    (ak, keys.ufvk().unwrap().encode(&net).unwrap(), address)
+}
+
 fn material_for(ids: &[&Identity]) -> Vec<u8> {
+    material_of(ids).to_bytes().unwrap()
+}
+
+fn material_of(ids: &[&Identity]) -> VaultMaterial {
+    let (ak, ufvk, address) = keys(5);
     let descriptor = VaultDescriptor {
         vault_id: [7; 16],
         version: version::DESCRIPTOR,
@@ -31,9 +61,9 @@ fn material_for(ids: &[&Identity]) -> Vec<u8> {
                 name: format!("m{i}"),
             })
             .collect(),
-        group_public_key: [1; 32],
-        ufvk: "uviewregtest1...".into(),
-        address: "uregtest1...".into(),
+        group_public_key: ak,
+        ufvk,
+        address,
         use_qsk: true,
         birthday_height: 2,
         proposal_expiry_blocks: 8064,
@@ -49,8 +79,6 @@ fn material_for(ids: &[&Identity]) -> Vec<u8> {
         log_key: [6; 32],
         relay: zafe_core::node::VaultRelay::legacy([7; 16]),
     }
-    .to_bytes()
-    .unwrap()
 }
 
 fn seeds(id: &Identity) -> Vec<u8> {
@@ -197,4 +225,51 @@ fn passphrase_rules() {
     assert_eq!(suggested.split_whitespace().count(), 12);
     assert!(backup::check_passphrase(&suggested).is_ok());
     assert_ne!(suggested, backup::suggest_passphrase(&mut rng));
+}
+
+/// Rule 3: a backup whose vault address isn't its viewing key's is refused, and so is a
+/// log copy whose `Created` descriptor (signed by every member) says so.
+#[test]
+fn an_address_that_isnt_the_viewing_keys_is_refused() {
+    let mut rng = StdRng::seed_from_u64(5);
+    let (me, other) = (Identity::generate(&mut rng), Identity::generate(&mut rng));
+    let material = material_of(&[&me, &other]);
+    let (_, _, elsewhere) = keys(6);
+    let contents = |material: &VaultMaterial| Contents {
+        identity_seeds: seeds(&me),
+        material: material.to_bytes().unwrap(),
+        invite: "zafe-invite-v1:abc".into(),
+        created_at: 1_700_000_000,
+        names: Default::default(),
+        log: Vec::new(),
+    };
+    assert!(contents(&material).validate().is_ok());
+    let mut moved = material.clone();
+    moved.descriptor.address = elsewhere.clone();
+    assert!(contents(&moved).validate().is_err());
+
+    let mut descriptor = material.descriptor.clone();
+    descriptor.address = elsewhere;
+    let message = descriptor.signing_message().unwrap();
+    let created = VaultEvent::Created {
+        signatures: [&me, &other]
+            .iter()
+            .map(|id| (id.public().sig_pk, id.sign(&message).to_vec()))
+            .collect(),
+        descriptor,
+    };
+    let entry = zafe_proto::LogEntry::create(
+        &me,
+        &material.log_key(),
+        material.descriptor.vault_id,
+        0,
+        [0; 32],
+        &created.to_bytes().unwrap(),
+        &mut rng,
+    )
+    .unwrap();
+    let cache = zafe_core::log_cache::LogCache::in_dir(tempfile::tempdir().unwrap().keep());
+    assert!(
+        zafe_core::node::install_log_copy(&cache, &material, &[entry.to_bytes().unwrap()]).is_err()
+    );
 }

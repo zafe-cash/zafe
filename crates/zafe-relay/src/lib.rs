@@ -73,10 +73,6 @@ use zafe_proto::{
 /// How long a seat recovery's safety-check values stay (a recovery takes minutes to days).
 pub const RECOVERY_RETENTION_SECS: u64 = 7 * 24 * 3600;
 
-/// Most co-signers' challenges kept for one recovering phone: more than any vault has
-/// approvers, few enough that a stranger can't bury the real ones.
-pub const MAX_RECOVERY_CHALLENGES: i64 = 16;
-
 /// Largest number of items returned by one read (clients rely on it: a shorter log read
 /// is the end of the log).
 const PAGE: i64 = zafe_proto::relay::READ_PAGE as i64;
@@ -308,11 +304,11 @@ CREATE TABLE IF NOT EXISTS push_tokens (
 );
 CREATE TABLE IF NOT EXISTS recovery_values (
     subject BLOB NOT NULL,
-    signer BLOB NOT NULL,
+    cosigner BLOB NOT NULL,
     kind INTEGER NOT NULL,
     signed BLOB NOT NULL,
     created_at INTEGER NOT NULL,
-    PRIMARY KEY (subject, signer, kind)
+    PRIMARY KEY (subject, cosigner, kind)
 );
 ";
 
@@ -366,14 +362,17 @@ impl Relay {
         // Version 0 with tables: written before versioning (unversioned envelopes and log
         // entries), refused; delete it. Older schemas migrate from `found` here.
         match found {
-            1..=3 => {
+            1..=4 => {
                 if found == 1 {
                     migrate_from_v1(&conn)?;
                 }
                 if found <= 2 {
                     migrate_from_v2(&conn)?;
                 }
-                migrate_from_v3(&conn, day(clock()))?;
+                if found <= 3 {
+                    migrate_from_v3(&conn, day(clock()))?;
+                }
+                migrate_from_v4(&conn)?;
             }
             0 if !has_tables => {}
             _ => version::check(version::Format::RelayDb, found)?,
@@ -504,8 +503,8 @@ impl Relay {
             )
             .route("/v1/mailbox/reseed", post(reseed))
             .route("/v1/mailboxes", post(mailboxes))
-            .route("/v1/recovery/put", post(recovery_put))
-            .route("/v1/recovery/read", post(recovery_read))
+            .route("/v1/seat-check/put", post(recovery_put))
+            .route("/v1/seat-check/read", post(recovery_read))
             .route("/v1/push/register", post(register_push))
             .route("/v1/push/forget", post(forget_push))
             .route("/v1/envelope", post(post_envelope))
@@ -676,12 +675,18 @@ impl Relay {
         ip: Option<std::net::IpAddr>,
         headers: &HeaderMap,
     ) -> Result<(), RelayError> {
+        self.charge_daily(ip)?;
+        self.check_create_token(headers)
+    }
+
+    /// Takes one token from the client address's daily bucket ([`Limits::creates_per_ip`]).
+    fn charge_daily(&self, ip: Option<std::net::IpAddr>) -> Result<(), RelayError> {
         if let (Some(buckets), Some(ip)) = (&self.creates_per_ip, ip) {
             buckets
                 .take(ip, self.now())
                 .map_err(RelayError::RateLimited)?;
         }
-        self.check_create_token(headers)
+        Ok(())
     }
 
     fn check_fresh(&self, timestamp: u64) -> Result<(), RelayError> {
@@ -771,6 +776,19 @@ fn migrate_from_v3(conn: &Connection, today: i64) -> Result<(), RelayError> {
          COMMIT;"
     ))?;
     tracing::info!("relay database migrated from schema 3 to 4 (labels, expiry)");
+    Ok(())
+}
+
+/// Schema 4 → 5: seat-recovery values are kept per (new phone, co-signer); the old table
+/// (one secret per new phone, values a week old at most) is dropped and made again.
+fn migrate_from_v4(conn: &Connection) -> Result<(), RelayError> {
+    conn.execute_batch(
+        "BEGIN;
+         DROP TABLE IF EXISTS recovery_values;
+         PRAGMA user_version = 5;
+         COMMIT;",
+    )?;
+    tracing::info!("relay database migrated from schema 4 to 5 (per co-signer recovery)");
     Ok(())
 }
 
@@ -1453,41 +1471,61 @@ async fn mailboxes(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     ok(&MailboxesResponse { mailboxes })
 }
 
-/// Keeps one value of a seat recovery's safety check (see [`RecoveryPut`]). The new phone
-/// (the subject) leaves its commitment and later its secret; anyone else may leave one
-/// challenge. The first of each (subject, signer, kind) stays: a value can't be changed
-/// after the other side has seen it.
-async fn recovery_put(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+/// Keeps one value of a seat recovery's safety check (see [`RecoveryPut`]). Each
+/// (new phone, co-signer) pair has its own slots, the first of each kind stays (a value
+/// can't change after the other side has seen it), and there is no cap per new phone, so
+/// no number of strangers can take a real co-signer's place. What co-signers leave is
+/// charged to their address like a creation; the new phone answers only co-signers that
+/// announced, so its own values are bounded by theirs and cost it nothing.
+async fn recovery_put(
+    State(relay): State<Relay>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
+    body: Bytes,
+) -> RelayResult {
     let req = verified::<RecoveryPut>(&relay, &body)?;
     let p = &req.payload;
     relay.check_fresh(p.timestamp)?;
-    let by_subject = req.signer.sig_pk == p.subject;
-    let allowed = match p.kind {
-        RecoveryValueKind::Commit | RecoveryValueKind::Reveal => by_subject,
-        RecoveryValueKind::Challenge => !by_subject,
-    };
+    let signer = req.signer.sig_pk;
+    let by_cosigner = matches!(
+        p.kind,
+        RecoveryValueKind::Announce | RecoveryValueKind::Challenge
+    );
+    let allowed = p.subject != p.cosigner
+        && if by_cosigner {
+            signer == p.cosigner
+        } else {
+            signer == p.subject
+        };
     if !allowed {
         return Err(RelayError::Forbidden);
     }
     // The canonical bytes, not the body: nothing extra rides along.
     let signed = req.to_bytes().map_err(|_| RelayError::BadRequest)?;
+    if by_cosigner {
+        relay.charge_daily(ip)?;
+    }
     let db = relay.db.lock().expect("lock");
-    if p.kind == RecoveryValueKind::Challenge {
-        let challenges: i64 = db.query_row(
-            "SELECT COUNT(*) FROM recovery_values WHERE subject = ?1 AND kind = ?2",
-            params![&p.subject[..], p.kind as i64],
+    if !by_cosigner {
+        let announced: bool = db.query_row(
+            "SELECT EXISTS (SELECT 1 FROM recovery_values
+                            WHERE subject = ?1 AND cosigner = ?2 AND kind = ?3)",
+            params![
+                &p.subject[..],
+                &p.cosigner[..],
+                RecoveryValueKind::Announce as i64
+            ],
             |r| r.get(0),
         )?;
-        if challenges >= MAX_RECOVERY_CHALLENGES {
+        if !announced {
             return Err(RelayError::Forbidden);
         }
     }
     db.execute(
-        "INSERT OR IGNORE INTO recovery_values (subject, signer, kind, signed, created_at)
+        "INSERT OR IGNORE INTO recovery_values (subject, cosigner, kind, signed, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             &p.subject[..],
-            &req.signer.sig_pk[..],
+            &p.cosigner[..],
             p.kind as i64,
             &signed[..],
             relay.now() as i64
@@ -1501,9 +1539,8 @@ async fn recovery_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<RecoveryRead>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
     let db = relay.db.lock().expect("lock");
-    let mut stmt = db.prepare(
-        "SELECT signed FROM recovery_values WHERE subject = ?1 ORDER BY kind, created_at",
-    )?;
+    let mut stmt = db
+        .prepare("SELECT signed FROM recovery_values WHERE subject = ?1 ORDER BY cosigner, kind")?;
     let values = stmt
         .query_map(params![&req.payload.subject[..]], |r| {
             r.get::<_, Vec<u8>>(0)

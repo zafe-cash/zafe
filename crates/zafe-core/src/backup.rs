@@ -91,6 +91,8 @@ pub enum BackupError {
     BadParams,
     #[error("the backup's identity is not a member of its vault")]
     NotAMember,
+    #[error("the backup's vault address isn't the one its viewing key gives")]
+    WrongAddress,
     #[error("passphrase too weak: {0}")]
     WeakPassphrase(String),
     #[error("encoding: {0}")]
@@ -172,8 +174,8 @@ impl core::fmt::Debug for Contents {
 }
 
 impl Contents {
-    /// Checks that the contents are a usable vault: the material parses and the identity
-    /// is one of the vault's members.
+    /// Checks that the contents are a usable vault: the material parses, the identity is
+    /// one of the vault's members and the vault's address is its viewing key's.
     pub fn validate(&self) -> Result<VaultMaterial, BackupError> {
         let material = VaultMaterial::from_bytes(&self.material).map_err(|e| match e {
             NodeError::UnsupportedVersion(v) => BackupError::UnsupportedVersion(v),
@@ -187,6 +189,7 @@ impl Contents {
         if material.descriptor.member(&me.public().sig_pk).is_none() {
             return Err(BackupError::NotAMember);
         }
+        crate::node::check_address(&material.descriptor).map_err(|_| BackupError::WrongAddress)?;
         Ok(material)
     }
 }
@@ -396,29 +399,45 @@ mod tests {
     /// Backups made by version 1 and 2 builds still restore (no names, no log copy).
     #[test]
     fn older_backups_migrate() {
+        use orchard::keys::{FullViewingKey, SpendingKey};
         let mut rng = StdRng::seed_from_u64(9);
         let me = Identity::generate(&mut rng);
+        let sk = (0u8..)
+            .find_map(|i| Option::<SpendingKey>::from(SpendingKey::from_bytes([i; 32])))
+            .unwrap();
+        let ak: [u8; 32] = FullViewingKey::from(&sk).to_bytes()[..32]
+            .try_into()
+            .unwrap();
+        let keys =
+            crate::keys::VaultKeys::derive(&crate::keys::VaultSecret::from_bytes([5; 32]), &ak)
+                .unwrap();
+        let mut descriptor = VaultDescriptor {
+            vault_id: [7; 16],
+            version: version::DESCRIPTOR,
+            name: "Grants".into(),
+            network: "regtest".into(),
+            threshold: 1,
+            members: vec![MemberInfo {
+                identity: *me.public(),
+                frost_id: vec![1],
+                name: "m".into(),
+            }],
+            group_public_key: ak,
+            ufvk: keys
+                .ufvk()
+                .unwrap()
+                .encode(&crate::wallet::regtest_network())
+                .unwrap(),
+            address: String::new(),
+            use_qsk: true,
+            birthday_height: 2,
+            proposal_expiry_blocks: 8064,
+            epoch: 0,
+            transcript_hash: [2; 32],
+        };
+        descriptor.address = crate::node::ufvk_address(&descriptor).unwrap();
         let material = VaultMaterial {
-            descriptor: VaultDescriptor {
-                vault_id: [7; 16],
-                version: version::DESCRIPTOR,
-                name: "Grants".into(),
-                network: "regtest".into(),
-                threshold: 1,
-                members: vec![MemberInfo {
-                    identity: *me.public(),
-                    frost_id: vec![1],
-                    name: "m".into(),
-                }],
-                group_public_key: [1; 32],
-                ufvk: "uviewregtest1...".into(),
-                address: "uregtest1...".into(),
-                use_qsk: true,
-                birthday_height: 2,
-                proposal_expiry_blocks: 8064,
-                epoch: 0,
-                transcript_hash: [2; 32],
-            },
+            descriptor,
             key_package: vec![3; 40],
             public_key_package: vec![4; 40],
             vault_secret: [5; 32],

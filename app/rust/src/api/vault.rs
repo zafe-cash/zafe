@@ -254,21 +254,21 @@ pub fn setup_step(
             // Sealed with the words known: members and words can't change any more, so
             // "They match" and key generation steps reuse them (the membership step is
             // ~4 s over Tor). Steps before the tap still ask the relay (a cancelled setup).
-            let key = (
+            let sealed = (
                 relay.base_url().to_owned(),
                 invite.label,
                 me.public().sig_pk,
             );
             if confirmed_safety_number.is_some() || node::keygen_started(&dir) {
-                if let Some(m) = SEALED.lock().ok().and_then(|c| c.get(&key).cloned()) {
+                if let Some(m) = SEALED.lock().ok().and_then(|c| c.get(&sealed).cloned()) {
                     return Ok(m);
                 }
             }
-            let m = node::membership(&relay, &me, &invite).await?;
-            let m = node::seal_when_full(&relay, &me, &invite, m).await?;
+            let m = node::membership(&relay, &me, &invite, &dir, &key).await?;
+            let m = node::seal_when_full(&relay, &me, &invite, m, &dir, &key).await?;
             if m.sealed && m.safety_words.is_some() {
                 if let Ok(mut cache) = SEALED.lock() {
-                    cache.insert(key, m.clone());
+                    cache.insert(sealed, m.clone());
                 }
             }
             Ok::<_, node::NodeError>(m)
@@ -407,7 +407,7 @@ pub fn vault_summary(material: Vec<u8>) -> Result<VaultSummary, ZafeError> {
         vault_id: hex::encode(d.vault_id),
         name: d.name.clone(),
         network: d.network.clone(),
-        address: d.address.clone(),
+        address: node::ufvk_address(d)?,
         threshold: d.threshold,
         members: d
             .members

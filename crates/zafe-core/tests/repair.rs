@@ -48,17 +48,15 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
         join_vault(relay, id, &invite).await.unwrap();
     }
     seal(relay, &ids[0], &invite).await.unwrap();
-    let number = futures::future::join_all(ids.iter().map(|id| {
-        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
-    }))
-    .await
-    .into_iter()
-    .map(Result::unwrap)
-    .reduce(|a, b| {
-        assert_eq!(a, b, "every member sees the same safety words");
-        a
-    })
-    .unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| safety_words(relay, id, &invite)))
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .reduce(|a, b| {
+            assert_eq!(a, b, "every member sees the same safety words");
+            a
+        })
+        .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let mut rngs: Vec<StdRng> = (0..n)
@@ -83,8 +81,8 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
                     creator_expiry_blocks: None,
                     max_birthday: None,
                 },
-                keygen_dir(),
-                keygen_key(),
+                member_dir(relay, id),
+                setup_key(id),
                 rng,
                 timeout,
             )
@@ -127,7 +125,7 @@ fn sign_together(a: &VaultMaterial, b: &VaultMaterial, rng: &mut StdRng) {
 async fn compare_words(relay: &RelayClient, cosigner: &Identity, new: &Identity) -> String {
     let mut words = None;
     for _ in 0..4 {
-        let shown_new = recovery_checks(relay, new).await.unwrap();
+        let shown_new = recovery_checks(relay, new, &pins()).await.unwrap();
         if let Some(w) = new_phone_words(relay, cosigner, new.public())
             .await
             .unwrap()
@@ -137,7 +135,7 @@ async fn compare_words(relay: &RelayClient, cosigner: &Identity, new: &Identity)
         }
     }
     let (w, _) = words.expect("the check finishes in a few polls");
-    let shown = recovery_checks(relay, new).await.unwrap();
+    let shown = recovery_checks(relay, new, &pins()).await.unwrap();
     let on_new = shown
         .iter()
         .find(|c| c.cosigner == cosigner.public().sig_pk)
@@ -157,9 +155,9 @@ async fn a_swapped_recovery_code_shows_words_the_new_phone_does_not() {
     let real = Identity::generate(&mut rng);
     let attacker = Identity::generate(&mut rng);
     // The real phone has its screen open; the co-signer received the attacker's code.
-    recovery_checks(&relay, &real).await.unwrap();
+    recovery_checks(&relay, &real, &pins()).await.unwrap();
     let words = compare_words(&relay, &ids[1], &attacker).await;
-    let on_real = recovery_checks(&relay, &real).await.unwrap();
+    let on_real = recovery_checks(&relay, &real, &pins()).await.unwrap();
     assert!(on_real.is_empty(), "the real phone was never challenged");
     // Approving the attacker's phone needs the words the co-signer's phone shows for it;
     // with any others it refuses.
@@ -217,8 +215,12 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let words_b = compare_words(&relay, &ids[1], &fresh).await;
     let words_c = compare_words(&relay, &ids[2], &fresh).await;
     assert_ne!(words_b, words_c, "each co-signer has its own words");
+    // The person taps "Words match" on the rows of the co-signers they compared with.
+    let confirmed = [ids[1].public().sig_pk, ids[2].public().sig_pk];
     assert!(matches!(
-        try_recover(&relay, &fresh, label).await.unwrap(),
+        try_recover(&relay, &fresh, label, &confirmed)
+            .await
+            .unwrap(),
         RecoveryStatus::Waiting
     ));
 
@@ -247,7 +249,9 @@ async fn a_lost_seat_moves_to_a_new_device() {
         Err(NodeError::Invalid(_))
     ));
     assert!(matches!(
-        try_recover(&relay, &fresh, label).await.unwrap(),
+        try_recover(&relay, &fresh, label, &confirmed)
+            .await
+            .unwrap(),
         RecoveryStatus::Waiting
     ));
 
@@ -273,7 +277,9 @@ async fn a_lost_seat_moves_to_a_new_device() {
         "the lost device is out"
     );
     assert!(matches!(
-        try_recover(&relay, &fresh, label).await.unwrap(),
+        try_recover(&relay, &fresh, label, &confirmed)
+            .await
+            .unwrap(),
         RecoveryStatus::SeatMoved { received: 0, .. }
     ));
 
@@ -290,7 +296,9 @@ async fn a_lost_seat_moves_to_a_new_device() {
         .unwrap();
     assert_eq!((second.deltas_sent, second.sigmas_sent), (1, 1));
     assert!(matches!(
-        try_recover(&relay, &fresh, label).await.unwrap(),
+        try_recover(&relay, &fresh, label, &confirmed)
+            .await
+            .unwrap(),
         RecoveryStatus::SeatMoved {
             received: 1,
             needed: 2
@@ -306,8 +314,9 @@ async fn a_lost_seat_moves_to_a_new_device() {
         .unwrap();
     assert_eq!(again, Default::default());
 
-    let RecoveryStatus::Done { material, invite } =
-        try_recover(&relay, &fresh, label).await.unwrap()
+    let RecoveryStatus::Done { material, invite } = try_recover(&relay, &fresh, label, &confirmed)
+        .await
+        .unwrap()
     else {
         panic!("not recovered");
     };
@@ -389,22 +398,24 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
 
     // Only a member who isn't helping can take over, and only from a helper.
     let stalled = ids[2].public().sig_pk;
+    let (helping, taker) = (ids[1].public().sig_pk, ids[3].public().sig_pk);
     assert!(
-        retry_repair(&relay, &ids[1], &m[1], index, stalled, &mut rng)
+        retry_repair(&relay, &ids[1], &m[1], index, stalled, helping, &mut rng)
             .await
             .is_err()
     );
-    assert!(retry_repair(
-        &relay,
-        &ids[3],
-        &m[3],
-        index,
-        ids[3].public().sig_pk,
-        &mut rng
-    )
-    .await
-    .is_err());
-    retry_repair(&relay, &ids[3], &m[3], index, stalled, &mut rng)
+    assert!(
+        retry_repair(&relay, &ids[3], &m[3], index, taker, taker, &mut rng)
+            .await
+            .is_err()
+    );
+    retry_repair(&relay, &ids[3], &m[3], index, stalled, taker, &mut rng)
+        .await
+        .unwrap();
+    // One member's offer waits for the other helper to agree (rule 4).
+    let (_, state) = load_state(&relay, &ids[1], &m[1]).await.unwrap();
+    assert_eq!(state.replacements[0].attempt, 0);
+    retry_repair(&relay, &ids[1], &m[1], index, stalled, taker, &mut rng)
         .await
         .unwrap();
     let (_, state) = load_state(&relay, &ids[1], &m[1]).await.unwrap();
@@ -431,7 +442,9 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
         .unwrap();
         assert_eq!(report.sigmas_sent, sigmas, "member {i}");
     }
-    let RecoveryStatus::Done { material, .. } = try_recover(&relay, &fresh, None).await.unwrap()
+    let confirmed = [ids[1].public().sig_pk, ids[2].public().sig_pk];
+    let RecoveryStatus::Done { material, .. } =
+        try_recover(&relay, &fresh, None, &confirmed).await.unwrap()
     else {
         panic!("not recovered");
     };
@@ -443,12 +456,320 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A fresh directory for one member's key-generation state.
-fn keygen_dir() -> std::path::PathBuf {
-    tempfile::tempdir().unwrap().keep()
+/// Rule 1: a co-signer who challenges after the new phone revealed its value to another
+/// co-signer can't know the words the new phone will show it: each co-signer's check has
+/// its own secret.
+#[tokio::test]
+async fn a_late_challenger_cant_predict_the_new_phones_words() {
+    use zafe_proto::relay::RecoveryValueKind;
+    let relay = RelayClient::new(start_relay().await);
+    let mut rng = StdRng::seed_from_u64(75);
+    let (new, cosigner, late) = (
+        Identity::generate(&mut rng),
+        Identity::generate(&mut rng),
+        Identity::generate(&mut rng),
+    );
+    compare_words(&relay, &cosigner, &new).await;
+    let (subject, late_pk) = (new.public().sig_pk, late.public().sig_pk);
+    let seen = relay.recovery_read(&late, subject).await.unwrap();
+    let revealed = seen
+        .iter()
+        .find(|v| v.payload.kind == RecoveryValueKind::Reveal)
+        .unwrap()
+        .payload
+        .value;
+    relay
+        .recovery_put(
+            &late,
+            subject,
+            late_pk,
+            RecoveryValueKind::Announce,
+            [0; 32],
+        )
+        .await
+        .unwrap();
+    recovery_checks(&relay, &new, &pins()).await.unwrap();
+    let challenge = [7; 32];
+    relay
+        .recovery_put(
+            &late,
+            subject,
+            late_pk,
+            RecoveryValueKind::Challenge,
+            challenge,
+        )
+        .await
+        .unwrap();
+    let shown = recovery_checks(&relay, &new, &pins()).await.unwrap();
+    let shown = shown.iter().find(|c| c.cosigner == late_pk).unwrap();
+    let predicted = zafe_core::sas::recovery_words(new.public(), &late_pk, &revealed, &challenge);
+    assert_ne!(shown.words, predicted);
 }
 
-/// The key that encrypts it (any fixed key will do in tests).
-fn keygen_key() -> zafe_core::nonce_store::NonceKey {
-    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
+/// Rule 1: once the new phone revealed its secret to a co-signer, the challenge it answered
+/// is pinned. A relay that serves that co-signer's challenge again with another value
+/// (chosen knowing the secret, to match words it wants) gets the row refused, not new words.
+#[tokio::test]
+async fn a_challenge_swapped_after_the_reveal_is_refused() {
+    use zafe_proto::relay::{RecoveryPut, RecoveryValueKind, Signed};
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("relay.sqlite");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = zafe_relay::Relay::open(&db).unwrap().router();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let relay = RelayClient::new(format!("http://{addr}"));
+    let mut rng = StdRng::seed_from_u64(78);
+    let (new, cosigner) = (Identity::generate(&mut rng), Identity::generate(&mut rng));
+    let words = compare_words(&relay, &cosigner, &new).await;
+
+    let (subject, key) = (new.public().sig_pk, cosigner.public().sig_pk);
+    let swapped = Signed::new(
+        &cosigner,
+        RecoveryPut {
+            subject,
+            cosigner: key,
+            kind: RecoveryValueKind::Challenge,
+            value: [9; 32],
+            timestamp: 1,
+        },
+    )
+    .unwrap()
+    .to_bytes()
+    .unwrap();
+    let n = rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute(
+            "UPDATE recovery_values SET signed = ?1 WHERE subject = ?2 AND cosigner = ?3 AND kind = ?4",
+            rusqlite::params![swapped, &subject[..], &key[..], RecoveryValueKind::Challenge as i64],
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    let rows = recovery_checks(&relay, &new, &pins()).await.unwrap();
+    assert!(
+        rows.iter().all(|c| c.cosigner != key),
+        "shown {rows:?}, compared {words}"
+    );
+}
+
+/// A 2-of-4 vault: member 0's seat moves to `fresh` (approved by 1 and 2, who both send
+/// their sigma), then the repair restarts with 3 in place of 2 and helpers 1 and 3 send
+/// theirs, with `log_key` in place of the vault's if given. Returns ids, materials, fresh.
+async fn restarted_repair(
+    relay: &RelayClient,
+    log_key: Option<[u8; 32]>,
+) -> (Vec<Identity>, Vec<VaultMaterial>, Identity) {
+    let (ids, m) = vault(relay, 4).await;
+    let mut rng = StdRng::seed_from_u64(80);
+    let dir = tempfile::tempdir().unwrap().keep();
+    let fresh = Identity::generate(&mut rng);
+    let request = RecoveryRequest {
+        identity: *fresh.public(),
+    };
+    let old = ids[0].public().sig_pk;
+    for i in [1, 2] {
+        let words = compare_words(relay, &ids[i], &fresh).await;
+        approve_replacement(relay, &ids[i], &m[i], old, &request, &words, &mut rng)
+            .await
+            .unwrap();
+    }
+    // `sent` is the material whose vault data goes into the sigma.
+    let help = |i: usize, sent: VaultMaterial| {
+        let (id, dir, material) = (&ids[i], dir.join(i.to_string()), &m[i]);
+        async move {
+            let mut rng = StdRng::seed_from_u64(81 + i as u64);
+            let (chain, state) = load_state(relay, id, material).await.unwrap();
+            help_repairs(relay, id, &sent, &chain, &state, &dir, &mut rng)
+                .await
+                .unwrap();
+        }
+    };
+    for i in [1, 2, 1] {
+        help(i, m[i].clone()).await;
+    }
+    let (_, state) = load_state(relay, &ids[1], &m[1]).await.unwrap();
+    let index = state.replacements[0].index;
+    let (stalled, taker) = (ids[2].public().sig_pk, ids[3].public().sig_pk);
+    for i in [3, 1] {
+        retry_repair(relay, &ids[i], &m[i], index, stalled, taker, &mut rng)
+            .await
+            .unwrap();
+    }
+    for i in [1, 3, 1] {
+        let mut material = m[i].clone();
+        if let Some(key) = log_key {
+            material.log_key = key;
+        }
+        help(i, material).await;
+    }
+    (ids, m, fresh)
+}
+
+/// Rule 2: the confirmed co-signer must have approved this seat move. Member 3 helps
+/// after a restart and sends a valid sigma, but never approved the move.
+#[tokio::test]
+async fn a_confirmed_helper_that_didnt_approve_the_move_is_refused() {
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, _, fresh) = restarted_repair(&relay, None).await;
+    let confirmed = [ids[3].public().sig_pk];
+    let err = try_recover(&relay, &fresh, None, &confirmed)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NodeError::Verification(_)), "{err:?}");
+}
+
+/// Rule 2: the confirmed co-signer must still be a member. Member 2 approved the move and
+/// sent a valid sigma, then its own seat moved (the relay still lists its old key).
+#[tokio::test]
+async fn a_confirmed_cosigner_that_is_no_longer_a_member_is_refused() {
+    use zafe_core::{node::append_event, vault::VaultEvent};
+    use zafe_proto::relay::ReplaceApproval;
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, m, fresh) = restarted_repair(&relay, None).await;
+    let mut rng = StdRng::seed_from_u64(82);
+    let elsewhere = Identity::generate(&mut rng);
+    for i in [1, 3] {
+        let (mut chain, mut state) = load_state(&relay, &ids[i], &m[i]).await.unwrap();
+        let approval = ReplaceApproval {
+            mailbox: state.descriptor.vault_id,
+            old: ids[2].public().sig_pk,
+            new: *elsewhere.public(),
+        };
+        let event = VaultEvent::ReplaceApproval {
+            old: approval.old,
+            new: approval.new,
+            signature: approval.sign(&ids[i]).unwrap(),
+        };
+        append_event(
+            &relay, &ids[i], &m[i], &mut chain, &mut state, &event, &mut rng,
+        )
+        .await
+        .unwrap();
+    }
+    let confirmed = [ids[2].public().sig_pk];
+    let err = try_recover(&relay, &fresh, None, &confirmed)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NodeError::Verification(_)), "{err:?}");
+}
+
+/// The vault data comes from the confirmed co-signer: helpers a restart named (here both)
+/// can't hand the new phone another log key than the one that read the log.
+#[tokio::test]
+async fn helpers_with_another_log_key_than_the_confirmed_cosigner_are_refused() {
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, _, fresh) = restarted_repair(&relay, Some([9; 32])).await;
+    let confirmed = [ids[2].public().sig_pk];
+    let err = try_recover(&relay, &fresh, None, &confirmed)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NodeError::Verification(_)), "{err:?}");
+    // With the vault's own key they agree, and the seat is recovered.
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, m, fresh) = restarted_repair(&relay, None).await;
+    let RecoveryStatus::Done { material, .. } =
+        try_recover(&relay, &fresh, None, &[ids[2].public().sig_pk])
+            .await
+            .unwrap()
+    else {
+        panic!("not recovered");
+    };
+    assert_eq!(material.log_key, m[1].log_key);
+}
+
+/// Rule 2: members of another vault (here, all of it) move a seat of theirs to the new
+/// phone, which answers anyone's safety check. The phone doesn't take that vault: the
+/// person compared words only with their own co-signer, who isn't in it.
+#[tokio::test]
+async fn a_vault_the_confirmed_cosigner_isnt_in_is_refused() {
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, m) = vault(&relay, 3).await;
+    let mut rng = StdRng::seed_from_u64(76);
+    let dir = std::env::temp_dir().join(format!("zafe-repair-fake-{}", std::process::id()));
+    let fresh = Identity::generate(&mut rng);
+    let request = RecoveryRequest {
+        identity: *fresh.public(),
+    };
+    let old = ids[0].public().sig_pk;
+    for i in [1, 2] {
+        let words = compare_words(&relay, &ids[i], &fresh).await;
+        approve_replacement(&relay, &ids[i], &m[i], old, &request, &words, &mut rng)
+            .await
+            .unwrap();
+    }
+    for i in [1, 2, 1] {
+        let (chain, state) = load_state(&relay, &ids[i], &m[i]).await.unwrap();
+        help_repairs(
+            &relay,
+            &ids[i],
+            &m[i],
+            &chain,
+            &state,
+            &dir.join(i.to_string()),
+            &mut rng,
+        )
+        .await
+        .unwrap();
+    }
+    let own_cosigner = Identity::generate(&mut rng).public().sig_pk;
+    assert!(!matches!(
+        try_recover(&relay, &fresh, None, &[own_cosigner])
+            .await
+            .unwrap(),
+        RecoveryStatus::Done { .. }
+    ));
+    // Only by confirming a member of that vault would the phone take it.
+    let theirs = [ids[1].public().sig_pk];
+    assert!(matches!(
+        try_recover(&relay, &fresh, None, &theirs).await.unwrap(),
+        RecoveryStatus::Done { .. }
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One member's setup state dir in this test's relay: the safety check and key generation
+/// share it (the safety value lives there).
+fn member_dir(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+) -> std::path::PathBuf {
+    let port = relay
+        .base_url()
+        .rsplit(':')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    std::env::temp_dir().join(format!(
+        "zafe-setup-{}-{port}-{}",
+        std::process::id(),
+        hex::encode(&id.public().sig_pk[..8])
+    ))
+}
+
+/// The key that seals one member's setup state (any fixed key per member will do).
+fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
+}
+
+/// One member's safety words for `invite`, polled from its setup state dir.
+async fn safety_words(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+    invite: &zafe_core::node::Invite,
+) -> Result<String, zafe_core::node::NodeError> {
+    zafe_core::node::wait_for_safety_words(
+        relay,
+        id,
+        invite,
+        &member_dir(relay, id),
+        &setup_key(id),
+        std::time::Duration::from_secs(30),
+    )
+    .await
+}
+
+/// Where new phones in these tests keep their seat recovery pins (one file per identity
+/// and co-signer, so one directory serves every test).
+fn pins() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("zafe-recovery-pins-{}", std::process::id()))
 }

@@ -160,6 +160,10 @@ enum Command {
         /// Without it, every mailbox `--relay` lists for this device is checked.
         #[arg(long)]
         link: Option<String>,
+        /// A co-signer (hex key) whose safety words matched; the vault is taken only
+        /// through one of them. Repeat for each.
+        #[arg(long)]
+        confirm: Vec<String>,
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
@@ -190,8 +194,14 @@ enum SeatCmd {
     List,
     /// Do this member's part in repairing a moved seat's key (and save the new membership).
     Repair,
-    /// Take over from a helper who stalled the repair of the seat moved at `replacement`.
-    Retry { replacement: u64, stalled: String },
+    /// Take over from a helper who stalled the repair of the seat moved at `replacement`;
+    /// a helper passes `--taker` to agree to another member's offer.
+    Retry {
+        replacement: u64,
+        stalled: String,
+        #[arg(long)]
+        taker: Option<String>,
+    },
     /// Print the link a new device recovering a seat needs (`zafe recover --link`): the
     /// vault's relay and mailbox.
     Link,
@@ -743,18 +753,42 @@ async fn main() -> Result<()> {
                             r.attempt,
                             helpers.join(", ")
                         );
+                        for (list, asked) in &r.retries {
+                            let list: Vec<String> = list.iter().map(hex::encode).collect();
+                            println!(
+                                "  restart with {} asked by {}/{}",
+                                list.join(", "),
+                                asked.len(),
+                                state.descriptor.threshold
+                            );
+                        }
                     }
                 }
                 SeatCmd::Retry {
                     replacement,
                     stalled,
+                    taker,
                 } => {
-                    let stalled: [u8; 32] = hex::decode(stalled.trim())?
-                        .try_into()
-                        .map_err(|_| anyhow!("stalled must be a 32-byte hex key"))?;
-                    repair::retry_repair(&relay, &me, &material, replacement, stalled, &mut rng)
-                        .await?;
-                    println!("retrying with you as a helper");
+                    let key = |hex_key: &str| -> anyhow::Result<[u8; 32]> {
+                        hex::decode(hex_key.trim())?
+                            .try_into()
+                            .map_err(|_| anyhow!("keys are 32 bytes of hex"))
+                    };
+                    let taker = match taker {
+                        Some(t) => key(&t)?,
+                        None => me.public().sig_pk,
+                    };
+                    repair::retry_repair(
+                        &relay,
+                        &me,
+                        &material,
+                        replacement,
+                        key(&stalled)?,
+                        taker,
+                        &mut rng,
+                    )
+                    .await?;
+                    println!("asked to restart; it starts once every new helper asked");
                 }
                 SeatCmd::Link => {
                     println!(
@@ -784,9 +818,18 @@ async fn main() -> Result<()> {
         Command::Recover {
             wait,
             link,
+            confirm,
             timeout_secs,
         } => {
             let link = link.as_deref().map(repair::SeatLink::decode).transpose()?;
+            let confirmed = confirm
+                .iter()
+                .map(|k| {
+                    hex::decode(k.trim())?
+                        .try_into()
+                        .map_err(|_| anyhow!("--confirm takes a 32-byte hex key"))
+                })
+                .collect::<anyhow::Result<Vec<[u8; 32]>>>()?;
             let relay = match &link {
                 Some(l) => RelayClient::new(&l.relay_url),
                 None => relay.clone(),
@@ -808,14 +851,16 @@ async fn main() -> Result<()> {
             let mut shown = std::collections::BTreeSet::new();
             loop {
                 // The safety check: each co-signer's words, once, as they arrive.
-                if let Ok(checks) = repair::recovery_checks(&relay, &me).await {
+                if let Ok(checks) =
+                    repair::recovery_checks(&relay, &me, &home.path(state_dir::RECOVERY)).await
+                {
                     for c in checks {
                         if shown.insert(c.cosigner) {
                             eprintln!("safety words with {}: {}", hex::encode(c.cosigner), c.words);
                         }
                     }
                 }
-                match repair::try_recover(&relay, &me, label).await? {
+                match repair::try_recover(&relay, &me, label, &confirmed).await? {
                     RecoveryStatus::Done { material, invite } => {
                         fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
                         fs::write(home.path(INVITE_FILE), invite.encode())?;
@@ -938,7 +983,9 @@ async fn vault(
         }
         VaultCmd::Members { wait } => {
             let (me, invite) = (home.identity()?, home.invite()?);
-            let m = node::membership(relay, &me, &invite).await?;
+            // The home is the state dir, as for key generation.
+            let key = NonceKey::derive(&fs::read(home.path(IDENTITY_FILE))?, &invite.vault_id);
+            let m = node::membership(relay, &me, &invite, &home.0, &key).await?;
             for member in &m.members {
                 println!("member {}", hex::encode(member.sig_pk));
             }
@@ -946,8 +993,15 @@ async fn vault(
             let words = match (m.safety_words, wait) {
                 (Some(words), _) => Some(words),
                 (None, true) => Some(
-                    node::wait_for_safety_words(relay, &me, &invite, Duration::from_secs(300))
-                        .await?,
+                    node::wait_for_safety_words(
+                        relay,
+                        &me,
+                        &invite,
+                        &home.0,
+                        &key,
+                        Duration::from_secs(300),
+                    )
+                    .await?,
                 ),
                 (None, false) => {
                     for pk in &m.waiting_for {

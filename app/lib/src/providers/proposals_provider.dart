@@ -515,9 +515,14 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return moved;
   }
 
-  /// Takes over from `stalledKeyHex`, a helper not doing its part in rebuilding the key of
-  /// the seat moved at `replacement`.
-  Future<void> retryRepair(BigInt replacement, String stalledKeyHex) async {
+  /// Asks to restart rebuilding the key of the seat moved at `replacement` with
+  /// `takerKeyHex` (this phone offering, or the member whose offer it agrees to) in place
+  /// of `stalledKeyHex`, a helper not doing its part.
+  Future<void> retryRepair(
+    BigInt replacement,
+    String stalledKeyHex,
+    String takerKeyHex,
+  ) async {
     final vault = _vault;
     await rust.retryRepair(
       relayUrl: _endpoints.relayUrl,
@@ -525,6 +530,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       replacement: replacement,
       stalledKeyHex: stalledKeyHex,
+      takerKeyHex: takerKeyHex,
     );
     await refreshFresh();
   }

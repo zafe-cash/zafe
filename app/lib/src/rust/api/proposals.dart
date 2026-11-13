@@ -72,20 +72,24 @@ Future<ProposalList> listProposals({
   tipHeight: tipHeight,
 );
 
-/// Takes over from `stalled_key_hex`, a helper not doing its part in rebuilding a moved
-/// seat's key: a new attempt starts with this member in its place.
+/// Asks to restart rebuilding a moved seat's key with `taker_key_hex` in place of
+/// `stalled_key_hex`, a helper not doing its part: this member offering to help, or a
+/// helper agreeing to another member's offer. The restart starts once every new helper
+/// asked.
 Future<void> retryRepair({
   required String relayUrl,
   required List<int> seeds,
   required List<int> material,
   required BigInt replacement,
   required String stalledKeyHex,
+  required String takerKeyHex,
 }) => RustLib.instance.api.crateApiProposalsRetryRepair(
   relayUrl: relayUrl,
   seeds: seeds,
   material: material,
   replacement: replacement,
   stalledKeyHex: stalledKeyHex,
+  takerKeyHex: takerKeyHex,
 );
 
 /// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
@@ -732,14 +736,18 @@ class RepairInfo {
   /// The members rebuilding it in the current attempt (hex keys).
   final List<String> helpers;
 
-  /// 0 for the approvers' attempt, +1 per retry.
+  /// 0 for the approvers' attempt, +1 per restart.
   final int attempt;
+
+  /// Restarts asked for in this attempt: each starts once every helper it names asked.
+  final List<RepairRestart> restarts;
 
   const RepairInfo({
     required this.replacement,
     required this.newKeyHex,
     required this.helpers,
     required this.attempt,
+    required this.restarts,
   });
 
   @override
@@ -747,7 +755,8 @@ class RepairInfo {
       replacement.hashCode ^
       newKeyHex.hashCode ^
       helpers.hashCode ^
-      attempt.hashCode;
+      attempt.hashCode ^
+      restarts.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -757,7 +766,30 @@ class RepairInfo {
           replacement == other.replacement &&
           newKeyHex == other.newKeyHex &&
           helpers == other.helpers &&
-          attempt == other.attempt;
+          attempt == other.attempt &&
+          restarts == other.restarts;
+}
+
+/// A restart of a key repair some members asked for.
+class RepairRestart {
+  /// The helpers it names (hex keys).
+  final List<String> helpers;
+
+  /// Who asked so far (hex keys).
+  final List<String> asked;
+
+  const RepairRestart({required this.helpers, required this.asked});
+
+  @override
+  int get hashCode => helpers.hashCode ^ asked.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RepairRestart &&
+          runtimeType == other.runtimeType &&
+          helpers == other.helpers &&
+          asked == other.asked;
 }
 
 /// This device's independent check of a proposal (spec §9.3).

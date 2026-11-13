@@ -171,6 +171,8 @@ abstract class RustLibApi extends BaseApi {
     required String relayUrl,
     required List<int> seeds,
     String? label,
+    required List<String> confirmed,
+    required String recoveryDir,
   });
 
   Future<RelayCheck> crateApiEndpointsCheckRelay({required String relayUrl});
@@ -402,6 +404,7 @@ abstract class RustLibApi extends BaseApi {
     required List<int> material,
     required BigInt replacement,
     required String stalledKeyHex,
+    required String takerKeyHex,
   });
 
   Future<ReviewInfo> crateApiProposalsReviewProposal({
@@ -1020,6 +1023,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String relayUrl,
     required List<int> seeds,
     String? label,
+    required List<String> confirmed,
+    required String recoveryDir,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1028,6 +1033,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(relayUrl, serializer);
           sse_encode_list_prim_u_8_loose(seeds, serializer);
           sse_encode_opt_String(label, serializer);
+          sse_encode_list_String(confirmed, serializer);
+          sse_encode_String(recoveryDir, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1040,7 +1047,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiRepairCheckRecoveryConstMeta,
-        argValues: [relayUrl, seeds, label],
+        argValues: [relayUrl, seeds, label, confirmed, recoveryDir],
         apiImpl: this,
       ),
     );
@@ -1049,7 +1056,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiRepairCheckRecoveryConstMeta =>
       const TaskConstMeta(
         debugName: "check_recovery",
-        argNames: ["relayUrl", "seeds", "label"],
+        argNames: ["relayUrl", "seeds", "label", "confirmed", "recoveryDir"],
       );
 
   @override
@@ -2562,6 +2569,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required List<int> material,
     required BigInt replacement,
     required String stalledKeyHex,
+    required String takerKeyHex,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2572,6 +2580,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_list_prim_u_8_loose(material, serializer);
           sse_encode_u_64(replacement, serializer);
           sse_encode_String(stalledKeyHex, serializer);
+          sse_encode_String(takerKeyHex, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -2584,7 +2593,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_zafe_error,
         ),
         constMeta: kCrateApiProposalsRetryRepairConstMeta,
-        argValues: [relayUrl, seeds, material, replacement, stalledKeyHex],
+        argValues: [
+          relayUrl,
+          seeds,
+          material,
+          replacement,
+          stalledKeyHex,
+          takerKeyHex,
+        ],
         apiImpl: this,
       ),
     );
@@ -2599,6 +2615,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "material",
           "replacement",
           "stalledKeyHex",
+          "takerKeyHex",
         ],
       );
 
@@ -3754,6 +3771,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RepairRestart> dco_decode_list_repair_restart(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_repair_restart).toList();
+  }
+
+  @protected
   List<ScannedPayment> dco_decode_list_scanned_payment(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_scanned_payment).toList();
@@ -4138,13 +4161,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RepairInfo dco_decode_repair_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return RepairInfo(
       replacement: dco_decode_u_64(arr[0]),
       newKeyHex: dco_decode_String(arr[1]),
       helpers: dco_decode_list_String(arr[2]),
       attempt: dco_decode_u_32(arr[3]),
+      restarts: dco_decode_list_repair_restart(arr[4]),
+    );
+  }
+
+  @protected
+  RepairRestart dco_decode_repair_restart(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return RepairRestart(
+      helpers: dco_decode_list_String(arr[0]),
+      asked: dco_decode_list_String(arr[1]),
     );
   }
 
@@ -4736,6 +4772,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RepairRestart> sse_decode_list_repair_restart(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <RepairRestart>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_repair_restart(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<ScannedPayment> sse_decode_list_scanned_payment(
     SseDeserializer deserializer,
   ) {
@@ -5251,12 +5301,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_newKeyHex = sse_decode_String(deserializer);
     var var_helpers = sse_decode_list_String(deserializer);
     var var_attempt = sse_decode_u_32(deserializer);
+    var var_restarts = sse_decode_list_repair_restart(deserializer);
     return RepairInfo(
       replacement: var_replacement,
       newKeyHex: var_newKeyHex,
       helpers: var_helpers,
       attempt: var_attempt,
+      restarts: var_restarts,
     );
+  }
+
+  @protected
+  RepairRestart sse_decode_repair_restart(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_helpers = sse_decode_list_String(deserializer);
+    var var_asked = sse_decode_list_String(deserializer);
+    return RepairRestart(helpers: var_helpers, asked: var_asked);
   }
 
   @protected
@@ -5860,6 +5920,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_repair_restart(
+    List<RepairRestart> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_repair_restart(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_scanned_payment(
     List<ScannedPayment> self,
     SseSerializer serializer,
@@ -6257,6 +6329,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.newKeyHex, serializer);
     sse_encode_list_String(self.helpers, serializer);
     sse_encode_u_32(self.attempt, serializer);
+    sse_encode_list_repair_restart(self.restarts, serializer);
+  }
+
+  @protected
+  void sse_encode_repair_restart(RepairRestart self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_String(self.helpers, serializer);
+    sse_encode_list_String(self.asked, serializer);
   }
 
   @protected

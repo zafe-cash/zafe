@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/formatting/member_label.dart';
 import '../../core/layout/mobile/zafe_screen.dart';
+import '../../core/storage/zafe_paths.dart';
 import '../../core/storage/zafe_secure_store.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_confirm.dart';
@@ -25,10 +26,10 @@ import '../../rust/api/repair.dart' as rust;
 import '../../rust/api/vault.dart' as rust_vault;
 
 /// A new phone takes over a lost signer's seat without a backup (spec §10.1): it shows a
-/// recovery code for a co-signer and a safety code to read out, then waits until enough
-/// co-signers approved and their phones rebuilt its key. Before saving, the member checks
-/// the vault's address with a co-signer: this phone can't know which vault to expect, so a
-/// dishonest relay could otherwise present a vault of its own.
+/// recovery code for a co-signer and each co-signer's safety words, which the person
+/// confirms row by row, then waits until enough co-signers approved and their phones
+/// rebuilt its key. The vault is taken only through a co-signer the person confirmed
+/// (rule 2); before saving, the member also checks the vault's address with a co-signer.
 class RecoverScreen extends ConsumerStatefulWidget {
   const RecoverScreen({super.key});
 
@@ -41,6 +42,9 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   List<int>? _seeds;
   rust.RecoveryCode? _code;
   rust.RecoveryProgress? _progress;
+
+  /// Co-signers (hex keys) whose words the person confirmed.
+  List<String> _confirmed = const [];
   Object? _error;
   Timer? _timer;
   bool _checking = false;
@@ -74,8 +78,15 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     }
     // Kept on "Start over" (same vault); dropped with the identity when rejected.
     final link = await _store.readRecoveryLink();
+    // Confirmations and pins belong to the identity: a new code starts without any.
+    if (fresh) {
+      await _store.writeRecoveryConfirmed(const []);
+      await (await ZafePaths.get()).deleteRecovery();
+    }
+    final confirmed = await _store.readRecoveryConfirmed();
     if (!mounted) return;
     setState(() {
+      _confirmed = confirmed;
       _link = link == null ? null : _tryLink(link);
       _seeds = seeds;
       _code = rust.recoveryCode(seeds: seeds!);
@@ -98,6 +109,8 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
         relayUrl: link?.relayUrl ?? ref.read(endpointsProvider).relayUrl,
         seeds: seeds,
         label: link?.label,
+        confirmed: _confirmed,
+        recoveryDir: (await ZafePaths.get()).recoveryDir,
       );
       if (!mounted) return;
       setState(() {
@@ -113,6 +126,15 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     } finally {
       _checking = false;
     }
+  }
+
+  /// The person compared words with this co-signer and they match.
+  Future<void> _confirm(String keyHex) async {
+    final confirmed = [..._confirmed, keyHex];
+    await _store.writeRecoveryConfirmed(confirmed);
+    if (!mounted) return;
+    setState(() => _confirmed = confirmed);
+    unawaited(_check());
   }
 
   static rust.SeatLinkInfo? _tryLink(String text) {
@@ -172,6 +194,7 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       rethrow;
     }
     await _store.deleteRecoveryIdentity();
+    await (await ZafePaths.get()).deleteRecovery();
     if (!mounted) return;
     // The key now exists only here: offer a backup first, as after key generation.
     context.go('/backup-prompt');
@@ -253,6 +276,8 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
           RecoverBody(
             code: code.code,
             checks: _progress?.checks ?? const [],
+            confirmed: _confirmed,
+            onConfirm: _confirm,
             stage: _progress?.stage,
             received: _progress?.received ?? 0,
             needed: _progress?.needed ?? 0,
@@ -281,6 +306,8 @@ class RecoverBody extends StatelessWidget {
     super.key,
     required this.code,
     this.checks = const [],
+    this.confirmed = const [],
+    this.onConfirm,
     this.stage,
     this.received = 0,
     this.needed = 0,
@@ -302,6 +329,10 @@ class RecoverBody extends StatelessWidget {
 
   /// Each co-signer's words, once that co-signer opened the code.
   final List<rust.CosignerWords> checks;
+
+  /// Co-signers (hex keys) the person confirmed with "Words match".
+  final List<String> confirmed;
+  final void Function(String keyHex)? onConfirm;
   final rust.RecoveryStage? stage;
   final int received;
   final int needed;
@@ -312,6 +343,8 @@ class RecoverBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final status = switch (stage) {
+      rust.RecoveryStage.repairing when confirmed.isEmpty =>
+        'Approved. Tap Words match for a co-signer you compared words with.',
       rust.RecoveryStage.repairing =>
         needed == 0
             ? 'Approved. Your co-signers\' phones are rebuilding your key.'
@@ -386,10 +419,40 @@ class RecoverBody extends StatelessWidget {
                 color: colors.text.accent,
               ),
             ),
-            const SizedBox(height: AppSpacing.xs),
+            const SizedBox(height: AppSpacing.xxs),
+            if (confirmed.contains(c.cosignerKeyHex))
+              Row(
+                children: [
+                  AppIcon(
+                    AppIcons.checkCircle,
+                    size: 18,
+                    color: colors.icon.accent,
+                  ),
+                  const SizedBox(width: AppSpacing.xxs),
+                  Text(
+                    'Confirmed',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: colors.text.secondary,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Align(
+                alignment: Alignment.centerLeft,
+                child: AppButton(
+                  variant: AppButtonVariant.secondary,
+                  size: AppButtonSize.small,
+                  onPressed: onConfirm == null
+                      ? null
+                      : () => onConfirm!(c.cosignerKeyHex),
+                  child: const Text('Words match'),
+                ),
+              ),
+            const SizedBox(height: AppSpacing.s),
           ],
           Text(
-            'Compare them with each co-signer on a call or in person. If the words differ, or someone you didn\'t ask appears, stop.',
+            'On a call or in person, compare the words with each co-signer and tap Words match on their row. If they differ, or someone you didn\'t ask appears, stop.',
             style: AppTypography.bodySmall.copyWith(color: colors.text.muted),
           ),
         ],

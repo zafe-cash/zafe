@@ -10,7 +10,7 @@ update it in the same change when you finish, defer or find something. `§` refe
 - Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not decided ·
   *(check)* not verified, look before relying on it.
 
-Last updated: 2026-11-12.
+Last updated: 2026-11-13.
 
 ## Now: relay moves (merged 2026-10-27)
 
@@ -446,6 +446,25 @@ Security audit and races (2026-10-14, fixed by 2026-10-15; `docs/audit-scope.md`
       choice, the fee row shows it).
 - [ ] Ship the action bound in the next app release (and `zafe` CLI members): class
       `essential` (security fix), notes credit "@danielgorgonha from @deegalabs".
+
+Security review 2026-11, batch 1: safety words, recovery and address
+(`docs/security-review-2026-11.md`; not committed yet, 2026-11-13):
+- [x] Setup secret bound to the sealed member list (`sas::secret`); seat recovery runs one
+      check per co-signer (`/v1/seat-check/*`, `RELAY_DB` 5); the recovering phone takes a
+      vault only through a co-signer confirmed with **Words match**; descriptor address
+      checked against the UFVK and shown from it; co-signers' seat-check writes charged per
+      address; `RepairRetry` needs every named helper (`VAULT_EVENT` 11, **Agree**). Live run on the
+      emulator 2026-11-13 (360x640 dp, 2.0 text): phone as new device with CLI co-signers
+      (no vault until "Words match", then recovered) and phone as co-signer for a CLI new
+      device. Not live-tested: the Agree flow for repair restarts.
+- [x] Stateless reveals could be reset by a hostile relay (found 2026-11-13): reveals are
+      pinned now (setup `safety.pin`; recovery pin per (new identity, co-signer)), and the
+      setup value is random per attempt (`safety.secret`), so rejoining never reuses it.
+- [x] Version transitions: from v11 only current members raise the version floor or count
+      as newer ("update Zafe" hint only; transition notes in the review doc).
+- [ ] Ship with the relay first: the new app needs `/v1/seat-check/*` (an older relay
+      answers 404, "doesn't support safe seat recovery yet"), and an older app's seat
+      recovery fails on the new relay the same way.
 
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,

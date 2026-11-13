@@ -340,8 +340,10 @@ pub enum VaultEvent {
         signature: Vec<u8>,
     },
     /// The repair of a moved seat's key stalled (a helper never did its part): the author
-    /// replaces the helpers with `helpers` (the threshold of current members, the author
-    /// among them, the new key not), starting a new attempt. Event version 5.
+    /// asks to replace the helpers with `helpers` (the threshold of current members, the
+    /// author among them, the new key not). Event version 5. Up to version 10 it starts a
+    /// new attempt at once; from version 11 only once every member of `helpers` logged the
+    /// same list for the current attempt (rule 4: one member can't restart a repair alone).
     RepairRetry {
         /// The move ([`Replacement::index`]).
         replacement: u64,
@@ -408,9 +410,12 @@ pub struct Replacement {
     /// The members repairing the share in the current attempt: the approvers at first, then
     /// whoever a `RepairRetry` named.
     pub helpers: Vec<[u8; 32]>,
-    /// 0 for the approvers' attempt, +1 per `RepairRetry`. Repair messages carry it, so a
+    /// 0 for the approvers' attempt, +1 per restart. Repair messages carry it, so a
     /// stalled attempt's messages never mix with the new one's.
     pub attempt: u32,
+    /// Restarts asked for in the current attempt (version 11 on): the helpers each names,
+    /// and who logged it so far, in log order.
+    pub retries: BTreeMap<Vec<[u8; 32]>, Vec<[u8; 32]>>,
     /// The new device logged `RepairDone`.
     pub done: bool,
 }
@@ -624,19 +629,30 @@ impl VaultState {
     /// Applies one more log entry, recording it in `ignored` if it is invalid.
     pub fn apply_entry(&mut self, entry: &LogEntry, key: &LogKey) {
         let index = entry.header.index;
+        let author = entry.header.author;
         self.record_hash(entry);
+        let current = self.descriptor.member(&author).is_some();
         let result = entry
             .decrypt(key)
             .map_err(|_| VaultError::Undecryptable(index))
             .and_then(|bytes| VaultEvent::from_bytes_versioned(&bytes))
             .and_then(|(event, found)| {
                 let effective = self.effective_version(found);
-                self.max_event_version = self.max_event_version.max(found);
-                let seen = self.member_versions.entry(entry.header.author).or_default();
-                *seen = (*seen).max(found);
-                self.apply_versioned(index, entry.header.author, event, effective)
+                // Only current members' versions count from version 11: a former member's
+                // phone (its entries still chain) can't raise the floor.
+                if current || effective < CURRENT_AUTHORS_FROM {
+                    self.max_event_version = self.max_event_version.max(found);
+                    let seen = self.member_versions.entry(author).or_default();
+                    *seen = (*seen).max(found);
+                }
+                self.apply_versioned(index, author, event, effective)
             });
         if let Err(e) = result {
+            // A newer version is a hint to update only when a current member wrote it.
+            let e = match e {
+                VaultError::UnsupportedVersion(_) if !current => VaultError::NotAMember(index),
+                e => e,
+            };
             self.ignored.push((index, e));
         }
         self.applied = index + 1;
@@ -666,11 +682,16 @@ impl VaultState {
     /// Current members whose app hasn't written a version 10 event yet (it may be older
     /// than relay moves): moving waits for them.
     pub fn members_needing_update(&self) -> Vec<[u8; 32]> {
+        self.members_below(MOVE_FROM)
+    }
+
+    /// Current members whose app hasn't written an event of `version` or later yet.
+    pub fn members_below(&self, version: u16) -> Vec<[u8; 32]> {
         self.descriptor
             .members
             .iter()
             .map(|m| m.identity.sig_pk)
-            .filter(|pk| self.member_versions.get(pk).copied().unwrap_or(0) < MOVE_FROM)
+            .filter(|pk| self.member_versions.get(pk).copied().unwrap_or(0) < version)
             .collect()
     }
 
@@ -991,8 +1012,19 @@ impl VaultState {
                     return Err(bad());
                 }
                 let r = &mut self.replacements[r];
+                if event_version >= REPAIR_QUORUM_FROM {
+                    let asked = r.retries.entry(helpers.clone()).or_default();
+                    if asked.contains(&author) {
+                        return Err(bad());
+                    }
+                    asked.push(author);
+                    if asked.len() < threshold {
+                        return Ok(());
+                    }
+                }
                 r.helpers = helpers;
                 r.attempt += 1;
+                r.retries.clear();
             }
             VaultEvent::RepairDone { replacement } => {
                 let r = self
@@ -1177,6 +1209,7 @@ impl VaultState {
             approvals,
             helpers,
             attempt: 0,
+            retries: BTreeMap::new(),
             done: false,
         });
     }
@@ -1270,6 +1303,16 @@ const POOL_RESET_FROM: u16 = 8;
 
 /// First `VAULT_EVENT` version that has [`VaultEvent::VaultMoved`] (relay moves).
 pub const MOVE_FROM: u16 = 10;
+
+/// First `VAULT_EVENT` version after which only current members' entries raise the
+/// version floor and `member_versions` (and count as newer): a former member's phone can't
+/// change which rules apply. Entries before it replay as before.
+const CURRENT_AUTHORS_FROM: u16 = 11;
+
+/// First `VAULT_EVENT` version whose `RepairRetry` restarts a repair only once every
+/// helper it names logged it. Offered only once every member's app writes it
+/// ([`VaultState::members_below`]).
+pub const REPAIR_QUORUM_FROM: u16 = 11;
 
 /// First `VAULT_EVENT` version after which versions only go up (see
 /// `VaultState::max_event_version`), and proposals must carry a usable PCZT.

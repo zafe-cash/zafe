@@ -139,7 +139,7 @@ pub struct RecoveryProgress {
     /// `VaultMaterial::to_bytes` (secret; `Done` only).
     pub material: Vec<u8>,
     pub invite: String,
-    /// While waiting: the words each co-signer that started the safety check shows.
+    /// Until done: the words each co-signer that started the safety check shows.
     pub checks: Vec<CosignerWords>,
 }
 
@@ -183,13 +183,27 @@ pub fn parse_seat_link(text: String) -> Result<SeatLinkInfo> {
 /// `Done` the key has been checked against the vault (spec §10.4.2), and its relay history
 /// against what every helper vouched for. `relay_url` and `label`: from the co-signer's
 /// seat link ([`parse_seat_link`]); without a label (no link: the app-wide relay), every
-/// mailbox the relay lists for this phone is checked.
+/// mailbox the relay lists for this phone is checked. `confirmed`: the co-signers (hex
+/// keys) whose words the person confirmed (kept with the recovery identity); a vault is
+/// taken only through one of them. `recovery_dir`: where this phone pins what it reveals
+/// to each co-signer (`ZafePaths.recoveryDir`; deleted with the recovery identity).
 pub fn check_recovery(
     relay_url: String,
     seeds: Vec<u8>,
     label: Option<String>,
+    confirmed: Vec<String>,
+    recovery_dir: String,
 ) -> Result<RecoveryProgress> {
     let me = identity(&seeds)?;
+    let confirmed = confirmed
+        .iter()
+        .map(|k| {
+            hex::decode(k.trim())
+                .ok()
+                .and_then(|b| <[u8; 32]>::try_from(b).ok())
+                .ok_or_else(|| ZafeError::invalid("not a signer key"))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let label = label
         .map(|l| {
             hex::decode(l.trim())
@@ -200,18 +214,25 @@ pub fn check_recovery(
         .transpose()?;
     let relay = RelayClient::pooled(relay_url);
     let mut watch = crate::diag::Stopwatch::new("recover");
-    // Both read the relay (~1 s each over Tor): at once. The safety check's next step
-    // (commit, then reveal once challenged) only matters while waiting for approvals.
+    // Both read the relay (~1 s each over Tor): at once. The words stay shown until done:
+    // the person may confirm a co-signer's row after the seat moved.
     let (status, checks) = runtime().block_on(async {
         tokio::join!(
-            repair::try_recover(&relay, &me, label),
-            repair::recovery_checks(&relay, &me)
+            repair::try_recover(&relay, &me, label, &confirmed),
+            repair::recovery_checks(&relay, &me, std::path::Path::new(&recovery_dir))
         )
     });
     watch.lap("relay");
     watch.finish();
     let status = status?;
-    let empty = |stage, received, needed| RecoveryProgress {
+    let checks: Vec<CosignerWords> = checks?
+        .into_iter()
+        .map(|c| CosignerWords {
+            cosigner_key_hex: hex::encode(c.cosigner),
+            words: c.words,
+        })
+        .collect();
+    let waiting = |stage, received, needed| RecoveryProgress {
         stage,
         received,
         needed,
@@ -219,21 +240,12 @@ pub fn check_recovery(
         name: String::new(),
         material: Vec::new(),
         invite: String::new(),
-        checks: Vec::new(),
+        checks,
     };
     Ok(match status {
-        RecoveryStatus::Waiting => RecoveryProgress {
-            checks: checks?
-                .into_iter()
-                .map(|c| CosignerWords {
-                    cosigner_key_hex: hex::encode(c.cosigner),
-                    words: c.words,
-                })
-                .collect(),
-            ..empty(RecoveryStage::Waiting, 0, 0)
-        },
+        RecoveryStatus::Waiting => waiting(RecoveryStage::Waiting, 0, 0),
         RecoveryStatus::SeatMoved { received, needed } => {
-            empty(RecoveryStage::Repairing, received as u32, needed as u32)
+            waiting(RecoveryStage::Repairing, received as u32, needed as u32)
         }
         RecoveryStatus::Done { material, invite } => RecoveryProgress {
             stage: RecoveryStage::Done,

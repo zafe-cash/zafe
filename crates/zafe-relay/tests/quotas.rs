@@ -404,6 +404,47 @@ async fn a_schema_3_database_is_migrated() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Schema 4 kept seat-recovery values per (new phone, signer): opening it makes the table
+/// again per (new phone, co-signer), dropping the old values (a week old at most).
+#[tokio::test]
+async fn a_schema_4_database_is_migrated() {
+    let (dir, path) = temp_db("recovery-migrate");
+    let mut rng = StdRng::seed_from_u64(8);
+    let before = fill(&Relay::open(&path).unwrap(), &mut rng).await;
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE recovery_values;
+         CREATE TABLE recovery_values (
+             subject BLOB NOT NULL,
+             signer BLOB NOT NULL,
+             kind INTEGER NOT NULL,
+             signed BLOB NOT NULL,
+             created_at INTEGER NOT NULL,
+             PRIMARY KEY (subject, signer, kind)
+         );
+         INSERT INTO recovery_values VALUES (x'01', x'02', 0, x'03', 0);
+         PRAGMA user_version = 4;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let relay = Relay::open(&path).unwrap();
+    assert_eq!(relay.usage(&MAILBOX).unwrap(), before);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let rows: i64 = conn
+        .query_row("SELECT COUNT(cosigner) FROM recovery_values", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 0);
+    let version: u16 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, zafe_proto::version::RELAY_DB);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 async fn inbox_cursors(app: &Router, who: &Identity) -> Vec<u64> {
     let read = InboxRead {
         mailbox: MAILBOX,

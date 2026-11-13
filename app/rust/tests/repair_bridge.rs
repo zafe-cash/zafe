@@ -81,15 +81,22 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     let link = repair::parse_seat_link(format!("Open this: {link}")).unwrap();
     assert_eq!(link.relay_url, relay);
     let (seat_relay, label) = (link.relay_url, Some(link.label));
+    let pins = tmp.join("recovery").to_string_lossy().into_owned();
     let fresh = vault::generate_identity();
     let code = repair::recovery_code(fresh.seeds.clone()).unwrap();
     let parsed =
         repair::parse_recovery_code(format!("Move my seat please: {}", code.code)).unwrap();
     assert_eq!(parsed.key_hex, fresh.public_key_hex);
     assert!(matches!(
-        repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone())
-            .unwrap()
-            .stage,
+        repair::check_recovery(
+            seat_relay.clone(),
+            fresh.seeds.clone(),
+            label.clone(),
+            Vec::new(),
+            pins.clone(),
+        )
+        .unwrap()
+        .stage,
         RecoveryStage::Waiting
     ));
 
@@ -98,7 +105,14 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     let words_of = |i: usize, code: &str| {
         for _ in 0..4 {
             // The new phone's poll: commit, then reveal once challenged.
-            repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone()).unwrap();
+            repair::check_recovery(
+                seat_relay.clone(),
+                fresh.seeds.clone(),
+                label.clone(),
+                Vec::new(),
+                pins.clone(),
+            )
+            .unwrap();
             if let Some(w) = repair::new_phone_words(
                 relay.clone(),
                 seeds[i].clone(),
@@ -108,10 +122,15 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
             .unwrap()
             {
                 let me = vault::identity_public_key(seeds[i].clone()).unwrap();
-                let shown =
-                    repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone())
-                        .unwrap()
-                        .checks;
+                let shown = repair::check_recovery(
+                    seat_relay.clone(),
+                    fresh.seeds.clone(),
+                    label.clone(),
+                    Vec::new(),
+                    pins.clone(),
+                )
+                .unwrap()
+                .checks;
                 let on_new = shown.iter().find(|c| c.cosigner_key_hex == me).unwrap();
                 assert_eq!(on_new.words, w);
                 return w;
@@ -150,9 +169,14 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     .unwrap());
 
     // The helpers' regular refreshes repair the key; their material picks up the move.
+    // The new phone takes the vault only once the person tapped "Words match" on a row.
+    let confirmed: Vec<String> = [1, 2]
+        .iter()
+        .map(|&i| vault::identity_public_key(seeds[i].clone()).unwrap())
+        .collect();
     let mut updated = [materials[1].clone(), materials[2].clone()];
     let mut done = None;
-    for _ in 0..4 {
+    for round in 0..4 {
         for (k, i) in [1usize, 2].into_iter().enumerate() {
             let l = list(i, &seeds[i], &updated[k]);
             assert!(l.seat_moves.is_empty());
@@ -160,8 +184,28 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
                 updated[k] = m;
             }
         }
-        let p =
-            repair::check_recovery(seat_relay.clone(), fresh.seeds.clone(), label.clone()).unwrap();
+        let unconfirmed = repair::check_recovery(
+            seat_relay.clone(),
+            fresh.seeds.clone(),
+            label.clone(),
+            Vec::new(),
+            pins.clone(),
+        )
+        .unwrap();
+        assert!(!matches!(unconfirmed.stage, RecoveryStage::Done));
+        assert_eq!(
+            unconfirmed.checks.len(),
+            2,
+            "the rows stay to confirm (round {round})"
+        );
+        let p = repair::check_recovery(
+            seat_relay.clone(),
+            fresh.seeds.clone(),
+            label.clone(),
+            confirmed.clone(),
+            pins.clone(),
+        )
+        .unwrap();
         if matches!(p.stage, RecoveryStage::Done) {
             done = Some(p);
             break;

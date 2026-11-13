@@ -31,6 +31,8 @@ async fn cancelling_a_setup_ends_the_invite() {
         .await
         .unwrap();
     join_vault(&relay, &joiner, &invite).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let key = zafe_core::nonce_store::NonceKey::derive(b"joiner", &invite.vault_id);
 
     // Only the creator can cancel.
     assert!(matches!(
@@ -41,13 +43,15 @@ async fn cancelling_a_setup_ends_the_invite() {
         cancel_setup(&relay, &stranger, &invite).await,
         Err(NodeError::Verification(_))
     ));
-    membership(&relay, &joiner, &invite).await.unwrap();
+    membership(&relay, &joiner, &invite, dir.path(), &key)
+        .await
+        .unwrap();
 
     // The creator cancels: the joiner's next read says the mailbox is gone, the invite
     // can't be used again and a second cancel finds nothing.
     assert!(cancel_setup(&relay, &creator, &invite).await.unwrap());
     assert!(matches!(
-        membership(&relay, &joiner, &invite).await,
+        membership(&relay, &joiner, &invite, dir.path(), &key).await,
         Err(NodeError::Relay(RelayClientError::Status {
             status: 404,
             ..
@@ -77,5 +81,9 @@ async fn a_locked_setup_without_keys_can_still_be_cancelled() {
     join_vault(&relay, &joiner, &invite).await.unwrap();
     seal(&relay, &creator, &invite).await.unwrap();
     assert!(cancel_setup(&relay, &creator, &invite).await.unwrap());
-    assert!(membership(&relay, &joiner, &invite).await.is_err());
+    let dir = tempfile::tempdir().unwrap();
+    let key = zafe_core::nonce_store::NonceKey::derive(b"joiner", &invite.vault_id);
+    assert!(membership(&relay, &joiner, &invite, dir.path(), &key)
+        .await
+        .is_err());
 }

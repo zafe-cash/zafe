@@ -9,11 +9,16 @@
 //! the relay commits to in one view, the honest member's value in the other is fixed
 //! after it and unknown to it: matching words are a one-shot guess (2^-44 for 4 words).
 //!
-//! The value is a deterministic signature-derived secret, so a restarted app reveals the
-//! same value it committed to, with nothing new to store.
+//! The value is random per setup attempt and kept sealed in the setup's state before its
+//! commitment is sent, so a restarted app reveals what it committed to and a new attempt
+//! (after leaving) never brings a revealed value back. Before the value leaves the phone
+//! the member also pins the sealed member list and every other member's commitment
+//! (`node::safety_check`), and from then on refuses any other list or commitment. Without
+//! the pin a relay could serve a member it controls again, with a value ground against the
+//! revealed one.
 
 use bip0039::{English, Language};
-use zafe_proto::{Identity, IdentityPublic, MailboxId};
+use zafe_proto::{IdentityPublic, MailboxId};
 
 /// Words members compare; 11 bits each (BIP-39 English list).
 pub const WORDS: usize = 4;
@@ -27,14 +32,6 @@ fn hash(personal: &[u8; 16], parts: &[&[u8]]) -> [u8; 32] {
         state.update(p);
     }
     state.finalize().as_bytes().try_into().expect("32 bytes")
-}
-
-/// This member's secret value for the setup of `mailbox`. Ed25519 signatures are
-/// deterministic, so it is the same on every call and unknown to anyone else.
-pub fn secret(me: &Identity, mailbox: &MailboxId) -> [u8; 32] {
-    let mut message = b"Zafe setup safety words v1".to_vec();
-    message.extend_from_slice(mailbox);
-    hash(b"Zafe_SasSecret__", &[&me.sign(&message)])
 }
 
 /// The commitment a member publishes first.
@@ -68,15 +65,15 @@ fn words_of(h: &[u8; 32]) -> String {
 }
 
 /// Seat recovery (spec §10.1): the commitment a new phone publishes to its secret value
-/// before any co-signer challenges it.
+/// for one co-signer, before that co-signer challenges it.
 pub fn recovery_commitment(new: &IdentityPublic, secret: &[u8; 32]) -> [u8; 32] {
     hash(b"Zafe_RecovCommit", &[&new.fingerprint(), secret])
 }
 
 /// The words a new phone and one co-signer compare before the co-signer approves moving
-/// a seat to it: over the new identity, the co-signer's key, the new phone's revealed
-/// secret and the co-signer's challenge. A recovery code swapped on the way commits to its
-/// value before the challenge exists, so a match is a one-shot guess (2^-44).
+/// a seat to it: over the new identity, the co-signer's key, the new phone's secret for
+/// that co-signer and the co-signer's challenge. A recovery code swapped on the way commits
+/// to its value before the challenge exists, so a match is a one-shot guess (2^-44).
 pub fn recovery_words(
     new: &IdentityPublic,
     cosigner: &[u8; 32],
@@ -100,7 +97,8 @@ pub fn normalize(words: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
+    use zafe_proto::Identity;
 
     use super::*;
 
@@ -111,7 +109,11 @@ mod tests {
         let mailbox = [7; 16];
         let set: Vec<_> = ids
             .iter()
-            .map(|i| (*i.public(), secret(i, &mailbox)))
+            .map(|i| {
+                let mut value = [0; 32];
+                rng.fill_bytes(&mut value);
+                (*i.public(), value)
+            })
             .collect();
         let w = words(&mailbox, &set);
         assert_eq!(w.split(' ').count(), WORDS);
@@ -122,12 +124,6 @@ mod tests {
         other_value[1].1[0] ^= 1;
         assert_ne!(w, words(&mailbox, &other_value));
         assert_ne!(w, words(&[0; 16], &set), "bound to the vault");
-        assert_eq!(
-            secret(&ids[0], &mailbox),
-            secret(&ids[0], &mailbox),
-            "stable"
-        );
-        assert_ne!(secret(&ids[0], &mailbox), secret(&ids[0], &[8; 16]));
         assert_eq!(
             normalize("  Apple  BANANA\tcat dog "),
             "apple banana cat dog"

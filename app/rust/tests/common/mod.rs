@@ -88,10 +88,17 @@ pub fn keygen(
             } else {
                 let me = Identity::from_seeds(IdentitySeeds::from_bytes(&m.seeds).unwrap());
                 rt.block_on(async {
-                    let membership = node::membership(&client, &me, &decoded).await.unwrap();
-                    let membership = node::seal_when_full(&client, &me, &decoded, membership)
+                    let (dir, key) = (
+                        std::path::Path::new(&m.state_dir),
+                        NonceKey::derive(&m.seeds, &decoded.vault_id),
+                    );
+                    let membership = node::membership(&client, &me, &decoded, dir, &key)
                         .await
                         .unwrap();
+                    let membership =
+                        node::seal_when_full(&client, &me, &decoded, membership, dir, &key)
+                            .await
+                            .unwrap();
                     match node::keygen_step(
                         &client,
                         &me,

@@ -48,7 +48,11 @@ pub const LOG_ENTRY: u16 = 1;
 /// members' arrivals for one move. Moving is offered only once every current member has
 /// written a version 10 event (`VaultState::member_versions`; each app announces itself
 /// once, `node::announce_version`).
-pub const VAULT_EVENT: u16 = 10;
+/// 11 (2026-11-13): no new variant. A version 11 `RepairRetry` restarts a key repair only
+/// once every helper it names logged the same list for the current attempt; versions 5-10
+/// restart at once. Restarting is offered only once every current member has written a
+/// version 11 event (as for moves).
+pub const VAULT_EVENT: u16 = 11;
 /// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
 /// Relay API request and response bodies (signed into every request).
@@ -91,6 +95,17 @@ pub const SILENT_SIGNERS: u16 = 1;
 /// A member's key-generation state between steps (`keygen.state`: round-1 secret, `sk`
 /// contribution, log key, what was sent), so a setup can pause and resume (2026-10-16).
 pub const KEYGEN_STATE: u16 = 1;
+/// What a member revealed its setup safety value against (`safety.pin`: the sealed member
+/// list and every other member's commitment), written before the value leaves the phone
+/// and deleted with the key-generation state (2026-11-13).
+pub const SAFETY_PIN: u16 = 1;
+/// A member's random safety value for one setup attempt (`safety.secret`), written before
+/// its commitment is sent and deleted with the key-generation state (2026-11-13).
+pub const SAFETY_SECRET: u16 = 1;
+/// What a recovering phone revealed its safety value for one co-signer against (that
+/// co-signer's commitment and challenge), written before the value leaves the phone
+/// (2026-11-13).
+pub const RECOVERY_PIN: u16 = 1;
 /// This device's copy of a vault's log (`log_cache::LogCache`, `<mailbox>.log`).
 pub const LOG_CACHE: u16 = 1;
 /// Encrypted vault backups (`ZAFEBAK`; the tag is a single byte there). 2 added signer
@@ -104,8 +119,9 @@ pub const BACKUP: u16 = 3;
 /// member's seat (migrated from 1 and 2). 4 (2026-10-25): `mailboxes.vault_id` (a mailbox id
 /// is a label that may differ from the vault id its entries carry), `last_seen_day`,
 /// `created_day` and `shared` for expiry (migrated from 1-3; existing rows get
-/// `vault_id = id`, today as last seen, and count as shared).
-pub const RELAY_DB: u16 = 4;
+/// `vault_id = id`, today as last seen, and count as shared). 5 (2026-11-13): seat-recovery
+/// values keyed per (new phone, co-signer) (`recovery_values` is dropped and made again).
+pub const RELAY_DB: u16 = 5;
 /// Share repair envelope payloads (RTS deltas and sigmas) and a helper's saved deltas.
 /// 2 (2026-10-01): both carry the repair attempt. 3 (2026-10-25): a sigma also carries the
 /// helper's log anchor (length and head hash), which the recovering phone's first load
@@ -154,6 +170,9 @@ pub enum Format {
     UsedCommitments,
     SilentSigners,
     KeygenState,
+    SafetyPin,
+    SafetySecret,
+    RecoveryPin,
     LogCache,
     Backup,
     RelayDb,
@@ -187,6 +206,9 @@ impl Format {
             Format::UsedCommitments => USED_COMMITMENTS,
             Format::SilentSigners => SILENT_SIGNERS,
             Format::KeygenState => KEYGEN_STATE,
+            Format::SafetyPin => SAFETY_PIN,
+            Format::SafetySecret => SAFETY_SECRET,
+            Format::RecoveryPin => RECOVERY_PIN,
             Format::LogCache => LOG_CACHE,
             Format::Backup => BACKUP,
             Format::RelayDb => RELAY_DB,
@@ -220,6 +242,9 @@ impl Format {
             Format::UsedCommitments => "used commitments",
             Format::SilentSigners => "silent signers",
             Format::KeygenState => "key generation state",
+            Format::SafetyPin => "safety word pin",
+            Format::SafetySecret => "safety value",
+            Format::RecoveryPin => "seat recovery pin",
             Format::LogCache => "log copy",
             Format::Backup => "backup",
             Format::RelayDb => "relay database",

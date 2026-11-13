@@ -938,9 +938,9 @@ async fn oversized_bodies_are_refused() {
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
 }
 
-/// A seat recovery's safety values: the new phone (subject) leaves its commitment and
-/// secret, others one challenge each; the first of each stays; the relay hands back the
-/// signed values.
+/// A seat recovery's safety values, one check per co-signer: the co-signer announces and
+/// challenges, the new phone (subject) commits and reveals, only for a co-signer that
+/// announced; the first of each stays; the relay hands back the signed values.
 #[tokio::test]
 async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
     use zafe_proto::relay::{RecoveryPut, RecoveryRead, RecoveryValueKind as K, RecoveryValues};
@@ -949,12 +949,30 @@ async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
     let subject = new.public().sig_pk;
     let put = |kind, value: u8| RecoveryPut {
         subject,
+        cosigner: cosigner.public().sig_pk,
         kind,
         value: [value; 32],
         timestamp: NOW,
     };
-    let path = "/v1/recovery/put";
-    // Only the new phone commits and reveals; only others challenge.
+    let path = "/v1/seat-check/put";
+    // The new phone answers only a co-signer that announced itself.
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Commit, 1)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // Each side posts only its own kinds, and only for itself.
+    assert_eq!(
+        signed(&w.app, path, new, put(K::Announce, 0)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&w.app, path, &w.ids[2], put(K::Announce, 0)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(K::Announce, 0)).await.0,
+        StatusCode::OK
+    );
     assert_eq!(
         signed(&w.app, path, cosigner, put(K::Commit, 1)).await.0,
         StatusCode::FORBIDDEN
@@ -979,7 +997,7 @@ async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
 
     let (status, body) = signed(
         &w.app,
-        "/v1/recovery/read",
+        "/v1/seat-check/read",
         cosigner,
         RecoveryRead {
             subject,
@@ -1000,21 +1018,61 @@ async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
                 .clone()
         })
         .collect();
-    assert_eq!(values, vec![put(K::Commit, 1), put(K::Challenge, 3)]);
+    assert_eq!(
+        values,
+        vec![put(K::Announce, 0), put(K::Commit, 1), put(K::Challenge, 3)]
+    );
+}
 
-    // A stranger can't bury the real challenges under many of its own.
-    let mut rng = StdRng::seed_from_u64(9);
-    let mut refused = false;
-    for _ in 0..20 {
-        let stranger = Identity::generate(&mut rng);
-        if signed(&w.app, path, &stranger, put(K::Challenge, 4))
-            .await
-            .0
-            == StatusCode::FORBIDDEN
-        {
-            refused = true;
-            break;
-        }
+/// Rule 7: what co-signers leave for a recovering phone is charged per address like a
+/// creation, and junk from many keys and addresses can't take a real co-signer's place.
+#[tokio::test]
+async fn recovery_checks_are_charged_per_address_and_junk_cant_lock_out_a_cosigner() {
+    use zafe_proto::relay::{RecoveryPut, RecoveryValueKind as K};
+    use zafe_relay::limits::{DailyRate, Limits};
+    let app = limited(Limits {
+        creates_per_ip: Some(DailyRate::new(24, 2)),
+        client_ip_header: Some("fly-client-ip".into()),
+        ..Limits::none()
+    });
+    let mut rng = StdRng::seed_from_u64(14);
+    let subject = Identity::generate(&mut rng).public().sig_pk;
+    let put = |who: &Identity, ip: String| {
+        let body = Signed::new(
+            who,
+            RecoveryPut {
+                subject,
+                cosigner: who.public().sig_pk,
+                kind: K::Announce,
+                value: [0; 32],
+                timestamp: NOW,
+            },
+        )
+        .unwrap()
+        .to_bytes()
+        .unwrap();
+        app.clone().oneshot(
+            Request::post("/v1/seat-check/put")
+                .header("fly-client-ip", ip)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+    };
+    let mut fresh = || Identity::generate(&mut rng);
+    for expected in [
+        StatusCode::OK,
+        StatusCode::OK,
+        StatusCode::TOO_MANY_REQUESTS,
+    ] {
+        let status = put(&fresh(), "203.0.113.1".into()).await.unwrap().status();
+        assert_eq!(status, expected);
     }
-    assert!(refused, "challenges per recovering phone are capped");
+    for i in 0..20 {
+        put(&fresh(), format!("198.51.100.{i}")).await.unwrap();
+    }
+    let cosigner = fresh();
+    assert_eq!(
+        put(&cosigner, "203.0.113.9".into()).await.unwrap().status(),
+        StatusCode::OK
+    );
 }

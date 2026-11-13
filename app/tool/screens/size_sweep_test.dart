@@ -106,6 +106,7 @@ final _cases = <(String, String?, Widget)>[
         CosignerWords(cosignerKeyHex: _key, words: 'guilt afford pear gasp'),
         CosignerWords(cosignerKeyHex: _key2, words: 'say green fiction stick'),
       ],
+      confirmed: [_key],
     ),
   ),
   (

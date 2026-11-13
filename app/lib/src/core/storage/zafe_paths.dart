@@ -33,6 +33,15 @@ class ZafePaths {
   /// backup exclusion: a restored copy would carry this phone's guard choice elsewhere.
   String get torDir => '$_support/tor';
 
+  /// A recovering phone's seat recovery pins (what it revealed to each co-signer against),
+  /// kept with the recovery identity and deleted with it ([deleteRecovery]).
+  String get recoveryDir => '$_support/recovery';
+
+  Future<void> deleteRecovery() async {
+    final dir = Directory(recoveryDir);
+    if (await dir.exists()) await dir.delete(recursive: true);
+  }
+
   /// The local crash log (`core/diagnostics`). Never uploaded; the user shares it by hand.
   String get diagnosticsDir => '$_support/diagnostics';
 

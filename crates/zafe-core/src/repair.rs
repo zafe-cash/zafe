@@ -39,12 +39,13 @@ use zafe_proto::{
 
 use crate::{
     node::{
-        append_event, frost_id_of, load_state, members_by_pk, read_inbox, read_log_verified,
-        save_copy, send_fresh, Invite, LogAnchor, NodeError, SeqCounter, VaultIds, VaultMaterial,
-        VaultRelay,
+        announce_version, append_event, frost_id_of, load_state, members_by_pk, read_inbox,
+        read_log_verified, save_copy, send_fresh, Invite, LogAnchor, NodeError, SeqCounter,
+        VaultIds, VaultMaterial, VaultRelay,
     },
+    nonce_store::NonceKey,
     relay_client::RelayClient,
-    vault::{Replacement, VaultEvent, VaultState},
+    vault::{Replacement, VaultEvent, VaultState, REPAIR_QUORUM_FROM},
     wallet::ZafeNetwork,
 };
 
@@ -83,19 +84,23 @@ impl RecoveryRequest {
     }
 }
 
-// --- The recovery's safety words (commit, challenge, reveal; spec §10.1) ---------------
+// --- The recovery's safety words (one check per co-signer; spec §10.1) ----------------
 //
 // The recovery code travels over a chat app, so whoever relays it can swap it for one of
-// their own. Before approving, each co-signer and the new phone compare words that depend
-// on the new phone's secret (committed before any challenge exists) and the co-signer's
-// challenge: a swapped code gets one guess. The values pass through the relay
-// (`/v1/recovery/*`; the new phone isn't a member of any mailbox yet), signed; nothing is
-// stored on either phone, each value being derived from a signature by its own key.
+// their own. Before approving, each co-signer and the new phone compare words of their own
+// check: the co-signer announces itself, the new phone commits to a secret for that
+// co-signer, the co-signer challenges that commitment, and the new phone reveals that
+// secret to it alone. A swapped code gets one guess, and a value revealed to one co-signer
+// says nothing about another's words (rule 1). The values pass through the relay
+// (`/v1/seat-check/*`; the new phone isn't a member of any mailbox yet), signed, each
+// derived from a signature by its own key. The co-signer's challenge is made from the
+// commitment it saw, so it needs no record; the new phone's secret never changes, so it
+// pins each co-signer's commitment and challenge before revealing ([`RecoveryPin`]).
 
-/// The new phone's secret for its recovery (a deterministic signature: a restarted app
-/// reveals what it committed to).
-fn recovery_secret(me: &Identity) -> [u8; 32] {
-    signed_value(me, b"Zafe seat recovery secret v1", &[])
+/// The new phone's secret for its check with `cosigner` (a deterministic signature: a
+/// restarted app reveals what it committed to).
+fn recovery_secret(me: &Identity, cosigner: &[u8; 32]) -> [u8; 32] {
+    signed_value(me, b"Zafe seat recovery secret v1", &[cosigner])
 }
 
 /// A co-signer's challenge to the new phone `subject`, bound to the commitment it saw.
@@ -122,12 +127,16 @@ fn signed_value(me: &Identity, label: &[u8], parts: &[&[u8; 32]]) -> [u8; 32] {
         .expect("32 bytes")
 }
 
-/// The values of `kind` among those read for a subject.
-fn values_by(
+/// The value of `kind` in the check with `cosigner`, among those read for a subject.
+fn value_of(
     values: &[Signed<RecoveryPut>],
+    cosigner: &[u8; 32],
     kind: RecoveryValueKind,
-) -> impl Iterator<Item = &Signed<RecoveryPut>> {
-    values.iter().filter(move |v| v.payload.kind == kind)
+) -> Option<[u8; 32]> {
+    values
+        .iter()
+        .find(|v| v.payload.cosigner == *cosigner && v.payload.kind == kind)
+        .map(|v| v.payload.value)
 }
 
 fn older_relay(e: crate::relay_client::RelayClientError) -> NodeError {
@@ -140,6 +149,54 @@ fn older_relay(e: crate::relay_client::RelayClientError) -> NodeError {
     }
 }
 
+/// What the new phone revealed its secret for one co-signer against (rule 1): written
+/// before the secret leaves the phone, one file per (new identity, co-signer) in the
+/// recovery directory, sealed with a key from the identity. From then on that co-signer's
+/// words are only over this challenge, and a row whose challenge the relay serves
+/// differently is refused. Unreadable is an error, never a fresh start.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RecoveryPin {
+    commitment: [u8; 32],
+    challenge: [u8; 32],
+}
+
+impl RecoveryPin {
+    fn name(me: &Identity, cosigner: &[u8; 32]) -> String {
+        format!(
+            "{}-{}.pin",
+            hex::encode(me.public().sig_pk),
+            hex::encode(cosigner)
+        )
+    }
+
+    fn key(me: &Identity) -> NonceKey {
+        NonceKey::derive(&me.seeds().to_bytes(), b"seat recovery pins")
+    }
+
+    fn load(dir: &Path, me: &Identity, cosigner: &[u8; 32]) -> Result<Option<Self>, NodeError> {
+        let name = Self::name(me, cosigner);
+        let bytes = match std::fs::read(dir.join(&name)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(NodeError::Io(e.to_string())),
+        };
+        let plain = Self::key(me).open(&name, &bytes).ok_or_else(|| {
+            NodeError::Protocol("this phone's seat recovery record can't be read".into())
+        })?;
+        Ok(Some(version::decode(Format::RecoveryPin, &plain)?))
+    }
+
+    /// Writes the pin unless one exists (the first wins) and returns the one on disk.
+    fn create(&self, dir: &Path, me: &Identity, cosigner: &[u8; 32]) -> Result<Self, NodeError> {
+        let name = Self::name(me, cosigner);
+        let sealed = Self::key(me).seal(&name, &version::encode(Format::RecoveryPin, self)?);
+        std::fs::create_dir_all(dir).map_err(|e| NodeError::Io(e.to_string()))?;
+        crate::durable::create_new(&dir.join(&name), &sealed)
+            .map_err(|e| NodeError::Io(e.to_string()))?;
+        Self::load(dir, me, cosigner)?.ok_or_else(|| NodeError::Io("seat recovery record".into()))
+    }
+}
+
 /// Words a co-signer showed the new phone, by the co-signer's key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecoveryCheck {
@@ -147,67 +204,81 @@ pub struct RecoveryCheck {
     pub words: String,
 }
 
-/// New phone: one step of the safety check (the app polls it). Publishes the commitment
-/// if the relay doesn't have it, reveals the secret once a co-signer has challenged, and
-/// returns the words for each co-signer who did.
+/// New phone: one step of the safety check with every co-signer that announced itself
+/// (the app polls it). Commits to a secret for each new one; once that co-signer has
+/// challenged, pins the challenge in `dir` and reveals; returns the words for each
+/// co-signer pinned, over the pinned challenge. A co-signer whose challenge the relay
+/// serves differently from its pin gets no row.
 pub async fn recovery_checks(
     relay: &RelayClient,
     me: &Identity,
+    dir: &Path,
 ) -> Result<Vec<RecoveryCheck>, NodeError> {
+    use RecoveryValueKind::*;
     let subject = me.public().sig_pk;
-    let secret = recovery_secret(me);
     let values = relay
         .recovery_read(me, subject)
         .await
         .map_err(older_relay)?;
-    let mine = |kind| values_by(&values, kind).any(|v| v.signer == *me.public());
-    if !mine(RecoveryValueKind::Commit) {
-        let commitment = crate::sas::recovery_commitment(me.public(), &secret);
-        relay
-            .recovery_put(me, subject, RecoveryValueKind::Commit, commitment)
-            .await
-            .map_err(older_relay)?;
-        // A challenge needs the commitment first; nothing to show yet.
-        return Ok(Vec::new());
-    }
-    let challenges: Vec<_> = values_by(&values, RecoveryValueKind::Challenge)
-        .filter(|v| v.signer.sig_pk != subject)
-        .collect();
-    if challenges.is_empty() {
-        return Ok(Vec::new());
-    }
-    if !mine(RecoveryValueKind::Reveal) {
-        // Only now, with a challenge fixed, does the secret leave the phone.
-        relay
-            .recovery_put(me, subject, RecoveryValueKind::Reveal, secret)
-            .await
-            .map_err(older_relay)?;
-    }
-    Ok(challenges
+    let mut checks = Vec::new();
+    for cosigner in values
         .iter()
-        .map(|c| RecoveryCheck {
-            cosigner: c.signer.sig_pk,
-            words: crate::sas::recovery_words(
-                me.public(),
-                &c.signer.sig_pk,
-                &secret,
-                &c.payload.value,
-            ),
-        })
-        .collect())
+        .filter(|v| v.payload.kind == Announce)
+        .map(|v| v.payload.cosigner)
+    {
+        let secret = recovery_secret(me, &cosigner);
+        let commitment = crate::sas::recovery_commitment(me.public(), &secret);
+        let has = |kind| value_of(&values, &cosigner, kind);
+        if has(Commit).is_none() {
+            relay
+                .recovery_put(me, subject, cosigner, Commit, commitment)
+                .await
+                .map_err(older_relay)?;
+            continue;
+        }
+        let pin = match (RecoveryPin::load(dir, me, &cosigner)?, has(Challenge)) {
+            // The relay may drop or repeat the pinned challenge, never change it.
+            (Some(pin), served) if served.is_none_or(|c| c == pin.challenge) => pin,
+            (Some(_), _) | (None, None) => continue,
+            (None, Some(challenge)) => {
+                let pin = RecoveryPin {
+                    commitment,
+                    challenge,
+                };
+                if pin.create(dir, me, &cosigner)? != pin {
+                    continue;
+                }
+                pin
+            }
+        };
+        if has(Reveal).is_none() {
+            // Pinned: only now does this co-signer's secret leave the phone.
+            relay
+                .recovery_put(me, subject, cosigner, Reveal, secret)
+                .await
+                .map_err(older_relay)?;
+        }
+        checks.push(RecoveryCheck {
+            cosigner,
+            words: crate::sas::recovery_words(me.public(), &cosigner, &secret, &pin.challenge),
+        });
+    }
+    Ok(checks)
 }
 
 /// Co-signer: one step of the safety check with the new phone `new` (from its recovery
-/// code or the vault log). Challenges once the new phone's commitment is there, and once
-/// it has revealed a secret that matches, returns the words to compare. `None` while
-/// waiting for the new phone.
+/// code or the vault log). Announces itself, challenges once the new phone committed to
+/// a secret for it, and once that secret is revealed and matches, returns the words to
+/// compare. `None` while waiting for the new phone.
 pub async fn new_phone_words(
     relay: &RelayClient,
     me: &Identity,
     new: &IdentityPublic,
 ) -> Result<Option<String>, NodeError> {
+    use RecoveryValueKind::*;
     let subject = new.sig_pk;
-    if subject == me.public().sig_pk {
+    let my_pk = me.public().sig_pk;
+    if subject == my_pk {
         return Err(NodeError::Protocol(
             "that recovery code is this phone's own".into(),
         ));
@@ -216,23 +287,29 @@ pub async fn new_phone_words(
         .recovery_read(me, subject)
         .await
         .map_err(older_relay)?;
-    let by_new = |kind| values_by(&values, kind).find(|v| v.signer == *new);
-    let Some(commit) = by_new(RecoveryValueKind::Commit) else {
+    let mine = |kind| value_of(&values, &my_pk, kind);
+    if mine(Announce).is_none() {
+        relay
+            .recovery_put(me, subject, my_pk, Announce, [0; 32])
+            .await
+            .map_err(older_relay)?;
+        return Ok(None);
+    }
+    let Some(commitment) = mine(Commit) else {
         return Ok(None); // the new phone hasn't opened its recovery screen yet
     };
-    let commitment = commit.payload.value;
     let challenge = recovery_challenge(me, &subject, &commitment);
-    match values_by(&values, RecoveryValueKind::Challenge).find(|v| v.signer == *me.public()) {
+    match mine(Challenge) {
         None => {
             relay
-                .recovery_put(me, subject, RecoveryValueKind::Challenge, challenge)
+                .recovery_put(me, subject, my_pk, Challenge, challenge)
                 .await
                 .map_err(older_relay)?;
             return Ok(None);
         }
         // Our challenge was made for another commitment than the one shown now: the
         // relay swapped it (or the new phone started over). Never compare those words.
-        Some(posted) if posted.payload.value != challenge => {
+        Some(posted) if posted != challenge => {
             return Err(NodeError::Verification(
                 "the new phone's safety value changed after it was challenged: don't approve; \
                  ask them to start over"
@@ -241,19 +318,16 @@ pub async fn new_phone_words(
         }
         Some(_) => {}
     }
-    let Some(reveal) = by_new(RecoveryValueKind::Reveal) else {
+    let Some(revealed) = mine(Reveal) else {
         return Ok(None);
     };
-    if crate::sas::recovery_commitment(new, &reveal.payload.value) != commitment {
+    if crate::sas::recovery_commitment(new, &revealed) != commitment {
         return Err(NodeError::Verification(
             "the new phone's safety value doesn't match what it committed to: don't approve".into(),
         ));
     }
     Ok(Some(crate::sas::recovery_words(
-        new,
-        &me.public().sig_pk,
-        &reveal.payload.value,
-        &challenge,
+        new, &my_pk, &revealed, &challenge,
     )))
 }
 
@@ -615,18 +689,22 @@ pub enum RecoveryStatus {
 /// Recovering device: checks whether its seat has moved and the helpers' repair is
 /// complete, and if so builds and verifies its vault material (spec §10.4.2 checks).
 /// `label`: the vault's mailbox on this relay, from a co-signer's [`SeatLink`]; `None`
-/// looks at every mailbox the relay lists this device in.
+/// looks at every mailbox the relay lists this device in. `confirmed`: the co-signers
+/// whose words the person confirmed matched. A vault is taken only through one of them
+/// (rule 2): a current member who approved moving this seat here and sent a repair message
+/// whose log anchor checks; the log key and vault id come from that message.
 pub async fn try_recover(
     relay: &RelayClient,
     me: &Identity,
     label: Option<MailboxId>,
+    confirmed: &[[u8; 32]],
 ) -> Result<RecoveryStatus, NodeError> {
     let mut status = RecoveryStatus::Waiting;
     for mailbox in relay.mailboxes(me).await? {
         if label.is_some_and(|l| l != mailbox) {
             continue;
         }
-        match recover_from(relay, me, mailbox).await? {
+        match recover_from(relay, me, mailbox, confirmed).await? {
             done @ RecoveryStatus::Done { .. } => return Ok(done),
             s @ RecoveryStatus::SeatMoved { .. } => status = s,
             RecoveryStatus::Waiting => {}
@@ -639,6 +717,7 @@ async fn recover_from(
     relay: &RelayClient,
     me: &Identity,
     label: MailboxId,
+    confirmed: &[[u8; 32]],
 ) -> Result<RecoveryStatus, NodeError> {
     let on_relay: BTreeMap<[u8; 32], IdentityPublic> = relay
         .members(me, label)
@@ -661,22 +740,21 @@ async fn recover_from(
                 .or_insert((cursor, msg));
         }
     }
-    let Some((_, first)) = messages.values().last() else {
+    // The relay lists the members, so it could add senders of its own: the log key and
+    // the vault id come only from a co-signer the person confirmed.
+    let Some((voucher, anchor, vouched)) = messages.iter().rev().find_map(|((from, _), (_, m))| {
+        let anchor = m.anchor.filter(|_| confirmed.contains(from))?;
+        Some((*from, anchor, m))
+    }) else {
         return Ok(RecoveryStatus::SeatMoved {
             received: 0,
             needed: 0,
         });
     };
-    // The log key from a helper lets this device read the log, and the log decides
-    // which move is ours and who the helpers are. A sigma from before anchors comes from
-    // a vault whose label is its vault id.
-    let key = LogKey::from_bytes(first.data.log_key_epoch, first.data.log_key);
-    let ids = match &first.anchor {
-        Some(a) => VaultIds {
-            vault: a.vault_id,
-            label,
-        },
-        None => VaultIds::legacy(label),
+    let key = LogKey::from_bytes(vouched.data.log_key_epoch, vouched.data.log_key);
+    let ids = VaultIds {
+        vault: anchor.vault_id,
+        label,
     };
     // Not saved as this device's copy until everything checked out.
     let (chain, state, _) = read_log_verified(relay, me, ids, &key).await?;
@@ -692,6 +770,13 @@ async fn recover_from(
     let r = state.replacement_to(&me.public().sig_pk).ok_or_else(|| {
         NodeError::Protocol("the vault log has no seat move to this device".into())
     })?;
+    if state.descriptor.member(&voucher).is_none()
+        || !r.approvals.iter().any(|(pk, _)| *pk == voucher)
+    {
+        return Err(NodeError::Verification(
+            "the co-signer you compared words with didn't move your seat in this vault".into(),
+        ));
+    }
     let helpers = r.helpers();
     let from_helpers: Vec<&SigmaMsg> = helpers
         .iter()
@@ -709,8 +794,14 @@ async fn recover_from(
             "the repaired key doesn't check out ({why}); ask your co-signers to approve the move again"
         ))
     };
-    let data = &from_helpers[0].data;
-    if from_helpers.iter().any(|m| &m.data != data) {
+    // The vault data is the confirmed co-signer's (its log key read the log above), and
+    // every helper's must be the same: a helper that isn't the confirmed co-signer (one a
+    // restart named) can't hand this phone another log key or create token.
+    let data = &vouched.data;
+    if from_helpers
+        .iter()
+        .any(|m| &m.data != data || m.create_token != vouched.create_token)
+    {
         return Err(failed("helpers sent different vault data"));
     }
     let pkp = PublicKeyPackage::deserialize(&data.public_key_package).map_err(proto)?;
@@ -737,7 +828,7 @@ async fn recover_from(
         relay: VaultRelay {
             url: Some(relay.base_url().to_owned()),
             label,
-            create_token: from_helpers.iter().find_map(|m| m.create_token.clone()),
+            create_token: vouched.create_token.clone(),
         },
     };
     let network = ZafeNetwork::from_name(&state.descriptor.network)
@@ -834,34 +925,49 @@ impl SeatLink {
     }
 }
 
-/// Member: takes over from `stalled`, a helper who isn't doing its part in repairing the
-/// key of the seat moved at `replacement`, starting a new attempt with this member in its
-/// place (spec §10.4.2).
+/// Member: asks to restart the repair of the seat moved at `replacement` with `taker` in
+/// place of `stalled`, a helper who isn't doing its part (spec §10.4.2). `taker` is this
+/// member offering to help, or, from a helper, the member whose offer it agrees to. The new
+/// attempt starts once every helper of the new list asked for it (rule 4), which needs
+/// every member's app to know that rule.
+#[allow(clippy::too_many_arguments)]
 pub async fn retry_repair<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,
     replacement: u64,
     stalled: [u8; 32],
+    taker: [u8; 32],
     rng: &mut R,
 ) -> Result<(), NodeError> {
     let (mut chain, mut state) = load_state(relay, me, material).await?;
+    let my_pk = me.public().sig_pk;
+    let _ = Box::pin(announce_version(
+        relay, me, material, &mut chain, &mut state, rng,
+    ))
+    .await;
     let r = state
         .replacements
         .iter()
         .find(|r| r.index == replacement && !r.done)
         .ok_or_else(|| NodeError::NotReady("that key repair is already finished".into()))?;
-    let my_pk = me.public().sig_pk;
-    if !r.helpers.contains(&stalled) || r.helpers.contains(&my_pk) {
-        return Err(NodeError::NotReady(
-            "you are already helping, or that signer isn't".into(),
-        ));
+    // Every app must count restarts the same way; the new phone can't write before its key
+    // is back, and the stalled helper may never return, so neither is waited for.
+    let mut behind = state.members_below(REPAIR_QUORUM_FROM);
+    behind.retain(|pk| ![my_pk, r.new.sig_pk, stalled].contains(pk));
+    if !behind.is_empty() {
+        return Err(NodeError::MembersMustUpdate(behind));
     }
-    let helpers = r
+    let helpers: Vec<[u8; 32]> = r
         .helpers
         .iter()
-        .map(|h| if *h == stalled { my_pk } else { *h })
+        .map(|h| if *h == stalled { taker } else { *h })
         .collect();
+    if !r.helpers.contains(&stalled) || r.helpers.contains(&taker) || !helpers.contains(&my_pk) {
+        return Err(NodeError::NotReady(
+            "that signer isn't helping, the other one already is, or you wouldn't be".into(),
+        ));
+    }
     let event = VaultEvent::RepairRetry {
         replacement,
         helpers,

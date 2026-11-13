@@ -74,15 +74,22 @@ SeatLinkInfo parseSeatLink({required String text}) =>
 /// `Done` the key has been checked against the vault (spec §10.4.2), and its relay history
 /// against what every helper vouched for. `relay_url` and `label`: from the co-signer's
 /// seat link ([`parse_seat_link`]); without a label (no link: the app-wide relay), every
-/// mailbox the relay lists for this phone is checked.
+/// mailbox the relay lists for this phone is checked. `confirmed`: the co-signers (hex
+/// keys) whose words the person confirmed (kept with the recovery identity); a vault is
+/// taken only through one of them. `recovery_dir`: where this phone pins what it reveals
+/// to each co-signer (`ZafePaths.recoveryDir`; deleted with the recovery identity).
 Future<RecoveryProgress> checkRecovery({
   required String relayUrl,
   required List<int> seeds,
   String? label,
+  required List<String> confirmed,
+  required String recoveryDir,
 }) => RustLib.instance.api.crateApiRepairCheckRecovery(
   relayUrl: relayUrl,
   seeds: seeds,
   label: label,
+  confirmed: confirmed,
+  recoveryDir: recoveryDir,
 );
 
 /// The words a co-signer (`cosigner_key_hex`) sees for this new phone.
@@ -151,7 +158,7 @@ class RecoveryProgress {
   final Uint8List material;
   final String invite;
 
-  /// While waiting: the words each co-signer that started the safety check shows.
+  /// Until done: the words each co-signer that started the safety check shows.
   final List<CosignerWords> checks;
 
   const RecoveryProgress({

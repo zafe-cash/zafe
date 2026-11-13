@@ -208,31 +208,39 @@ impl ReplaceApproval {
     }
 }
 
-/// Which value of a seat recovery's safety check (commit, then reveal) a record holds.
-/// Appended only: the postcard index is the wire format.
+/// Which value of a seat recovery's safety check a record holds. The new phone and each
+/// co-signer run their own check: announce, commit, challenge, reveal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RecoveryValueKind {
-    /// The new phone's commitment to its secret value (signed by the new phone).
+    /// A co-signer opens its check with the new phone (signed by the co-signer; the value
+    /// is unused).
+    Announce,
+    /// The new phone's commitment to its secret value for that co-signer (signed by the new
+    /// phone).
     Commit,
-    /// A co-signer's random value (signed by that co-signer).
+    /// The co-signer's challenge, made from that commitment (signed by the co-signer).
     Challenge,
-    /// The new phone's secret value, sent once a challenge exists (signed by the new phone).
+    /// The new phone's secret value for that co-signer, sent once it challenged (signed by
+    /// the new phone).
     Reveal,
 }
 
-/// Leaves one value of the safety check for the seat recovery of the new phone whose
-/// signing key is `subject` (`POST /v1/recovery/put`, a newer route: an older relay
-/// answers 404). The new phone isn't a vault member yet, so this can't go through a
-/// mailbox. The relay keeps the signed bytes and serves them back; clients verify them.
+/// Leaves one value of the safety check between the new phone whose signing key is
+/// `subject` and the co-signer `cosigner` (`POST /v1/seat-check/put`, a newer route: an
+/// older relay answers 404). The new phone isn't a vault member yet, so this can't go
+/// through a mailbox. The relay keeps the signed bytes and serves them back; clients
+/// verify them. The co-signer signs `Announce` and `Challenge`, the new phone `Commit` and
+/// `Reveal`, and only for a co-signer that announced itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryPut {
     pub subject: [u8; 32],
+    pub cosigner: [u8; 32],
     pub kind: RecoveryValueKind,
     pub value: [u8; 32],
     pub timestamp: u64,
 }
 
-/// Reads every value left for `subject` (`POST /v1/recovery/read`), signed by anyone.
+/// Reads every value left for `subject` (`POST /v1/seat-check/read`), signed by anyone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryRead {
     pub subject: [u8; 32],

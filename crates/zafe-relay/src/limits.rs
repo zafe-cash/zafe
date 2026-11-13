@@ -3,8 +3,9 @@
 //! Keys are only charged after their signature verified, so nobody can drain another
 //! member's bucket. The IP limit catches floods of unauthenticated requests; behind a proxy
 //! it uses the client address the proxy reports (see [`Limits::client_ip_header`]).
-//! Creating a mailbox is free and keys cost nothing to make, so creations have their own,
-//! much slower per-IP bucket ([`Limits::creates_per_ip`]).
+//! Creating a mailbox is free and keys cost nothing to make, so creations (and what
+//! co-signers leave for a recovering phone) have their own, much slower per-IP bucket
+//! ([`Limits::creates_per_ip`]).
 
 use std::{collections::HashMap, hash::Hash, net::IpAddr, sync::Mutex};
 
@@ -43,6 +44,7 @@ pub struct Limits {
     /// Per client IP (many members can share one address behind NAT).
     pub per_ip: Option<Rate>,
     /// Mailboxes (vaults) created per client IP. Each vault is created once, by one member.
+    /// A co-signer's seat-recovery values (announce, challenge) take from the same bucket.
     pub creates_per_ip: Option<DailyRate>,
     /// Header holding the client address when the relay runs behind a proxy (e.g.
     /// `fly-client-ip`, or `x-forwarded-for` behind Caddy, whose rightmost entry is the

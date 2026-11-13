@@ -113,9 +113,24 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   a reveal that doesn't match aborts. `reddsa` 0.5.2's `post_dkg` normalizes `ak` to even Y.
 - **Safety words** (`zafe_core::sas`): after sealing, `Kind::SafetyCommit`, then (only holding
   every other commitment) `Kind::SafetyReveal`; 4 BIP-39 words hash every key and value, so a
-  relay gets one guess (2^-44). Secrets derive from an Ed25519 signature (nothing stored).
-  Keygen takes the confirmed words and re-derives them. Seat recovery uses the same scheme
-  (`repair::recovery_checks` / `new_phone_words`, relay `/v1/recovery/put|read`).
+  relay gets one guess (2^-44). The setup value is **random per attempt**
+  (`state_dir::SAFETY_SECRET`, sealed, `durable::create_new` before the first commit): a
+  revealed value never comes back, even after leaving and opening the same invite again.
+  **A reveal is pinned first**: any commit-then-reveal needs the revealer to durably keep
+  what it revealed against. Setup: `state_dir::SAFETY_PIN` (sealed member list + every other
+  commitment, `durable::create_new`, sealed with the `NonceKey`) before `SafetyReveal`; then
+  any other list or commitment is a hard stop. `forget_keygen` deletes value and pin. Keygen takes the
+  confirmed words and re-derives them. Seat recovery runs one check **per co-signer**
+  (announce, commit, challenge, reveal; a secret per co-signer): `repair::recovery_checks`
+  pins each co-signer's commitment + challenge (`state_dir::RECOVERY`, a file per (new
+  identity, co-signer)) before revealing and shows words only over the pin; relay
+  `/v1/seat-check/put|read`. Unreadable pin = error, never a fresh start.
+- **Recovering phone trusts only a confirmed co-signer** (`repair::try_recover(.., confirmed)`):
+  the person taps **Words match** per row (kept in `ZafeSecureStore` with the recovery
+  identity); log key and vault id come from that co-signer's sigma, never another sender's,
+  and it must be a current member who approved this seat move, with an anchor that checks.
+- **Derive the address**: a descriptor's `address` must be its UFVK's (`node::check_address`,
+  in `start_chain` and backup `validate`); screens show `node::ufvk_address`, never the field.
 - **Keygen is a step function** (`node::keygen_step`; bridge `setup_step`; CLI/tests
   `node::run_keygen`, 1 step/s to stay under the hosted rate). State in `state_dir::KEYGEN`,
   sealed with the vault's `NonceKey`, **written before anything it covers is sent** (round 1
@@ -235,9 +250,23 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     (gate by tag); 7 `Broadcast` must carry the PCZT's txid (gate); 8 `PoolReset` (gate);
     9 highest-version replay + parseable PCZT check (gate); 10 `VaultMoved` (gate: Move is
     offered only once every current member wrote a v10 event, `VaultState::member_versions`;
-    each app announces once with `node::announce_version`, an idempotent `Name`).
-  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 4 (vault
-    id + expiry columns; migrated from 1-3, old rows get `vault_id = id`, seen today, shared),
+    each app announces once with `node::announce_version`, an idempotent `Name`); 11
+    `RepairRetry` restarts only once every helper it names logged it (`Replacement::retries`;
+    gate: `retry_repair` needs v11 from every member but the new key and the stalled helper,
+    `VaultState::members_below`), and from v11 only current members' entries raise the floor
+    and `member_versions` or count in `newer_version_entries` (an "update Zafe" hint only).
+  - **Version transitions**: shipped older apps keep acting on the old rules. For repair that
+    is a stall, never a leak: messages are keyed by (index, attempt, sender), a re-run of
+    part 1 is a fresh additive sharing, and a helper named in a retry learns nothing RTS
+    doesn't give it. A v10 app ignores v11-tagged entries entirely, so an older helper bumps
+    `attempt` only on tag-10 retries (from other old apps), never on v11 votes, and stops
+    matching the others until it updates: still a stall. An older app keeps signing one-tap under the old assignment: a stall, never a
+    reuse (`sign_groups` deletes each nonce before sending a share), which is why any change
+    to one-tap assignment must be gated on every member. Never make core refuse or fall back
+    on a newer tag (one entry would freeze the vault; interactive fallback deadlocks a 2-of-2).
+  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 5 (4: vault
+    id + expiry columns, migrated from 1-3, old rows get `vault_id = id`, seen today, shared;
+    5: `recovery_values` per (new phone, co-signer), dropped and made again),
     `REPAIR` 3 (sigma carries the helper's `LogAnchor` + create token; v2 still read),
     `INVITE` 3 (2: safety words; 3: vault id + label + relay URL, v2 reads as label = vault
     id on the default relay), `VAULT_MATERIAL` 2 (`relay`; v1 reads as legacy),
@@ -245,7 +274,8 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     `LOG_KEY_MESSAGE` 1 (setup log key + create token; the untagged 36-byte payload still
     reads), `SEAT_LINK` 1 (`zafe-seat-v1:`), `RELAY_STATUS` 1, `MOVE_MESSAGE` 1 (arrival /
     notice / cancel payloads, padded to 1 KiB), `MOVE_STATE` 1 (`<vault id>.move`,
-    encrypted with a key from the vault secret), `MOVE_LINK` 1 (`zafe.cash/move#` fragment).
+    encrypted with a key from the vault secret), `MOVE_LINK` 1 (`zafe.cash/move#` fragment),
+    `SAFETY_PIN` 1, `SAFETY_SECRET` 1, `RECOVERY_PIN` 1 (2026-11-13).
 
 ### Relay and client
 - **Relay is blind**: it sees public keys, ciphertext, metadata. Clients drop envelopes for
@@ -288,7 +318,9 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - **Relay limits/quotas** (`zafe_relay::{limits, quota}`): off in `Relay::new()` (tests), on in
   the binary. **Charge a key only after its signature verifies.** Byte counters on `mailboxes`
   must change in the same transaction as every write/delete of `deliveries`/`log_entries`.
-  IP limits need `into_make_service_with_connect_info`. New polling flows must stay under the
+  IP limits need `into_make_service_with_connect_info`. A co-signer's seat-check values
+  (announce, challenge) take a token from `creates_per_ip`; the new phone's need an announce,
+  so no cap per new phone can lock real co-signers out. New polling flows must stay under the
   hosted rate (300/min per key). No `--` comments in `SCHEMA` (breaks `DROP COLUMN`).
 - **Long polls** (`POST /v1/wait`): bump the per-mailbox watch **after commit and after dropping
   the DB mutex**; waiters subscribe before reading and never hold the mutex. Unknown mailbox is

@@ -17,7 +17,7 @@ impl From<backup::BackupError> for ZafeError {
             WeakPassphrase(_) | NotABackup | WrongPassphraseOrDamaged | UnsupportedVersion(_) => {
                 ZafeErrorKind::InvalidInput
             }
-            NotAMember | BadParams => ZafeErrorKind::Verification,
+            NotAMember | WrongAddress | BadParams => ZafeErrorKind::Verification,
             Encoding(_) => ZafeErrorKind::Other,
         };
         let message = match e {

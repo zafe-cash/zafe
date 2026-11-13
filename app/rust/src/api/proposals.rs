@@ -421,8 +421,18 @@ pub struct RepairInfo {
     pub new_key_hex: String,
     /// The members rebuilding it in the current attempt (hex keys).
     pub helpers: Vec<String>,
-    /// 0 for the approvers' attempt, +1 per retry.
+    /// 0 for the approvers' attempt, +1 per restart.
     pub attempt: u32,
+    /// Restarts asked for in this attempt: each starts once every helper it names asked.
+    pub restarts: Vec<RepairRestart>,
+}
+
+/// A restart of a key repair some members asked for.
+pub struct RepairRestart {
+    /// The helpers it names (hex keys).
+    pub helpers: Vec<String>,
+    /// Who asked so far (hex keys).
+    pub asked: Vec<String>,
 }
 
 /// A signer moving to a new phone, waiting for approvals.
@@ -596,31 +606,45 @@ fn repairs(state: &VaultState) -> Vec<RepairInfo> {
             new_key_hex: hex::encode(r.new.sig_pk),
             helpers: r.helpers.iter().map(hex::encode).collect(),
             attempt: r.attempt,
+            restarts: r
+                .retries
+                .iter()
+                .map(|(helpers, asked)| RepairRestart {
+                    helpers: helpers.iter().map(hex::encode).collect(),
+                    asked: asked.iter().map(hex::encode).collect(),
+                })
+                .collect(),
         })
         .collect()
 }
 
-/// Takes over from `stalled_key_hex`, a helper not doing its part in rebuilding a moved
-/// seat's key: a new attempt starts with this member in its place.
+/// Asks to restart rebuilding a moved seat's key with `taker_key_hex` in place of
+/// `stalled_key_hex`, a helper not doing its part: this member offering to help, or a
+/// helper agreeing to another member's offer. The restart starts once every new helper
+/// asked.
 pub fn retry_repair(
     relay_url: String,
     seeds: Vec<u8>,
     material: Vec<u8>,
     replacement: u64,
     stalled_key_hex: String,
+    taker_key_hex: String,
 ) -> Result<(), ZafeError> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
-    let stalled: [u8; 32] = hex::decode(stalled_key_hex.trim())
-        .ok()
-        .and_then(|b| b.try_into().ok())
-        .ok_or_else(|| ZafeError::invalid("not a signer key"))?;
+    let key = |hex_key: &str| -> Result<[u8; 32], ZafeError> {
+        hex::decode(hex_key.trim())
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| ZafeError::invalid("not a signer key"))
+    };
     runtime().block_on(repair::retry_repair(
         &vault_relay(&relay_url, &m),
         &me,
         &m,
         replacement,
-        stalled,
+        key(&stalled_key_hex)?,
+        key(&taker_key_hex)?,
         &mut OsRng,
     ))?;
     Ok(())

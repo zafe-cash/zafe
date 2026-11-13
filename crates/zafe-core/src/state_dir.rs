@@ -23,6 +23,15 @@ pub const POOL_RESET: &str = "pool-reset";
 /// This member's key-generation state while a setup is in progress (`node::keygen_step`);
 /// deleted once the vault's keys are saved.
 pub const KEYGEN: &str = "keygen.state";
+/// The member list and commitments this member revealed its safety value against
+/// (`node::safety_check`); deleted with [`KEYGEN`].
+pub const SAFETY_PIN: &str = "safety.pin";
+/// This member's random safety value for the setup (`node::safety_check`), written before
+/// its commitment is sent; deleted with [`KEYGEN`].
+pub const SAFETY_SECRET: &str = "safety.secret";
+/// A recovering phone's seat-recovery pins (`repair::recovery_checks`), one file per
+/// (new identity, co-signer); not inside any vault's directory (there is none yet).
+pub const RECOVERY: &str = "recovery";
 /// Extension of a leader's saved signing request.
 pub const REQUEST_EXT: &str = "req";
 /// Extension of a leader's saved own signature shares.

@@ -16,6 +16,7 @@ import '../../core/widgets/mobile/zafe_detail.dart';
 import '../../providers/member_names_provider.dart';
 import '../../providers/proposals_provider.dart';
 import '../../providers/vault_provider.dart';
+import '../../rust/api/proposals.dart' as rust show RepairInfo, RepairRestart;
 import '../home/rename_sheet.dart';
 import '../../core/widgets/line_icon.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
@@ -91,13 +92,32 @@ class SignersScreen extends ConsumerWidget {
                             (h, memberLabel(h, me: me, names: names)),
                         ],
                         meHelping: r.helpers.contains(me),
-                        onTakeOver: (stalled, name) => _takeOver(
-                          context,
-                          ref,
-                          r.replacement,
-                          stalled,
-                          name,
-                        ),
+                        offers: [
+                          for (final x in r.restarts)
+                            if (_change(r, x) case (final stalled, final taker))
+                              _offer(
+                                context,
+                                ref,
+                                r.replacement,
+                                x,
+                                stalled,
+                                taker,
+                                me: me,
+                                label: (k) =>
+                                    memberLabel(k, me: me, names: names),
+                              ),
+                        ],
+                        // One offer at a time from this phone.
+                        onTakeOver: r.restarts.any((x) => x.asked.contains(me))
+                            ? null
+                            : (stalled, name) => _takeOver(
+                                context,
+                                ref,
+                                r.replacement,
+                                stalled,
+                                name,
+                                me!,
+                              ),
                       ),
                     ],
                   if (backedUp != null) ...[
@@ -152,20 +172,57 @@ class SignersScreen extends ConsumerWidget {
   }
 }
 
-/// Asks, then takes over from a helper who isn't rebuilding a moved seat's key.
+/// The one helper a restart replaces and the member taking its place, when it changes
+/// exactly one (what this app asks for).
+(String, String)? _change(rust.RepairInfo r, rust.RepairRestart x) {
+  final leaving = r.helpers.where((h) => !x.helpers.contains(h)).toList();
+  final taking = x.helpers.where((h) => !r.helpers.contains(h)).toList();
+  return leaving.length == 1 && taking.length == 1
+      ? (leaving.single, taking.single)
+      : null;
+}
+
+/// How the card shows a member's offer to help instead of `stalled`.
+RepairOffer _offer(
+  BuildContext context,
+  WidgetRef ref,
+  BigInt replacement,
+  rust.RepairRestart x,
+  String stalled,
+  String taker, {
+  required String? me,
+  required String Function(String keyHex) label,
+}) {
+  final waiting = x.helpers
+      .where((h) => !x.asked.contains(h))
+      .map((h) => h == me ? 'you' : label(h));
+  return (
+    text: taker == me
+        ? 'You offered to help instead of ${label(stalled)}.'
+        : '${label(taker)} offers to help instead of ${label(stalled)}.',
+    waitingFor: waiting.isEmpty ? null : waiting.join(' and '),
+    onAgree: x.helpers.contains(me) && !x.asked.contains(me)
+        ? () => _agree(context, ref, replacement, stalled, taker, label)
+        : null,
+  );
+}
+
+/// Asks, then takes over from a helper who isn't rebuilding a moved seat's key. The
+/// rebuild starts over once the other helpers agree.
 Future<void> _takeOver(
   BuildContext context,
   WidgetRef ref,
   BigInt replacement,
   String stalled,
   String name,
+  String me,
 ) async {
   final ok = await showAppConfirm(
     context,
     title: 'Help instead of $name?',
     body:
-        'Your phone takes $name\'s place and the rebuild starts over. Only do this '
-        'if $name can\'t open Zafe for a while.',
+        'Your phone takes $name\'s place once the other helpers agree, and the rebuild '
+        'starts over. Only do this if $name can\'t open Zafe for a while.',
     confirmLabel: 'Help instead',
     destructive: false,
   );
@@ -173,8 +230,36 @@ Future<void> _takeOver(
   if (!await confirmUnlock(context, ref, reason: 'Help rebuild a key')) {
     throw const ActionCancelled();
   }
-  // The card then shows this phone among the helpers.
-  await ref.read(proposalsProvider.notifier).retryRepair(replacement, stalled);
+  await ref
+      .read(proposalsProvider.notifier)
+      .retryRepair(replacement, stalled, me);
+}
+
+/// A helper agrees that `taker` helps instead of `stalled`.
+Future<void> _agree(
+  BuildContext context,
+  WidgetRef ref,
+  BigInt replacement,
+  String stalled,
+  String taker,
+  String Function(String keyHex) label,
+) async {
+  final ok = await showAppConfirm(
+    context,
+    title: 'Let ${label(taker)} help?',
+    body:
+        'The rebuild starts over with ${label(taker)} instead of ${label(stalled)}. '
+        'Only agree if ${label(stalled)} can\'t open Zafe for a while.',
+    confirmLabel: 'Agree',
+    destructive: false,
+  );
+  if (!ok || !context.mounted) throw const ActionCancelled();
+  if (!await confirmUnlock(context, ref, reason: 'Help rebuild a key')) {
+    throw const ActionCancelled();
+  }
+  await ref
+      .read(proposalsProvider.notifier)
+      .retryRepair(replacement, stalled, taker);
 }
 
 /// The Signers tab's backup card text: what losing phones without a backup means for a
@@ -371,14 +456,24 @@ class SeatMoveCard extends StatelessWidget {
   }
 }
 
+/// A member's offer to help instead of a stalled helper: what the card says, who still
+/// has to agree, and this phone's "Agree" when it is one of them.
+typedef RepairOffer = ({
+  String text,
+  String? waitingFor,
+  Future<void> Function()? onAgree,
+});
+
 /// A moved seat whose key the helpers' phones are still rebuilding on the new phone. A
-/// member who isn't helping can take over from a helper who can't.
+/// member who isn't helping can offer to take over from a helper who can't; the rebuild
+/// starts over once the other helpers agree.
 class RepairCard extends StatelessWidget {
   const RepairCard({
     super.key,
     required this.who,
     required this.helpers,
     required this.meHelping,
+    this.offers = const [],
     this.onTakeOver,
   });
 
@@ -387,6 +482,7 @@ class RepairCard extends StatelessWidget {
   /// `(key hex, label)` of the helpers in the current attempt.
   final List<(String, String)> helpers;
   final bool meHelping;
+  final List<RepairOffer> offers;
   final Future<void> Function(String stalled, String name)? onTakeOver;
 
   @override
@@ -423,6 +519,30 @@ class RepairCard extends StatelessWidget {
               color: colors.text.secondary,
             ),
           ),
+          for (final o in offers) ...[
+            const SizedBox(height: AppSpacing.s),
+            Text(
+              o.waitingFor == null
+                  ? o.text
+                  : '${o.text} Waiting for ${o.waitingFor} to agree.',
+              style: AppTypography.bodySmall.copyWith(
+                color: colors.text.secondary,
+              ),
+            ),
+            if (o.onAgree != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              SizedBox(
+                width: double.infinity,
+                child: ActionButton(
+                  label: 'Agree',
+                  variant: AppButtonVariant.secondary,
+                  size: AppButtonSize.medium,
+                  errorFallback: 'Couldn\'t agree. Try again.',
+                  onPressed: o.onAgree!,
+                ),
+              ),
+            ],
+          ],
           if (!meHelping && onTakeOver != null)
             for (final (key, name) in helpers) ...[
               const SizedBox(height: AppSpacing.s),

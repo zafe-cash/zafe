@@ -52,17 +52,15 @@ async fn make_vault(relay: &RelayClient) -> Vault {
         join_vault(relay, id, &invite).await.unwrap();
     }
     seal(relay, &ids[0], &invite).await.unwrap();
-    let number = futures::future::join_all(ids.iter().map(|id| {
-        zafe_core::node::wait_for_safety_words(relay, id, &invite, Duration::from_secs(30))
-    }))
-    .await
-    .into_iter()
-    .map(Result::unwrap)
-    .reduce(|a, b| {
-        assert_eq!(a, b, "every member sees the same safety words");
-        a
-    })
-    .unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| safety_words(relay, id, &invite)))
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .reduce(|a, b| {
+            assert_eq!(a, b, "every member sees the same safety words");
+            a
+        })
+        .unwrap();
     let net = regtest_network();
     let timeout = Duration::from_secs(60);
     let (mut r0, mut r1, mut r2) = (
@@ -83,8 +81,8 @@ async fn make_vault(relay: &RelayClient) -> Vault {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(relay, &ids[0]),
+            setup_key(&ids[0]),
             &mut r0,
             timeout
         ),
@@ -100,8 +98,8 @@ async fn make_vault(relay: &RelayClient) -> Vault {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(relay, &ids[1]),
+            setup_key(&ids[1]),
             &mut r1,
             timeout
         ),
@@ -117,8 +115,8 @@ async fn make_vault(relay: &RelayClient) -> Vault {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(relay, &ids[2]),
+            setup_key(&ids[2]),
             &mut r2,
             timeout
         ),
@@ -584,16 +582,6 @@ async fn a_copy_that_does_not_verify_is_an_error_until_the_member_follows_the_re
     assert_eq!(len(&w, 0, &w.url).await.unwrap(), total);
 }
 
-/// A fresh directory for one member's key-generation state.
-fn keygen_dir() -> std::path::PathBuf {
-    tempfile::tempdir().unwrap().keep()
-}
-
-/// The key that encrypts it (any fixed key will do in tests).
-fn keygen_key() -> zafe_core::nonce_store::NonceKey {
-    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
-}
-
 // --- Labelled vaults and anchors (docs/relay-move.md §4.6, §6, §8 K-L) -------------------
 
 /// A new vault's relay mailbox is a random label, not its vault id: everything addressed
@@ -769,7 +757,9 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
         let relay = w.client(i, &w.url);
         let mut words = None;
         for _ in 0..4 {
-            recovery_checks(&phone, &fresh).await.unwrap();
+            recovery_checks(&phone, &fresh, &w.dir.path().join("recovery"))
+                .await
+                .unwrap();
             words = new_phone_words(&relay, &w.vault.ids[i], fresh.public())
                 .await
                 .unwrap();
@@ -824,7 +814,8 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
     }
     let lossy = serve(Relay::open(&snap).unwrap()).await;
     let label = Some(w.vault.material[1].label());
-    let err = try_recover(&new_phone(&lossy, "new-phone-a"), &fresh, label)
+    let confirmed = [1, 2].map(|i| w.vault.ids[i].public().sig_pk);
+    let err = try_recover(&new_phone(&lossy, "new-phone-a"), &fresh, label, &confirmed)
         .await
         .unwrap_err();
     assert!(
@@ -839,8 +830,9 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
 
     // The live relay serves the whole history: recovered, and anchored there.
     let honest = new_phone(&w.url, "new-phone-b");
-    let RecoveryStatus::Done { material, invite } =
-        try_recover(&honest, &fresh, label).await.unwrap()
+    let RecoveryStatus::Done { material, invite } = try_recover(&honest, &fresh, label, &confirmed)
+        .await
+        .unwrap()
     else {
         panic!("not recovered");
     };
@@ -855,4 +847,45 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
             .len() as u64,
         total
     );
+}
+
+/// One member's setup state dir in this test's relay: the safety check and key generation
+/// share it (the safety value lives there).
+fn member_dir(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+) -> std::path::PathBuf {
+    let port = relay
+        .base_url()
+        .rsplit(':')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    std::env::temp_dir().join(format!(
+        "zafe-setup-{}-{port}-{}",
+        std::process::id(),
+        hex::encode(&id.public().sig_pk[..8])
+    ))
+}
+
+/// The key that seals one member's setup state (any fixed key per member will do).
+fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
+}
+
+/// One member's safety words for `invite`, polled from its setup state dir.
+async fn safety_words(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+    invite: &zafe_core::node::Invite,
+) -> Result<String, zafe_core::node::NodeError> {
+    zafe_core::node::wait_for_safety_words(
+        relay,
+        id,
+        invite,
+        &member_dir(relay, id),
+        &setup_key(id),
+        std::time::Duration::from_secs(30),
+    )
+    .await
 }

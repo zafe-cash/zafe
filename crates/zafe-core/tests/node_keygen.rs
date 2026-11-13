@@ -57,20 +57,26 @@ async fn setup() -> (RelayClient, Vec<Identity>, Invite, String) {
     seal(&relay, &ids[0], &invite).await.unwrap();
 
     // Membership is locked; every member sees the same safety words once all values are in.
-    let m = membership(&relay, &ids[0], &invite).await.unwrap();
+    let m = membership(
+        &relay,
+        &ids[0],
+        &invite,
+        &member_dir(&relay, &ids[0]),
+        &setup_key(&ids[0]),
+    )
+    .await
+    .unwrap();
     assert!(m.sealed);
     assert_eq!(m.members.len(), 3);
-    let number = futures::future::join_all(ids.iter().map(|id| {
-        zafe_core::node::wait_for_safety_words(&relay, id, &invite, Duration::from_secs(30))
-    }))
-    .await
-    .into_iter()
-    .map(Result::unwrap)
-    .reduce(|a, b| {
-        assert_eq!(a, b, "every member sees the same safety words");
-        a
-    })
-    .unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| safety_words(&relay, id, &invite)))
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .reduce(|a, b| {
+            assert_eq!(a, b, "every member sees the same safety words");
+            a
+        })
+        .unwrap();
     (relay, ids, invite, number)
 }
 
@@ -98,8 +104,8 @@ async fn three_members_create_a_vault_over_the_relay() {
                 creator_expiry_blocks: Some(3 * 1152),
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[0]),
+            setup_key(&ids[0]),
             &mut r0,
             timeout
         ),
@@ -115,8 +121,8 @@ async fn three_members_create_a_vault_over_the_relay() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[1]),
+            setup_key(&ids[1]),
             &mut r1,
             timeout
         ),
@@ -132,8 +138,8 @@ async fn three_members_create_a_vault_over_the_relay() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[2]),
+            setup_key(&ids[2]),
             &mut r2,
             timeout
         ),
@@ -231,8 +237,8 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[0]),
+            setup_key(&ids[0]),
             &mut r0,
             timeout
         ),
@@ -248,8 +254,8 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
                 creator_expiry_blocks: None,
                 max_birthday: Some(110)
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[1]),
+            setup_key(&ids[1]),
             &mut r1,
             timeout
         ),
@@ -265,8 +271,8 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[2]),
+            setup_key(&ids[2]),
             &mut r2,
             timeout
         ),
@@ -298,8 +304,8 @@ async fn keygen_names_the_member_who_never_took_part() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[0]),
+            setup_key(&ids[0]),
             &mut r0,
             timeout
         ),
@@ -315,8 +321,8 @@ async fn keygen_names_the_member_who_never_took_part() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[1]),
+            setup_key(&ids[1]),
             &mut r1,
             timeout
         ),
@@ -348,8 +354,8 @@ async fn keygen_refuses_an_unconfirmed_safety_number() {
             creator_expiry_blocks: None,
             max_birthday: None,
         },
-        keygen_dir(),
-        keygen_key(),
+        member_dir(&relay, &ids[1]),
+        setup_key(&ids[1]),
         &mut rng,
         Duration::from_secs(5),
     )
@@ -465,8 +471,8 @@ async fn a_restored_device_replaces_its_dead_pool() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[0]),
+            setup_key(&ids[0]),
             &mut r0,
             timeout
         ),
@@ -482,8 +488,8 @@ async fn a_restored_device_replaces_its_dead_pool() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[1]),
+            setup_key(&ids[1]),
             &mut r1,
             timeout
         ),
@@ -499,8 +505,8 @@ async fn a_restored_device_replaces_its_dead_pool() {
                 creator_expiry_blocks: None,
                 max_birthday: None
             },
-            keygen_dir(),
-            keygen_key(),
+            member_dir(&relay, &ids[2]),
+            setup_key(&ids[2]),
             &mut r2,
             timeout
         ),
@@ -582,12 +588,43 @@ async fn a_restored_device_replaces_its_dead_pool() {
     assert_eq!(state.pools[&me].available(), published);
 }
 
-/// A fresh directory for one member's key-generation state.
-fn keygen_dir() -> std::path::PathBuf {
-    tempfile::tempdir().unwrap().keep()
+/// One member's setup state dir in this test's relay: the safety check and key generation
+/// share it (the safety value lives there).
+fn member_dir(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+) -> std::path::PathBuf {
+    let port = relay
+        .base_url()
+        .rsplit(':')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    std::env::temp_dir().join(format!(
+        "zafe-setup-{}-{port}-{}",
+        std::process::id(),
+        hex::encode(&id.public().sig_pk[..8])
+    ))
 }
 
-/// The key that encrypts it (any fixed key will do in tests).
-fn keygen_key() -> zafe_core::nonce_store::NonceKey {
-    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
+/// The key that seals one member's setup state (any fixed key per member will do).
+fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
+}
+
+/// One member's safety words for `invite`, polled from its setup state dir.
+async fn safety_words(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+    invite: &zafe_core::node::Invite,
+) -> Result<String, zafe_core::node::NodeError> {
+    zafe_core::node::wait_for_safety_words(
+        relay,
+        id,
+        invite,
+        &member_dir(relay, id),
+        &setup_key(id),
+        std::time::Duration::from_secs(30),
+    )
+    .await
 }

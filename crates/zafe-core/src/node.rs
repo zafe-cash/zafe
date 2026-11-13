@@ -456,6 +456,45 @@ impl VaultMaterial {
 mod relay_move;
 pub use relay_move::*;
 
+/// The vault's address: its viewing key's external address at index 0, Orchard only.
+fn vault_address(
+    fvk: &orchard::keys::FullViewingKey,
+    network: &impl Parameters,
+) -> Result<String, NodeError> {
+    Ok(UnifiedAddress::from_receivers(
+        Some(fvk.address_at(0u32, Scope::External)),
+        None,
+        None,
+        None,
+        None,
+    )
+    .ok_or_else(|| NodeError::Protocol("cannot build unified address".into()))?
+    .encode(network))
+}
+
+/// The address `descriptor`'s viewing key gives (what screens show, never the stored one).
+pub fn ufvk_address(descriptor: &VaultDescriptor) -> Result<String, NodeError> {
+    let network = crate::wallet::ZafeNetwork::from_name(&descriptor.network)
+        .ok_or_else(|| proto("unknown network"))?;
+    let ufvk = zcash_keys::keys::UnifiedFullViewingKey::decode(&network, &descriptor.ufvk)
+        .map_err(proto)?;
+    let fvk = ufvk
+        .orchard()
+        .ok_or_else(|| proto("the viewing key has no Orchard key"))?;
+    vault_address(fvk, &network)
+}
+
+/// Refuses a descriptor whose stored address isn't its viewing key's (rule 3: derive,
+/// don't store). Checked wherever a vault is accepted: a log's `Created` entry, a backup.
+pub fn check_address(descriptor: &VaultDescriptor) -> Result<(), NodeError> {
+    if ufvk_address(descriptor)? != descriptor.address {
+        return Err(NodeError::Verification(
+            "the vault's address isn't the one its viewing key gives".into(),
+        ));
+    }
+    Ok(())
+}
+
 // --- Setup: create, join, seal, safety number ------------------------------------------
 
 /// Creates a vault's mailbox on `relay` and returns the invite. The vault id and the
@@ -523,12 +562,14 @@ pub struct Membership {
 
 /// The current membership and, once it is sealed, one step of the safety check: this
 /// member publishes its commitment, then (once it holds every other member's
-/// commitment) its value; when every value is in, the words. Call it repeatedly (the app
-/// polls it): each call does what it can and returns.
+/// commitment, pinned in `state_dir` with `key`) its value; when every value is in, the
+/// words. Call it repeatedly (the app polls it): each call does what it can and returns.
 pub async fn membership(
     relay: &RelayClient,
     who: &Identity,
     invite: &Invite,
+    state_dir: &Path,
+    key: &NonceKey,
 ) -> Result<Membership, NodeError> {
     let response = relay.members(who, invite.label).await?;
     let mut out = Membership {
@@ -538,15 +579,16 @@ pub async fn membership(
         waiting_for: Vec::new(),
     };
     if out.sealed {
-        let (words, waiting) = safety_check(relay, who, invite.ids(), &out.members).await?;
+        let (words, waiting) =
+            safety_check(relay, who, invite.ids(), &out.members, state_dir, key).await?;
         out.safety_words = words;
         out.waiting_for = waiting;
     }
     Ok(out)
 }
 
-/// Relay URL, mailbox label, sender, envelope kind.
-type SafetySent = (String, MailboxId, [u8; 32], u8);
+/// Relay URL, mailbox label, sender, envelope kind, payload.
+type SafetySent = (String, MailboxId, [u8; 32], u8, [u8; 32]);
 
 /// Commitments and values this process already sent, per relay, so polling doesn't send
 /// them again (a restarted app sends them once more; receivers keep the first of each).
@@ -558,11 +600,16 @@ pub async fn wait_for_safety_words(
     relay: &RelayClient,
     me: &Identity,
     invite: &Invite,
+    state_dir: &Path,
+    key: &NonceKey,
     timeout: Duration,
 ) -> Result<String, NodeError> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(words) = membership(relay, me, invite).await?.safety_words {
+        if let Some(words) = membership(relay, me, invite, state_dir, key)
+            .await?
+            .safety_words
+        {
             return Ok(words);
         }
         if Instant::now() > deadline {
@@ -573,6 +620,83 @@ pub async fn wait_for_safety_words(
     }
 }
 
+/// This member's safety value for this setup attempt: random, sealed in `state_dir`
+/// (`state_dir::SAFETY_SECRET`) before its commitment is sent, so a restarted app reveals
+/// what it committed to, while an attempt whose state was deleted (left, then the same
+/// invite opened again) never brings a revealed value back (rule 1). Unreadable is an
+/// error; missing once pinned (it was revealed) too. Deleted with the keygen state.
+fn safety_secret(state_dir: &Path, key: &NonceKey, pinned: bool) -> Result<[u8; 32], NodeError> {
+    let path = state_dir.join(state_dir::SAFETY_SECRET);
+    let load = || -> Result<Option<[u8; 32]>, NodeError> {
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(NodeError::Io(e.to_string())),
+        };
+        let plain = key
+            .open(state_dir::SAFETY_SECRET, &bytes)
+            .ok_or_else(|| NodeError::Protocol("this phone's safety value can't be read".into()))?;
+        Ok(Some(version::decode(Format::SafetySecret, &plain)?))
+    };
+    match load()? {
+        Some(secret) => Ok(secret),
+        None if pinned => Err(NodeError::Protocol(
+            "this phone's safety value is gone after it was revealed".into(),
+        )),
+        None => {
+            let mut secret = [0u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut secret);
+            let sealed = key.seal(
+                state_dir::SAFETY_SECRET,
+                &version::encode(Format::SafetySecret, &secret)?,
+            );
+            fs::create_dir_all(state_dir).map_err(|e| NodeError::Io(e.to_string()))?;
+            // The first one written wins (the app and a background check may race).
+            crate::durable::create_new(&path, &sealed).map_err(|e| NodeError::Io(e.to_string()))?;
+            load()?.ok_or_else(|| NodeError::Io("safety value".into()))
+        }
+    }
+}
+
+/// What this member revealed its safety value against: the sealed member list (sorted)
+/// and every other member's commitment (rule 1). Written before the value leaves the phone
+/// (`state_dir::SAFETY_PIN`, sealed with the vault's [`NonceKey`]); from then on the words
+/// are only over these, and any other list or commitment the relay serves stops the setup.
+/// Deleted with the key-generation state.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SafetyPin {
+    members: Vec<IdentityPublic>,
+    commitments: BTreeMap<[u8; 32], [u8; 32]>,
+}
+
+impl SafetyPin {
+    fn load(path: &Path, key: &NonceKey) -> Result<Option<Self>, NodeError> {
+        let bytes = match fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(NodeError::Io(e.to_string())),
+        };
+        // Unreadable is an error, never "not revealed yet": the value is already out.
+        let plain = key.open(state_dir::SAFETY_PIN, &bytes).ok_or_else(|| {
+            NodeError::Protocol("this phone's safety word record can't be read".into())
+        })?;
+        Ok(Some(version::decode(Format::SafetyPin, &plain)?))
+    }
+
+    /// Writes the pin unless one exists (the app and a background check may race; the
+    /// first wins) and returns the one on disk.
+    fn create(&self, state_dir: &Path, key: &NonceKey) -> Result<Self, NodeError> {
+        let path = state_dir.join(state_dir::SAFETY_PIN);
+        let sealed = key.seal(
+            state_dir::SAFETY_PIN,
+            &version::encode(Format::SafetyPin, self)?,
+        );
+        fs::create_dir_all(state_dir).map_err(|e| NodeError::Io(e.to_string()))?;
+        crate::durable::create_new(&path, &sealed).map_err(|e| NodeError::Io(e.to_string()))?;
+        Self::load(&path, key)?.ok_or_else(|| NodeError::Io("safety word record".into()))
+    }
+}
+
 /// The words are bound to the vault id (shared out of band in the invite); messages go
 /// to the relay's label.
 async fn safety_check(
@@ -580,12 +704,26 @@ async fn safety_check(
     me: &Identity,
     ids: VaultIds,
     members: &[IdentityPublic],
+    state_dir: &Path,
+    key: &NonceKey,
 ) -> Result<(Option<String>, Vec<[u8; 32]>), NodeError> {
     let (vault, label) = (ids.vault, ids.label);
     let my_pk = me.public().sig_pk;
-    let secret = crate::sas::secret(me, &vault);
-    let by_pk: BTreeMap<[u8; 32], IdentityPublic> =
-        members.iter().map(|m| (m.sig_pk, *m)).collect();
+    let changed = |what: &str| {
+        NodeError::Verification(format!(
+            "{what} changed after this phone revealed its safety value: stop, and don't \
+             make keys for this setup"
+        ))
+    };
+    let pinned = SafetyPin::load(&state_dir.join(state_dir::SAFETY_PIN), key)?;
+    let secret = safety_secret(state_dir, key, pinned.is_some())?;
+    let mut sorted = members.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    if pinned.as_ref().is_some_and(|p| p.members != sorted) {
+        return Err(changed("The member list"));
+    }
+    let by_pk: BTreeMap<[u8; 32], IdentityPublic> = sorted.iter().map(|m| (m.sig_pk, *m)).collect();
     if !by_pk.contains_key(&my_pk) {
         return Err(NodeError::NotReady(
             "this phone isn't a member of the setup".into(),
@@ -593,26 +731,43 @@ async fn safety_check(
     }
     let others: Vec<[u8; 32]> = by_pk.keys().filter(|pk| **pk != my_pk).copied().collect();
 
-    let mut commits = BTreeMap::<[u8; 32], [u8; 32]>::new();
+    // Every commitment served from each member (a restarted app sends the same one again);
+    // the first value from each member.
+    let mut commits = BTreeMap::<[u8; 32], Vec<[u8; 32]>>::new();
     let mut reveals = BTreeMap::<[u8; 32], [u8; 32]>::new();
     for (_, sender, env) in read_inbox(relay, me, label, &by_pk, 0).await? {
-        let slot = match env.header.kind {
-            Kind::SafetyCommit => &mut commits,
-            Kind::SafetyReveal => &mut reveals,
-            _ => continue,
-        };
-        if let Some(value) = env
+        let Some(value) = env
             .open(me, &sender)
             .ok()
             .and_then(|p| <[u8; 32]>::try_from(p.as_slice()).ok())
+        else {
+            continue;
+        };
+        match env.header.kind {
+            Kind::SafetyCommit => commits.entry(sender.sig_pk).or_default().push(value),
+            Kind::SafetyReveal => {
+                reveals.entry(sender.sig_pk).or_insert(value);
+            }
+            _ => {}
+        }
+    }
+    if let Some(pin) = &pinned {
+        if commits
+            .iter()
+            .any(|(pk, seen)| seen.iter().any(|c| pin.commitments.get(pk) != Some(c)))
         {
-            // The first of each kind from each member counts.
-            slot.entry(sender.sig_pk).or_insert(value);
+            return Err(changed("A member's commitment"));
         }
     }
 
     let send = |kind: Kind, payload: [u8; 32]| async move {
-        let key = (relay.base_url().to_owned(), label, my_pk, kind as u8);
+        let key = (
+            relay.base_url().to_owned(),
+            label,
+            my_pk,
+            kind as u8,
+            payload,
+        );
         if SAFETY_SENT.lock().expect("not poisoned").contains(&key) {
             return Ok::<_, NodeError>(());
         }
@@ -628,15 +783,29 @@ async fn safety_check(
         crate::sas::commitment(&vault, &my_pk, &secret),
     )
     .await?;
-    let missing_commits: Vec<_> = others
-        .iter()
-        .filter(|pk| !commits.contains_key(*pk))
-        .copied()
-        .collect();
-    if !missing_commits.is_empty() {
-        return Ok((None, missing_commits));
-    }
-    // Every other member is committed: only now does this value leave the phone.
+    let pin = match pinned {
+        Some(pin) => pin,
+        None => {
+            let missing_commits: Vec<_> = others
+                .iter()
+                .filter(|pk| !commits.contains_key(*pk))
+                .copied()
+                .collect();
+            if !missing_commits.is_empty() {
+                return Ok((None, missing_commits));
+            }
+            let pin = SafetyPin {
+                members: sorted,
+                commitments: others.iter().map(|pk| (*pk, commits[pk][0])).collect(),
+            };
+            // Another step of this phone may have pinned first, from another answer.
+            if pin.create(state_dir, key)? != pin {
+                return Err(changed("What the relay shows"));
+            }
+            pin
+        }
+    };
+    // Pinned: only now does this value leave the phone.
     send(Kind::SafetyReveal, secret).await?;
     let missing_reveals: Vec<_> = others
         .iter()
@@ -649,7 +818,7 @@ async fn safety_check(
     let mut values = vec![(*me.public(), secret)];
     for pk in &others {
         let value = reveals[pk];
-        if crate::sas::commitment(&vault, pk, &value) != commits[pk] {
+        if crate::sas::commitment(&vault, pk, &value) != pin.commitments[pk] {
             return Err(NodeError::Verification(
                 "a member's safety value doesn't match what it committed to: stop, and \
                  don't make keys for this setup"
@@ -840,13 +1009,20 @@ pub fn keygen_started(state_dir: &Path) -> bool {
     state_dir.join(state_dir::KEYGEN).exists()
 }
 
-/// Deletes the key-generation state once the vault's material is saved (or the setup
-/// was abandoned).
+/// Deletes the key-generation state, the safety value and its pin once the vault's
+/// material is saved (or the setup was abandoned).
 pub fn forget_keygen(state_dir: &Path) -> std::io::Result<()> {
-    match crate::durable::remove(&state_dir.join(state_dir::KEYGEN)) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        other => other,
+    for name in [
+        state_dir::KEYGEN,
+        state_dir::SAFETY_PIN,
+        state_dir::SAFETY_SECRET,
+    ] {
+        match crate::durable::remove(&state_dir.join(name)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            other => other?,
+        }
     }
+    Ok(())
 }
 
 /// One step of key generation for this member (spec §7.2): does whatever it can with the
@@ -1103,16 +1279,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     let output = dkg_result.finish(&contributions).map_err(proto)?;
 
     // Descriptor: identical on every member, then signed by all.
-    let fvk = output.vault_keys.fvk();
-    let address = UnifiedAddress::from_receivers(
-        Some(fvk.address_at(0u32, Scope::External)),
-        None,
-        None,
-        None,
-        None,
-    )
-    .ok_or_else(|| NodeError::Protocol("cannot build unified address".into()))?
-    .encode(network);
+    let address = vault_address(output.vault_keys.fvk(), network)?;
     let descriptor = VaultDescriptor {
         vault_id: invite.vault_id,
         version: version::DESCRIPTOR,
@@ -1311,6 +1478,8 @@ pub async fn seal_when_full(
     me: &Identity,
     invite: &Invite,
     membership: Membership,
+    state_dir: &Path,
+    key: &NonceKey,
 ) -> Result<Membership, NodeError> {
     if membership.sealed
         || me.public().sig_pk != invite.creator
@@ -1319,7 +1488,7 @@ pub async fn seal_when_full(
         return Ok(membership);
     }
     seal(relay, me, invite).await?;
-    self::membership(relay, me, invite).await
+    self::membership(relay, me, invite, state_dir, key).await
 }
 
 /// Runs key generation to the end for this member, stepping once a second (three relay requests a step: under the hosted per-key rate) ([`keygen_step`]
@@ -1343,8 +1512,8 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
     let (state_dir, key) = (state_dir.as_path(), &key);
     let deadline = Instant::now() + timeout;
     loop {
-        let m = membership(relay, me, invite).await?;
-        let m = seal_when_full(relay, me, invite, m).await?;
+        let m = membership(relay, me, invite, state_dir, key).await?;
+        let m = seal_when_full(relay, me, invite, m, state_dir, key).await?;
         match keygen_step(
             relay,
             me,
@@ -1478,6 +1647,7 @@ fn start_chain(
             "the vault log belongs to another vault".into(),
         ));
     }
+    check_address(&state.descriptor)?;
     let mut chain = Chain::new(vault_id);
     chain
         .append(first.clone(), &state.member_identities())

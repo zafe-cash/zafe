@@ -559,24 +559,38 @@ Learned while studying it:
   (screenshots are black: read it with `agent-device snapshot`); the code is not shown as
   text, so "Copy code", then paste it into Join's field to read it.
 - **Seat recovery safety words** (2026-10-15, audit M2; replaced an 8-digit code of the new
-  keys, which a swapped recovery code could match in seconds): commit, challenge, reveal
-  through the relay (`POST /v1/recovery/put|read`, `RecoveryPut` signed; new routes, no
-  `RELAY_API` bump, table `recovery_values` added by `CREATE TABLE IF NOT EXISTS`, so no
-  `RELAY_DB` bump; first value per (subject, signer, kind) stays, at most
-  `MAX_RECOVERY_CHALLENGES` = 16 challenges per new phone, pruned after 7 days; the relay
-  stores the canonical signed bytes, clients verify). The new phone
-  (`repair::recovery_checks`, run by the bridge's `check_recovery` poll) publishes a
-  commitment to its secret, reveals it once a challenge exists, and lists the words per
-  co-signer key (`RecoveryProgress.checks`). A co-signer (`repair::new_phone_words`, bridge
-  `new_phone_words`, polled by the Replace screen) challenges with a value derived from a
-  signature over (subject, commitment), refuses a commitment that changed after it
-  challenged, checks the reveal and returns 4 words (`sas::recovery_words`).
-  `approve_replacement` takes the confirmed words and recomputes them (reading them and the
-  log at once). The new phone's `/recover` screen checks every 2 s: co-signers wait on it. Both secrets are
-  signature-derived (nothing stored). Every approver does its own check, also when
-  approving from the log's pending move. CLI: `zafe seat words <code>` then `zafe seat
-  approve <old> <code> --words "..."`; `zafe recover` prints the words as they arrive. An
-  older relay answers 404 → "the relay doesn't support safe seat recovery yet".
+  keys, which a swapped recovery code could match in seconds; one check per co-signer since
+  2026-11-13, security review rule 1): announce, commit, challenge, reveal through the relay
+  (`POST /v1/seat-check/put|read`, `RecoveryPut { subject, cosigner, kind, value }` signed;
+  the old `/v1/recovery/*` routes are gone, `RELAY_DB` 5 remade `recovery_values` keyed per
+  (subject, co-signer, kind); first value per slot stays, no cap per new phone, a
+  co-signer's announce and challenge take a `creates_per_ip` token, the new phone's commit
+  and reveal need that co-signer's announce; pruned after 7 days; the relay stores the
+  canonical signed bytes, clients verify signer and role). The new phone
+  (`repair::recovery_checks`, run by the bridge's `check_recovery` poll) commits to a secret
+  per announced co-signer (signature over its key), reveals it to that co-signer once it
+  challenged, and lists the words per co-signer key (`RecoveryProgress.checks`, until done).
+  Before revealing to a co-signer it pins that co-signer's commitment and challenge
+  (`ZafePaths.recoveryDir`, one sealed file per (identity, co-signer), deleted on save,
+  reject and Start over); words are only over the pin, a row whose challenge changes is
+  dropped. The person taps **Words match** on a row; the keys are kept in `ZafeSecureStore`
+  (`readRecoveryConfirmed`, dropped with the identity and on Start over) and passed as
+  `check_recovery(confirmed)`: `try_recover` takes a vault only through one of them. A
+  co-signer (`repair::new_phone_words`, bridge `new_phone_words`, polled by the Replace
+  screen) announces, challenges with a value derived from a signature over (subject,
+  commitment), refuses a commitment that changed after it challenged, checks the reveal and
+  returns 4 words (`sas::recovery_words`). `approve_replacement` takes the confirmed words
+  and recomputes them (reading them and the log at once). The new phone's `/recover` screen
+  checks every 2 s: co-signers wait on it. Every secret is signature-derived (nothing
+  stored). Every approver does its own check, also when approving from the log's pending
+  move. CLI: `zafe seat words <code>` then `zafe seat approve <old> <code> --words "..."`;
+  `zafe recover --confirm <co-signer key>` prints the words as they arrive. An older relay
+  answers 404 → "the relay doesn't support safe seat recovery yet".
+- **Repair restarts** (2026-11-13, event version 11): "Help instead of …" logs a
+  `RepairRetry` that only counts once every helper it names logged the same list; the other
+  helpers see "X offers to help instead of Y" with **Agree** on the Signers card
+  (`RepairInfo.restarts`, bridge `retry_repair(stalled, taker)`, CLI `zafe seat retry
+  <move> <stalled> [--taker <key>]`).
 - **Backup health** (spec §12.2): `VaultEvent::BackupVerified { epoch, at }` (only for the
   current descriptor epoch; latest per member in `VaultState.backups`), written by
   `node::attest_backup` (once per epoch; bridge `attest_backup`, CLI `zafe backup`).

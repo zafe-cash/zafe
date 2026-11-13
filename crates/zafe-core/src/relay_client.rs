@@ -704,26 +704,30 @@ impl RelayClient {
         .map_err(route_missing(ROUTE))
     }
 
-    /// Leaves one value of the safety check of `subject`'s seat recovery (see
-    /// [`RecoveryPut`]). A relay without the route answers 404.
+    /// Leaves one value of the safety check between `subject`'s new phone and the
+    /// co-signer `cosigner` (see [`RecoveryPut`]). A relay without the route answers 404.
     pub async fn recovery_put(
         &self,
         who: &Identity,
         subject: [u8; 32],
+        cosigner: [u8; 32],
         kind: RecoveryValueKind,
         value: [u8; 32],
     ) -> Result<(), RelayClientError> {
         let payload = RecoveryPut {
             subject,
+            cosigner,
             kind,
             value,
             timestamp: now(),
         };
-        self.signed::<_, ()>("/v1/recovery/put", who, payload).await
+        self.signed::<_, ()>("/v1/seat-check/put", who, payload)
+            .await
     }
 
-    /// The values left for `subject`'s recovery whose signature verifies and that are
-    /// about `subject` (the relay is not trusted with them).
+    /// The values left for `subject`'s recovery whose signature verifies, that are about
+    /// `subject` and signed by the side whose value they are (the relay is not trusted
+    /// with them).
     pub async fn recovery_read(
         &self,
         who: &Identity,
@@ -733,12 +737,20 @@ impl RelayClient {
             subject,
             timestamp: now(),
         };
-        let response: RecoveryValues = self.signed("/v1/recovery/read", who, read).await?;
+        let response: RecoveryValues = self.signed("/v1/seat-check/read", who, read).await?;
         Ok(response
             .values
             .iter()
             .filter_map(|b| Signed::<RecoveryPut>::from_bytes(b).ok())
-            .filter(|s| s.verify().is_ok_and(|p| p.subject == subject))
+            .filter(|s| {
+                s.verify().is_ok_and(|p| {
+                    let by = match p.kind {
+                        RecoveryValueKind::Announce | RecoveryValueKind::Challenge => p.cosigner,
+                        RecoveryValueKind::Commit | RecoveryValueKind::Reveal => p.subject,
+                    };
+                    p.subject == subject && s.signer.sig_pk == by
+                })
+            })
             .collect())
     }
 

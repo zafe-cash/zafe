@@ -537,6 +537,8 @@ fn wire__crate__api__repair__check_recovery_impl(
             let api_relay_url = <String>::sse_decode(&mut deserializer);
             let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_label = <Option<String>>::sse_decode(&mut deserializer);
+            let api_confirmed = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_recovery_dir = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -545,6 +547,8 @@ fn wire__crate__api__repair__check_recovery_impl(
                             api_relay_url,
                             api_seeds,
                             api_label,
+                            api_confirmed,
+                            api_recovery_dir,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2156,6 +2160,7 @@ fn wire__crate__api__proposals__retry_repair_impl(
             let api_material = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_replacement = <u64>::sse_decode(&mut deserializer);
             let api_stalled_key_hex = <String>::sse_decode(&mut deserializer);
+            let api_taker_key_hex = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, crate::api::error::ZafeError>((move || {
@@ -2165,6 +2170,7 @@ fn wire__crate__api__proposals__retry_repair_impl(
                         api_material,
                         api_replacement,
                         api_stalled_key_hex,
+                        api_taker_key_hex,
                     )?;
                     Ok(output_ok)
                 })())
@@ -3423,6 +3429,20 @@ impl SseDecode for Vec<crate::api::proposals::RepairInfo> {
     }
 }
 
+impl SseDecode for Vec<crate::api::proposals::RepairRestart> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::proposals::RepairRestart>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::proposals::ScannedPayment> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3989,11 +4009,26 @@ impl SseDecode for crate::api::proposals::RepairInfo {
         let mut var_newKeyHex = <String>::sse_decode(deserializer);
         let mut var_helpers = <Vec<String>>::sse_decode(deserializer);
         let mut var_attempt = <u32>::sse_decode(deserializer);
+        let mut var_restarts =
+            <Vec<crate::api::proposals::RepairRestart>>::sse_decode(deserializer);
         return crate::api::proposals::RepairInfo {
             replacement: var_replacement,
             new_key_hex: var_newKeyHex,
             helpers: var_helpers,
             attempt: var_attempt,
+            restarts: var_restarts,
+        };
+    }
+}
+
+impl SseDecode for crate::api::proposals::RepairRestart {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_helpers = <Vec<String>>::sse_decode(deserializer);
+        let mut var_asked = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::proposals::RepairRestart {
+            helpers: var_helpers,
+            asked: var_asked,
         };
     }
 }
@@ -5212,6 +5247,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::RepairInfo {
             self.new_key_hex.into_into_dart().into_dart(),
             self.helpers.into_into_dart().into_dart(),
             self.attempt.into_into_dart().into_dart(),
+            self.restarts.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5224,6 +5260,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::proposals::RepairInfo>
     for crate::api::proposals::RepairInfo
 {
     fn into_into_dart(self) -> crate::api::proposals::RepairInfo {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::proposals::RepairRestart {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.helpers.into_into_dart().into_dart(),
+            self.asked.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::proposals::RepairRestart
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::proposals::RepairRestart>
+    for crate::api::proposals::RepairRestart
+{
+    fn into_into_dart(self) -> crate::api::proposals::RepairRestart {
         self
     }
 }
@@ -5926,6 +5983,16 @@ impl SseEncode for Vec<crate::api::proposals::RepairInfo> {
     }
 }
 
+impl SseEncode for Vec<crate::api::proposals::RepairRestart> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::proposals::RepairRestart>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::proposals::ScannedPayment> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6340,6 +6407,15 @@ impl SseEncode for crate::api::proposals::RepairInfo {
         <String>::sse_encode(self.new_key_hex, serializer);
         <Vec<String>>::sse_encode(self.helpers, serializer);
         <u32>::sse_encode(self.attempt, serializer);
+        <Vec<crate::api::proposals::RepairRestart>>::sse_encode(self.restarts, serializer);
+    }
+}
+
+impl SseEncode for crate::api::proposals::RepairRestart {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<String>>::sse_encode(self.helpers, serializer);
+        <Vec<String>>::sse_encode(self.asked, serializer);
     }
 }
 

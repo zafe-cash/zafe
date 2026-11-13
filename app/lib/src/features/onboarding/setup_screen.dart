@@ -147,6 +147,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         });
       } else if (confirmed != null) {
         rethrow;
+      } else if (e is ZafeError && e.kind == ZafeErrorKind.verification) {
+        setState(() => _stopped = true);
       } else {
         setState(() => _error = 'Can\'t reach the server. Retrying...');
       }
@@ -213,6 +215,11 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   /// Why the last "They match" failed (kept until the next tap; polls don't clear it).
   String? _tapError;
 
+  /// The safety check found a member list or value that changed after this phone took
+  /// part (another member left and opened the invite again, or the server swapped one):
+  /// nobody should make keys with this setup.
+  bool _stopped = false;
+
   /// "They match": starts this member's part of key generation. A failure brings the
   /// words back with the reason.
   Future<void> _confirm(String words) async {
@@ -224,12 +231,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       await _refresh(confirmed: words);
     } catch (e) {
       if (!mounted) return;
+      final stopped = e is ZafeError && e.kind == ZafeErrorKind.verification;
       setState(() {
         _confirming = false;
-        _tapError = zafeErrorMessage(
-          e,
-          fallback: 'Couldn\'t start. Try again.',
-        );
+        _stopped = stopped;
+        _tapError = stopped
+            ? null
+            : zafeErrorMessage(e, fallback: 'Couldn\'t start. Try again.');
       });
     }
   }
@@ -269,7 +277,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         onPressed: () => _cancel(creator: false, confirm: false),
         child: const Text('Leave setup'),
       );
-    } else if (sealed && words != null && !started) {
+    } else if (sealed && words != null && !started && !_stopped) {
       bottom = ActionButton(
         label: 'They match',
         icon: AppIcons.check,
@@ -320,23 +328,28 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 : membership?.waitingFor ?? const [],
           ),
           const SizedBox(height: AppSpacing.md),
-          if (_tapError ?? _error case final error?)
+          if ((_stopped
+                  ? 'The safety check changed after your phone took part. Don\'t '
+                        'make keys with this setup: abandon it and start again with a '
+                        'new invite.'
+                  : _tapError ?? _error)
+              case final error?)
             Text(
               error,
               style: AppTypography.bodySmall.copyWith(
                 color: context.colors.text.warning,
               ),
             ),
-          if (!sealed && !_gone)
+          if (!sealed && !_gone && !_stopped)
             _Hint(
               text: 'You can close Zafe. It tells you when it\'s your turn.',
             ),
-          if (sealed && membership != null && !started)
+          if (sealed && membership != null && !started && !_stopped)
             SetupSafetyWordsCard(
               words: words,
               waiting: membership.waitingFor.length,
             ),
-          if (sealed) ...[
+          if (sealed || _stopped) ...[
             const SizedBox(height: AppSpacing.sm),
             AppButton(
               expand: true,
@@ -344,11 +357,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
               onPressed: _leaving ? null : _abandon,
               // Different words: nobody should make keys with this setup.
               child: Text(
-                words != null ? 'They don\'t match' : 'Abandon setup',
+                words != null && !_stopped
+                    ? 'They don\'t match'
+                    : 'Abandon setup',
               ),
             ),
           ],
-          if (!sealed && !_gone) ...[
+          if (!sealed && !_gone && !_stopped) ...[
             const SizedBox(height: AppSpacing.sm),
             AppButton(
               expand: true,

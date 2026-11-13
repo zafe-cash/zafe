@@ -142,6 +142,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RepairInfo> dco_decode_list_repair_info(dynamic raw);
 
   @protected
+  List<RepairRestart> dco_decode_list_repair_restart(dynamic raw);
+
+  @protected
   List<ScannedPayment> dco_decode_list_scanned_payment(dynamic raw);
 
   @protected
@@ -245,6 +248,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RepairInfo dco_decode_repair_info(dynamic raw);
+
+  @protected
+  RepairRestart dco_decode_repair_restart(dynamic raw);
 
   @protected
   ReviewInfo dco_decode_review_info(dynamic raw);
@@ -440,6 +446,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RepairInfo> sse_decode_list_repair_info(SseDeserializer deserializer);
 
   @protected
+  List<RepairRestart> sse_decode_list_repair_restart(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<ScannedPayment> sse_decode_list_scanned_payment(
     SseDeserializer deserializer,
   );
@@ -555,6 +566,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RepairInfo sse_decode_repair_info(SseDeserializer deserializer);
+
+  @protected
+  RepairRestart sse_decode_repair_restart(SseDeserializer deserializer);
 
   @protected
   ReviewInfo sse_decode_review_info(SseDeserializer deserializer);
@@ -785,6 +799,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_repair_restart(
+    List<RepairRestart> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_scanned_payment(
     List<ScannedPayment> self,
     SseSerializer serializer,
@@ -939,6 +959,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_repair_info(RepairInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_repair_restart(RepairRestart self, SseSerializer serializer);
 
   @protected
   void sse_encode_review_info(ReviewInfo self, SseSerializer serializer);

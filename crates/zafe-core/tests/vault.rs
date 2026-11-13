@@ -521,6 +521,85 @@ fn a_stalled_repair_restarts_and_finishes() {
     );
 }
 
+/// Rule 4: from version 11 a repair restarts only once every helper it names (the
+/// threshold of current members) logged the same restart: one member alone can't restart
+/// it. A restart tagged with an older version after a version 11 event counts the same way.
+#[test]
+fn a_repair_restart_needs_every_named_helper() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.replace(1, 0, 3);
+    log.replace(2, 0, 3);
+    let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
+    let index = log.replay().unwrap().replacements[0].index;
+    let retry = VaultEvent::RepairRetry {
+        replacement: index,
+        helpers: vec![pk[2], pk[1]],
+    };
+    let attempt = |log: &Log| log.replay().unwrap().replacements[0].attempt;
+
+    log.push_v(2, &retry, version::VAULT_EVENT);
+    assert_eq!(
+        attempt(&log),
+        0,
+        "one member's restart waits for the other helper"
+    );
+    log.push_v(2, &retry, version::VAULT_EVENT);
+    assert_eq!(attempt(&log), 0, "the same member twice counts once");
+    log.push_v(1, &retry, version::VAULT_EVENT);
+    let state = log.replay().unwrap();
+    assert_eq!(state.replacements[0].attempt, 1);
+    assert_eq!(state.replacements[0].helpers, vec![pk[2], pk[1]]);
+
+    log.push_v(2, &retry, 10);
+    assert_eq!(attempt(&log), 1, "an older tag doesn't skip the rule");
+}
+
+/// A former member's phone (its entries still chain) can't change which rules apply: from
+/// version 11 its entries raise neither the version floor nor `member_versions`, and a
+/// future tag from it isn't counted as "update Zafe". A current member's future tag is.
+#[test]
+fn a_former_members_future_tag_changes_nothing() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push_v(1, &name("Bob"), 9);
+    log.replace(1, 0, 3);
+    log.replace(2, 0, 3);
+    let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
+    let before = log.replay().unwrap();
+    for tag in [version::VAULT_EVENT, u16::MAX] {
+        log.push_v(0, &name("Mallory"), tag);
+        let state = log.replay().unwrap();
+        assert_eq!(state.max_event_version, before.max_event_version);
+        assert_eq!(state.member_versions, before.member_versions);
+        assert!(!state.member_versions.contains_key(&pk[0]));
+        assert_eq!(state.newer_version_entries(), 0);
+    }
+    log.push_v(1, &name("Bob"), u16::MAX);
+    assert_eq!(log.replay().unwrap().newer_version_entries(), 1);
+}
+
+/// A log written before version 11 replays as before: there a former member's entry still
+/// raised the floor and its `member_versions` (here to 10).
+#[test]
+fn a_former_members_entry_before_version_11_replays_as_before() {
+    let mut log = Log::new();
+    log.push(0, &log.created(&[0, 1, 2]));
+    log.push_v(1, &name("Bob"), 9);
+    log.replace(1, 0, 3);
+    log.replace(2, 0, 3);
+    let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
+    log.push_v(0, &name("Mallory"), 10);
+    let state = log.replay().unwrap();
+    assert_eq!(state.max_event_version, 10);
+    assert_eq!(state.member_versions.get(&pk[0]), Some(&10));
+    assert_eq!(state.newer_version_entries(), 0);
+    assert!(matches!(
+        state.ignored.last(),
+        Some((_, VaultError::NotAMember(_)))
+    ));
+}
+
 /// Interactive approvals of the lost device carry commitments whose nonces were on it:
 /// the move voids them, so a proposal approved at exactly the threshold reopens.
 #[test]

@@ -54,17 +54,15 @@ async fn vault(
         join_vault(&relay, id, &invite).await.unwrap();
     }
     seal(&relay, &ids[0], &invite).await.unwrap();
-    let number = futures::future::join_all(ids.iter().map(|id| {
-        zafe_core::node::wait_for_safety_words(&relay, id, &invite, Duration::from_secs(30))
-    }))
-    .await
-    .into_iter()
-    .map(Result::unwrap)
-    .reduce(|a, b| {
-        assert_eq!(a, b, "every member sees the same safety words");
-        a
-    })
-    .unwrap();
+    let number = futures::future::join_all(ids.iter().map(|id| safety_words(&relay, id, &invite)))
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .reduce(|a, b| {
+            assert_eq!(a, b, "every member sees the same safety words");
+            a
+        })
+        .unwrap();
     let net = nu6_3_network();
     let runs = ids.iter().enumerate().map(|(i, id)| {
         let (relay, invite, number, net) = (&relay, &invite, &number, &net);
@@ -83,8 +81,8 @@ async fn vault(
                     creator_expiry_blocks: None,
                     max_birthday: None,
                 },
-                keygen_dir(),
-                keygen_key(),
+                member_dir(relay, id),
+                setup_key(id),
                 &mut rng,
                 Duration::from_secs(60),
             )
@@ -331,12 +329,43 @@ async fn a_useless_interactive_approval_is_refused() {
     assert!(!one_tap_stuck(&state, &proposal, &pk(0), &pools[0]));
 }
 
-/// A fresh directory for one member's key-generation state.
-fn keygen_dir() -> std::path::PathBuf {
-    tempfile::tempdir().unwrap().keep()
+/// One member's setup state dir in this test's relay: the safety check and key generation
+/// share it (the safety value lives there).
+fn member_dir(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+) -> std::path::PathBuf {
+    let port = relay
+        .base_url()
+        .rsplit(':')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    std::env::temp_dir().join(format!(
+        "zafe-setup-{}-{port}-{}",
+        std::process::id(),
+        hex::encode(&id.public().sig_pk[..8])
+    ))
 }
 
-/// The key that encrypts it (any fixed key will do in tests).
-fn keygen_key() -> zafe_core::nonce_store::NonceKey {
-    zafe_core::nonce_store::NonceKey::derive(b"test member", b"keygen")
+/// The key that seals one member's setup state (any fixed key per member will do).
+fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
+    zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
+}
+
+/// One member's safety words for `invite`, polled from its setup state dir.
+async fn safety_words(
+    relay: &zafe_core::relay_client::RelayClient,
+    id: &zafe_proto::Identity,
+    invite: &zafe_core::node::Invite,
+) -> Result<String, zafe_core::node::NodeError> {
+    zafe_core::node::wait_for_safety_words(
+        relay,
+        id,
+        invite,
+        &member_dir(relay, id),
+        &setup_key(id),
+        std::time::Duration::from_secs(30),
+    )
+    .await
 }
