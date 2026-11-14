@@ -15,13 +15,16 @@
 //! - `ZAFE_RELAY_CLIENT_IP_HEADER`: behind a proxy, the header carrying the client address
 //!   (`fly-client-ip` on Fly.io, `x-forwarded-for` behind Caddy). Unset: the TCP peer
 //! - `ZAFE_RELAY_QUOTAS`: `off` disables storage quotas (default: on, [`Quotas::hosted`]:
-//!   10,000 undelivered envelopes per recipient, 256 MiB of undelivered envelopes and
-//!   512 MiB of vault log per mailbox). Over a quota the relay answers 507
-//! - `ZAFE_RELAY_MAX_INBOX`: undelivered envelopes per recipient in a mailbox
+//!   256 envelopes and 2 MiB per sender per recipient, 64 MiB of undelivered envelopes and
+//!   512 MiB of vault log per mailbox, half of it per author). Over a quota the relay answers 507
+//! - `ZAFE_RELAY_MAX_INBOX`: undelivered envelopes one sender may leave one recipient
 //! - `ZAFE_RELAY_MAX_DELIVERY_MB` / `ZAFE_RELAY_MAX_LOG_MB`: MiB of undelivered envelopes /
 //!   of vault log per mailbox
 //! - `ZAFE_RELAY_MAX_VAULTS_PER_KEY`: mailboxes one signing key may create (default 8).
 //!   `0` turns that quota off, as for the three before it
+//! - `ZAFE_RELAY_MAX_DB_MB`: MiB the whole database may take (no default: size it to the
+//!   disk). Writes past it answer 507; at 90% new vaults stop, and so do writes from vaults
+//!   created here in the last 30 days. `0` or unset: no cap
 //! - `ZAFE_RELAY_EXPIRY`: `off` keeps every mailbox (default: on, [`Expiry::hosted`]:
 //!   deleted after a year without member requests, or 30 days after creation when no
 //!   member but the creator ever made one)
@@ -96,11 +99,13 @@ async fn main() -> std::io::Result<()> {
     );
     let quotas = quotas_from_env(|name| std::env::var(name).ok());
     tracing::info!(
-        "quotas: envelopes per recipient {:?}, delivery bytes {:?}, log bytes {:?}, vaults per key {:?}",
-        quotas.envelopes_per_recipient,
+        "quotas: envelopes per pair {:?}, pair bytes {:?}, delivery bytes {:?}, log bytes {:?}, vaults per key {:?}, database bytes {:?}",
+        quotas.envelopes_per_pair,
+        quotas.pair_bytes,
         quotas.delivery_bytes,
         quotas.log_bytes,
-        quotas.mailboxes_per_key
+        quotas.mailboxes_per_key,
+        quotas.db_bytes
     );
     let expiry = expiry_from_env(|name| std::env::var(name).ok());
     tracing::info!(
@@ -138,6 +143,15 @@ async fn main() -> std::io::Result<()> {
                 Err(e) => tracing::warn!("expiry failed: {e}"),
             }
             tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
+    });
+
+    // Every few seconds: the pushes held back in windows that ended (`zafe_relay::push`).
+    let pusher = relay.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            pusher.flush_pushes();
         }
     });
 
@@ -191,11 +205,11 @@ fn quotas_from_env(var: impl Fn(&str) -> Option<String>) -> Quotas {
         Some(Ok(n)) => Some(n.saturating_mul(scale)),
         _ => default,
     };
-    quotas.envelopes_per_recipient =
-        value("ZAFE_RELAY_MAX_INBOX", 1, quotas.envelopes_per_recipient);
+    quotas.envelopes_per_pair = value("ZAFE_RELAY_MAX_INBOX", 1, quotas.envelopes_per_pair);
     quotas.delivery_bytes = value("ZAFE_RELAY_MAX_DELIVERY_MB", 1 << 20, quotas.delivery_bytes);
     quotas.log_bytes = value("ZAFE_RELAY_MAX_LOG_MB", 1 << 20, quotas.log_bytes);
     quotas.mailboxes_per_key = value("ZAFE_RELAY_MAX_VAULTS_PER_KEY", 1, quotas.mailboxes_per_key);
+    quotas.db_bytes = value("ZAFE_RELAY_MAX_DB_MB", 1 << 20, quotas.db_bytes);
     quotas
 }
 
@@ -273,11 +287,13 @@ mod tests {
             ("ZAFE_RELAY_MAX_DELIVERY_MB", "0"),
             ("ZAFE_RELAY_MAX_LOG_MB", "2"),
             ("ZAFE_RELAY_MAX_VAULTS_PER_KEY", "3"),
+            ("ZAFE_RELAY_MAX_DB_MB", "4096"),
         ]));
-        assert_eq!(q.envelopes_per_recipient, Some(50));
+        assert_eq!(q.envelopes_per_pair, Some(50));
         assert_eq!(q.delivery_bytes, None);
         assert_eq!(q.log_bytes, Some(2 * 1024 * 1024));
         assert_eq!(q.mailboxes_per_key, Some(3));
+        assert_eq!(q.db_bytes, Some(4096 * 1024 * 1024));
         let q = quotas_from_env(env(&[("ZAFE_RELAY_MAX_INBOX", "lots")]));
         assert_eq!(q, Quotas::hosted(), "unparsable values keep the default");
     }

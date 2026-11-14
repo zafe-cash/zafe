@@ -510,6 +510,26 @@ yet, 2026-11-14; review doc "Proposals"):
       broadcast counts as a W (2026-11-14).
 - [x] `zafe interop` against frost-zec still passes (keygen, both signing roles; 2026-11-14).
 
+Security review 2026-11, batch 4: relay server (rule 7, NEW 6-9; not committed yet,
+2026-11-14; review doc "Relay server"):
+- [x] Signatures before the lock (approvals deduplicated, cancels, envelopes, entries,
+      reseed entries); reseed capped at 512 entries per request; log length by `MAX(idx)`;
+      16 MiB page budget with a shared end-of-log rule; database cap
+      (`ZAFE_RELAY_MAX_DB_MB`); batched prune on an age index; pushes per token per 30 s
+      with a trailing push and a bounded FCM queue; cancel replays don't charge the old
+      key; only the creator writes entry 0; no client redirects; Caddy `1MiB`; Compose
+      memory and pid limits (`RELAY_DB` 7).
+- [x] No one member fills a vault for everyone: fixed per-(sender, recipient) inbox caps
+      (NEW 6), a sender's part of the vault's messages, an author's half of the log
+      (NEW 7); a leader rebuilds the round without a signer it can't reach; stored items
+      fit a reseed (NEW 9); above 90% only established vaults write (NEW 8); the app names
+      a full log and a full server.
+- [ ] Confirm the VPS's RAM and disk (assumed OVH VPS-1: 8 GB, 75 GB) and adjust
+      `ZAFE_RELAY_MAX_DB_MB` (2048 each) and `mem_limit` in `vps/compose.yml` if needed.
+- [ ] Admission control on the hosted relays (create token or proof of work on create and
+      reseed; a body change), an operator alert on database size, and the backup layout
+      (14 local copies are why the cap is 2 GiB): operator calls (review doc Residuals).
+
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,
       async setup (nobody online at once), backup first once funded, notification primer,

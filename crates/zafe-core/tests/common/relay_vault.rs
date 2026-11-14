@@ -14,13 +14,14 @@ use zafe_proto::Identity;
 use super::nu6_3_network;
 
 pub async fn start_relay() -> RelayClient {
+    start_relay_with(zafe_relay::Relay::new()).await
+}
+
+/// `relay` served on a local port (e.g. with quotas).
+pub async fn start_relay_with(relay: zafe_relay::Relay) -> RelayClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, zafe_relay::Relay::new().router())
-            .await
-            .unwrap();
-    });
+    tokio::spawn(async move { axum::serve(listener, relay.router()).await.unwrap() });
     RelayClient::new(format!("http://{addr}"))
 }
 
@@ -36,7 +37,22 @@ pub async fn vault(
     Vec<VaultMaterial>,
     Vec<MemoryPoolStore>,
 ) {
-    let relay = start_relay().await;
+    vault_on(zafe_relay::Relay::new(), t, n, pools).await
+}
+
+/// [`vault`] on `relay` (e.g. one with quotas).
+pub async fn vault_on(
+    relay: zafe_relay::Relay,
+    t: u16,
+    n: u16,
+    pools: bool,
+) -> (
+    RelayClient,
+    Vec<Identity>,
+    Vec<VaultMaterial>,
+    Vec<MemoryPoolStore>,
+) {
+    let relay = start_relay_with(relay).await;
     let mut rng = StdRng::seed_from_u64(70 + u64::from(n));
     let ids: Vec<Identity> = (0..n).map(|_| Identity::generate(&mut rng)).collect();
     let invite = create_vault(&relay, &ids[0], "Retry", t, n, &mut rng)

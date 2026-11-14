@@ -152,8 +152,57 @@ pub struct InboxAckResponse {
 }
 
 /// Most items one read returns (log entries, inbox envelopes). A log read that returns
-/// fewer has reached the end of the log, so a client needs no second read to learn that.
+/// fewer has reached the end of the log, unless the byte budget cut it
+/// ([`page_may_continue`]), so a client needs no second read to learn that.
 pub const READ_PAGE: u64 = 500;
+
+/// Largest request body a relay accepts.
+pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+
+/// Largest log entry or envelope a relay stores (`LogEntry::to_bytes`,
+/// `Envelope::to_bytes`). Below [`MAX_BODY_BYTES`] by room for the largest request that
+/// carries one stored item: a `/v1/mailbox/reseed` of that entry with `MAX_MEMBERS` (64)
+/// members (64 bytes each) and its signed wrapper. Equal limits let an append store an
+/// entry no restore or relay move could ever copy (413).
+pub const MAX_ENTRY_BYTES: usize = MAX_BODY_BYTES - 64 * 1024;
+
+/// The body of a 507 that refuses one recipient only: the sender's share of that
+/// member's inbox is full (count or bytes). Every other 507 (the vault's or the relay's
+/// storage, the sender's own total) refuses the write for every recipient.
+pub const RECIPIENT_FULL: &str = "this member's inbox is full for this sender";
+
+/// The body of a 507 for a vault log at its cap, or its author's half of it. The log is
+/// kept for good, so only a server with more room helps (a move copies the log).
+pub const LOG_FULL: &str = "this vault's history is full on this relay";
+
+/// The body of a 507 for a relay whose database is full (or nearly, for a young mailbox).
+pub const RELAY_FULL: &str = "this relay is full";
+
+/// A read stops adding items once the next one would take the page over this many bytes,
+/// measured by [`page_bytes`] (never the encoded response). A page always holds at least
+/// one item, so a page stays under `READ_BUDGET_BYTES + MAX_ENTRY_BYTES` and well under what
+/// a client reads (64 MiB), and reading always makes progress.
+pub const READ_BUDGET_BYTES: usize = 16 * 1024 * 1024;
+
+/// The size of a page for [`READ_BUDGET_BYTES`]: the sum of its items' byte lengths, as
+/// stored (log entries, envelopes). Relays and clients measure the same thing.
+pub fn page_bytes<'a>(items: impl IntoIterator<Item = &'a [u8]>) -> usize {
+    items.into_iter().map(<[u8]>::len).sum()
+}
+
+/// Whether a relay may hold more after a page of `len` items and `bytes`
+/// ([`page_bytes`]): it was full, or the budget cut it (the item that didn't fit was
+/// smaller than [`MAX_BODY_BYTES`]: entries stored before [`MAX_ENTRY_BYTES`] was lowered
+/// may be larger than that). Honest pages never come near the budget.
+pub fn page_may_continue(len: usize, bytes: usize) -> bool {
+    len as u64 >= READ_PAGE || bytes > READ_BUDGET_BYTES - MAX_BODY_BYTES
+}
+
+/// Whether a page of `len` items and `bytes` ([`page_bytes`]) has room for one more of
+/// `next` bytes: always for the first item, then only within [`READ_BUDGET_BYTES`].
+pub fn page_has_room(len: usize, bytes: usize, next: usize) -> bool {
+    len == 0 || (len < READ_PAGE as usize && bytes + next <= READ_BUDGET_BYTES)
+}
 
 /// Reads log entries from index `from`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -735,14 +784,20 @@ impl RelayVersions {
 pub struct RelayLimits {
     /// Largest request body (bytes).
     pub max_body_bytes: u64,
+    /// Largest log entry or envelope stored (bytes).
+    pub max_entry_bytes: u64,
     /// Most members one mailbox may have.
     pub max_members: u16,
     /// Bytes of vault log one mailbox may keep.
     pub log_bytes: Option<u64>,
     /// Bytes of undelivered envelopes one mailbox may keep.
     pub delivery_bytes: Option<u64>,
-    /// Undelivered envelopes one member may have in one mailbox.
-    pub envelopes_per_recipient: Option<u64>,
+    /// Undelivered envelopes one sender may leave one member in one mailbox.
+    pub envelopes_per_pair: Option<u64>,
+    /// Bytes of undelivered envelopes one sender may leave one member in one mailbox.
+    pub pair_bytes: Option<u64>,
+    /// Bytes of vault log one member may write in one mailbox (at least this share).
+    pub author_log_bytes: Option<u64>,
     /// Mailboxes one signing key may create.
     pub mailboxes_per_key: Option<u64>,
     /// Requests per minute per signing key.

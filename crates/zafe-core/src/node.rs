@@ -2112,7 +2112,7 @@ pub(crate) async fn read_log_verified(
             let last = chain.entries().last().expect("a saved copy has entries");
             let last_hash = last.hash().map_err(proto)?;
             let from = saved_len - 1;
-            let page = match relay.read_log(me, label, from).await {
+            let (page, bytes) = match relay.read_log_page(me, label, from).await {
                 Err(RelayClientError::Status { status: 404, .. }) => {
                     return Err(NodeError::RelayLostVault {
                         local_len: saved_len,
@@ -2128,22 +2128,23 @@ pub(crate) async fn read_log_verified(
             if first.header.index != from || first.hash().map_err(proto)? != last_hash {
                 return Err(NodeError::RelayForked { index: from });
             }
-            let rest = page.len() as u64 >= zafe_proto::relay::READ_PAGE;
+            let rest = zafe_proto::relay::page_may_continue(page.len(), bytes);
             extend_chain(&mut chain, &mut state, page.into_iter().skip(1), key)?;
             (chain, state, saved_len, rest)
         }
         None => {
-            let first_page = relay.read_log(me, label, 0).await?;
+            let (first_page, bytes) = relay.read_log_page(me, label, 0).await?;
             let first = first_page.first().ok_or(NodeError::Invalid(
                 crate::vault::VaultError::NotCreatedFirst,
             ))?;
-            let rest = first_page.len() as u64 >= zafe_proto::relay::READ_PAGE;
+            let rest = zafe_proto::relay::page_may_continue(first_page.len(), bytes);
             let (mut chain, mut state) = start_chain(first, ids.vault, key)?;
             extend_chain(&mut chain, &mut state, first_page.into_iter().skip(1), key)?;
             (chain, state, 0, rest)
         }
     };
-    // A short page was the end of the log: one round trip instead of two.
+    // A short page was the end of the log (unless the relay's byte budget cut it): one
+    // round trip instead of two.
     if rest {
         fetch_rest(relay, me, label, key, &mut chain, &mut state).await?;
     }
@@ -4097,6 +4098,19 @@ pub struct SentRequest {
     pub used_commitments: Vec<[u8; 32]>,
 }
 
+/// A send the relay refused for this one recipient (507 with exactly
+/// [`zafe_proto::relay::RECIPIENT_FULL`]: the sender's share of its inbox is full; 403: not
+/// a recipient there), not because it is down, full, limiting us, older, or without the
+/// vault. Any other 507 (the vault's or the relay's storage, our own total) refuses every
+/// recipient, so the round fails instead of marking signers silent.
+fn undeliverable(e: &RelayClientError) -> bool {
+    match e {
+        RelayClientError::StorageFull { detail } => detail == zafe_proto::relay::RECIPIENT_FULL,
+        RelayClientError::Status { status: 403, .. } => true,
+        _ => false,
+    }
+}
+
 /// Leader: once the proposal is approved, sends sealed signing requests to `threshold`
 /// approvers whose current commitments are not in `used` (commitment sets already put in an
 /// earlier request). Members re-approve to provide fresh commitments after a failed round.
@@ -4179,43 +4193,102 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     }
     let threshold = usize::from(material.descriptor.threshold);
     let mine = *material.key_package()?.identifier();
-    let chosen: Vec<Identifier> = order_signers(leader.available_signers(), mine, &silent.load())
+    let available = leader.available_signers();
+    // Signers the relay refused to deliver to in this call: a round that names one can't
+    // complete, so it is rebuilt without them. Signers that already got the abandoned
+    // request stay used (answering it consumes their nonces) and count as used for good;
+    // the rest are released for the next try.
+    let mut refused: BTreeSet<Identifier> = BTreeSet::new();
+    let mut reached_before: Vec<Identifier> = Vec::new();
+    let mut last_refusal = None;
+    loop {
+        let silent_now = silent.load();
+        let chosen: Vec<Identifier> = order_signers(
+            available
+                .iter()
+                .copied()
+                .filter(|id| !refused.contains(id) && !reached_before.contains(id))
+                .collect(),
+            mine,
+            &silent_now,
+        )
         .into_iter()
         .take(threshold)
         .collect();
-    if chosen.len() < threshold {
-        return Err(NodeError::NotReady(format!(
-            "{} of {threshold} signers are ready. Signers from the unfinished round need to \
-             approve again, or more signers need to approve",
-            chosen.len()
-        )));
-    }
-    let request = leader.request(&chosen).map_err(proto)?;
-
-    let bytes = encode_request(&request)?;
-    let mut seq = SeqCounter::default();
-    for id in &request.signers {
-        let to = member_by_frost_id(&state.descriptor, id)?;
-        if to.sig_pk == me.public().sig_pk {
-            continue; // the leader signs its own part locally (`sign_own_shares`)
+        if chosen.len() < threshold {
+            if let Some(e) = last_refusal {
+                return Err(NodeError::Relay(e));
+            }
+            return Err(NodeError::NotReady(format!(
+                "{} of {threshold} signers are ready. Signers from the unfinished round need to \
+                 approve again, or more signers need to approve",
+                chosen.len()
+            )));
         }
-        let env = Envelope::sealed(
-            me,
-            &to,
-            material.label(),
-            seq.next_seq(),
-            Kind::SigningRequest,
-            &bytes,
-            rng,
-        )
-        .map_err(proto)?;
-        relay.send(me, &env).await?;
+        let request = leader.request(&chosen).map_err(proto)?;
+        let bytes = encode_request(&request)?;
+        // A signer the relay refused before is asked first: if it still can't be reached,
+        // nobody else has been sent a request that can't complete.
+        let mut order: Vec<Identifier> = request.signers.iter().copied().collect();
+        order.sort_by_key(|id| !silent_now.contains(id));
+        let mut seq = SeqCounter::default();
+        let mut undelivered = None;
+        let mut reached = Vec::new();
+        for id in &order {
+            let to = member_by_frost_id(&state.descriptor, id)?;
+            if to.sig_pk == me.public().sig_pk {
+                continue; // the leader signs its own part locally (`sign_own_shares`)
+            }
+            let env = Envelope::sealed(
+                me,
+                &to,
+                material.label(),
+                seq.next_seq(),
+                Kind::SigningRequest,
+                &bytes,
+                rng,
+            )
+            .map_err(proto)?;
+            match relay.send(me, &env).await {
+                Ok(()) => reached.push(*id),
+                // The relay is fine but won't deliver to this signer (the leader's share of
+                // its inbox is full, it isn't a recipient there any more): ask it last from
+                // now on and rebuild the round without it. A relay that is down fails the
+                // round as before.
+                Err(e) if undeliverable(&e) => {
+                    eprintln!("signing request to a signer not delivered: {e}");
+                    silent.update(&[*id], &[]);
+                    undelivered = Some((*id, e));
+                    break;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        match undelivered {
+            Some((id, e)) => {
+                let unsent: Vec<Identifier> = chosen
+                    .iter()
+                    .copied()
+                    .filter(|c| !reached.contains(c))
+                    .collect();
+                leader.release(&unsent);
+                refused.insert(id);
+                reached_before.extend(reached);
+                last_refusal = Some(e);
+            }
+            None => {
+                let used_commitments = chosen
+                    .iter()
+                    .chain(&reached_before)
+                    .map(|id| hash_of[id])
+                    .collect();
+                return Ok(SentRequest {
+                    request,
+                    used_commitments,
+                });
+            }
+        }
     }
-    let used_commitments = chosen.iter().map(|id| hash_of[id]).collect();
-    Ok(SentRequest {
-        request,
-        used_commitments,
-    })
 }
 
 /// Whether `request` is built only from votes in the log: every signer's commitments in it

@@ -71,9 +71,16 @@ enum ZafeErrorKind {
   /// The relay is older than this app and must be updated by whoever runs it.
   relayOutdated,
 
-  /// The relay's storage quota for this vault is full; it frees up as old messages
-  /// expire (30 days), or whoever runs the relay raises it.
+  /// The relay's storage quota for this vault's messages is full; it frees up as old
+  /// messages expire (30 days), or whoever runs the relay raises it.
   relayStorageFull,
+
+  /// The vault's history (the log, kept for good) is at this relay's cap, or this
+  /// member's half of it: only a relay with more room helps.
+  relayLogFull,
+
+  /// The relay's whole database is full (or nearly, for a vault new on it).
+  relayFull,
 
   /// The server already holds the most open moves it takes for this seat.
   tooManySeatMoves,

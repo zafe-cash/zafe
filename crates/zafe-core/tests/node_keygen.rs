@@ -405,7 +405,7 @@ async fn a_full_relay_gets_a_typed_error() {
         start_relay_with(
             Limits::hosted(),
             Quotas {
-                envelopes_per_recipient: Some(1),
+                envelopes_per_pair: Some(1),
                 ..Quotas::none()
             },
         )

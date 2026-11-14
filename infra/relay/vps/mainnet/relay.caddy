@@ -4,7 +4,7 @@
 
 {$RELAY_MAINNET_DOMAIN} {
 	request_body {
-		max_size 1MB
+		max_size 1MiB
 	}
 	reverse_proxy relay-mainnet:8080 {
 		lb_try_duration 10s

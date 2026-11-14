@@ -368,10 +368,122 @@ Status 2026-11-14 (implemented, not committed; `VAULT_EVENT` 12, `PROPOSAL_RULES
   reseed verifies outside the lock with a per-request cap.
 - Responses stop at a byte budget and entries have a size cap, so no member can make a
   page too big to read; storage has a global cap; Compose sets memory limits.
-- Pushes: bounded concurrency, a per-mailbox rate, tokens that fail are pruned.
-- A replayed entry charges the request's signer, not the entry's author.
-- Unknown and foreign mailboxes answer the same; cross-host redirects are refused; only the
-  creator appends entry 0; Caddy's body limit matches the relay's.
+- No one member can fill a vault's storage (an inbox, its messages, its log) for
+  everyone; a stranger's fresh mailboxes can't take an established vault's room.
+- Pushes: bounded concurrency, a per-device rate, tokens that fail are pruned.
+- A replayed signed object charges its signer only when it changes something.
+- Cross-host redirects are refused; only the creator appends entry 0; Caddy's body limit
+  matches the relay's.
+
+Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
+`inbox_flood.rs`, `shares.rs`, `quotas.rs`, `crates/zafe-core/tests/relay_redirect.rs`,
+`relay_pages.rs`, `proposal_rules.rs`), as built:
+- **Seat-move approvals**: a repeated key is 400 and every signature is checked against its
+  own key before the lock; under it, more approvals than members is 400, then t verified
+  current members other than the old key count, as before.
+- **Reseed**: at most `RESEED_MAX_ENTRIES` (512) entries per request, their summed size
+  checked, decoded, verified and hashed before the lock; under it only the chain against
+  the head and the inserts. The answer's `len` says where to continue (clients already
+  do); `open` only once every entry was taken. A new mailbox's room check and creation
+  charge happen before the lock.
+- **The log length** is `MAX(idx) + 1` through the primary key, never a `COUNT(*)` walk
+  (an append on a 200,000-entry log cost 28x one on a short log); cancel setup uses
+  `EXISTS`.
+- **Pages** stop at `READ_BUDGET_BYTES` (16 MiB) of stored entries or envelopes, at least
+  one per page; entries and envelopes are at most `MAX_ENTRY_BYTES` (below). Relay and
+  client measure the same thing (`zafe_proto::relay::page_bytes`), and a client's
+  end-of-log rule is `page_may_continue`: `len >= READ_PAGE || bytes > BUDGET -
+  MAX_BODY_BYTES` (no stored item, old ones included, is larger than a body). The inbox already read until an empty page. An older core (a dev build
+  of 37ac433) reads a cut page as the end of the log and, if its saved copy already holds
+  more, reports `RelayRolledBack`. Honest logs never reach 16 MiB in 500 entries, so only a
+  log someone padded can cut a page; on 37ac433 that log gave every reader
+  `ResponseTooLarge` for good instead.
+- **Global storage**: `ZAFE_RELAY_MAX_DB_MB` is the database's `max_page_count`; a write
+  past it is 507 (`Quota::Relay`, "this relay is full"). From 90% new mailboxes stop
+  (checked before the creation token is charged) and mailboxes created here in the last
+  30 days stop writing (`YOUNG_MAILBOX_DAYS`, NEW 8). Compose caps each relay's memory
+  (768 MiB) and processes, and Caddy's.
+- **Pruning** reads only expired rows (`deliveries_by_age`) in batches of 1,000, each its
+  own transaction (`DELETE ... RETURNING`, then grouped counter updates).
+- **Inbox counters (and NEW 6)**: `inbox_counts` holds count and bytes per (mailbox,
+  recipient, sender), changed in the same transaction as every insert, ack and prune of
+  `deliveries`, and in `delete_mailbox`. The quota check reads one counter row per
+  recipient and the sender's rows (a broadcast into deep inboxes walked ~63 x depth index
+  entries). **NEW 6** (from the review): the inbox cap counted every sender's deliveries,
+  and phones never ack kinds they don't handle, so one member could fill another's inbox
+  (about 33 min at the hosted rate) and every send to it got 507 for 30 days: the leader's
+  signing request aborted the round, repair parts to a pending key were blocked, and the
+  victim re-downloaded the junk on every read. Caps are now per (sender, recipient) pair,
+  fixed: 256 envelopes and 2 MiB hosted. A first cut shared the vault's caps out per pair
+  (`/ (members - 1)`, `/ (members x (members - 1))`); the second review showed that is
+  42 MiB per pair in a 2-of-3 (a victim reading three 16 MiB pages per call, past the 60 s
+  timeout on a slow link: it can't sign) and 66 KB in a 64-member vault (less than one
+  signing request). A fixed pair holds two of the largest envelopes, and a victim reads at
+  most 2 MiB of one sender's junk. A sender may use at most half the vault's 64 MiB (never
+  less than a pair), so one dishonest member can't fill it; a 1/n share (round 2 of the
+  review) left a 64-member vault's leader 2 MiB, less than one interactive round with ~20
+  notes and t = 33 (~70 KB to each of 32 signers).
+- **A refused signer** (NEW 6, client): only a pair's 507 names one recipient (body exactly
+  `RECIPIENT_FULL`); a 403 means it isn't a recipient there. The leader marks that signer
+  silent and rebuilds the round without it (a request naming it can't complete, and each
+  one sent consumes its signers' nonces, so they would approve again for nothing); refused
+  signers are tried first, so a set with no reachable t signers fails before anyone else
+  got a request, and a signer that got an abandoned request stays used (`Leader::release`
+  frees only the others). Any other 507 (the vault's or relay's storage, the leader's own
+  total) fails the round: a full relay must not mark every signer silent.
+- **NEW 7, the log** (second review): the log cap was per mailbox only, the relay can't
+  judge an entry's ciphertext and replay ignores junk, so one member could fill the 512 MiB
+  log in under two minutes and freeze the vault for good (the log is kept forever), and a
+  move copied the junk into the new relay's total. An author may now append at most half
+  the log (`log_counts` per (mailbox, author); `quota::author_log_cap`): one dishonest
+  member freezes nobody, and a vault where one person proposes every payment still gets
+  half (a 1/n share would stop a 2-of-3 treasurer at a third, years before the total).
+  Reseed takes a signed history whole but counts it per author, so a move gives no fresh
+  share (k moves would otherwise let one member write k halves).
+- **NEW 8, a stranger** (second review): with 2 GiB per network and 768 MiB per mailbox,
+  three fresh mailboxes from one IP filled a relay in minutes and froze every vault on it
+  (before batch 4: the disk). Above 90%, mailboxes created here in the last 30 days stop
+  writing, so established vaults keep the last 10%; an attacker must prepare its
+  mailboxes a month ahead. Age-based allowances were rejected: they accrue on idle
+  attacker mailboxes and a reseed of a self-signed junk chain skips them. A first cut
+  froze large mailboxes instead, which freezes the busiest honest vaults first. The
+  hosted delivery cap drops to 64 MiB (a 64-member key generation leaves ~36 MB until it
+  is done); the log stays 512 MiB, sized for honest lifetimes, not strangers.
+- **NEW 9, entry size** (second review): `MAX_ENTRY_BYTES` equalled the body cap, so an
+  entry as large as an append takes couldn't fit a reseed body (which also carries the
+  member list): every later restore and move got 413 for good. Stored items are now at
+  most `MAX_BODY_BYTES - 64 KiB` (appends and envelopes).
+- **Errors in the app**: a full log ("This vault's history is full on this server. Move
+  the vault to a server with more room.") and a full server have their own messages
+  (`RelayLogFull`, `RelayFull`); the rest keep "the server's storage for this vault".
+- **Pushes**: per device token (one FID serves all of a phone's vaults), at most one per
+  `PUSH_WINDOW_SECS` (30 s) plus one trailing push at the window's end when any were held
+  back (never dropped; the binary flushes every 5 s). FCM sends go through a token-deduped
+  queue with at most 32 in flight. A token is forgotten on 404 `UNREGISTERED`, 403
+  `SENDER_ID_MISMATCH`, and 400 `INVALID_ARGUMENT` only when its `google.rpc.BadRequest`
+  names `message.token`/`message.fid` (FCM: "INVALID_ARGUMENT can also be returned in
+  cases of issues in the message payload").
+- **Charges**: a reseed already charged only its request's signer. The real case was
+  `/v1/seat/cancel`, which takes no request signature and charged the old key on every
+  post, so the thief whose move was kept could replay the shown cancel and rate-limit the
+  owner. The cancel is verified before the lock and charged to the old key only when it
+  moves a row from pending to cancelled; reposts cost the old key nothing.
+- **Entry 0**: when the log is empty, author, poster and creator must be the same key
+  (a joiner could take index 0 and strand the setup, which then couldn't be cancelled).
+  Restores and relay moves write entry 0 through reseed.
+- **Redirects**: every relay client is built with `redirect::Policy::none()` (reqwest
+  followed up to 10, resending the body on 307/308 and the create token across hosts);
+  the Tor path follows none.
+- **Caddy** takes `max_size 1MiB` in both site blocks (`1MB` was 1,000,000 bytes to
+  go-humanize; the relay takes 1,048,576).
+- `post_envelope` and `append_entry` verify the signature before the lock (the request's
+  signer is the envelope's sender; an entry's author key is in its header) and keep only
+  the membership checks under it.
+- No `RELAY_API` bump (no body changed; 507 bodies are now exactly the quota's text, and
+  `/v1/info` limits gained fields); `RELAY_DB` 7 (`deliveries.sender`, `inbox_counts`,
+  `log_counts`, `deliveries_by_age`; the migration reads each stored envelope's sender and
+  each entry's author).
+- Dropped: unknown and foreign mailboxes answering the same (see Residuals).
 
 ### Privacy
 
@@ -437,7 +549,24 @@ Status 2026-11-14 (implemented, not committed; `VAULT_EVENT` 12, `PROPOSAL_RULES
 - The relay can link one phone's vaults through its push installation id. Push is per app
   install; turning push off for a vault avoids it.
 - An invite is a bearer credential until the setup is sealed (design, spec §5).
+- Unknown and foreign mailboxes still answer differently (404 vs 403), so whoever holds a
+  label (an old invite, a former member, a move link) can learn whether that vault is on
+  a relay. Only label holders can probe; create and reseed on an existing label must refuse
+  anyway, so they would stay an oracle (at one creation token per probe); and answering a
+  removed member 404 would show it "the server lost your vault" instead of a refusal.
 - A moved seat's old share still works (spec §10.1 "Limits").
+- **A public relay can still be filled by a stranger** with enough mailboxes made a month
+  ahead (one IP makes 20 a day), and then every vault on it stops writing until the
+  operator deletes them; quotas only set how many it takes. The real fix is admission
+  control on hosted relays (a create token, or proof of work in create and reseed: a body
+  change) plus an operator alert on database size. The hosted 2 GiB per network comes
+  from 14 daily backups on the same disk; fewer local copies, or compressed or off-site
+  ones, would allow a larger cap. Operator calls, not made here.
+- **The log is a lifetime limit per relay**: 512 MiB hosted is about seven years at 10
+  payments a day, one author's half about three and a half; a move copies the log, so
+  only a relay with a larger cap helps (the app says so).
+- Two colluding members can fill a vault's log or its undelivered messages (each may use
+  half); the threat model is one dishonest member.
 
 ## Order
 

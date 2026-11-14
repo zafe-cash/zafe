@@ -260,10 +260,17 @@ async fn over_tor(
     })
 }
 
+/// Every relay client (pooled or not) comes from here. Redirects are never followed:
+/// reqwest's default follows up to 10 (`reqwest-0.12.28/src/redirect.rs:161-163`), resends
+/// the body on 307/308 (`tower-http-0.6.11/src/follow_redirect/mod.rs:291`) and strips only
+/// the standard credential headers across hosts (`redirect.rs:239-250`), so a relay could
+/// send a phone's signed requests and the create token anywhere. A redirect answers as its
+/// status. The Tor path follows none either (`zcash_client_backend` `tor::http`).
 fn http_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
 }
 
 fn now() -> u64 {
@@ -984,6 +991,18 @@ impl RelayClient {
         mailbox: MailboxId,
         from: u64,
     ) -> Result<Vec<LogEntry>, RelayClientError> {
+        Ok(self.read_log_page(who, mailbox, from).await?.0)
+    }
+
+    /// [`RelayClient::read_log`], with the page's size as the relay measures it
+    /// ([`zafe_proto::relay::page_bytes`] of the stored entries), for
+    /// [`zafe_proto::relay::page_may_continue`].
+    pub async fn read_log_page(
+        &self,
+        who: &Identity,
+        mailbox: MailboxId,
+        from: u64,
+    ) -> Result<(Vec<LogEntry>, usize), RelayClientError> {
         let response: LogResponse = self
             .signed(
                 "/v1/log/read",
@@ -995,7 +1014,8 @@ impl RelayClient {
                 },
             )
             .await?;
-        response.decoded().map_err(decoding)
+        let bytes = zafe_proto::relay::page_bytes(response.entries.iter().map(Vec::as_slice));
+        Ok((response.decoded().map_err(decoding)?, bytes))
     }
 
     /// Long poll: returns as soon as the vault log has more than `log_len` entries or an

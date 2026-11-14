@@ -385,8 +385,9 @@ async fn log_appends_must_extend_the_head() {
     let mut probe =
         LogEntry::create(&w.ids[3], &key, MAILBOX, 9, head, b"probe", &mut w.rng).unwrap();
     probe.header.author = w.ids[1].public().sig_pk;
+    // (Its signature is checked before the relay looks at the mailbox: 401, not 403.)
     let (status, body) = append(&w.app, &w.ids[3], &probe).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(decode_body::<AppendResult>(&body).is_err());
     let (status, body) = append(&w.app, &w.ids[2], &probe).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);

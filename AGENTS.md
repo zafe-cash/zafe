@@ -69,7 +69,8 @@ pair with `// theme-pair: <why>`.
 App (from `app/`, after `source ~/android/env.sh`): `flutter_rust_bridge_codegen generate` after
 changing `app/rust/src/api`; `flutter analyze lib test` (must be clean; a fresh worktree needs
 `dart pub get` in `rust_builder/cargokit/build_tool` before a plain `flutter analyze`);
-`flutter build apk --debug --target-platform android-arm64`; `adb install -r
+`flutter build apk --debug --target-platform android-arm64` (the `zafe` emulator is x86_64:
+`android-x64`); `adb install -r
 build/app/outputs/flutter-apk/app-debug.apk`. Screen previews: `flutter test tool/screens/<x>_render_test.dart`;
 overflow check: `flutter test tool/screens/size_sweep_test.dart`.
 
@@ -333,10 +334,12 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     reuse (`sign_groups` deletes each nonce before sending a share), which is why any change
     to one-tap assignment must be gated on every member. Never make core refuse or fall back
     on a newer tag (one entry would freeze the vault; interactive fallback deadlocks a 2-of-2).
-  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 6 (4: vault
+  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 7 (4: vault
     id + expiry columns, migrated from 1-3, old rows get `vault_id = id`, seen today, shared;
     5: `recovery_values` per (new phone, co-signer), dropped and made again; 6:
-    `seat_moves` + `seat_finishes`, new tables, in `delete_mailbox`), `RELAY_API` 2 (every
+    `seat_moves` + `seat_finishes`, new tables, in `delete_mailbox`; 7: `deliveries.sender`
+    (read from each stored envelope), `inbox_counts`, `log_counts` (from each entry's
+    author), `deliveries_by_age`), `RELAY_API` 2 (every
     body; no version 1 read),
     `REPAIR` 3 (sigma carries the helper's `LogAnchor` + create token; v2 still read),
     `INVITE` 3 (2: safety words; 3: vault id + label + relay URL, v2 reads as label = vault
@@ -404,16 +407,41 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   log says its seat switched and the relay lists it pending for that move.
   Raw `/v1/envelope`, `/v1/log/append` and `/v1/mailbox/replace` answer 426 (old apps must
   update); envelopes go through `RelayClient::send(who, ..)` (`/v1/envelope/send`).
-- **Relay hardening**: client reads at most 64 MiB per response; `log_append` verifies and
-  charges **before** answering `Conflict`; joiners refuse a creator birthday above tip +
+- **Relay hardening** (rule 7: verify and bound before the lock, charge before the work):
+  signatures (requests, envelopes, entries, approvals, cancels) are checked **before** the
+  DB mutex; under it only membership and bounded row work (no `COUNT(*)` walks: log length
+  is `log_len`, quotas read `inbox_counts`). `log_append` verifies and charges **before**
+  answering `Conflict`; only the creator writes entry 0. Reseed takes at most
+  `RESEED_MAX_ENTRIES` per request (clients continue from `len`). Pages stop at
+  `READ_BUDGET_BYTES` of stored items (`zafe_proto::relay::page_bytes`, at least one item);
+  a client ends a log read only when `page_may_continue` says so. The client reads at most
+  64 MiB per response and never follows redirects (`http_builder`). Caddy's `max_size` is
+  `1MiB` (= `MAX_BODY_BYTES`; `1MB` is SI). Joiners refuse a creator birthday above tip +
   leeway; `VaultKeys`'s `Debug` shows only `ak`.
 - **Relay limits/quotas** (`zafe_relay::{limits, quota}`): off in `Relay::new()` (tests), on in
-  the binary. **Charge a key only after its signature verifies.** Byte counters on `mailboxes`
-  must change in the same transaction as every write/delete of `deliveries`/`log_entries`.
+  the binary. **Charge a key only after its signature verifies**, and only the key that
+  asked (a relayed signed object, e.g. a seat cancel anyone may post, charges its signer
+  only when it changes something). Byte counters on `mailboxes`, `inbox_counts` and
+  `log_counts` must change in the same transaction as every write/delete of
+  `deliveries`/`log_entries`. **No one member may fill a vault for everyone**: fixed caps
+  per (sender, recipient) pair, a sender at most half the vault's messages, an author at
+  most half the log (`quota::author_log_cap`, appends only; reseed takes a signed history
+  whole but counts it per author, so a move gives no fresh share). Only a pair's 507 names
+  one recipient (`RECIPIENT_FULL`): a leader rebuilds the round without that signer
+  (`node::undeliverable`; never sends a round that can't complete); any other 507 fails it.
+  Stored items are at most `MAX_ENTRY_BYTES` (< `MAX_BODY_BYTES`, so a reseed fits one).
+  `db_bytes` (`ZAFE_RELAY_MAX_DB_MB`) is `max_page_count`; from `NEARLY_FULL_PERCENT`
+  creations stop and mailboxes younger than `YOUNG_MAILBOX_DAYS` can't write; creations
+  check room **before** the creation charge.
   IP limits need `into_make_service_with_connect_info`. A co-signer's seat-check values
   (announce, challenge) take a token from `creates_per_ip`; the new phone's need an announce,
   so no cap per new phone can lock real co-signers out. New polling flows must stay under the
   hosted rate (300/min per key). No `--` comments in `SCHEMA` (breaks `DROP COLUMN`).
+- **Pushes** (`zafe_relay::push`): at most one per **device token** (one FID serves all a
+  phone's vaults) per `PUSH_WINDOW_SECS`, plus one trailing push at the window's end that is
+  never dropped (`flush_pushes`, every 5 s in the binary); FCM sends go through a
+  token-deduped queue, at most `fcm::MAX_IN_FLIGHT`. New write paths push through
+  `relay.push(..)`, never `notifier.notify` directly.
 - **Long polls** (`POST /v1/wait`): bump the per-mailbox watch **after commit and after dropping
   the DB mutex**; waiters subscribe before reading and never hold the mutex. Unknown mailbox is
   403 here so 404 means "old relay". New write paths that should wake apps call

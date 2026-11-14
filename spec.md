@@ -235,7 +235,7 @@ They come from a commit-then-reveal exchange after membership is locked (`zafe_c
 - Store and forward envelopes. Delete them after every recipient acknowledges, or after 30 days (`DELIVERY_RETENTION_SECS`).
 - Store the **encrypted vault log** (append-only) so new or restored devices can catch up.
 - Send push notifications with **no content**: just "vault activity". FCM only; APNs tokens are accepted but not yet sent to.
-- Authenticate every request by identity-key signature. Rate-limit per key and IP, and cap storage per mailbox (`zafe_relay::{limits, quota}`).
+- Authenticate every request by identity-key signature. Rate-limit per key and IP, and cap storage per mailbox so no one member can fill it for everyone (per (sender, recipient) inbox caps, a sender's part of the vault's messages, an author's half of the log), and for the whole database, where above 90% only mailboxes older than 30 days write (`zafe_relay::{limits, quota}`). Verify signatures and bound the work before taking the database lock; pages stop at 16 MiB of items; pushes go out at most once per 30 s per device token.
 - Delete mailboxes nobody uses (`zafe_relay::expiry`; hosted relays: no member request for a year, or no member but the creator within 30 days). Each phone keeps its own copy of the log, so the relay's copy is a cache.
 - Optionally require a **create token** (`ZAFE_RELAY_CREATE_TOKEN`) to create or restore a mailbox, so a private relay serves only its own groups.
 

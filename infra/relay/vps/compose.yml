@@ -28,10 +28,23 @@ x-relay: &relay
   tmpfs: [/tmp]
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
+  # Each relay is capped so a flood against one (testnet) can't take the host's memory from
+  # the other (mainnet) or Caddy. A read page holds at most 16 MiB plus one 1 MiB entry
+  # (zafe_proto READ_BUDGET_BYTES), about 35 MiB with its encoded copy; 768 MiB is ~20 such
+  # reads at once on top of SQLite's cache. Two relays + Caddy stay under 2 GiB on the
+  # VPS (OVH VPS-1: 8 GB RAM, 75 GB disk; confirm on the host when it changes). A few tokio
+  # workers per core: 256 tasks is ample.
+  mem_limit: 768m
+  pids_limit: 256
   environment:
     RUST_LOG: zafe_relay=info
     # Caddy sets X-Forwarded-For to the client address (it drops client-supplied values).
     ZAFE_RELAY_CLIENT_IP_HEADER: x-forwarded-for
+    # The whole database's cap (writes past it are 507; at 90% new vaults stop, and so do
+    # writes from vaults less than 30 days old here). Each
+    # network keeps 14 daily backups on the same disk (backup.sh), so a full database takes
+    # ~15x its size: (75 GB - ~10 GB for the system and images) / (2 networks x 15) ≈ 2 GiB.
+    ZAFE_RELAY_MAX_DB_MB: "2048"
   networks: [relay]
   # No published ports: only Caddy reaches the relay.
 
@@ -66,6 +79,10 @@ services:
   caddy:
     image: caddy:2.11-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
+    # Caddy buffers at most a 1 MiB request body (request_body max_size) and streams
+    # responses; 256 MiB leaves room for TLS state of many long polls.
+    mem_limit: 256m
+    pids_limit: 256
     ports:
       - "80:80"
       - "443:443"

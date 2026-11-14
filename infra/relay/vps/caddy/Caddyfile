@@ -3,10 +3,11 @@
 # ports 80 and 443 are open.
 
 {$RELAY_TESTNET_DOMAIN} {
-	# Relay requests are small signed postcard bodies; refuse anything large early
-	# (the relay itself refuses bodies over 1 MiB).
+	# Relay requests are small signed postcard bodies; refuse anything large early, at the
+	# relay's own 1 MiB (MAX_BODY_BYTES = 1,048,576). `1MB` would be 1,000,000 (Caddy parses
+	# sizes with go-humanize, where MB is SI): bodies between would get a 413 here.
 	request_body {
-		max_size 1MB
+		max_size 1MiB
 	}
 	# No response timeout (Caddy's default): long polls on /v1/wait hold up to 25 s.
 	# One upstream: no active health checks (they keep it marked down for a whole interval

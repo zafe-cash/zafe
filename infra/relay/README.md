@@ -52,13 +52,29 @@ Runtime contract (both paths):
   counts as one concurrent request on Fly, so `fly.toml` sets the concurrency limits to
   1000/1500. The relay caps waits at 2 per signing key and 4096 in total (over them:
   `429`); an older relay without the endpoint just makes apps fall back to polling.
-- Storage quotas per vault (on by default): 10,000 undelivered envelopes per member,
-  256 MiB of undelivered envelopes and 512 MiB of vault log. A write over a quota is
-  refused whole with `507 Insufficient Storage`, and the app says the relay's storage for
-  the vault is full. Undelivered envelopes expire after 30 days (hourly pruning), which
-  frees their share; the log is kept while the vault is in use. Tune with `ZAFE_RELAY_MAX_INBOX` (envelopes),
+- Storage quotas per vault (on by default): each sender may leave each member 256
+  undelivered envelopes and 2 MiB, a vault keeps at most 64 MiB of undelivered envelopes
+  (one sender a member's share of it: 64 MiB / members) and 512 MiB of vault log (one
+  member at most half). So one member can't fill another's inbox, the vault's bytes or
+  its log for everyone. A write over a quota is refused whole with `507 Insufficient
+  Storage`; the app names which (an inbox, the vault's messages, its history, the
+  server). Undelivered envelopes expire after 30 days (hourly pruning); the log is kept
+  for good, so 512 MiB is a lifetime limit on one relay (about seven years at 10
+  payments a day, one member's half about three and a half), and a move copies it. Tune
+  with `ZAFE_RELAY_MAX_INBOX` (envelopes per sender and member),
   `ZAFE_RELAY_MAX_DELIVERY_MB` / `ZAFE_RELAY_MAX_LOG_MB` (MiB), `0` = that quota off, or
   `ZAFE_RELAY_QUOTAS=off`.
+- Database cap (off unless set): `ZAFE_RELAY_MAX_DB_MB` caps the whole SQLite file
+  (`PRAGMA max_page_count`). Past it writes answer `507` ("this relay is full"). At 90%
+  new vaults stop, and so do writes from vaults created (or moved in) in the last 30 days,
+  so established vaults keep the rest. Mailboxes are cheap (20 a day per IP), so a public
+  relay needs it: size it to the disk, counting backups. The hosted relays use 2048 each
+  (`vps/compose.yml` has the arithmetic). Without a create token anyone can still fill a
+  public relay with enough mailboxes made a month ahead; watch the database size.
+- Reads stop at 16 MiB of entries or envelopes per page (at least one item), so no member
+  can make a page too big for an app to read (64 MiB); pushes go out at most once per
+  30 s per device token, with one trailing push when any were held back. Compose caps each
+  relay at 768 MiB and Caddy at 256 MiB of memory.
 - Expiry (on by default): every phone keeps the vault's history, so the relay deletes
   what nobody uses: a vault with no member request for a year, and a mailbox where no
   member but its creator made a request within 30 days of its creation (an abandoned

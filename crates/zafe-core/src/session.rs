@@ -605,6 +605,15 @@ impl Leader {
         })
     }
 
+    /// Makes `signers`' commitments available again after a request that never reached
+    /// them (a signer that got a request keeps its commitments used: answering it consumes
+    /// its nonces).
+    pub fn release(&mut self, signers: &[Identifier]) {
+        for id in signers {
+            self.used.remove(id);
+        }
+    }
+
     /// Aggregates one signature per spend. Every share is verified; an invalid share
     /// yields a FROST error naming the culprit.
     pub fn aggregate(

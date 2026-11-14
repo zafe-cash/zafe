@@ -178,40 +178,49 @@ async fn a_labelled_mailbox_holds_one_vault_whatever_its_label() {
     let (status, _) = call(&app, "/v1/log/append", log[0].to_bytes().unwrap()).await;
     assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
 
-    // Any member may post any member's entry (catching up), once, in order.
+    // Only the creator writes entry 0 (security review 2026-11, batch 4).
     assert_eq!(
         append_to(&app, &ids[1], LABEL, &log[0]).await,
-        (StatusCode::OK, Some(AppendResult::Appended { index: 0 }))
+        (StatusCode::FORBIDDEN, None)
     );
     assert_eq!(
-        append_to(&app, &ids[2], LABEL, &log[0]).await,
-        (StatusCode::OK, Some(AppendResult::Conflict { len: 1 }))
+        append_to(&app, &ids[0], LABEL, &log[0]).await,
+        (StatusCode::OK, Some(AppendResult::Appended { index: 0 }))
+    );
+    // Any member may post any member's later entry (catching up), once, in order.
+    assert_eq!(
+        append_to(&app, &ids[2], LABEL, &log[1]).await,
+        (StatusCode::OK, Some(AppendResult::Appended { index: 1 }))
+    );
+    assert_eq!(
+        append_to(&app, &ids[1], LABEL, &log[1]).await,
+        (StatusCode::OK, Some(AppendResult::Conflict { len: 2 }))
     );
     // An outsider can't post a member's entry, nor learn the log length.
-    let (status, result) = append_to(&app, &ids[3], LABEL, &log[1]).await;
+    let (status, result) = append_to(&app, &ids[3], LABEL, &log[2]).await;
     assert_eq!((status, result), (StatusCode::FORBIDDEN, None));
     // An entry of another vault is refused, even correctly chained and signed by a member.
     let key = LogKey::generate(0, &mut rng);
-    let head = log[0].hash().unwrap();
+    let head = log[1].hash().unwrap();
     let foreign =
-        LogEntry::create(&ids[1], &key, OTHER_VAULT, 1, head, b"other", &mut rng).unwrap();
+        LogEntry::create(&ids[1], &key, OTHER_VAULT, 2, head, b"other", &mut rng).unwrap();
     let (status, result) = append_to(&app, &ids[1], LABEL, &foreign).await;
     assert_eq!((status, result), (StatusCode::BAD_REQUEST, None));
     // A request signed for another label doesn't verify for this one.
     let mut moved =
-        Signed::new(&ids[1], LabelledAppend::new([9; 16], &log[1], NOW).unwrap()).unwrap();
+        Signed::new(&ids[1], LabelledAppend::new([9; 16], &log[2], NOW).unwrap()).unwrap();
     moved.payload.mailbox = LABEL;
     let (status, _) = call(&app, "/v1/log/append-labelled", moved.to_bytes().unwrap()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     // A stale request is refused.
-    let old = LabelledAppend::new(LABEL, &log[1], NOW - 3600).unwrap();
+    let old = LabelledAppend::new(LABEL, &log[2], NOW - 3600).unwrap();
     assert_eq!(
         signed(&app, "/v1/log/append-labelled", &ids[1], old)
             .await
             .0,
         StatusCode::BAD_REQUEST
     );
-    for e in &log[1..] {
+    for e in &log[2..] {
         assert_eq!(append_to(&app, &ids[0], LABEL, e).await.0, StatusCode::OK);
     }
     assert_eq!(read_log(&app, &ids[2], LABEL).await, log);

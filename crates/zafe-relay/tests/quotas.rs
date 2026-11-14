@@ -119,10 +119,14 @@ async fn post(app: &Router, who: &Identity, envelope: Vec<u8>) -> (StatusCode, S
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
+/// The inbox cap is per (sender, recipient) pair (security review 2026-11, NEW 6: one
+/// member's envelopes, never acked, must not close the inbox for everyone). The refusal's
+/// body names the recipient, so a leader skips only that signer.
 #[tokio::test]
-async fn a_full_inbox_refuses_more_envelopes_for_that_recipient() {
-    let relay = Relay::new().with_quotas(Quotas {
-        envelopes_per_recipient: Some(2),
+async fn a_senders_full_share_of_an_inbox_refuses_only_that_sender() {
+    let now = Arc::new(AtomicU64::new(T0));
+    let relay = Relay::with_clock(clock(&now)).with_quotas(Quotas {
+        envelopes_per_pair: Some(2),
         ..Quotas::none()
     });
     let app = relay.clone().router();
@@ -136,8 +140,8 @@ async fn a_full_inbox_refuses_more_envelopes_for_that_recipient() {
     }
     let (status, body) = post(&app, &ids[0], to_one(&ids[0], &ids[1], 3, &mut rng)).await;
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
-    assert!(body.contains("inbox is full"), "{body}");
-    // A broadcast reaching the full inbox is refused whole.
+    assert_eq!(body, zafe_proto::relay::RECIPIENT_FULL);
+    // A broadcast reaching the full share is refused whole.
     assert_eq!(
         post(&app, &ids[0], to_all(&ids[0], 3, b"all")).await.0,
         StatusCode::INSUFFICIENT_STORAGE
@@ -147,12 +151,21 @@ async fn a_full_inbox_refuses_more_envelopes_for_that_recipient() {
     // Other recipients still receive, and the refused sends did not use up seq 3.
     let env = to_one(&ids[0], &ids[2], 3, &mut rng);
     assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
-    // Another sender filling the same inbox is refused too (the cap is per recipient).
-    let env = to_one(&ids[2], &ids[1], 1, &mut rng);
+    // Another sender still reaches the same inbox, up to its own share.
+    for seq in 1..=2 {
+        let env = to_one(&ids[2], &ids[1], seq, &mut rng);
+        assert_eq!(post(&app, &ids[2], env).await.0, StatusCode::OK);
+    }
+    let env = to_one(&ids[2], &ids[1], 3, &mut rng);
     assert_eq!(
         post(&app, &ids[2], env).await.0,
         StatusCode::INSUFFICIENT_STORAGE
     );
+    // Acking frees the share.
+    let cursors = inbox_cursors(&app, &ids[1]).await;
+    assert_eq!(ack(&app, &ids[1], cursors).await, (StatusCode::OK, 4));
+    let env = to_one(&ids[0], &ids[1], 4, &mut rng);
+    assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -162,9 +175,10 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(&mut rng)).collect();
     let payload = vec![0u8; 1000];
     let len = to_all(&ids[0], 1, &payload).len() as u64;
-    // Room for two broadcasts to two recipients (4 stored copies), not a third.
+    // A sender may use half of the mailbox's bytes: room for four copies and a half, so
+    // two broadcasts (4 stored copies), not a third.
     let relay = Relay::with_clock(clock(&now)).with_quotas(Quotas {
-        delivery_bytes: Some(4 * len + len / 2),
+        delivery_bytes: Some(9 * len),
         ..Quotas::none()
     });
     let app = relay.clone().router();
@@ -189,6 +203,11 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert!(body.contains("undelivered"), "{body}");
     assert_eq!(relay.usage(&MAILBOX).unwrap().delivery_bytes, 4 * len);
+    // Another member still delivers.
+    assert_eq!(
+        post(&app, &ids[1], to_all(&ids[1], 1, &payload)).await.0,
+        StatusCode::OK
+    );
 
     // A day later one more small envelope still fits; then retention frees the old ones.
     now.store(T0 + 86_400, Ordering::SeqCst);
@@ -196,7 +215,7 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     let small_len = small.len() as u64;
     assert_eq!(post(&app, &ids[0], small).await.0, StatusCode::OK);
     now.store(T0 + DELIVERY_RETENTION_SECS + 1, Ordering::SeqCst);
-    assert_eq!(relay.prune().unwrap(), 4);
+    assert_eq!(relay.prune().unwrap(), 6);
     assert_eq!(
         relay.usage(&MAILBOX).unwrap(),
         Usage {
@@ -269,7 +288,7 @@ async fn the_log_is_capped() {
     .unwrap();
     let (status, body) = append(&app, &ids[0], &third).await;
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
-    assert!(String::from_utf8_lossy(&body).contains("vault log"));
+    assert_eq!(String::from_utf8_lossy(&body), zafe_proto::relay::LOG_FULL);
     assert_eq!(relay.usage(&MAILBOX).unwrap().log_bytes, 2 * len);
     // Pruning never touches the log.
     relay.prune().unwrap();
@@ -583,4 +602,62 @@ async fn a_stale_reseed_is_refused() {
         signed(&app, "/v1/mailbox/reseed", &ids[0], request(now)).await,
         StatusCode::OK
     );
+}
+
+/// Schema 6 had no per-sender inbox counters, no log counters per author and no index on
+/// delivery age: opening it adds `deliveries.sender` (read from each stored envelope's
+/// header), fills `inbox_counts` from the stored deliveries and `log_counts` from the
+/// stored entries' authors, and adds the indexes.
+#[tokio::test]
+async fn a_schema_6_database_is_migrated() {
+    let (dir, path) = temp_db("inbox-counts-migrate");
+    let mut rng = StdRng::seed_from_u64(9);
+    let before = fill(&Relay::open(&path).unwrap(), &mut rng).await;
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "DROP TABLE inbox_counts;
+         DROP TABLE log_counts;
+         DROP INDEX deliveries_by_age;
+         ALTER TABLE deliveries DROP COLUMN sender;
+         PRAGMA user_version = 6;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let relay = Relay::open(&path).unwrap();
+    assert_eq!(relay.usage(&MAILBOX).unwrap(), before);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let (n, bytes): (i64, i64) = conn
+        .query_row(
+            "SELECT SUM(n), SUM(bytes) FROM inbox_counts WHERE mailbox = ?1",
+            [&MAILBOX[..]],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (n as u64, bytes as u64),
+        (before.deliveries, before.delivery_bytes)
+    );
+    let unknown: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM deliveries WHERE length(sender) != 32",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unknown, 0, "every sender read from its envelope");
+    let (log, unknown): (i64, i64) = conn
+        .query_row(
+            "SELECT SUM(bytes), SUM(length(author) != 32) FROM log_counts WHERE mailbox = ?1",
+            [&MAILBOX[..]],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((log as u64, unknown), (before.log_bytes, 0));
+    let version: u16 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, zafe_proto::version::RELAY_DB);
+    std::fs::remove_dir_all(&dir).ok();
 }

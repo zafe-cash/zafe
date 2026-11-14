@@ -27,9 +27,14 @@ pub enum ZafeErrorKind {
     UpdateRequired,
     /// The relay is older than this app and must be updated by whoever runs it.
     RelayOutdated,
-    /// The relay's storage quota for this vault is full; it frees up as old messages
-    /// expire (30 days), or whoever runs the relay raises it.
+    /// The relay's storage quota for this vault's messages is full; it frees up as old
+    /// messages expire (30 days), or whoever runs the relay raises it.
     RelayStorageFull,
+    /// The vault's history (the log, kept for good) is at this relay's cap, or this
+    /// member's half of it: only a relay with more room helps.
+    RelayLogFull,
+    /// The relay's whole database is full (or nearly, for a vault new on it).
+    RelayFull,
     /// The server already holds the most open moves it takes for this seat.
     TooManySeatMoves,
     /// The relay has fewer log entries than this device saw: it lost data or was rewound
@@ -204,6 +209,16 @@ impl From<NodeError> for ZafeError {
                 ZafeErrorKind::InviteExpired
             }
             NodeError::Relay(RelayClientError::RateLimited { .. }) => ZafeErrorKind::NotReady,
+            NodeError::Relay(RelayClientError::StorageFull { detail })
+                if detail == zafe_proto::relay::LOG_FULL =>
+            {
+                ZafeErrorKind::RelayLogFull
+            }
+            NodeError::Relay(RelayClientError::StorageFull { detail })
+                if detail == zafe_proto::relay::RELAY_FULL =>
+            {
+                ZafeErrorKind::RelayFull
+            }
             NodeError::Relay(RelayClientError::StorageFull { .. }) => {
                 ZafeErrorKind::RelayStorageFull
             }

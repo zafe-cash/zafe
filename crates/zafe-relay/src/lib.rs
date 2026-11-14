@@ -53,12 +53,15 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 pub mod expiry;
 pub mod fcm;
 pub mod limits;
+pub mod push;
 pub mod quota;
 pub mod wait;
+
+pub use push::PUSH_WINDOW_SECS;
 
 use expiry::{day, Expiry};
 use limits::{Buckets, Limits};
@@ -89,10 +92,30 @@ pub const RECOVERY_RETENTION_SECS: u64 = 7 * 24 * 3600;
 /// is the end of the log).
 const PAGE: i64 = zafe_proto::relay::READ_PAGE as i64;
 
-/// Largest request body. The biggest real bodies are log entries carrying a proposal's
-/// PCZT (tens of KB for a few payments; a 50-recipient batch stays well under this) and
-/// commitment batches (256 x ~70 bytes).
-pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+/// Largest request body ([`zafe_proto::relay::MAX_BODY_BYTES`]); stored entries and
+/// envelopes are at most [`zafe_proto::relay::MAX_ENTRY_BYTES`], so a reseed can always
+/// carry one. The biggest real bodies are log entries carrying a proposal's PCZT (tens of
+/// KB for a few payments; a 50-recipient batch stays well under this) and commitment
+/// batches (256 x ~70 bytes). Caddy's `request_body max_size` is the same 1 MiB.
+pub const MAX_BODY_BYTES: usize = zafe_proto::relay::MAX_BODY_BYTES;
+
+/// Most log entries one `/v1/mailbox/reseed` request appends (the rest wait for the next
+/// request: clients continue from the length the relay answers), so the work under the
+/// database lock is bounded. Their summed size is checked against [`MAX_BODY_BYTES`] too.
+pub const RESEED_MAX_ENTRIES: usize = 512;
+
+/// Deliveries one pruning step deletes before it lets go of the database lock.
+const PRUNE_BATCH: i64 = 1000;
+
+/// From this share of [`Quotas::db_bytes`] (percent) new mailboxes stop, and so do writes
+/// from mailboxes younger than [`YOUNG_MAILBOX_DAYS`]: established vaults keep the rest.
+pub const NEARLY_FULL_PERCENT: u64 = 90;
+
+/// A mailbox younger than this (days since it was created or restored here) stops writing
+/// once the relay is [`NEARLY_FULL_PERCENT`] full: an attacker's fresh mailboxes can fill a
+/// relay only so far, and one prepared a month ahead is the cost (security review 2026-11,
+/// Residuals). A vault that just moved in is blocked only while the relay is nearly full.
+pub const YOUNG_MAILBOX_DAYS: i64 = 30;
 
 /// Undelivered envelopes older than this are pruned (spec §6.1).
 pub const DELIVERY_RETENTION_SECS: u64 = 30 * 24 * 3600;
@@ -141,6 +164,7 @@ pub struct Relay {
     /// [`create_token_hash`] of `ZAFE_RELAY_CREATE_TOKEN` (never the token itself).
     create_token: Option<[u8; 32]>,
     waiters: Arc<Waiters>,
+    pushes: Arc<push::Pushes>,
 }
 
 /// The client address `limit_ip` found for a request (None: unknown, e.g. in tests).
@@ -203,6 +227,11 @@ fn bad_request(e: ProtoError) -> RelayError {
 
 impl From<rusqlite::Error> for RelayError {
     fn from(e: rusqlite::Error) -> Self {
+        // `PRAGMA max_page_count` (`Quotas::db_bytes`) reached, or the disk itself is full.
+        if e.sqlite_error_code() == Some(ErrorCode::DiskFull) {
+            tracing::warn!("storage: the database is full");
+            return RelayError::QuotaExceeded(Quota::Relay);
+        }
         tracing::error!("storage: {e}");
         RelayError::Storage
     }
@@ -253,6 +282,11 @@ impl IntoResponse for RelayError {
             RelayError::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
             RelayError::QuotaExceeded(_) => StatusCode::INSUFFICIENT_STORAGE,
         };
+        // A quota's body is exactly its text: clients tell a full recipient, log or relay
+        // apart by it (`zafe_proto::relay::{RECIPIENT_FULL, LOG_FULL, RELAY_FULL}`).
+        if let RelayError::QuotaExceeded(q) = self {
+            return (status, q.as_str()).into_response();
+        }
         (status, self.to_string()).into_response()
     }
 }
@@ -265,7 +299,13 @@ type RelayResult = Result<Vec<u8>, RelayError>;
 // there is one; the id is only a label). `last_seen_day` / `created_day`: day numbers for
 // expiry; `shared`: a member other than the creator has made a request (see `expiry`).
 // `seat_moves.status`: [`SEAT_PENDING`], [`SEAT_CANCELLED`] or [`SEAT_FINISHED`];
-// `seat_finishes`: who signed a pending move's finish.
+// `seat_finishes`: who signed a pending move's finish. `deliveries.sender`: the envelope's
+// sender; `inbox_counts`: undelivered envelopes (`n`) and their bytes per (mailbox,
+// recipient, sender), kept in step with `deliveries` by every insert, ack and prune (see
+// `quota`); `inbox_counts_by_sender` sums one sender's rows. `log_counts`: log bytes per
+// (mailbox, author), changed with every append and reseed. `deliveries_by_age`: pruning
+// reads only expired rows (`created_at` sits after the envelope blob, so a scan would
+// read every stored envelope).
 // No SQL comments inside the schema: SQLite keeps the CREATE text and re-parses it on
 // ALTER TABLE.
 const SCHEMA: &str = "
@@ -298,9 +338,26 @@ CREATE TABLE IF NOT EXISTS deliveries (
     recipient BLOB NOT NULL,
     envelope BLOB NOT NULL,
     created_at INTEGER NOT NULL,
+    sender BLOB NOT NULL DEFAULT x'',
     PRIMARY KEY (mailbox, cursor)
 );
 CREATE INDEX IF NOT EXISTS deliveries_by_recipient ON deliveries (mailbox, recipient, cursor);
+CREATE INDEX IF NOT EXISTS deliveries_by_age ON deliveries (created_at);
+CREATE TABLE IF NOT EXISTS inbox_counts (
+    mailbox BLOB NOT NULL,
+    recipient BLOB NOT NULL,
+    sender BLOB NOT NULL,
+    n INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    PRIMARY KEY (mailbox, recipient, sender)
+);
+CREATE INDEX IF NOT EXISTS inbox_counts_by_sender ON inbox_counts (mailbox, sender);
+CREATE TABLE IF NOT EXISTS log_counts (
+    mailbox BLOB NOT NULL,
+    author BLOB NOT NULL,
+    bytes INTEGER NOT NULL,
+    PRIMARY KEY (mailbox, author)
+);
 CREATE INDEX IF NOT EXISTS mailboxes_by_creator ON mailboxes (creator);
 CREATE TABLE IF NOT EXISTS sender_seqs (
     mailbox BLOB NOT NULL,
@@ -400,7 +457,7 @@ impl Relay {
         // Version 0 with tables: written before versioning (unversioned envelopes and log
         // entries), refused; delete it. Older schemas migrate from `found` here.
         match found {
-            1..=5 => {
+            1..=6 => {
                 if found == 1 {
                     migrate_from_v1(&conn)?;
                 }
@@ -414,6 +471,7 @@ impl Relay {
                     migrate_from_v4(&conn)?;
                 }
                 // 5 → 6 only adds tables, which `SCHEMA` creates below.
+                migrate_from_v6(&conn)?;
             }
             0 if !has_tables => {}
             _ => version::check(version::Format::RelayDb, found)?,
@@ -436,6 +494,7 @@ impl Relay {
                 wait::DEFAULT_WAITS_PER_KEY,
                 wait::DEFAULT_WAITS_TOTAL,
             )),
+            pushes: Arc::new(push::Pushes::default()),
         })
     }
 
@@ -447,9 +506,53 @@ impl Relay {
     }
 
     /// Sets storage quotas (none by default; `zafe-relay` uses [`Quotas::hosted`]).
+    /// [`Quotas::db_bytes`] becomes the database's `max_page_count`.
     pub fn with_quotas(mut self, quotas: Quotas) -> Self {
+        if let Some(cap) = quotas.db_bytes {
+            let db = self.db.lock().expect("lock");
+            let page: u64 = db
+                .pragma_query_value(None, "page_size", |r| r.get::<_, i64>(0))
+                .map(|p| p.max(512) as u64)
+                .unwrap_or(4096);
+            let pages = (cap / page).max(1);
+            if let Err(e) = db.pragma_update(None, "max_page_count", pages as i64) {
+                tracing::error!("max_page_count: {e}");
+            }
+        }
         self.quotas = quotas;
         self
+    }
+
+    /// Whether the database holds [`NEARLY_FULL_PERCENT`] of [`Quotas::db_bytes`] (pages in
+    /// use, from the header: no table is read).
+    fn nearly_full(&self, db: &Connection) -> Result<bool, RelayError> {
+        let Some(cap) = self.quotas.db_bytes else {
+            return Ok(false);
+        };
+        let pages: i64 = db.pragma_query_value(None, "page_count", |r| r.get(0))?;
+        let free: i64 = db.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
+        let page: i64 = db.pragma_query_value(None, "page_size", |r| r.get(0))?;
+        let used = (pages - free).max(0) as u64 * page.max(0) as u64;
+        Ok(used.saturating_mul(100) >= cap.saturating_mul(NEARLY_FULL_PERCENT))
+    }
+
+    /// Refuses a new mailbox once the relay is [`Relay::nearly_full`]. Checked before the
+    /// creation is charged.
+    fn check_room_for_creation(&self) -> Result<(), RelayError> {
+        let db = self.db.lock().expect("lock");
+        if self.nearly_full(&db)? {
+            return Err(RelayError::QuotaExceeded(Quota::Relay));
+        }
+        Ok(())
+    }
+
+    /// Refuses a write that adds storage from a mailbox younger than
+    /// [`YOUNG_MAILBOX_DAYS`] once the relay is [`Relay::nearly_full`].
+    fn check_room_for_write(&self, db: &Connection, mb: &MailboxRow) -> Result<(), RelayError> {
+        if self.today() - mb.created_day < YOUNG_MAILBOX_DAYS && self.nearly_full(db)? {
+            return Err(RelayError::QuotaExceeded(Quota::Relay));
+        }
+        Ok(())
     }
 
     /// Sets when [`Relay::expire`] deletes mailboxes (never by default; `zafe-relay` uses
@@ -506,8 +609,30 @@ impl Relay {
     /// Deletes a push token everywhere it is registered (FCM reported it gone). Returns
     /// how many registrations were removed.
     pub fn forget_push_token(&self, token: &str) -> Result<usize, RelayError> {
+        self.pushes.forget(token);
         let db = self.db.lock().expect("lock");
         Ok(db.execute("DELETE FROM push_tokens WHERE token = ?1", params![token])?)
+    }
+
+    /// Sends the vault-activity pushes for `tokens`, at most one per token per
+    /// [`PUSH_WINDOW_SECS`] ([`push`]); the rest go out at the window's end.
+    fn push(&self, tokens: Vec<(PushPlatform, String)>) {
+        let now = self.now();
+        for (platform, token) in tokens {
+            if self.pushes.admit(platform, &token, now) {
+                self.notifier.notify(platform, &token);
+            }
+        }
+    }
+
+    /// Sends the pushes held back in windows that have ended (the binary calls this every
+    /// few seconds). Returns how many.
+    pub fn flush_pushes(&self) -> usize {
+        let due = self.pushes.due(self.now());
+        for (platform, token) in &due {
+            self.notifier.notify(*platform, token);
+        }
+        due.len()
     }
 
     /// Charges one request to a signing key whose signature already verified.
@@ -576,27 +701,42 @@ impl Relay {
             b.prune(self.now());
         }
         let cutoff = self.now().saturating_sub(DELIVERY_RETENTION_SECS) as i64;
-        let mut db = self.db.lock().expect("lock");
-        let tx = db.transaction()?;
-        // Give the expired bytes back to each mailbox's counter, then delete. This scans
-        // the expired rows once an hour, never on a request.
-        tx.execute(
-            "UPDATE mailboxes SET delivery_bytes = MAX(0, delivery_bytes - (
-                 SELECT COALESCE(SUM(length(envelope)), 0) FROM deliveries
-                 WHERE mailbox = mailboxes.id AND created_at < ?1))
-             WHERE id IN (SELECT DISTINCT mailbox FROM deliveries WHERE created_at < ?1)",
-            params![cutoff],
-        )?;
-        let deleted = tx.execute(
-            "DELETE FROM deliveries WHERE created_at < ?1",
-            params![cutoff],
-        )?;
+        // In batches through the age index, each its own transaction, so a backlog never
+        // holds the lock for long; every batch gives its bytes and counts back in the same
+        // transaction that deletes them.
+        let mut deleted = 0;
+        loop {
+            let mut db = self.db.lock().expect("lock");
+            let tx = db.transaction()?;
+            let rows = {
+                let mut stmt = tx.prepare_cached(
+                    "DELETE FROM deliveries WHERE rowid IN
+                         (SELECT rowid FROM deliveries WHERE created_at < ?1 LIMIT ?2)
+                     RETURNING mailbox, recipient, sender, length(envelope)",
+                )?;
+                let rows = stmt.query_map(params![cutoff, PRUNE_BATCH], |r| {
+                    Ok(Gone {
+                        mailbox: r.get(0)?,
+                        recipient: r.get(1)?,
+                        sender: r.get(2)?,
+                        bytes: r.get(3)?,
+                    })
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            uncount(&tx, &rows)?;
+            tx.commit()?;
+            deleted += rows.len();
+            if (rows.len() as i64) < PRUNE_BATCH {
+                break;
+            }
+        }
         let recovery_cutoff = self.now().saturating_sub(RECOVERY_RETENTION_SECS) as i64;
-        tx.execute(
+        let db = self.db.lock().expect("lock");
+        db.execute(
             "DELETE FROM recovery_values WHERE created_at < ?1",
             params![recovery_cutoff],
         )?;
-        tx.commit()?;
         Ok(deleted)
     }
 
@@ -645,10 +785,13 @@ impl Relay {
             versions: RelayVersions::current(),
             limits: RelayLimits {
                 max_body_bytes: MAX_BODY_BYTES as u64,
+                max_entry_bytes: zafe_proto::relay::MAX_ENTRY_BYTES as u64,
                 max_members: MAX_MEMBERS,
                 log_bytes: q.log_bytes,
                 delivery_bytes: q.delivery_bytes,
-                envelopes_per_recipient: q.envelopes_per_recipient,
+                envelopes_per_pair: q.envelopes_per_pair,
+                pair_bytes: q.pair_bytes,
+                author_log_bytes: q.log_bytes.map(quota::author_log_cap),
                 mailboxes_per_key: q.mailboxes_per_key,
                 requests_per_minute: self.limits.per_key.map(|r| r.per_minute),
                 delivery_retention_days: (DELIVERY_RETENTION_SECS / expiry::DAY_SECS) as u32,
@@ -765,6 +908,8 @@ fn delete_mailbox(tx: &Connection, id: &MailboxId) -> Result<(), RelayError> {
         "log_entries",
         "seat_moves",
         "seat_finishes",
+        "inbox_counts",
+        "log_counts",
     ] {
         tx.execute(
             &format!("DELETE FROM {table} WHERE mailbox = ?1"),
@@ -838,41 +983,214 @@ fn migrate_from_v4(conn: &Connection) -> Result<(), RelayError> {
     Ok(())
 }
 
-/// Refuses a delivery of `len` bytes to each of `recipients` that would go over a quota.
+/// Schema 6 → 7: each delivery keeps its sender (read from the stored envelope's header;
+/// one that doesn't decode keeps an empty sender), `inbox_counts` is filled from the stored
+/// deliveries, and `SCHEMA` adds the age index. Runs for every older schema too.
+fn migrate_from_v6(conn: &Connection) -> Result<(), RelayError> {
+    let tx = conn.unchecked_transaction()?;
+    let has_sender: bool = tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('deliveries') WHERE name = 'sender')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has_sender {
+        tx.execute_batch("ALTER TABLE deliveries ADD COLUMN sender BLOB NOT NULL DEFAULT x''")?;
+    }
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS inbox_counts (
+             mailbox BLOB NOT NULL,
+             recipient BLOB NOT NULL,
+             sender BLOB NOT NULL,
+             n INTEGER NOT NULL,
+             bytes INTEGER NOT NULL,
+             PRIMARY KEY (mailbox, recipient, sender)
+         );
+         DELETE FROM inbox_counts;",
+    )?;
+    // A few envelopes at a time: memory stays bounded however much is stored.
+    let mut after = 0i64;
+    loop {
+        let batch: Vec<(i64, Vec<u8>)> = {
+            let mut stmt = tx.prepare(
+                "SELECT rowid, envelope FROM deliveries WHERE rowid > ?1 ORDER BY rowid LIMIT 64",
+            )?;
+            let rows = stmt.query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let Some(&(last, _)) = batch.last() else {
+            break;
+        };
+        for (rowid, envelope) in &batch {
+            let sender = Envelope::from_bytes(envelope)
+                .map(|e| e.header.from.to_vec())
+                .unwrap_or_default();
+            tx.execute(
+                "UPDATE deliveries SET sender = ?2 WHERE rowid = ?1",
+                params![rowid, sender],
+            )?;
+        }
+        after = last;
+    }
+    tx.execute_batch(
+        "INSERT INTO inbox_counts (mailbox, recipient, sender, n, bytes)
+             SELECT mailbox, recipient, sender, COUNT(*), SUM(length(envelope))
+             FROM deliveries GROUP BY mailbox, recipient, sender;
+         CREATE TABLE IF NOT EXISTS log_counts (
+             mailbox BLOB NOT NULL,
+             author BLOB NOT NULL,
+             bytes INTEGER NOT NULL,
+             PRIMARY KEY (mailbox, author)
+         );
+         DELETE FROM log_counts;",
+    )?;
+    // Log bytes per author, from each stored entry's header (one that doesn't decode is
+    // counted under an empty author), a few at a time.
+    let mut after = 0i64;
+    loop {
+        let batch: Vec<(i64, Vec<u8>, Vec<u8>)> = {
+            let mut stmt = tx.prepare(
+                "SELECT rowid, mailbox, entry FROM log_entries WHERE rowid > ?1
+                 ORDER BY rowid LIMIT 64",
+            )?;
+            let rows = stmt.query_map(params![after], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let Some(&(last, _, _)) = batch.last() else {
+            break;
+        };
+        for (_, mailbox, entry) in &batch {
+            let author = LogEntry::from_bytes(entry)
+                .map(|e| e.header.author.to_vec())
+                .unwrap_or_default();
+            count_log(&tx, mailbox, &author, entry.len())?;
+        }
+        after = last;
+    }
+    tx.execute_batch("PRAGMA user_version = 7;")?;
+    tx.commit()?;
+    tracing::info!("relay database migrated from schema 6 to 7 (inbox counters per sender, log counters per author)");
+    Ok(())
+}
+
+/// Adds `len` log bytes to `author`'s counter in `mailbox` (in the caller's transaction).
+fn count_log(tx: &Connection, mailbox: &[u8], author: &[u8], len: usize) -> Result<(), RelayError> {
+    tx.execute(
+        "INSERT INTO log_counts (mailbox, author, bytes) VALUES (?1, ?2, ?3)
+         ON CONFLICT (mailbox, author) DO UPDATE SET bytes = bytes + excluded.bytes",
+        params![mailbox, author, len as i64],
+    )?;
+    Ok(())
+}
+
+/// A deleted delivery, for [`uncount`].
+struct Gone {
+    mailbox: Vec<u8>,
+    recipient: Vec<u8>,
+    sender: Vec<u8>,
+    bytes: i64,
+}
+
+/// Gives deleted deliveries back to their counters (`inbox_counts` and the mailbox's
+/// `delivery_bytes`), grouped, in the caller's transaction.
+fn uncount(tx: &Connection, gone: &[Gone]) -> Result<(), RelayError> {
+    use std::collections::BTreeMap;
+    // (mailbox, recipient, sender) -> (envelopes, bytes)
+    type Pair<'a> = (&'a [u8], &'a [u8], &'a [u8]);
+    let mut pairs: BTreeMap<Pair, (i64, i64)> = BTreeMap::new();
+    let mut mailboxes: BTreeMap<&[u8], i64> = BTreeMap::new();
+    for g in gone {
+        let pair = pairs
+            .entry((&g.mailbox, &g.recipient, &g.sender))
+            .or_default();
+        pair.0 += 1;
+        pair.1 += g.bytes;
+        *mailboxes.entry(&g.mailbox).or_default() += g.bytes;
+    }
+    for ((mailbox, recipient, sender), (n, bytes)) in pairs {
+        tx.execute(
+            "UPDATE inbox_counts SET n = n - ?4, bytes = bytes - ?5
+             WHERE mailbox = ?1 AND recipient = ?2 AND sender = ?3",
+            params![mailbox, recipient, sender, n, bytes],
+        )?;
+        tx.execute(
+            "DELETE FROM inbox_counts
+             WHERE mailbox = ?1 AND recipient = ?2 AND sender = ?3 AND n <= 0",
+            params![mailbox, recipient, sender],
+        )?;
+    }
+    for (mailbox, bytes) in mailboxes {
+        tx.execute(
+            "UPDATE mailboxes SET delivery_bytes = MAX(0, delivery_bytes - ?2) WHERE id = ?1",
+            params![mailbox, bytes],
+        )?;
+    }
+    Ok(())
+}
+
+/// Refuses a delivery of `len` bytes from `sender` to each of `recipients` that would go
+/// over a quota ([`quota`]): the pair's count or bytes ([`Quota::Recipient`], that
+/// recipient only), the sender's part of the mailbox total or the total itself
+/// ([`Quota::Deliveries`]). Reads one counter row per recipient and the sender's rows (at
+/// most one per member); never walks deliveries.
 fn check_delivery_quotas(
     tx: &Connection,
     quotas: &Quotas,
     mailbox: &MailboxId,
+    sender: &[u8; 32],
     recipients: &[[u8; 32]],
     len: usize,
 ) -> Result<(), RelayError> {
-    if let Some(cap) = quotas.delivery_bytes {
-        let used: i64 = tx.query_row(
-            "SELECT delivery_bytes FROM mailboxes WHERE id = ?1",
-            params![&mailbox[..]],
-            |r| r.get(0),
-        )?;
-        let adding = (len as u64).saturating_mul(recipients.len() as u64);
-        if (used as u64).saturating_add(adding) > cap {
-            return Err(RelayError::QuotaExceeded(Quota::Deliveries));
-        }
-    }
-    if let Some(cap) = quotas.envelopes_per_recipient {
-        // Walks at most `cap` entries of the (mailbox, recipient, cursor) index.
+    let len = len as u64;
+    if quotas.envelopes_per_pair.is_some() || quotas.pair_bytes.is_some() {
         let mut stmt = tx.prepare_cached(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM deliveries
-             WHERE mailbox = ?1 AND recipient = ?2 LIMIT ?3)",
+            "SELECT n, bytes FROM inbox_counts
+             WHERE mailbox = ?1 AND recipient = ?2 AND sender = ?3",
         )?;
-        let limit = i64::try_from(cap).unwrap_or(i64::MAX);
         for recipient in recipients {
-            let n: i64 =
-                stmt.query_row(params![&mailbox[..], &recipient[..], limit], |r| r.get(0))?;
-            if n as u64 >= cap {
-                return Err(RelayError::QuotaExceeded(Quota::Inbox));
+            let (count, bytes): (i64, i64) = stmt
+                .query_row(params![&mailbox[..], &recipient[..], &sender[..]], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .optional()?
+                .unwrap_or((0, 0));
+            let (count, bytes) = (count.max(0) as u64, bytes.max(0) as u64);
+            if quotas.envelopes_per_pair.is_some_and(|cap| count >= cap)
+                || quotas
+                    .pair_bytes
+                    .is_some_and(|cap| bytes.saturating_add(len) > cap)
+            {
+                return Err(RelayError::QuotaExceeded(Quota::Recipient));
             }
         }
     }
+    if let Some(cap) = quotas.delivery_bytes {
+        let adding = len.saturating_mul(recipients.len() as u64);
+        let (total, mine): (i64, i64) = tx.query_row(
+            "SELECT (SELECT delivery_bytes FROM mailboxes WHERE id = ?1),
+                    (SELECT COALESCE(SUM(bytes), 0) FROM inbox_counts
+                     WHERE mailbox = ?1 AND sender = ?2)",
+            params![&mailbox[..], &sender[..]],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let sender_cap = quota::sender_delivery_cap(cap, quotas.pair_bytes);
+        if (total.max(0) as u64).saturating_add(adding) > cap
+            || (mine.max(0) as u64).saturating_add(adding) > sender_cap
+        {
+            return Err(RelayError::QuotaExceeded(Quota::Deliveries));
+        }
+    }
     Ok(())
+}
+
+/// The log's length: indices run from 0 without gaps (appends and reseeds check
+/// `index == len`), so the last index answers it through the primary key, never a count.
+fn log_len(db: &Connection, id: &MailboxId) -> Result<u64, RelayError> {
+    let len: i64 = db.query_row(
+        "SELECT COALESCE(MAX(idx) + 1, 0) FROM log_entries WHERE mailbox = ?1",
+        params![&id[..]],
+        |r| r.get(0),
+    )?;
+    Ok(len as u64)
 }
 
 struct MailboxRow {
@@ -886,6 +1204,8 @@ struct MailboxRow {
     /// The vault id of the first log entry (`None` before there is one).
     vault_id: Option<MailboxId>,
     last_seen_day: i64,
+    /// Day number it was created (or restored) here, for [`YOUNG_MAILBOX_DAYS`].
+    created_day: i64,
     shared: bool,
 }
 
@@ -897,7 +1217,7 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
     let row = db
         .query_row(
             "SELECT creator, join_token_hash, max_members, sealed, threshold, created_at,
-                    vault_id, last_seen_day, shared
+                    vault_id, last_seen_day, shared, created_day
              FROM mailboxes WHERE id = ?1",
             params![&id[..]],
             |r| {
@@ -914,13 +1234,14 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
                         r.get::<_, Option<Vec<u8>>>(6)?,
                         r.get::<_, i64>(7)?,
                         r.get::<_, i64>(8)?,
+                        r.get::<_, i64>(9)?,
                     ),
                 ))
             },
         )
         .optional()?
         .ok_or(RelayError::NotFound)?;
-    let (row, (vault_id, last_seen_day, shared)) = row;
+    let (row, (vault_id, last_seen_day, shared, created_day)) = row;
     Ok(MailboxRow {
         creator: arr32(row.0)?,
         join_token_hash: arr32(row.1)?,
@@ -932,6 +1253,7 @@ fn mailbox(db: &Connection, id: &MailboxId) -> Result<MailboxRow, RelayError> {
             .map(|v| MailboxId::try_from(v).map_err(|_| RelayError::Storage))
             .transpose()?,
         last_seen_day,
+        created_day,
         shared: shared != 0,
     })
 }
@@ -1005,6 +1327,7 @@ async fn create(
     if p.max_members < 2 || p.max_members > MAX_MEMBERS {
         return Err(RelayError::BadRequest);
     }
+    relay.check_room_for_creation()?;
     relay.charge_creation(ip, &headers)?;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
@@ -1155,12 +1478,12 @@ async fn cancel_setup(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     if req.signer.sig_pk != mb.creator {
         return Err(RelayError::Forbidden);
     }
-    let logged: i64 = db.query_row(
-        "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
+    let logged: bool = db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM log_entries WHERE mailbox = ?1)",
         params![&id[..]],
         |r| r.get(0),
     )?;
-    if logged > 0 {
+    if logged {
         return Err(RelayError::Forbidden);
     }
     let tx = db.transaction()?;
@@ -1362,22 +1685,43 @@ async fn replace_member_labelled(State(relay): State<Relay>, body: Bytes) -> Rel
     if p.approvals.len() > usize::from(MAX_MEMBERS) {
         return Err(RelayError::BadRequest);
     }
+    // Before the lock: a repeated key is malformed (honest phones send t distinct ones), and
+    // each signature is checked against its own key; membership is checked under the lock.
+    let mut keys = std::collections::BTreeSet::new();
+    if !p.approvals.iter().all(|(pk, _)| keys.insert(*pk)) {
+        return Err(RelayError::BadRequest);
+    }
+    let signed_by: std::collections::BTreeSet<[u8; 32]> = p
+        .approvals
+        .iter()
+        .filter(|(pk, signature)| {
+            let by = IdentityPublic {
+                sig_pk: *pk,
+                enc_pk: [0; 32],
+            };
+            p.approval.verify(&by, signature).is_ok()
+        })
+        .map(|(pk, _)| *pk)
+        .collect();
     replace_in(
         &relay,
         &req.signer.sig_pk,
         &p.mailbox,
         p.approval,
-        &p.approvals,
+        p.approvals.len(),
+        &signed_by,
     )
 }
 
-/// Adds `a.new` as a pending member of mailbox `label`.
+/// Adds `a.new` as a pending member of mailbox `label`: `approvals` were posted, and
+/// `signed_by` are the keys whose signature over `a` verified.
 fn replace_in(
     relay: &Relay,
     signer: &[u8; 32],
     label: &MailboxId,
     a: SeatMoveApproval,
-    approvals: &[([u8; 32], Vec<u8>)],
+    approvals: usize,
+    signed_by: &std::collections::BTreeSet<[u8; 32]>,
 ) -> RelayResult {
     let move_id = a.move_id();
     let mut db = relay.db.lock().expect("lock");
@@ -1393,6 +1737,9 @@ fn replace_in(
     // Members push approvals; a pending key writes nothing, not even its own move.
     if !is_member(signer) {
         return Err(RelayError::Forbidden);
+    }
+    if approvals > current.len() {
+        return Err(RelayError::BadRequest);
     }
     match seat_row(&tx, label, &move_id)? {
         // Already approved (or done): nothing changes.
@@ -1417,19 +1764,11 @@ fn replace_in(
     if pending as usize >= zafe_proto::relay::MAX_PENDING_SEAT_MOVES {
         return Err(RelayError::TooManySeatMoves);
     }
-    let mut approvers = std::collections::BTreeSet::new();
-    for (pk, signature) in approvals {
-        let Some(by) = current
-            .iter()
-            .find(|m| &m.sig_pk == pk && m.sig_pk != a.old)
-        else {
-            continue;
-        };
-        if a.verify(by, signature).is_ok() {
-            approvers.insert(*pk);
-        }
-    }
-    if approvers.len() < usize::from(mb.threshold) {
+    let approvers = signed_by
+        .iter()
+        .filter(|pk| **pk != a.old && is_member(pk))
+        .count();
+    if approvers < usize::from(mb.threshold) {
         return Err(RelayError::Forbidden);
     }
     tx.execute(
@@ -1549,6 +1888,13 @@ async fn seat_cancel(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     if post.signature.len() > 128 {
         return Err(RelayError::BadRequest);
     }
+    // The old key's signature, before the lock (only its signing key is needed).
+    let by = IdentityPublic {
+        sig_pk: c.old,
+        enc_pk: [0; 32],
+    };
+    c.verify(&by, &post.signature)
+        .map_err(|_| RelayError::Unauthenticated)?;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let mb = mailbox(&tx, &label)?;
@@ -1557,19 +1903,20 @@ async fn seat_cancel(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     }
     // Only the old key, while it holds the seat here, signs a cancel.
     let old = member(&tx, &label, &c.old)?.ok_or(RelayError::Forbidden)?;
-    c.verify(&old, &post.signature)
-        .map_err(|_| RelayError::Unauthenticated)?;
-    relay.limit_key(&old.sig_pk)?;
     // Only a move the relay holds: a cancel can't close a round that was never asked.
     let row = seat_row(&tx, &label, &c.move_id)?.ok_or(RelayError::Forbidden)?;
     if row.old != c.old || row.new.sig_pk != c.new || row.round != 0 {
         return Err(RelayError::Forbidden);
     }
     match row.status {
+        // A repost (anyone may post the signed cancel) changes nothing and costs the old
+        // key nothing: the per-IP limit covers it.
         SEAT_CANCELLED => return ok(&()),
         SEAT_PENDING => {}
         _ => return Err(RelayError::Forbidden),
     }
+    // Only the cancel that applies is charged to the old key.
+    relay.limit_key(&old.sig_pk)?;
     // Only the move it names: its pending key loses access. Other rows of the seat are left
     // alone (the log refuses any first-round approval after a keep, so another first-round
     // row is junk that no honest phone addresses, and the real move must keep its row).
@@ -1653,19 +2000,48 @@ async fn reseed(
     {
         return Err(RelayError::BadRequest);
     }
+    // Bounded and verified before the lock: at most `RESEED_MAX_ENTRIES` entries (the rest
+    // wait for the next request), each decoded, signed by its author and hashed here.
+    let take = p.entries.len().min(RESEED_MAX_ENTRIES);
+    let batch = &p.entries[..take];
+    if zafe_proto::relay::page_bytes(batch.iter().map(Vec::as_slice)) > MAX_BODY_BYTES {
+        return Err(RelayError::BadRequest);
+    }
+    let mut checked = Vec::with_capacity(take);
+    for bytes in batch {
+        let entry = LogEntry::from_bytes(bytes).map_err(bad_request)?;
+        // Only the author's key is needed to check a signature.
+        entry
+            .verify_signature(&IdentityPublic {
+                sig_pk: entry.header.author,
+                enc_pk: [0; 32],
+            })
+            .map_err(|_| RelayError::Unauthenticated)?;
+        let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
+        checked.push((entry.header, hash));
+    }
+    let all = take == p.entries.len();
+    // A new mailbox: room and the creation charge, before the lock.
+    let exists = {
+        let db = relay.db.lock().expect("lock");
+        match mailbox(&db, &p.mailbox) {
+            Ok(_) => true,
+            Err(RelayError::NotFound) => false,
+            Err(e) => return Err(e),
+        }
+    };
+    if !exists {
+        relay.check_room_for_creation()?;
+        relay.charge_creation(ip, &headers)?;
+    }
+
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
-    let count = |tx: &rusqlite::Transaction| -> Result<u64, RelayError> {
-        Ok(tx.query_row(
-            "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
-            params![&p.mailbox[..]],
-            |r| r.get::<_, i64>(0),
-        )? as u64)
-    };
     // The vault id the mailbox holds so far (`None`: no entry yet).
     let stored_vault = match mailbox(&tx, &p.mailbox) {
+        // Gone since the check above (cancelled or expired): uncharged, so not made here.
+        Err(RelayError::NotFound) if exists => return Err(RelayError::NotFound),
         Err(RelayError::NotFound) => {
-            relay.charge_creation(ip, &headers)?;
             // No join token (its hash is all zeros: nothing hashes to it), so nobody can
             // join; the members are listed by the signer, who alone may continue.
             tx.execute(
@@ -1705,7 +2081,7 @@ async fn reseed(
             // Already open: a member learns where its log is, nothing changes.
             member(&tx, &p.mailbox, &signer)?.ok_or(RelayError::Forbidden)?;
             relay.touch(&tx, &p.mailbox, &mb, &signer)?;
-            let len = count(&tx)?;
+            let len = log_len(&tx, &p.mailbox)?;
             tx.commit()?;
             return ok(&ReseedResponse {
                 len,
@@ -1719,12 +2095,13 @@ async fn reseed(
             if mb.creator != signer || mb.join_token_hash != [0u8; 32] {
                 return Err(RelayError::Forbidden);
             }
+            relay.check_room_for_write(&tx, &mb)?;
             relay.touch(&tx, &p.mailbox, &mb, &signer)?;
             mb.vault_id
         }
     };
 
-    let mut len = count(&tx)?;
+    let mut len = log_len(&tx, &p.mailbox)?;
     if p.from != len {
         // Out of step (a request was lost or repeated): say where to continue.
         tx.commit()?;
@@ -1751,9 +2128,8 @@ async fn reseed(
         |r| r.get(0),
     )?;
     let mut vault = stored_vault;
-    for bytes in &p.entries {
-        let entry = LogEntry::from_bytes(bytes).map_err(bad_request)?;
-        let h = &entry.header;
+    // Under the lock only the chain against the head and the inserts.
+    for ((h, hash), bytes) in checked.iter().zip(batch) {
         if h.index != len || h.prev_hash != head {
             return Err(RelayError::BadRequest);
         }
@@ -1762,26 +2138,20 @@ async fn reseed(
             Some(_) => {}
             None => vault = Some(h.mailbox),
         }
-        // Only the author's key is needed to check a signature.
-        entry
-            .verify_signature(&IdentityPublic {
-                sig_pk: h.author,
-                enc_pk: [0; 32],
-            })
-            .map_err(|_| RelayError::Unauthenticated)?;
         if let Some(cap) = relay.quotas.log_bytes {
             if (used as u64).saturating_add(bytes.len() as u64) > cap {
                 return Err(RelayError::QuotaExceeded(Quota::Log));
             }
         }
-        let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
         tx.execute(
             "INSERT INTO log_entries (mailbox, idx, entry, hash) VALUES (?1, ?2, ?3, ?4)",
             params![&p.mailbox[..], len as i64, &bytes[..], &hash[..]],
         )?;
+        // Counted per author, never refused on it: a restore takes a signed history whole.
+        count_log(&tx, &p.mailbox[..], &h.author[..], bytes.len())?;
         used += bytes.len() as i64;
         len += 1;
-        head = hash;
+        head = *hash;
     }
     tx.execute(
         "UPDATE mailboxes SET log_bytes = ?2 WHERE id = ?1",
@@ -1793,7 +2163,8 @@ async fn reseed(
             params![&p.mailbox[..], &v[..]],
         )?;
     }
-    let open = p.finish && len > 0;
+    // Open only once every entry the request carried is in.
+    let open = p.finish && all && len > 0;
     if open {
         tx.execute(
             "UPDATE mailboxes SET sealed = 1 WHERE id = ?1",
@@ -1947,12 +2318,19 @@ async fn forget_push(State(relay): State<Relay>, body: Bytes) -> RelayResult {
 /// sender, a member; a pending member of a seat move may receive it, never send.
 async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<PostEnvelope>(&relay, &body)?;
-    let envelope = Envelope::from_bytes(&req.payload.envelope).map_err(bad_request)?;
     let body = &req.payload.envelope;
+    if body.len() > zafe_proto::relay::MAX_ENTRY_BYTES {
+        return Err(RelayError::BadRequest);
+    }
+    let envelope = Envelope::from_bytes(body).map_err(bad_request)?;
     let h = &envelope.header;
     if h.from != req.signer.sig_pk {
         return Err(RelayError::Forbidden);
     }
+    // The request's signer is the sender: its signature is checked before the lock.
+    envelope
+        .verify(&req.signer)
+        .map_err(|_| RelayError::Unauthenticated)?;
     let mut db = relay.db.lock().expect("lock");
     let tx = db.transaction()?;
     let mb = mailbox(&tx, &h.mailbox)?;
@@ -1961,9 +2339,6 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         .iter()
         .find(|m| m.sig_pk == h.from)
         .ok_or(RelayError::Forbidden)?;
-    envelope
-        .verify(sender)
-        .map_err(|_| RelayError::Unauthenticated)?;
 
     let recipients: Vec<[u8; 32]> = match h.to {
         Recipient::One(pk) if pk != sender.sig_pk && members.iter().any(|m| m.sig_pk == pk) => {
@@ -2001,7 +2376,15 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         params![&h.mailbox[..], &h.from[..], seq],
     )?;
 
-    check_delivery_quotas(&tx, &relay.quotas, &h.mailbox, &recipients, body.len())?;
+    relay.check_room_for_write(&tx, &mb)?;
+    check_delivery_quotas(
+        &tx,
+        &relay.quotas,
+        &h.mailbox,
+        &sender.sig_pk,
+        &recipients,
+        body.len(),
+    )?;
     relay.touch(&tx, &h.mailbox, &mb, &sender.sig_pk)?;
     let now = relay.now() as i64;
     for recipient in &recipients {
@@ -2011,13 +2394,33 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
             |r| r.get(0),
         )?;
         tx.execute(
-            "INSERT INTO deliveries (mailbox, cursor, recipient, envelope, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![&h.mailbox[..], cursor, &recipient[..], &body[..], now],
+            "INSERT INTO deliveries (mailbox, cursor, recipient, envelope, created_at, sender)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                &h.mailbox[..],
+                cursor,
+                &recipient[..],
+                &body[..],
+                now,
+                &h.from[..]
+            ],
         )?;
         tx.execute(
             "UPDATE mailboxes SET next_cursor = next_cursor + 1,
                  delivery_bytes = delivery_bytes + ?2 WHERE id = ?1",
             params![&h.mailbox[..], body.len() as i64],
+        )?;
+        tx.execute(
+            "INSERT INTO inbox_counts (mailbox, recipient, sender, n, bytes)
+             VALUES (?1, ?2, ?3, 1, ?4)
+             ON CONFLICT (mailbox, recipient, sender) DO UPDATE
+                 SET n = n + 1, bytes = bytes + excluded.bytes",
+            params![
+                &h.mailbox[..],
+                &recipient[..],
+                &h.from[..],
+                body.len() as i64
+            ],
         )?;
     }
 
@@ -2026,9 +2429,7 @@ async fn post_envelope(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     tx.commit()?;
     drop(db);
     relay.waiters.signal(&h.mailbox);
-    for (platform, token) in pushes {
-        relay.notifier.notify(platform, &token);
-    }
+    relay.push(pushes);
     ok(&())
 }
 
@@ -2085,10 +2486,17 @@ async fn inbox(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         ],
         |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)),
     )?;
-    // Stored as received (`Envelope::to_bytes`); clients decode each one.
-    let envelopes = rows
-        .map(|row| row.map(|(cursor, bytes)| (cursor as u64, bytes)))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Stored as received (`Envelope::to_bytes`); clients decode each one. The page stops at
+    // the byte budget (always one envelope at least); clients read until a page is empty.
+    let (mut envelopes, mut bytes) = (Vec::new(), 0usize);
+    for row in rows {
+        let (cursor, envelope) = row?;
+        if !zafe_proto::relay::page_has_room(envelopes.len(), bytes, envelope.len()) {
+            break;
+        }
+        bytes += envelope.len();
+        envelopes.push((cursor as u64, envelope));
+    }
     ok(&InboxResponse { envelopes })
 }
 
@@ -2109,31 +2517,30 @@ async fn inbox_ack(State(relay): State<Relay>, body: Bytes) -> RelayResult {
         return Err(RelayError::Forbidden);
     }
     relay.touch(&tx, &req.payload.mailbox, &mb, &req.signer.sig_pk)?;
-    let mut deleted = 0u64;
-    let mut bytes = 0i64;
+    let mut gone = Vec::new();
     for &cursor in &req.payload.cursors {
         let Ok(cursor) = i64::try_from(cursor) else {
             continue;
         };
-        let size: Option<i64> = tx
+        let row = tx
             .query_row(
                 "DELETE FROM deliveries WHERE mailbox = ?1 AND recipient = ?2 AND cursor = ?3
-                 RETURNING length(envelope)",
+                 RETURNING sender, length(envelope)",
                 params![&req.payload.mailbox[..], &req.signer.sig_pk[..], cursor],
-                |r| r.get(0),
+                |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?)),
             )
             .optional()?;
-        if let Some(size) = size {
-            deleted += 1;
-            bytes += size;
+        if let Some((sender, bytes)) = row {
+            gone.push(Gone {
+                mailbox: req.payload.mailbox.to_vec(),
+                recipient: req.signer.sig_pk.to_vec(),
+                sender,
+                bytes,
+            });
         }
     }
-    if bytes > 0 {
-        tx.execute(
-            "UPDATE mailboxes SET delivery_bytes = MAX(0, delivery_bytes - ?2) WHERE id = ?1",
-            params![&req.payload.mailbox[..], bytes],
-        )?;
-    }
+    let deleted = gone.len() as u64;
+    uncount(&tx, &gone)?;
     tx.commit()?;
     ok(&InboxAckResponse { deleted })
 }
@@ -2143,22 +2550,37 @@ async fn inbox_ack(State(relay): State<Relay>, body: Bytes) -> RelayResult {
 async fn log_append_labelled(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let req = verified::<LabelledAppend>(&relay, &body)?;
     relay.check_fresh(req.payload.timestamp)?;
+    if req.payload.entry.len() > zafe_proto::relay::MAX_ENTRY_BYTES {
+        return Err(RelayError::BadRequest);
+    }
     let entry = LogEntry::from_bytes(&req.payload.entry).map_err(bad_request)?;
+    // The author's signature and the entry's hash, before the lock (only the author's
+    // signing key is needed); whether the author is a member is checked under it.
+    entry
+        .verify_signature(&IdentityPublic {
+            sig_pk: entry.header.author,
+            enc_pk: [0; 32],
+        })
+        .map_err(|_| RelayError::Unauthenticated)?;
+    let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
     append_entry(
         &relay,
         &req.payload.mailbox,
         &entry,
+        hash,
         &req.payload.entry,
         &req.signer.sig_pk,
     )
 }
 
-/// Appends `entry` (`bytes` as received) to the log of mailbox `label`. `poster`: the member
-/// who signed the request (already charged to its rate limit).
+/// Appends `entry` (`bytes` as received, `hash` its hash, its signature already verified)
+/// to the log of mailbox `label`. `poster`: the member who signed the request (already
+/// charged to its rate limit).
 fn append_entry(
     relay: &Relay,
     label: &MailboxId,
     entry: &LogEntry,
+    hash: [u8; 32],
     bytes: &[u8],
     poster: &[u8; 32],
 ) -> RelayResult {
@@ -2170,22 +2592,16 @@ fn append_entry(
     if !mb.sealed {
         return Err(RelayError::Forbidden);
     }
-    let author = member(&tx, label, &h.author)?.ok_or(RelayError::Forbidden)?;
-    // Verify before answering anything about the log, `Conflict { len }` included: only
-    // a member's signed entry learns the log length (audit L7).
-    entry
-        .verify_signature(&author)
-        .map_err(|_| RelayError::Unauthenticated)?;
+    // Signed by its author (checked before the lock), who must be a member, before
+    // anything about the log is answered, `Conflict { len }` included: only a member's
+    // signed entry learns the log length (audit L7).
+    member(&tx, label, &h.author)?.ok_or(RelayError::Forbidden)?;
     if mb.vault_id.is_some_and(|v| v != h.mailbox) {
         return Err(RelayError::OtherVault);
     }
     relay.touch(&tx, label, &mb, poster)?;
 
-    let len: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM log_entries WHERE mailbox = ?1",
-        params![&label[..]],
-        |r| r.get(0),
-    )?;
+    let len = log_len(&tx, label)? as i64;
     let head: Option<Vec<u8>> = tx
         .query_row(
             "SELECT hash FROM log_entries WHERE mailbox = ?1 ORDER BY idx DESC LIMIT 1",
@@ -2201,14 +2617,26 @@ fn append_entry(
         tx.commit()?; // keeps the touch
         return ok(&AppendResult::Conflict { len: len as u64 });
     }
-    let hash = entry.hash().map_err(|_| RelayError::BadRequest)?;
+    // Entry 0 fixes the mailbox's vault id and is the setup's `Created`: only the creator
+    // writes it (restores and relay moves write theirs through `/v1/mailbox/reseed`).
+    if len == 0 && (h.author != mb.creator || *poster != mb.creator) {
+        return Err(RelayError::Forbidden);
+    }
+    relay.check_room_for_write(&tx, &mb)?;
     if let Some(cap) = relay.quotas.log_bytes {
-        let used: i64 = tx.query_row(
-            "SELECT log_bytes FROM mailboxes WHERE id = ?1",
-            params![&label[..]],
-            |r| r.get(0),
+        // The vault's total, and the author's half of it (one member can't fill the log
+        // for everyone; `quota`).
+        let (used, mine): (i64, i64) = tx.query_row(
+            "SELECT (SELECT log_bytes FROM mailboxes WHERE id = ?1),
+                    (SELECT COALESCE(SUM(bytes), 0) FROM log_counts
+                     WHERE mailbox = ?1 AND author = ?2)",
+            params![&label[..], &h.author[..]],
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        if (used as u64).saturating_add(bytes.len() as u64) > cap {
+        let adding = bytes.len() as u64;
+        if (used.max(0) as u64).saturating_add(adding) > cap
+            || (mine.max(0) as u64).saturating_add(adding) > quota::author_log_cap(cap)
+        {
             return Err(RelayError::QuotaExceeded(Quota::Log));
         }
     }
@@ -2216,6 +2644,7 @@ fn append_entry(
         "INSERT INTO log_entries (mailbox, idx, entry, hash) VALUES (?1, ?2, ?3, ?4)",
         params![&label[..], len, bytes, &hash[..]],
     )?;
+    count_log(&tx, &label[..], &h.author[..], bytes.len())?;
     tx.execute(
         "UPDATE mailboxes SET log_bytes = log_bytes + ?2 WHERE id = ?1",
         params![&label[..], bytes.len() as i64],
@@ -2237,9 +2666,7 @@ fn append_entry(
     tx.commit()?;
     drop(db);
     relay.waiters.signal(label);
-    for (platform, token) in pushes {
-        relay.notifier.notify(platform, &token);
-    }
+    relay.push(pushes);
     ok(&AppendResult::Appended { index: len as u64 })
 }
 
@@ -2283,8 +2710,18 @@ async fn log_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let rows = stmt.query_map(params![&req.payload.mailbox[..], from, PAGE], |r| {
         r.get::<_, Vec<u8>>(0)
     })?;
-    // Stored as appended (`LogEntry::to_bytes`); clients decode and verify the chain.
-    let entries = rows.collect::<Result<Vec<_>, _>>()?;
+    // Stored as appended (`LogEntry::to_bytes`); clients decode and verify the chain. The
+    // page stops at the byte budget (always one entry at least): a short page is the end
+    // only when `page_may_continue` says so.
+    let (mut entries, mut bytes) = (Vec::new(), 0usize);
+    for row in rows {
+        let entry = row?;
+        if !zafe_proto::relay::page_has_room(entries.len(), bytes, entry.len()) {
+            break;
+        }
+        bytes += entry.len();
+        entries.push(entry);
+    }
     ok(&LogResponse { entries })
 }
 

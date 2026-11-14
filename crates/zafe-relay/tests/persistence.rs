@@ -419,6 +419,8 @@ async fn log_appends_push_every_other_member() {
     // A token FCM reported as unregistered is forgotten: no more pushes to it.
     assert_eq!(relay.forget_push_token("tok-0").unwrap(), 1);
     recorder.0.lock().unwrap().clear();
+    // (A window later: a token gets at most one push per window.)
+    now.store(T0 + zafe_relay::PUSH_WINDOW_SECS, Ordering::SeqCst);
     let next = LogEntry::create(
         &ids[1],
         &key,

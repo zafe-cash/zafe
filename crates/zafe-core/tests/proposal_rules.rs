@@ -30,8 +30,9 @@ use zcash_protocol::memo::MemoBytes;
 
 mod common;
 use common::{
-    build_pczt, nu6_3_network, receive_ironwood_note, relay_vault::vault, witness, Out,
-    TARGET_HEIGHT,
+    build_pczt, nu6_3_network, receive_ironwood_note,
+    relay_vault::{vault, vault_on},
+    witness, Out, TARGET_HEIGHT,
 };
 
 const TIP: u32 = TARGET_HEIGHT - 1;
@@ -766,4 +767,147 @@ async fn one_logged_share_vote_and_an_unlogged_one_sign() {
     .unwrap();
     // Every spend signature verifies against its rk: the transaction is signed.
     tx::apply_signatures(pczt, &signatures).unwrap();
+}
+
+/// A signer the relay won't deliver to (507: the leader's share of its inbox is full)
+/// doesn't abort the round for everyone: the leader skips it, asks it last from now on,
+/// still sends the others theirs and keeps the request (security review 2026-11, NEW 6).
+/// On 37ac433 `request_signatures` returned the relay's error.
+#[tokio::test]
+async fn a_leader_skips_a_signer_the_relay_wont_deliver_to() {
+    // Each sender may leave each recipient 100 envelopes.
+    let relay = zafe_relay::Relay::new().with_quotas(zafe_relay::quota::Quotas {
+        envelopes_per_pair: Some(100),
+        ..zafe_relay::quota::Quotas::none()
+    });
+    let (relay, ids, ms, _) = vault_on(relay, 2, 3, false).await;
+    let p = propose(&relay, &ids[0], &ms[0], 1, note(&ms[0], 0)).await;
+    for member in [0, 1, 2] {
+        approve_with(
+            &relay,
+            &ids,
+            &ms,
+            member,
+            p,
+            &mut MemoryNonceStore::default(),
+        )
+        .await
+        .unwrap();
+    }
+    // The leader (member 0) signs itself and would ask the lower id of 1 and 2; its share
+    // of that member's inbox is full (never acked).
+    let (full, other) = if frost_id(&ms[1]) < frost_id(&ms[2]) {
+        (1, 2)
+    } else {
+        (2, 1)
+    };
+    let mut rng = StdRng::seed_from_u64(11);
+    let mut seq = SeqCounter::default();
+    let refused = loop {
+        let env = Envelope::sealed(
+            &ids[0],
+            ids[full].public(),
+            ms[0].label(),
+            seq.next_seq(),
+            Kind::DkgEcho,
+            b"x",
+            &mut rng,
+        )
+        .unwrap();
+        if let Err(e) = relay.send(&ids[0], &env).await {
+            break e;
+        }
+    };
+    assert!(
+        matches!(
+            refused,
+            zafe_core::relay_client::RelayClientError::StorageFull { .. }
+        ),
+        "{refused:?}"
+    );
+    let silent_path =
+        std::env::temp_dir().join(format!("zafe-rules-{}-full.silent", std::process::id()));
+    let _ = std::fs::remove_file(&silent_path);
+    let silent = SilentSigners::at(&silent_path);
+    // The round goes to signers it can reach: never one that can't complete.
+    let sent = request_signatures(
+        &relay,
+        &ids[0],
+        &ms[0],
+        &nu6_3_network(),
+        TIP,
+        p,
+        &BTreeSet::new(),
+        &silent,
+        &mut rng,
+    )
+    .await
+    .expect("an undeliverable signer is replaced");
+    assert!(silent.load().contains(&frost_id(&ms[full])), "asked last");
+    assert_eq!(
+        sent.request.signers,
+        BTreeSet::from([frost_id(&ms[0]), frost_id(&ms[other])])
+    );
+    let inbox = zafe_core::node::read_inbox(
+        &relay,
+        &ids[other],
+        ms[other].label(),
+        &zafe_core::node::members_by_pk(
+            &load_state(&relay, &ids[other], &ms[other]).await.unwrap().1,
+        ),
+        0,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        inbox
+            .iter()
+            .filter(|(_, _, env)| env.header.kind == Kind::SigningRequest)
+            .count(),
+        1,
+        "one request, for the round that can complete"
+    );
+    // Without the leader's commitments the only set left needs the unreachable signer: the
+    // round doesn't start, and the reachable one gets no request that can't complete (a
+    // signer the relay refused before is asked first).
+    let short = request_signatures(
+        &relay,
+        &ids[0],
+        &ms[0],
+        &nu6_3_network(),
+        TIP,
+        p,
+        &BTreeSet::from([sent.used_commitments[0]]),
+        &silent,
+        &mut rng,
+    )
+    .await;
+    assert!(
+        matches!(
+            short.as_ref().err(),
+            Some(NodeError::Relay(
+                zafe_core::relay_client::RelayClientError::StorageFull { .. }
+            ))
+        ),
+        "{:?}",
+        short.err()
+    );
+    let inbox = zafe_core::node::read_inbox(
+        &relay,
+        &ids[other],
+        ms[other].label(),
+        &zafe_core::node::members_by_pk(
+            &load_state(&relay, &ids[other], &ms[other]).await.unwrap().1,
+        ),
+        0,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        inbox
+            .iter()
+            .filter(|(_, _, env)| env.header.kind == Kind::SigningRequest)
+            .count(),
+        1
+    );
 }

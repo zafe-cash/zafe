@@ -7,8 +7,20 @@
 //! Auth: the service-account key (the JSON file from the Firebase console) signs a short
 //! RS256 JWT, exchanged at Google's token endpoint for an OAuth access token, cached until
 //! shortly before it expires.
+//!
+//! Sends go through a queue that holds each token once and at most [`MAX_IN_FLIGHT`]
+//! workers, so a burst across vaults never opens unbounded connections and a queued push
+//! is never dropped (the relay already sends a token at most one push per window,
+//! [`crate::push`]).
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -17,6 +29,9 @@ use zafe_proto::relay::PushPlatform;
 use crate::Notifier;
 
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
+
+/// Most pushes in flight to FCM at once.
+pub const MAX_IN_FLIGHT: usize = 32;
 const FCM_BASE: &str = "https://fcm.googleapis.com";
 
 #[derive(Clone, Deserialize)]
@@ -51,6 +66,18 @@ pub struct FcmNotifier {
     token: Arc<Mutex<Option<CachedToken>>>,
     runtime: tokio::runtime::Handle,
     on_unregistered: Option<OnUnregistered>,
+    queue: Arc<Queue>,
+}
+
+/// Queued pushes in order, and the tokens among them.
+type Waiting = (VecDeque<(PushPlatform, String)>, HashSet<String>);
+
+/// Pushes waiting for a worker: each token once (a later push to a queued token is the
+/// same push), and how many workers run.
+#[derive(Default)]
+struct Queue {
+    waiting: std::sync::Mutex<Waiting>,
+    workers: AtomicUsize,
 }
 
 /// Callback for device tokens FCM reports as gone.
@@ -74,6 +101,7 @@ impl FcmNotifier {
             token: Arc::new(Mutex::new(None)),
             runtime: tokio::runtime::Handle::current(),
             on_unregistered: None,
+            queue: Arc::new(Queue::default()),
         }
     }
 
@@ -84,15 +112,41 @@ impl FcmNotifier {
         self
     }
 
-    /// Whether an FCM v1 error response says the device token is gone for good.
+    /// Whether an FCM v1 error response says the device token will never work for this
+    /// relay (FCM v1 `ErrorCode` reference):
+    /// - 404 `UNREGISTERED`: "App instance was unregistered from FCM";
+    /// - 403 `SENDER_ID_MISMATCH`: "The authenticated sender ID is different from the
+    ///   sender ID for the registration token";
+    /// - 400 `INVALID_ARGUMENT` only when its `google.rpc.BadRequest` names the token field
+    ///   (`message.token` / `message.fid`): "An extension of type `google.rpc.BadRequest`
+    ///   is returned to specify which field was invalid", and "INVALID_ARGUMENT can also be
+    ///   returned in cases of issues in the message payload" (FCM "Manage tokens").
     pub fn is_unregistered(status: u16, body: &str) -> bool {
-        status == 404
-            && serde_json::from_str::<serde_json::Value>(body).is_ok_and(|v| {
-                v["error"]["details"].as_array().is_some_and(|d| {
-                    d.iter()
-                        .any(|e| e["errorCode"].as_str() == Some("UNREGISTERED"))
-                })
-            })
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+            return false;
+        };
+        let details = v["error"]["details"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let code = |want: &str| {
+            details
+                .iter()
+                .any(|e| e["errorCode"].as_str() == Some(want))
+        };
+        match status {
+            404 => code("UNREGISTERED"),
+            403 => code("SENDER_ID_MISMATCH"),
+            400 => details.iter().any(|e| {
+                e["@type"].as_str() == Some("type.googleapis.com/google.rpc.BadRequest")
+                    && e["fieldViolations"].as_array().is_some_and(|f| {
+                        f.iter().any(|f| {
+                            matches!(f["field"].as_str(), Some("message.token" | "message.fid"))
+                        })
+                    })
+            }),
+            _ => false,
+        }
     }
 
     async fn access_token(
@@ -171,6 +225,95 @@ impl FcmNotifier {
     }
 }
 
+impl FcmNotifier {
+    /// Sends one push and reports a gone token.
+    async fn send(
+        http: &reqwest::Client,
+        account: &ServiceAccount,
+        cache: &Mutex<Option<CachedToken>>,
+        url: &str,
+        platform: PushPlatform,
+        token: &str,
+        on_unregistered: Option<&OnUnregistered>,
+    ) -> Result<(), String> {
+        let bearer = Self::access_token(http, account, cache).await?;
+        let resp = http
+            .post(url)
+            .bearer_auth(bearer)
+            .json(&Self::message(platform, token))
+            .send()
+            .await
+            .map_err(|e| format!("send: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            if Self::is_unregistered(status.as_u16(), &text) {
+                tracing::info!("push: token gone, forgetting it");
+                if let Some(f) = on_unregistered {
+                    f(token);
+                }
+                return Ok(());
+            }
+            return Err(format!("FCM {status}: {text}"));
+        }
+        tracing::debug!("push: sent");
+        Ok(())
+    }
+
+    /// Starts a worker when fewer than [`MAX_IN_FLIGHT`] run; each sends queued pushes
+    /// until the queue is empty.
+    fn spawn_worker(&self) {
+        let queue = self.queue.clone();
+        if queue
+            .workers
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_IN_FLIGHT).then_some(n + 1)
+            })
+            .is_err()
+        {
+            return; // enough workers; one of them takes it
+        }
+        let (http, account, cache) = (self.http.clone(), self.account.clone(), self.token.clone());
+        let url = format!(
+            "{}/v1/projects/{}/messages:send",
+            self.fcm_base, account.project_id
+        );
+        let on_unregistered = self.on_unregistered.clone();
+        self.runtime.spawn(async move {
+            loop {
+                let next = {
+                    let mut waiting = queue.waiting.lock().expect("lock");
+                    let next = waiting.0.pop_front();
+                    if let Some((_, token)) = &next {
+                        waiting.1.remove(token);
+                    } else {
+                        // Under the queue's lock: a push queued after this sees one fewer
+                        // worker and starts its own.
+                        queue.workers.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    next
+                };
+                let Some((platform, token)) = next else {
+                    return;
+                };
+                let sent = Self::send(
+                    &http,
+                    &account,
+                    &cache,
+                    &url,
+                    platform,
+                    &token,
+                    on_unregistered.as_ref(),
+                )
+                .await;
+                if let Err(e) = sent {
+                    tracing::warn!("push failed: {e}");
+                }
+            }
+        });
+    }
+}
+
 impl Notifier for FcmNotifier {
     fn notify(&self, platform: PushPlatform, token: &str) {
         if !matches!(platform, PushPlatform::Fcm | PushPlatform::FcmFid) {
@@ -180,43 +323,14 @@ impl Notifier for FcmNotifier {
             );
             return;
         }
-        let (http, account, cache) = (self.http.clone(), self.account.clone(), self.token.clone());
-        let url = format!(
-            "{}/v1/projects/{}/messages:send",
-            self.fcm_base, account.project_id
-        );
-        let body = Self::message(platform, token);
-        let (device_token, on_unregistered) = (token.to_owned(), self.on_unregistered.clone());
-        self.runtime.spawn(async move {
-            let result = async {
-                let bearer = Self::access_token(&http, &account, &cache).await?;
-                let resp = http
-                    .post(&url)
-                    .bearer_auth(bearer)
-                    .json(&body)
-                    .send()
-                    .await
-                    .map_err(|e| format!("send: {e}"))?;
-                let status = resp.status();
-                if !status.is_success() {
-                    let text = resp.text().await.unwrap_or_default();
-                    if Self::is_unregistered(status.as_u16(), &text) {
-                        tracing::info!("push: token unregistered, forgetting it");
-                        if let Some(f) = &on_unregistered {
-                            f(&device_token);
-                        }
-                        return Ok(());
-                    }
-                    return Err(format!("FCM {status}: {text}"));
-                }
-                tracing::debug!("push: sent");
-                Ok(())
+        {
+            let mut waiting = self.queue.waiting.lock().expect("lock");
+            if !waiting.1.insert(token.to_owned()) {
+                return; // already queued: that push covers this one
             }
-            .await;
-            if let Err(e) = result {
-                tracing::warn!("push failed: {e}");
-            }
-        });
+            waiting.0.push_back((platform, token.to_owned()));
+        }
+        self.spawn_worker();
     }
 }
 

@@ -139,8 +139,10 @@ pub const BACKUP: u16 = 3;
 /// `vault_id = id`, today as last seen, and count as shared). 5 (2026-11-13): seat-recovery
 /// values keyed per (new phone, co-signer) (`recovery_values` is dropped and made again).
 /// 6 (2026-11-13): pending seat moves and their finishes (`seat_moves`, `seat_finishes`,
-/// new tables; nothing to migrate).
-pub const RELAY_DB: u16 = 6;
+/// new tables; nothing to migrate). 7 (2026-11-14): each delivery keeps its sender
+/// (`deliveries.sender`, read from the stored envelopes), per (mailbox, recipient, sender)
+/// counters (`inbox_counts`) and an index on delivery age (`deliveries_by_age`).
+pub const RELAY_DB: u16 = 7;
 /// Share repair envelope payloads (RTS deltas and sigmas) and a helper's saved deltas.
 /// 2 (2026-10-01): both carry the repair attempt. 3 (2026-10-25): a sigma also carries the
 /// helper's log anchor (length and head hash), which the recovering phone's first load

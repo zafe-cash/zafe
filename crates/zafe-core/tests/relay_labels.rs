@@ -65,10 +65,14 @@ async fn labelled_appends_reads_and_push_forget() {
     )
     .unwrap();
 
-    // Another member posts the author's entries (catching up).
-    for (i, e) in [&first, &second].into_iter().enumerate() {
+    // The creator writes entry 0; another member posts the author's later entry
+    // (catching up).
+    for (i, (who, e)) in [(&ids[0], &first), (&ids[1], &second)]
+        .into_iter()
+        .enumerate()
+    {
         assert_eq!(
-            client.append_log_to(&ids[1], LABEL, e).await.unwrap(),
+            client.append_log_to(who, LABEL, e).await.unwrap(),
             AppendResult::Appended { index: i as u64 }
         );
     }
