@@ -15,10 +15,7 @@
 
 use std::{
     collections::{HashSet, VecDeque},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
@@ -69,15 +66,19 @@ pub struct FcmNotifier {
     queue: Arc<Queue>,
 }
 
-/// Queued pushes in order, and the tokens among them.
-type Waiting = (VecDeque<(PushPlatform, String)>, HashSet<String>);
-
 /// Pushes waiting for a worker: each token once (a later push to a queued token is the
-/// same push), and how many workers run.
+/// same push), and how many workers run. One lock covers all three, so a push queued as
+/// the last worker stops always finds a worker.
+#[derive(Default)]
+struct Waiting {
+    pushes: VecDeque<(PushPlatform, String)>,
+    tokens: HashSet<String>,
+    workers: usize,
+}
+
 #[derive(Default)]
 struct Queue {
     waiting: std::sync::Mutex<Waiting>,
-    workers: AtomicUsize,
 }
 
 /// Callback for device tokens FCM reports as gone.
@@ -260,19 +261,10 @@ impl FcmNotifier {
         Ok(())
     }
 
-    /// Starts a worker when fewer than [`MAX_IN_FLIGHT`] run; each sends queued pushes
-    /// until the queue is empty.
+    /// Starts a worker (the caller counted it in [`Waiting::workers`]); it sends queued
+    /// pushes until the queue is empty.
     fn spawn_worker(&self) {
         let queue = self.queue.clone();
-        if queue
-            .workers
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                (n < MAX_IN_FLIGHT).then_some(n + 1)
-            })
-            .is_err()
-        {
-            return; // enough workers; one of them takes it
-        }
         let (http, account, cache) = (self.http.clone(), self.account.clone(), self.token.clone());
         let url = format!(
             "{}/v1/projects/{}/messages:send",
@@ -283,13 +275,13 @@ impl FcmNotifier {
             loop {
                 let next = {
                     let mut waiting = queue.waiting.lock().expect("lock");
-                    let next = waiting.0.pop_front();
+                    let next = waiting.pushes.pop_front();
                     if let Some((_, token)) = &next {
-                        waiting.1.remove(token);
+                        waiting.tokens.remove(token);
                     } else {
                         // Under the queue's lock: a push queued after this sees one fewer
                         // worker and starts its own.
-                        queue.workers.fetch_sub(1, Ordering::SeqCst);
+                        waiting.workers -= 1;
                     }
                     next
                 };
@@ -323,14 +315,22 @@ impl Notifier for FcmNotifier {
             );
             return;
         }
-        {
+        let start = {
             let mut waiting = self.queue.waiting.lock().expect("lock");
-            if !waiting.1.insert(token.to_owned()) {
+            if !waiting.tokens.insert(token.to_owned()) {
                 return; // already queued: that push covers this one
             }
-            waiting.0.push_back((platform, token.to_owned()));
+            waiting.pushes.push_back((platform, token.to_owned()));
+            // Enough workers run: one of them takes it.
+            let start = waiting.workers < MAX_IN_FLIGHT;
+            if start {
+                waiting.workers += 1;
+            }
+            start
+        };
+        if start {
+            self.spawn_worker();
         }
-        self.spawn_worker();
     }
 }
 

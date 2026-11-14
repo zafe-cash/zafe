@@ -17,7 +17,8 @@ contributing upstream.
 
 ```bash
 cargo fmt --all && cargo clippy --workspace --all-targets     # must be clean
-# CI uses latest stable with -D warnings; local default is pinned older (1.97):
+# CI uses latest stable with -D warnings (`rustup update stable` first: new deprecations);
+# local default is pinned older (1.97):
 CARGO_TARGET_DIR=target/stable-check cargo +stable clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
