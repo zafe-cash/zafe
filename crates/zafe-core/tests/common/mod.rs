@@ -1,6 +1,8 @@
 //! Shared test helpers: an in-process simulation of vault creation.
 #![allow(dead_code)]
 
+pub mod relay_vault;
+
 use std::collections::BTreeMap;
 
 use rand::rngs::StdRng;

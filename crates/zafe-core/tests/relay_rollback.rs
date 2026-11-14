@@ -725,7 +725,7 @@ async fn the_spend_alert_falls_back_to_the_log_copy_when_the_relay_is_down() {
     assert_eq!(Some(as_of), reached.last_reached);
     assert_eq!(state.names, expected.names);
     assert_eq!(state.proposals.len(), expected.proposals.len());
-    assert!(zafe_core::spend_watch::unapproved_spends(&state, &[], 100).is_empty());
+    assert!(zafe_core::spend_watch::unapproved_spends(&state, &[]).is_empty());
 
     // Reached again: the outage is over.
     load_state(&live, &w.vault.ids[0], &w.vault.material[0])

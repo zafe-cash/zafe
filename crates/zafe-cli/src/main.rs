@@ -480,7 +480,12 @@ async fn main() -> Result<()> {
         }
         Command::Approve { proposal } => {
             let material = home.material()?;
-            let tip = tip(&home, &material, &cli.lightwalletd).await?;
+            // With the log, to read the mempool (whole) for payments that were sent.
+            let (_, state) = node::load_state(&relay, &home.identity()?, &material).await?;
+            let view =
+                node::ChainView::of(&open_wallet(&home, &material, &cli.lightwalletd).await?)?
+                    .with_mempool(&state, &mut connect(&cli.lightwalletd).await?)
+                    .await?;
             let mut store =
                 FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
             let mut pool =
@@ -490,7 +495,7 @@ async fn main() -> Result<()> {
                 &home.identity()?,
                 &material,
                 &network(),
-                tip,
+                &view,
                 parse_proposal(&proposal)?,
                 &mut store,
                 &mut pool,
@@ -649,11 +654,14 @@ async fn main() -> Result<()> {
             println!("cancelled");
         }
         Command::Reject { proposal } => {
+            let material = home.material()?;
             node::reject(
                 &relay,
                 &home.identity()?,
-                &home.material()?,
+                &material,
                 parse_proposal(&proposal)?,
+                &mut FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?),
+                &FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?),
                 &mut rng,
             )
             .await?;
@@ -677,8 +685,7 @@ async fn main() -> Result<()> {
                 tip,
                 id,
                 &used,
-                &node::SilentSigners::at(home.path(REQUESTS_DIR).join(state_dir::SILENT_SIGNERS))
-                    .load(),
+                &node::SilentSigners::at(home.path(REQUESTS_DIR).join(state_dir::SILENT_SIGNERS)),
                 &mut rng,
             )
             .await?;
@@ -990,6 +997,13 @@ async fn main() -> Result<()> {
                     sent
                 }
                 Err(e) => {
+                    // A signer whose share didn't verify: this round is over (the next
+                    // `zafe request` starts another, asking it last).
+                    if let node::NodeError::InvalidShares(culprits) = &e {
+                        silent.update(culprits, &[]);
+                        let _ = fs::remove_file(home.path(&format!("requests/{proposal}.bin")));
+                        let _ = fs::remove_file(home.path(&format!("requests/{proposal}.own")));
+                    }
                     // After a timeout, the next `zafe request` asks the silent signers last.
                     if matches!(e, node::NodeError::Timeout(_)) {
                         if let Ok(quiet) =

@@ -10,7 +10,7 @@ update it in the same change when you finish, defer or find something. `§` refe
 - Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not decided ·
   *(check)* not verified, look before relying on it.
 
-Last updated: 2026-11-13.
+Last updated: 2026-11-14.
 
 ## Now: relay moves (merged 2026-10-27)
 
@@ -91,11 +91,9 @@ Open from moves:
       restore drill; `docs/relay-move.md` §5). With one preset per network in
       `relay_presets.dart`, the Status screen's 6-hour move suggestion
       (`suggestedServer`) never finds another server, so it never shows.
-- [ ] A recovered seat without a pool (seen 2026-10-26, CLI B2 after `recover --wait`):
-      C approved one-tap, B2 interactively (no pool yet), and `send`/`request` refused
-      ("membership is not ready") until the proposal was cancelled. Check whether a
-      recovered app can hit it (the app tops up its pool on its first refresh) and whether
-      `request` should take a one-tap voter's part.
+- [x] A recovered seat without a pool (seen 2026-10-26: C one-tap, B2 interactive, no
+      round possible): from `VAULT_EVENT` 12 C approves again with commitments (**Approve
+      again**; CLI `zafe approve`), shares kept (security review batch 3, 2026-11-14).
 - Known limit: after a switch a phone stops reading the old relay's notices, so only
   stragglers and followers detect `TwoMoves` (`docs/relay-move.md` §9).
 
@@ -164,6 +162,8 @@ Done:
 - [ ] Replace lost phone (1080x1920, 1.0 text): the safety-words card's "Their new phone
       shows these words" row starts under the pinned **Approve move** bar and only toggles
       after scrolling (live run 2026-11-14). Pad the content by the bar's height.
+- [ ] A sweep (**Make it unsendable**) reads "You proposed moving funds / 0.00 TAZ / Back to
+      the vault": show the amount it moves (its spent notes), not the zero payment total.
 - [ ] Proposals refresh takes 6-11 s over Tor (pool top-up and log read are sequential
       round trips): batch or parallelise the relay requests.
 - [ ] The vault's approval window isn't shown anywhere after creation.
@@ -237,8 +237,8 @@ Never checked on a real phone:
 ## Relay
 
 - [ ] `catch_relay_up` across seat moves (open since the 2026-10-07 audit, §9).
-- [ ] Other members can't resend a dropped transaction (only the broadcaster has the
-      signatures and proof); anyone could rebuild a one-tap proposal from the log *(idea)*.
+- [x] Other members resend a dropped transaction from the signed bytes the log's
+      broadcast carries (`SignedBroadcast`, `VAULT_EVENT` 12, 2026-11-14).
 - *(idea)* Compact the log (old commitment batches); hide the author key in entry headers.
 - *(idea)* The leader polls its inbox twice a second while collecting shares; it could use
   `/v1/wait`.
@@ -489,6 +489,26 @@ Security review 2026-11, batch 2: seat moves (findings A, B, E; not committed ye
       countdown ends; a restart then waits again only for helpers who never saw the move.
 - [ ] Live emulator run of the second pass (the first pass ran 2026-11-13: keep from the
       old phone, round-2 warning, CLI keep, countdown; recovery to the end not live).
+
+Security review 2026-11, batch 3: proposals (rules 4, 5; findings G, I, J; not committed
+yet, 2026-11-14; review doc "Proposals"):
+- [x] Possibly signed drives holds, "still sendable", spend-alert grace and votes: a new
+      payment must spend a note of every signed cancelled/rejected one that can still mine
+      (`check_vote`, `propose` prefers those notes); a share only for logged votes; "sent"
+      needs the signed transaction (`SignedBroadcast`); reservations need a second member and
+      end at the window from the claimed tip; commitments after one-tap shares; no reject
+      after a released signature; change recovered with the internal OVK, value balance and
+      flags checked; nonce `take` claims by rename; leaders drop bad shares and commitments
+      (`VAULT_EVENT` 12). Follow-up: the spend alert accounts a signed cancelled payment's
+      txid at any time (no grace; shown as **Sent anyway**); a restored phone may reject
+      what nobody signed.
+- [ ] Live emulator run: cancel a signed payment and propose another (must spend its
+      funds), **Make it unsendable**, decline after signing ("Your signature is already
+      out"), **Approve again** after another signer approves interactively.
+- [x] Round 2 (zafe-e4): own shares never reserve; a W only blocks proposals logged after
+      it; `propose` spends a note of every live W (`wallet::ForcedInputs`); a dropped
+      broadcast counts as a W (2026-11-14).
+- [x] `zafe interop` against frost-zec still passes (keygen, both signing roles; 2026-11-14).
 
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,

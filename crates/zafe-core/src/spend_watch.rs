@@ -3,28 +3,29 @@
 //! shares from a removed device, or t compromised phones). Detecting it can't stop the
 //! theft; it tells the group at once, while the funds that are left can still be moved.
 //!
-//! A spending transaction is **accounted for** when
-//! - a proposal in the log has been marked broadcast with exactly this txid, or
-//! - it is recent (unmined, or mined at most [`GRACE_BLOCKS`] blocks ago) and some
-//!   **approved or broadcast** proposal in the log (not an open, cancelled or rejected one)
-//!   spends every note it spends, with the txid its PCZT fixes. That covers the moments between a leader
-//!   broadcasting and the log entry saying so, and a send that crashed before logging.
+//! A spending transaction is **accounted for** when its txid is
+//! - logged as sent for a proposal (its broadcast entry), or
+//! - the txid the PCZT of a proposal that **may be signed** fixes
+//!   (`ProposalState::possibly_signed`: it reached Approved or a vote carried shares),
+//!   whatever was decided after. A v6 txid commits to every action (spends, outputs,
+//!   `rk`), so this is exactly the transaction members verified: one sent before its
+//!   broadcast entry was logged, or one signed and then cancelled, rejected or withdrawn
+//!   that someone sent anyway (rule 5).
 //!
-//! Anything else is an **unapproved spend**: no proposal at all (keys used outside Zafe),
-//! or a proposal that was never logged as sent with this txid long after the transaction
-//! was mined (a cancelled or rejected payment that was sent anyway, or a transaction that
-//! spends a proposal's notes but pays somewhere else).
+//! Anything else is an **unapproved spend**, flagged at once: no proposal at all (keys used
+//! outside Zafe), a proposal nobody could have signed, or a transaction that spends a
+//! proposal's notes but isn't its transaction. There is no grace window: it sheltered the
+//! moments before a broadcast entry is logged, which the txid now covers whenever the
+//! transaction mined, and a proposal whose PCZT doesn't parse has no txid and can't be
+//! signed.
 
 use std::collections::BTreeMap;
 
 use crate::{
+    session::ProposalId,
     vault::{ProposalStatus, VaultState},
     wallet::VaultSpend,
 };
-
-/// How long after a spend appears (blocks) the log may still lack its broadcast entry
-/// before it is flagged: about 30 minutes at 75 s per block.
-pub const GRACE_BLOCKS: u32 = 24;
 
 /// A transaction that spent vault notes the log doesn't account for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,45 +35,44 @@ pub struct UnapprovedSpend {
     pub mined_height: Option<u32>,
 }
 
-/// Per transaction: the height it was mined at (if any) and the nullifiers it spends.
-type SpendsByTx = BTreeMap<[u8; 32], (Option<u32>, Vec<[u8; 32]>)>;
-
 /// Vault spends in `spends` (what the wallet saw) that `state` (the replayed log) doesn't
-/// account for. `tip` is the wallet's synced height.
-pub fn unapproved_spends(
-    state: &VaultState,
-    spends: &[VaultSpend],
-    tip: u32,
-) -> Vec<UnapprovedSpend> {
-    // One entry per transaction: all the notes it spends.
-    let mut txs = SpendsByTx::new();
+/// account for, one per transaction.
+pub fn unapproved_spends(state: &VaultState, spends: &[VaultSpend]) -> Vec<UnapprovedSpend> {
+    // One entry per transaction (the wallet reports one row per spent note).
+    let mut txs = BTreeMap::new();
     for s in spends {
-        let entry = txs.entry(s.txid).or_insert((s.mined_height, Vec::new()));
-        entry.1.extend_from_slice(&s.nullifiers);
+        txs.entry(s.txid).or_insert(s.mined_height);
     }
     txs.into_iter()
-        .filter(|(txid, (mined, nullifiers))| {
-            let logged_as_sent = state
-                .proposals
-                .values()
-                .any(|p| p.txid.as_ref() == Some(txid));
-            if logged_as_sent {
-                return false;
-            }
-            let recent = mined.is_none_or(|h| tip.saturating_sub(h) <= GRACE_BLOCKS);
-            let known_notes = !nullifiers.is_empty()
-                && state.proposals.values().any(|p| {
-                    // Only proposals that were actually approved (or logged as sent)
-                    // can have signatures; cancelled and rejected ones get no grace.
-                    // And the transaction must be the one the proposal's PCZT fixes.
-                    matches!(
-                        p.status,
-                        ProposalStatus::Approved | ProposalStatus::Broadcast
-                    ) && p.expected_txid.is_none_or(|t| &t == txid)
-                        && nullifiers.iter().all(|nf| p.nullifiers.contains(nf))
-                });
-            !(recent && known_notes)
+        .filter(|(txid, _)| {
+            !state.proposals.values().any(|p| {
+                p.txid.as_ref() == Some(txid)
+                    || (p.possibly_signed && p.expected_txid.as_ref() == Some(txid))
+            })
         })
-        .map(|(txid, (mined_height, _))| UnapprovedSpend { txid, mined_height })
+        .map(|(txid, mined_height)| UnapprovedSpend { txid, mined_height })
+        .collect()
+}
+
+/// Cancelled or rejected proposals whose transaction was mined anyway (signed before it
+/// was cancelled or rejected), with that txid: the app shows them as sent.
+pub fn sent_anyway(state: &VaultState, spends: &[VaultSpend]) -> BTreeMap<ProposalId, [u8; 32]> {
+    state
+        .proposals
+        .values()
+        .filter(|p| {
+            p.possibly_signed
+                && matches!(
+                    p.status,
+                    ProposalStatus::Cancelled | ProposalStatus::Rejected
+                )
+        })
+        .filter_map(|p| {
+            let txid = p.expected_txid?;
+            spends
+                .iter()
+                .any(|s| s.txid == txid && s.mined_height.is_some())
+                .then_some((p.id, txid))
+        })
         .collect()
 }

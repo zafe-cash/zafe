@@ -58,6 +58,15 @@ pub enum NodeError {
     /// This member's independent check of a proposal failed: do not approve or sign it.
     #[error("verification failed: {0}")]
     Verification(String),
+    /// This phone may already have released its signature for the proposal (a one-tap
+    /// vote, a reply to a signing request, or one being made): a reject would claim
+    /// otherwise, so none is logged. Its author can cancel it and move its funds.
+    #[error("your signature for this payment is already out")]
+    AlreadySigned,
+    /// Signature shares from these signers didn't verify: the round can't complete with
+    /// them (they're asked last from now on, `SilentSigners`).
+    #[error("{} signer(s) sent invalid signatures", .0.len())]
+    InvalidShares(Vec<Identifier>),
     #[error("protocol: {0}")]
     Protocol(String),
     /// This phone's own setup state couldn't be read or written.
@@ -2361,7 +2370,7 @@ use crate::{
         SigningRequest,
     },
     tx,
-    vault::{GroupShares, ProposalStatus, ProposedPayment},
+    vault::{GroupShares, ProposalState, ProposalStatus, ProposedPayment},
     verify::{verify_pczt, Expectations, Payment, VerifiedTx},
     wallet::{Client, PaymentRequest, VaultWallet},
 };
@@ -2474,6 +2483,158 @@ pub fn members_by_pk(state: &VaultState) -> BTreeMap<[u8; 32], IdentityPublic> {
         .collect()
 }
 
+/// What this member's own wallet says about the chain, for the checks a vote needs beyond
+/// the PCZT: its synced tip, the vault spends it has seen, and which sent payments dropped
+/// out of lightwalletd's mempool. lightwalletd supplies all three (a residual: a lying
+/// server can make a cancelled payment look dead to a member using it; every approving
+/// member's server must be fooled).
+#[derive(Clone, Debug, Default)]
+pub struct ChainView {
+    pub tip: u32,
+    pub spends: Vec<crate::wallet::VaultSpend>,
+    /// Txids of broadcast proposals that dropped: not mined here, and not in lightwalletd's
+    /// mempool when it was read (whole, never a lookup of one txid) for them
+    /// ([`ChainView::with_mempool`]). A broadcast sent after that read isn't in it, so a
+    /// stale view never takes a fresh send for a dropped one.
+    pub dropped: Vec<[u8; 32]>,
+}
+
+impl ChainView {
+    /// The wallet's tip and spends, without the mempool.
+    pub fn of<P: Parameters + Clone + Send + Sync + 'static>(
+        wallet: &VaultWallet<P>,
+    ) -> Result<Self, NodeError> {
+        Ok(Self {
+            tip: wallet
+                .chain_height()?
+                .ok_or_else(|| NodeError::NotReady("wallet not synced".into()))?,
+            spends: wallet.vault_spends()?,
+            dropped: Vec::new(),
+        })
+    }
+
+    /// Reads lightwalletd's mempool when `state` has a broadcast that may still be pending
+    /// (not mined in this view, before its expiry plus the margin) and records the ones not
+    /// in it as dropped: they count as still sendable ([`still_sendable`]).
+    pub async fn with_mempool(
+        mut self,
+        state: &VaultState,
+        lightwalletd: &mut Client,
+    ) -> Result<Self, NodeError> {
+        let pending: Vec<[u8; 32]> = state
+            .proposals
+            .values()
+            .filter(|p| self.pending_broadcast(state, p))
+            .filter_map(|p| p.txid)
+            .collect();
+        if !pending.is_empty() {
+            let mempool = crate::wallet::mempool_txids(lightwalletd).await?;
+            self.dropped = pending
+                .into_iter()
+                .filter(|txid| !mempool.contains(txid))
+                .collect();
+        }
+        Ok(self)
+    }
+
+    /// A broadcast proposal that isn't mined here and could still be.
+    fn pending_broadcast(&self, state: &VaultState, p: &ProposalState) -> bool {
+        p.status == ProposalStatus::Broadcast
+            && self.tip < p.expiry_height.saturating_add(state.reorg_margin(self.tip))
+            && p.txid.is_some_and(|txid| {
+                !self
+                    .spends
+                    .iter()
+                    .any(|s| s.txid == txid && s.mined_height.is_some())
+            })
+    }
+}
+
+/// How far a proposal's claimed tip may be ahead of this member's synced tip (75-second
+/// blocks, scaled): more means this phone is behind and should sync first.
+pub const TIP_LEAD_BLOCKS: u32 = 10;
+
+/// Proposals that may be signed, aren't going out, and can still mine, as far as `chain`
+/// shows (rule 5), in log order: cancelled or rejected ones, and broadcast ones that
+/// dropped (not mined, not in the mempool: anyone holding the signed bytes can send them
+/// later, a valid copy too when the logged one doesn't verify), before their expiry plus a
+/// reorg margin and while none of their notes has a spend that deep. A shallower spend
+/// doesn't count: a reorg can undo it and let the old transaction in. A broadcast that is
+/// in the mempool or mined is going out: nobody pays it again.
+pub fn still_sendable<'a>(state: &'a VaultState, chain: &ChainView) -> Vec<&'a ProposalState> {
+    let margin = state.reorg_margin(chain.tip);
+    let spent_deep = |p: &ProposalState| {
+        chain.spends.iter().any(|s| {
+            s.mined_height
+                .is_some_and(|h| chain.tip.saturating_add(1).saturating_sub(h) >= margin)
+                && s.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
+        })
+    };
+    let mut live: Vec<_> = state
+        .proposals
+        .values()
+        .filter(|p| {
+            let withdrawn = matches!(
+                p.status,
+                ProposalStatus::Cancelled | ProposalStatus::Rejected
+            );
+            let dropped = chain.pending_broadcast(state, p)
+                && p.txid.is_some_and(|txid| chain.dropped.contains(&txid));
+            (withdrawn || dropped)
+                && p.possibly_signed
+                && chain.tip < p.expiry_height.saturating_add(margin)
+                && !spent_deep(p)
+        })
+        .collect();
+    live.sort_by_key(|p| p.log_index);
+    live
+}
+
+/// This member's checks of `proposal` against its own view of the chain, before a vote
+/// (also shown on the review screen):
+/// - the tip it claims to be built on is at most [`TIP_LEAD_BLOCKS`] ahead of ours (else
+///   this phone syncs first) and at most the vault's window behind (a proposal's tip
+///   bounds how long it reserves notes, `VaultState::reservation_end`);
+/// - it spends a note of every proposal that may be signed and can still mine
+///   ([`still_sendable`]) and is earlier in the log, so at most one of them can mine (rule
+///   5). A later one can't block a logged proposal (a member could otherwise stall every
+///   payment, sweeps included, by posting its own shares and cancelling); it may duplicate
+///   it, but t members approved both.
+pub fn check_vote(
+    state: &VaultState,
+    proposal: &ProposalId,
+    chain: &ChainView,
+) -> Result<(), NodeError> {
+    let p = state
+        .proposals
+        .get(proposal)
+        .ok_or_else(|| NodeError::Protocol("unknown proposal".into()))?;
+    let scale = state.block_scale(chain.tip);
+    if p.tip_height > chain.tip.saturating_add(TIP_LEAD_BLOCKS * scale) {
+        return Err(NodeError::NotReady(
+            "this payment was built on newer blocks than this phone has: sync first".into(),
+        ));
+    }
+    if p.tip_height
+        .saturating_add(state.descriptor.proposal_expiry_blocks * scale)
+        < chain.tip
+    {
+        return Err(NodeError::Verification(
+            "this payment was built on blocks too old to approve".into(),
+        ));
+    }
+    if still_sendable(state, chain).iter().any(|w| {
+        w.log_index < p.log_index && !w.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
+    }) {
+        return Err(NodeError::Verification(
+            "a cancelled or dropped payment can still be sent, and this one doesn't spend its \
+             funds: both could go out"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Builds a PCZT for `payments` from this member's wallet and logs it as a proposal.
 /// Notes that other live proposals spend are held back first; if another member's
 /// proposal takes the same notes meanwhile (the log accepts only the first), the PCZT is
@@ -2558,13 +2719,33 @@ pub async fn propose_loaded<
 ) -> Result<ProposalId, NodeError> {
     check_payees(material, wallet.params(), payments)?;
     let fvk = material.vault_keys()?.fvk().clone();
+    let me_pk = me.public().sig_pk;
     for _ in 0..3 {
-        reserve_notes(state, wallet, lightwalletd, sent).await?;
-        let pczt = wallet.propose(payments, material.descriptor.proposal_expiry_blocks)?;
-        let tip = wallet
-            .chain_height()
-            .map_err(proto)?
-            .ok_or_else(|| NodeError::NotReady("wallet not synced".into()))?;
+        reserve_notes(state, &me_pk, wallet, lightwalletd, sent).await?;
+        // A payment that may be signed and can still mine (cancelled, rejected or dropped):
+        // members approve this one only if it spends one of its notes (`check_vote`), so it
+        // spends one of each.
+        let chain_view = ChainView::of(wallet)?
+            .with_mempool(state, lightwalletd)
+            .await?;
+        let must_spend: Vec<Vec<[u8; 32]>> = still_sendable(state, &chain_view)
+            .iter()
+            .map(|w| w.nullifiers.clone())
+            .collect();
+        let pczt = match wallet.propose(
+            payments,
+            material.descriptor.proposal_expiry_blocks,
+            &must_spend,
+        ) {
+            Err(crate::wallet::WalletError::NotesSpent) => {
+                return Err(NodeError::NotReady(
+                    "a cancelled payment's funds were just moved: try again in a few minutes"
+                        .into(),
+                ))
+            }
+            other => other?,
+        };
+        let tip = chain_view.tip;
         let signing_spends = tx::spends_to_sign(&pczt, &fvk).map_err(proto)?.len() as u16;
         let mut id = [0u8; 16];
         rng.fill_bytes(&mut id);
@@ -2604,11 +2785,13 @@ pub async fn propose_loaded<
     ))
 }
 
-/// Makes a cancelled proposal unsendable: proposes spending exactly its notes back to the
-/// vault (its internal address; no payments, so members check every output is the
-/// vault's). Needs t approvals like any spend; once mined, the cancelled transaction can
-/// never be valid, even if every signature for it is out. Sent automatically when the
-/// approvals complete.
+/// Makes a cancelled (or rejected) proposal unsendable: proposes spending exactly its notes
+/// back to the vault (its internal address; no payments, so members check every output is
+/// the vault's). Needs t approvals like any spend; once mined, the cancelled transaction
+/// can never be valid, even if every signature for it is out. Sent automatically when the
+/// approvals complete. The notes of every other cancelled payment that can still be sent
+/// go along: members approve a new proposal only if it spends a note of each
+/// (`check_vote`).
 #[allow(clippy::too_many_arguments)]
 pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCore + CryptoRng>(
     relay: &RelayClient,
@@ -2625,12 +2808,25 @@ pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCor
         .proposals
         .get(&cancelled)
         .ok_or_else(|| NodeError::Protocol("unknown proposal".into()))?;
-    if target.status != ProposalStatus::Cancelled {
+    if !matches!(
+        target.status,
+        ProposalStatus::Cancelled | ProposalStatus::Rejected
+    ) {
         return Err(NodeError::NotReady(
             "only a cancelled payment can be made unsendable".into(),
         ));
     }
-    let nullifiers = target.nullifiers.clone();
+    let chain_view = ChainView::of(wallet)?
+        .with_mempool(&state, lightwalletd)
+        .await?;
+    let mut swept = vec![target];
+    swept.extend(
+        still_sendable(&state, &chain_view)
+            .into_iter()
+            .filter(|w| w.id != cancelled),
+    );
+    let nullifiers: Vec<[u8; 32]> = swept.iter().flat_map(|w| w.nullifiers.clone()).collect();
+    let owners: Vec<[u8; 32]> = swept.iter().map(|w| w.pczt_hash).collect();
     let keys = material.vault_keys()?;
     let fvk = keys.fvk().clone();
     let internal = zcash_keys::address::UnifiedAddress::from_receivers(
@@ -2644,16 +2840,14 @@ pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCor
     .encode(wallet.params());
     let recipient = zcash_address::ZcashAddress::try_from_encoded(&internal).map_err(proto)?;
 
-    reserve_notes(&state, wallet, lightwalletd, sent).await?;
+    reserve_notes(&state, &me.public().sig_pk, wallet, lightwalletd, sent).await?;
     let pczt = wallet.propose_sweep(
         &nullifiers,
+        &owners,
         recipient,
         material.descriptor.proposal_expiry_blocks,
     )?;
-    let tip = wallet
-        .chain_height()
-        .map_err(proto)?
-        .ok_or_else(|| NodeError::NotReady("wallet not synced".into()))?;
+    let tip = chain_view.tip;
     let signing_spends = tx::spends_to_sign(&pczt, &fvk).map_err(proto)?.len() as u16;
     let mut id = [0u8; 16];
     rng.fill_bytes(&mut id);
@@ -2721,8 +2915,10 @@ pub async fn propose_again<
         .is_empty()
         .then(|| {
             state.proposals.values().find(|q| {
-                q.status == ProposalStatus::Cancelled
-                    && q.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
+                matches!(
+                    q.status,
+                    ProposalStatus::Cancelled | ProposalStatus::Rejected
+                ) && q.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
             })
         })
         .flatten()
@@ -2787,13 +2983,15 @@ pub fn one_tap_stuck(
 /// spendable balance and its next proposal leave out notes live proposals spend.
 ///
 /// A broadcast transaction that isn't mined and isn't in lightwalletd's mempool any more
-/// (dropped) is sent again when this device broadcast it and kept its bytes (`sent`);
-/// otherwise, or if the node refuses it now, it releases its notes. The whole mempool is fetched rather than looking up the
-/// txid, so lightwalletd doesn't learn which transaction belongs to the vault. If the
-/// chain moved past the wallet meanwhile, nothing is released this time (the transaction
-/// may just have been mined).
+/// (dropped) is sent again from the signed bytes this device kept when it broadcast it
+/// (`sent`) or the ones the log's broadcast carries (version 12); if there are none, or
+/// the node refuses them now, it releases its notes. The whole mempool is fetched rather
+/// than looking up the txid, so lightwalletd doesn't learn which transaction belongs to
+/// the vault. If the chain moved past the wallet meanwhile, nothing is released this time
+/// (the transaction may just have been mined).
 pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
     state: &VaultState,
+    me: &[u8; 32],
     wallet: &mut VaultWallet<P>,
     lightwalletd: &mut Client,
     sent: &SentTxs,
@@ -2803,7 +3001,7 @@ pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
     for p in state.proposals.values() {
         if let (ProposalStatus::Broadcast, Some(txid)) = (p.status, p.txid) {
             if p.expiry_height > tip && !wallet.tx_mined(&txid)? {
-                pending.push((p.id, txid));
+                pending.push((p.id, txid, p.signed_tx.as_deref()));
             } else {
                 sent.remove(&txid); // mined or expired: nothing left to resend
             }
@@ -2816,15 +3014,16 @@ pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
         // Only when lightwalletd agrees with the wallet's tip: behind (a restarting node
         // reports 0) or ahead (the transaction may just have been mined) proves nothing.
         if chain_tip == tip {
-            for (id, txid) in pending {
+            for (id, txid, logged) in pending {
                 if mempool.contains(&txid) {
                     continue;
                 }
-                // Dropped from the mempool. The broadcaster still has the bytes: send
-                // them again; otherwise, or if the node refuses them now, let the notes go.
-                // The bytes stay until the transaction is mined or expires: a refusal can be
-                // temporary, and resending a transaction that lost its notes is harmless.
-                let resent = match sent.get(&txid) {
+                // Dropped from the mempool: send the signed bytes again; without them, or
+                // if the node refuses them now, let the notes go. Kept bytes stay until the
+                // transaction is mined or expires: a refusal can be temporary, and
+                // resending a transaction that lost its notes is harmless.
+                let raw = sent.get(&txid).or_else(|| logged.map(<[u8]>::to_vec));
+                let resent = match raw {
                     Some(raw) => send_raw(&raw, lightwalletd).await?.is_ok(),
                     None => false,
                 };
@@ -2834,32 +3033,60 @@ pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
             }
         }
     }
-    Ok(wallet.reserve(&note_holds(state, &dropped))?)
+    Ok(wallet.reserve(&note_holds(state, &dropped, me))?)
 }
 
-/// The notes each live proposal spends, in log order, held until its transaction's expiry
-/// height: open and approved proposals, and broadcast ones except those in `dropped`.
-/// Cancelled proposals hold nothing, so a new proposal can respend (invalidate) their notes.
+/// The notes each live proposal spends, in log order, each held until it can no longer
+/// spend them:
+/// - open and approved ones that reserve their notes in the log (a second member approved,
+///   `ProposalState::reserves`), and this member's own: until
+///   `VaultState::reservation_end` (their expiry if they may be signed);
+/// - broadcast ones: until their expiry; those in `dropped` (not mined, not in the mempool,
+///   not resent) until their expiry plus the reorg margin under their own owner, like
+///   cancelled ones that may be signed: the signed bytes can still be sent;
+/// - cancelled and rejected ones that may be signed: until their expiry plus the reorg
+///   margin, while they can still mine (`still_sendable`; once their notes are spent the
+///   hold is moot). Their own lock owner lets a new proposal draw on them first
+///   (`VaultWallet::propose`), which it must.
+///
+/// Other cancelled or rejected proposals hold nothing.
 pub fn note_holds(
     state: &VaultState,
     dropped: &BTreeSet<ProposalId>,
+    me: &[u8; 32],
 ) -> Vec<crate::wallet::NoteHold> {
     let mut proposals: Vec<_> = state
         .proposals
         .values()
-        .filter(|p| match p.status {
-            ProposalStatus::Open | ProposalStatus::Approved => true,
-            ProposalStatus::Broadcast => !dropped.contains(&p.id),
-            ProposalStatus::Cancelled | ProposalStatus::Rejected => false,
+        .filter_map(|p| {
+            let until = match p.status {
+                ProposalStatus::Open | ProposalStatus::Approved if p.possibly_signed => {
+                    p.expiry_height
+                }
+                ProposalStatus::Open | ProposalStatus::Approved
+                    if p.reserves(state.descriptor.threshold) || p.author == *me =>
+                {
+                    state.reservation_end(p)
+                }
+                ProposalStatus::Broadcast if !dropped.contains(&p.id) => p.expiry_height,
+                ProposalStatus::Broadcast => p
+                    .expiry_height
+                    .saturating_add(state.reorg_margin(p.expiry_height)),
+                ProposalStatus::Cancelled | ProposalStatus::Rejected if p.possibly_signed => p
+                    .expiry_height
+                    .saturating_add(state.reorg_margin(p.expiry_height)),
+                _ => return None,
+            };
+            Some((p, until))
         })
         .collect();
-    proposals.sort_by_key(|p| p.log_index);
+    proposals.sort_by_key(|(p, _)| p.log_index);
     proposals
         .into_iter()
-        .map(|p| crate::wallet::NoteHold {
+        .map(|(p, until)| crate::wallet::NoteHold {
             owner: p.pczt_hash,
             nullifiers: p.nullifiers.clone(),
-            expiry_height: p.expiry_height,
+            expiry_height: until,
         })
         .collect()
 }
@@ -2881,16 +3108,18 @@ fn proposal_pczt(
     Ok((pczt, p.payments.clone()))
 }
 
-/// Verifies a logged proposal independently against this member's view of the chain tip,
-/// without voting (what the review screen shows).
+/// Verifies a logged proposal independently against this member's view of the chain,
+/// without voting (what the review screen shows): [`check_vote`] and the PCZT.
 pub fn review<P: Parameters>(
     state: &VaultState,
     material: &VaultMaterial,
     network: &P,
-    tip_height: u32,
+    chain: &ChainView,
     proposal: ProposalId,
 ) -> Result<VerifiedTx, NodeError> {
+    let tip_height = chain.tip;
     let (pczt, payments) = proposal_pczt(state, &proposal)?;
+    check_vote(state, &proposal, chain)?;
     let keys = material.vault_keys()?;
     verify_pczt(
         &pczt,
@@ -2945,7 +3174,7 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     me: &Identity,
     material: &VaultMaterial,
     network: &P,
-    tip_height: u32,
+    view: &ChainView,
     proposal: ProposalId,
     store: &mut impl NonceStore,
     pool: &mut impl PoolStore,
@@ -2955,8 +3184,8 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     let (mut chain, mut state) = load_state(relay, me, material).await?;
     laps.lap("history");
     approve_loaded(
-        relay, me, material, network, tip_height, proposal, store, pool, rng, &mut chain,
-        &mut state, laps,
+        relay, me, material, network, view, proposal, store, pool, rng, &mut chain, &mut state,
+        laps,
     )
     .await
 }
@@ -2969,7 +3198,7 @@ pub async fn approve_after_propose<P: Parameters, R: RngCore + CryptoRng>(
     me: &Identity,
     material: &VaultMaterial,
     network: &P,
-    tip_height: u32,
+    view: &ChainView,
     proposal: ProposalId,
     store: &mut impl NonceStore,
     pool: &mut impl PoolStore,
@@ -2982,7 +3211,7 @@ pub async fn approve_after_propose<P: Parameters, R: RngCore + CryptoRng>(
         me,
         material,
         network,
-        tip_height,
+        view,
         proposal,
         store,
         pool,
@@ -3000,7 +3229,7 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
     me: &Identity,
     material: &VaultMaterial,
     network: &P,
-    tip_height: u32,
+    view: &ChainView,
     proposal: ProposalId,
     store: &mut impl NonceStore,
     pool: &mut impl PoolStore,
@@ -3013,7 +3242,7 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
     let expected = expectations(
         network,
         &payments,
-        tip_height,
+        view.tip,
         material.descriptor.proposal_expiry_blocks,
     )?;
     let key_package = material.key_package()?;
@@ -3029,22 +3258,31 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
 
     // An earlier one-tap approval signed (consuming the nonces) but may not have reached
     // the log: the relay timed out, the app was closed, or the reply was lost after the
-    // append. Its vote was kept, so post the very same shares instead of falling back to
-    // interactive signing (a one-tap vote is final for the other members, so in a 2-of-2
-    // an interactive approval here could never be completed).
-    if p.shares.contains_key(&my_pk) {
+    // append. Its vote was kept, so post the very same shares. Once they are logged, this
+    // member adds interactive commitments only if no signer group can complete any more
+    // (another approver signs interactively): a one-tap vote then doesn't strand the
+    // payment (version 12).
+    let add_commitments = p.shares.contains_key(&my_pk);
+    if add_commitments {
         pool.drop_vote(&proposal, &pczt_hash);
-        let verified = verify_pczt(&pczt, keys.fvk(), &expected)
-            .map_err(|e| NodeError::Verification(e.to_string()))?;
-        laps.lap("sign");
-        return Ok(Approved {
-            verified,
-            signed: true,
-            completed: p.completed_by == Some(my_pk),
-            auto_send,
-            timings: laps.1,
-        });
+        // Needed once no group can complete, and again after a round used its last ones.
+        let needed = p.one_tap_blocked()
+            && (p.approvals.get(&my_pk).is_none_or(Vec::is_empty)
+                || !store.contains(&proposal, &pczt_hash));
+        if !needed {
+            let verified = verify_pczt(&pczt, keys.fvk(), &expected)
+                .map_err(|e| NodeError::Verification(e.to_string()))?;
+            laps.lap("sign");
+            return Ok(Approved {
+                verified,
+                signed: true,
+                completed: p.completed_by == Some(my_pk),
+                auto_send,
+                timings: laps.1,
+            });
+        }
     }
+    check_vote(state, &proposal, view)?;
     if let Some(bytes) = pool.kept_vote(&proposal, &pczt_hash) {
         let event = VaultEvent::from_bytes(&bytes).map_err(proto)?;
         let kept_ok = matches!(
@@ -3075,7 +3313,7 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
 
     // One-tap path: every commitment assigned to us must still have its nonce here.
     let one_tap = match &p.preprocessed {
-        Some(pre) => {
+        Some(pre) if !add_commitments => {
             let mut groups = Vec::new();
             for g in pre.groups_of(&my_pk) {
                 let ids = pre.subsets[g]
@@ -3092,7 +3330,7 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
             });
             (all_here && !groups.is_empty()).then_some(groups)
         }
-        None => None,
+        _ => None,
     };
 
     let (event, verified, signed) = if let Some(groups) = one_tap {
@@ -3120,30 +3358,37 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
         }
         (event, verified, true)
     } else {
-        // Interactive signing needs t approvers with fresh commitments, and members whose
-        // one-tap shares are logged can't add any (their vote is final). If too few others
-        // remain, this approval could never be used: say so instead of logging it.
-        if p.preprocessed.is_some() {
-            let members = state.descriptor.members.len();
-            let open = members.saturating_sub(p.shares.len());
-            if open < usize::from(state.descriptor.threshold) {
-                return Err(NodeError::NotReady(
-                    "this phone no longer holds the one-tap signing keys for this payment, and \
-                     too many signers have already signed it the one-tap way to finish it \
-                     interactively. Ask the proposer to cancel it and propose it again"
-                        .into(),
-                ));
+        // Nonces stored by an approval whose vote never reached the log (the append failed
+        // after they were saved): no share can have left (`respond` signs only for logged
+        // votes), so post those same commitments.
+        let unlogged = store
+            .commitments(&proposal, &pczt_hash)
+            .map(|c| {
+                c.iter()
+                    .map(|c| c.serialize().map_err(proto))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .filter(|c: &Vec<Vec<u8>>| p.approvals.get(&my_pk) != Some(c));
+        let (commitments, verified) = match unlogged {
+            Some(commitments) => {
+                let verified = verify_pczt(&pczt, keys.fvk(), &expected)
+                    .map_err(|e| NodeError::Verification(e.to_string()))?;
+                (commitments, verified)
             }
-        }
-        let (approval, verified) = member
-            .approve(proposal, &pczt, &expected, store, rng)
-            .map_err(approve_error)?;
+            None => {
+                let (approval, verified) = member
+                    .approve(proposal, &pczt, &expected, store, rng)
+                    .map_err(approve_error)?;
+                let commitments = approval
+                    .commitments
+                    .iter()
+                    .map(|c| c.serialize().map_err(proto))
+                    .collect::<Result<Vec<_>, _>>()?;
+                (commitments, verified)
+            }
+        };
         check_signing_spends(&verified, signing_spends)?;
-        let commitments = approval
-            .commitments
-            .iter()
-            .map(|c| c.serialize().map_err(proto))
-            .collect::<Result<Vec<_>, _>>()?;
         let event = VaultEvent::Vote {
             proposal,
             pczt_hash,
@@ -3151,7 +3396,7 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
             commitments,
             shares: vec![],
         };
-        (event, verified, false)
+        (event, verified, add_commitments)
     };
     laps.lap("sign");
     append_event(relay, me, material, chain, state, &event, rng).await?;
@@ -3525,7 +3770,10 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
     let signed = tx::apply_signatures(proved, &signatures).map_err(proto)?;
     let sent = broadcast(signed, lightwalletd).await?;
     let txid = sent.txid;
-    let event = VaultEvent::Broadcast { proposal, txid };
+    let event = VaultEvent::SignedBroadcast {
+        proposal,
+        tx: sent.raw.clone(),
+    };
     if let Err(e) = append_event(relay, me, material, &mut chain, &mut state, &event, rng).await {
         // Another member may have sent it first; the transaction is the same either way.
         if !matches!(
@@ -3670,7 +3918,8 @@ pub async fn unanswered_signers(
 
 /// Raw transactions this device broadcast, one file per txid, kept until mined or expired
 /// so a transaction that drops out of the mempool can be sent again (`reserve_notes`).
-/// Only the broadcaster has the bytes: signatures and proof aren't in the vault log.
+/// Since version 12 the log's broadcast carries the same bytes for every member; this copy
+/// covers the moments before that entry is logged, and logs from before.
 pub struct SentTxs(Option<std::path::PathBuf>);
 
 impl SentTxs {
@@ -3711,20 +3960,47 @@ impl SentTxs {
     }
 }
 
-/// Votes Reject.
+/// Votes Reject, unless this phone may already have released its signature for the
+/// proposal (finding G): then it fails with [`NodeError::AlreadySigned`] and logs nothing,
+/// since a reject would tell the others no signature exists. Released means a one-tap vote
+/// with shares (logged, or kept to post), a reply to a signing request (kept to send, or
+/// sent: an interactive approval in the log whose nonces aren't here, once the proposal
+/// reached Approved), or a reply being
+/// made right now by another process (a claimed nonce file, `NonceStore::claimed`). This
+/// phone's own nonces are claimed and deleted first, so nothing can sign from them after
+/// the checks.
 pub async fn reject<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
     material: &VaultMaterial,
     proposal: ProposalId,
+    store: &mut impl NonceStore,
+    pool: &impl PoolStore,
     rng: &mut R,
 ) -> Result<(), NodeError> {
     let (mut chain, mut state) = load_state(relay, me, material).await?;
-    let pczt_hash = state
+    let my_pk = me.public().sig_pk;
+    let p = state
         .proposals
         .get(&proposal)
-        .ok_or_else(|| NodeError::Protocol("unknown proposal".into()))?
-        .pczt_hash;
+        .ok_or_else(|| NodeError::Protocol("unknown proposal".into()))?;
+    let pczt_hash = p.pczt_hash;
+    if p.shares.contains_key(&my_pk) || pool.kept_vote(&proposal, &pczt_hash).is_some() {
+        return Err(NodeError::AlreadySigned);
+    }
+    let held = store.take(&proposal, &pczt_hash).is_some();
+    // Our logged interactive approval without its nonces here: a reply may have used them,
+    // but only for a proposal that reached Approved (a share needs t logged approvals,
+    // `check_request_logged`). Before that, missing nonces (a restored phone: backups
+    // carry none) can't mean a signature.
+    let approved_here = p.possibly_signed && p.approvals.get(&my_pk).is_some_and(|c| !c.is_empty());
+    let replied = store.kept_replies().iter().any(|bytes| {
+        version::decode::<SharesMsg>(Format::SignatureShares, bytes)
+            .is_ok_and(|m| m.proposal == proposal)
+    });
+    if (approved_here && !held) || store.claimed(&proposal, &pczt_hash) || replied {
+        return Err(NodeError::AlreadySigned);
+    }
     let event = VaultEvent::Vote {
         proposal,
         pczt_hash,
@@ -3824,6 +4100,8 @@ pub struct SentRequest {
 /// Leader: once the proposal is approved, sends sealed signing requests to `threshold`
 /// approvers whose current commitments are not in `used` (commitment sets already put in an
 /// earlier request). Members re-approve to provide fresh commitments after a failed round.
+/// Signers in `silent` are asked last; an approver whose logged commitments are unusable
+/// joins them.
 #[allow(clippy::too_many_arguments)]
 pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
@@ -3833,7 +4111,7 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     tip_height: u32,
     proposal: ProposalId,
     used: &BTreeSet<[u8; 32]>,
-    silent: &BTreeSet<Identifier>,
+    silent: &SilentSigners,
     rng: &mut R,
 ) -> Result<SentRequest, NodeError> {
     let (_, state) = load_state(relay, me, material).await?;
@@ -3861,6 +4139,7 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
         Leader::new(proposal, &pczt, &verified, material.descriptor.threshold).map_err(proto)?;
 
     let mut hash_of = BTreeMap::new();
+    let mut unusable = Vec::new();
     for (author, commitments) in &p.approvals {
         let hash = commitments_hash(commitments);
         if used.contains(&hash) {
@@ -3871,26 +4150,36 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
             .member(author)
             .ok_or_else(|| NodeError::Protocol("approval from non-member".into()))?;
         let member = Identifier::deserialize(&info.frost_id).map_err(proto)?;
+        // One-tap approvals carry none: nothing to use here.
+        if commitments.is_empty() {
+            continue;
+        }
         // A member's malformed commitments must not block everyone's signing: skip that
-        // approval (one-tap approvals carry none and are skipped by `add_approval`).
-        let Ok(parsed) = commitments
+        // approval, and ask that member last from now on.
+        let parsed = commitments
             .iter()
             .map(|c| SigningCommitments::deserialize(c))
-            .collect::<Result<Vec<_>, _>>()
-        else {
-            continue;
-        };
-        leader.add_approval(crate::session::Approval {
-            member,
-            proposal,
-            pczt_hash: p.pczt_hash,
-            commitments: parsed,
+            .collect::<Result<Vec<_>, _>>();
+        let added = parsed.is_ok_and(|commitments| {
+            leader.add_approval(crate::session::Approval {
+                member,
+                proposal,
+                pczt_hash: p.pczt_hash,
+                commitments,
+            })
         });
+        if !added {
+            unusable.push(member);
+            continue;
+        }
         hash_of.insert(member, hash);
+    }
+    if !unusable.is_empty() {
+        silent.update(&unusable, &[]);
     }
     let threshold = usize::from(material.descriptor.threshold);
     let mine = *material.key_package()?.identifier();
-    let chosen: Vec<Identifier> = order_signers(leader.available_signers(), mine, silent)
+    let chosen: Vec<Identifier> = order_signers(leader.available_signers(), mine, &silent.load())
         .into_iter()
         .take(threshold)
         .collect();
@@ -3927,6 +4216,46 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
         request,
         used_commitments,
     })
+}
+
+/// Whether `request` is built only from votes in the log: every signer's commitments in it
+/// are the ones its latest vote logged for interactive signing, and nobody else's. A share
+/// leaves this phone only for such a request, so the log then holds t approvals with
+/// exactly those commitments and the proposal reached Approved (possibly signed, for every
+/// member: rule 5). Never for a vote whose append failed, a vote a reject replaced, or a
+/// pool commitment assigned to a one-tap group.
+fn check_request_logged(state: &VaultState, request: &SigningRequest) -> Result<(), NodeError> {
+    let unlogged =
+        || NodeError::NotReady("the signing request isn't from approvals in the log".into());
+    let p = state
+        .proposals
+        .get(&request.proposal)
+        .filter(|p| p.pczt_hash == request.pczt_hash)
+        .ok_or_else(unlogged)?;
+    for package in &request.packages {
+        if package
+            .signing_commitments()
+            .keys()
+            .ne(request.signers.iter())
+        {
+            return Err(unlogged());
+        }
+    }
+    for id in &request.signers {
+        let member = member_by_frost_id(&state.descriptor, id)?;
+        let logged = p
+            .approvals
+            .get(&member.sig_pk)
+            .filter(|c| c.len() == request.packages.len())
+            .ok_or_else(unlogged)?;
+        for (package, c) in request.packages.iter().zip(logged) {
+            let c = SigningCommitments::deserialize(c).map_err(|_| unlogged())?;
+            if package.signing_commitment(id) != Some(c) {
+                return Err(unlogged());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Outcome of answering signing requests.
@@ -4028,6 +4357,7 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
         let result: Result<Vec<u8>, NodeError> = kept.map(Ok).unwrap_or_else(|| {
             let (pczt, payments) = proposal_pczt(&state, &msg.proposal)?;
             let request = decode_request(&bytes)?;
+            check_request_logged(&state, &request)?;
             let shares = member
                 .sign(
                     &request,
@@ -4190,6 +4520,7 @@ pub async fn sign_own_shares<P: Parameters>(
     }
     let (_, state) = load_state(relay, me, material).await?;
     let (pczt, payments) = proposal_pczt(&state, &request.proposal)?;
+    check_request_logged(&state, request)?;
     let keys = material.vault_keys()?;
     let member = Member {
         identifier: *key_package.identifier(),
@@ -4280,7 +4611,16 @@ pub async fn finalize<R: RngCore + CryptoRng>(
     let keys = material.vault_keys()?;
     let spends = tx::spends_to_sign(&pczt, keys.fvk()).map_err(proto)?;
     let signatures = aggregate_request(request, &spends, &shares, &material.public_key_package()?)
-        .map_err(proto)?;
+        .map_err(|e| match &e {
+            // A share that doesn't verify (FROST names who sent it): this round can't
+            // complete with that signer, so the caller starts another without it.
+            crate::session::SessionError::Signing(crate::signing::SigningError::Frost(f))
+                if !f.culprits().is_empty() =>
+            {
+                NodeError::InvalidShares(f.culprits())
+            }
+            _ => proto(e),
+        })?;
 
     let proved = proving
         .await
@@ -4290,9 +4630,9 @@ pub async fn finalize<R: RngCore + CryptoRng>(
     let txid = sent.txid;
     // The transaction is on its way regardless; if the log entry is no longer valid (e.g.
     // the author cancelled meanwhile), report the txid anyway.
-    let event = VaultEvent::Broadcast {
+    let event = VaultEvent::SignedBroadcast {
         proposal: request.proposal,
-        txid,
+        tx: sent.raw.clone(),
     };
     if let Err(e) = append_event(relay, me, material, &mut chain, &mut state, &event, rng).await {
         return Err(NodeError::Protocol(format!(

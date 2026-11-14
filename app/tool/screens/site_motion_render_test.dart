@@ -68,6 +68,8 @@ final _asked = rust.ProposalInfo(
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  maybeSigned: false,
+  sentAnyway: false,
   needsNewProposal: false,
 );
 

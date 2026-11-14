@@ -1955,6 +1955,7 @@ fn wire__crate__api__proposals__reject_proposal_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_relay_url = <String>::sse_decode(&mut deserializer);
+            let api_state_dir = <String>::sse_decode(&mut deserializer);
             let api_seeds = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_material = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_proposal_id = <String>::sse_decode(&mut deserializer);
@@ -1963,6 +1964,7 @@ fn wire__crate__api__proposals__reject_proposal_impl(
                 transform_result_sse::<_, crate::api::error::ZafeError>((move || {
                     let output_ok = crate::api::proposals::reject_proposal(
                         api_relay_url,
+                        api_state_dir,
                         api_seeds,
                         api_material,
                         api_proposal_id,
@@ -3880,6 +3882,8 @@ impl SseDecode for crate::api::proposals::ProposalInfo {
         let mut var_expiryHeight = <u32>::sse_decode(deserializer);
         let mut var_needsReapproval = <bool>::sse_decode(deserializer);
         let mut var_stillSendable = <bool>::sse_decode(deserializer);
+        let mut var_sentAnyway = <bool>::sse_decode(deserializer);
+        let mut var_maybeSigned = <bool>::sse_decode(deserializer);
         let mut var_invalidatedBy = <Option<String>>::sse_decode(deserializer);
         let mut var_needsNewProposal = <bool>::sse_decode(deserializer);
         return crate::api::proposals::ProposalInfo {
@@ -3904,6 +3908,8 @@ impl SseDecode for crate::api::proposals::ProposalInfo {
             expiry_height: var_expiryHeight,
             needs_reapproval: var_needsReapproval,
             still_sendable: var_stillSendable,
+            sent_anyway: var_sentAnyway,
+            maybe_signed: var_maybeSigned,
             invalidated_by: var_invalidatedBy,
             needs_new_proposal: var_needsNewProposal,
         };
@@ -4587,6 +4593,7 @@ impl SseDecode for crate::api::error::ZafeErrorKind {
             32 => crate::api::error::ZafeErrorKind::MoveExpired,
             33 => crate::api::error::ZafeErrorKind::MoveStale,
             34 => crate::api::error::ZafeErrorKind::TwoMoves,
+            35 => crate::api::error::ZafeErrorKind::AlreadySigned,
             _ => unreachable!("Invalid variant for ZafeErrorKind: {}", inner),
         };
     }
@@ -5110,6 +5117,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::proposals::ProposalInfo {
             self.expiry_height.into_into_dart().into_dart(),
             self.needs_reapproval.into_into_dart().into_dart(),
             self.still_sendable.into_into_dart().into_dart(),
+            self.sent_anyway.into_into_dart().into_dart(),
+            self.maybe_signed.into_into_dart().into_dart(),
             self.invalidated_by.into_into_dart().into_dart(),
             self.needs_new_proposal.into_into_dart().into_dart(),
         ]
@@ -5980,6 +5989,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::error::ZafeErrorKind {
             Self::MoveExpired => 32.into_dart(),
             Self::MoveStale => 33.into_dart(),
             Self::TwoMoves => 34.into_dart(),
+            Self::AlreadySigned => 35.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -6507,6 +6517,8 @@ impl SseEncode for crate::api::proposals::ProposalInfo {
         <u32>::sse_encode(self.expiry_height, serializer);
         <bool>::sse_encode(self.needs_reapproval, serializer);
         <bool>::sse_encode(self.still_sendable, serializer);
+        <bool>::sse_encode(self.sent_anyway, serializer);
+        <bool>::sse_encode(self.maybe_signed, serializer);
         <Option<String>>::sse_encode(self.invalidated_by, serializer);
         <bool>::sse_encode(self.needs_new_proposal, serializer);
     }
@@ -7012,6 +7024,7 @@ impl SseEncode for crate::api::error::ZafeErrorKind {
                 crate::api::error::ZafeErrorKind::MoveExpired => 32,
                 crate::api::error::ZafeErrorKind::MoveStale => 33,
                 crate::api::error::ZafeErrorKind::TwoMoves => 34,
+                crate::api::error::ZafeErrorKind::AlreadySigned => 35,
                 _ => {
                     unimplemented!("");
                 }

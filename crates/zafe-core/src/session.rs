@@ -92,7 +92,8 @@ pub fn pczt_hash(pczt: &Pczt) -> Result<[u8; 32], SessionError> {
 /// Where a member keeps secret nonces between approving and signing.
 ///
 /// Implementations on devices MUST use this-device-only storage excluded from backups
-/// (spec §9.4). `take` must remove the nonces *before* returning them.
+/// (spec §9.4). `take` must remove the nonces *before* returning them, and only one of
+/// two concurrent `take`s (two processes: the app and a background check) may get them.
 pub trait NonceStore {
     fn contains(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> bool;
     /// The public commitments of the stored nonces, without consuming them.
@@ -108,6 +109,9 @@ pub trait NonceStore {
         nonces: Vec<SigningNonces>,
     ) -> Result<(), SessionError>;
     fn take(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<SigningNonces>>;
+    /// Whether a `take` of these nonces was started and hasn't finished (another process is
+    /// signing with them now, or one crashed while doing so): they count as released.
+    fn claimed(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> bool;
 
     /// Keeps an encoded reply (signature shares) to the signing request with hash
     /// `request_hash` until it is sent. Signing consumed the nonces, so if the send fails
@@ -115,6 +119,8 @@ pub trait NonceStore {
     fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError>;
     fn kept_reply(&self, request_hash: &[u8; 32]) -> Option<Vec<u8>>;
     fn drop_reply(&mut self, request_hash: &[u8; 32]);
+    /// Every reply kept and not sent yet (a reject checks none is for its proposal).
+    fn kept_replies(&self) -> Vec<Vec<u8>>;
 }
 
 /// Secret nonces for pre-published commitments, keyed by the serialized commitment.
@@ -261,6 +267,9 @@ impl NonceStore for MemoryNonceStore {
     fn take(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
         self.0.remove(&(*proposal, *pczt_hash))
     }
+    fn claimed(&self, _: &ProposalId, _: &[u8; 32]) -> bool {
+        false // `take` is one step here
+    }
     fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError> {
         self.1.insert(*request_hash, reply.to_vec());
         Ok(())
@@ -270,6 +279,9 @@ impl NonceStore for MemoryNonceStore {
     }
     fn drop_reply(&mut self, request_hash: &[u8; 32]) {
         self.1.remove(request_hash);
+    }
+    fn kept_replies(&self) -> Vec<Vec<u8>> {
+        self.1.values().cloned().collect()
     }
 }
 

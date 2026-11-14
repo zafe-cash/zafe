@@ -120,6 +120,50 @@ pub fn shielded_sighash(pczt: &Pczt) -> Result<[u8; 32], TxError> {
         .shielded_sighash())
 }
 
+/// Checks that `tx` is `pczt`'s transaction, signed, and returns its txid: it parses for
+/// the PCZT's consensus branch with nothing left over, it has no transparent part, its
+/// txid is the PCZT's shielded sighash, and every Ironwood action's spend authorization
+/// signature verifies against its `rk` over that sighash (dummy spends are signed over it
+/// too, by the IO Finalizer). The txid commits to every action's effecting data (`rk`,
+/// nullifiers, notes), so a matching txid means the same actions; signatures aren't in the
+/// txid, so the check is what proves the vault signed. Proofs and the binding signature
+/// are not checked (cost): a transaction that fails them can't be mined, so it can't pay
+/// anyone either.
+///
+/// Without a transparent part, a v6 transaction's shielded sighash is its txid: both hash
+/// `hash_transparent_txid_data(None)` with the same header and bundle digests
+/// (zcash_primitives 0.31.0-pre.1 `sighash_v5.rs:38-40`, `sighash_v6.rs:24-35`,
+/// `txid.rs:467-480`).
+pub fn check_signed(pczt: &Pczt, tx: &[u8]) -> Result<[u8; 32], TxError> {
+    use zcash_primitives::transaction::Transaction;
+    let bad = |what: &str| TxError::Parse(what.to_owned());
+    let branch =
+        zcash_protocol::consensus::BranchId::try_from(*pczt.global().consensus_branch_id())
+            .map_err(|_| bad("unknown consensus branch"))?;
+    let mut reader = tx;
+    let tx = Transaction::read(&mut reader, branch).map_err(|e| bad(&e.to_string()))?;
+    if !reader.is_empty() {
+        return Err(bad("bytes after the transaction"));
+    }
+    if tx.transparent_bundle().is_some() {
+        return Err(bad("a transparent part"));
+    }
+    let txid: [u8; 32] = *tx.txid().as_ref();
+    if txid != shielded_sighash(pczt)? {
+        return Err(bad("another transaction"));
+    }
+    let bundle = tx
+        .ironwood_bundle()
+        .ok_or_else(|| bad("no Ironwood actions"))?;
+    for (i, action) in bundle.actions().iter().enumerate() {
+        action
+            .rk()
+            .verify(&txid, action.authorization())
+            .map_err(|_| TxError::Sign(format!("action {i}: spend authorization")))?;
+    }
+    Ok(txid)
+}
+
 /// Injects aggregated spend authorization signatures into the PCZT. Each signature is
 /// checked against its action's `rk` and the sighash before it is accepted.
 pub fn apply_signatures(pczt: Pczt, signatures: &[(usize, [u8; 64])]) -> Result<Pczt, TxError> {

@@ -20,16 +20,18 @@ use zcash_client_backend::{
     data_api::{
         chain::{error as chain_error, BlockCache, BlockSource},
         locking::LockError,
+        locking::LockFilter,
         scanning::ScanRange,
+        wallet::TargetHeight,
         wallet::{
             create_pczt_from_proposal, decrypt_and_store_transaction,
             input_selection::{
                 GreedyInputSelector, GreedyInputSelectorError, LockedInputPolicy, SpendPolicy,
             },
-            propose_send_max_transfer, propose_transfer, ConfirmationsPolicy,
+            propose_send_max_transfer, ConfirmationsPolicy,
         },
-        Account as _, AccountBirthday, AccountPurpose, MaxSpendMode, OutputLockStore, WalletRead,
-        WalletWrite,
+        Account as _, AccountBirthday, AccountPurpose, InputSource, MaxSpendMode, OutputLockStore,
+        ReceivedNotes, TargetValue, WalletRead, WalletWrite,
     },
     fees::{standard::MultiOutputChangeStrategy, DustOutputPolicy, SplitPolicy, StandardFeeRule},
     proto::{
@@ -37,7 +39,7 @@ use zcash_client_backend::{
         service::{self, compact_tx_streamer_client::CompactTxStreamerClient},
     },
     sync,
-    wallet::{LockOwner, OutputRef, OvkPolicy},
+    wallet::{LockOwner, OutputRef, OvkPolicy, ReceivedNote},
 };
 use zcash_client_sqlite::{util::SystemClock, wallet::init::init_wallet_db, AccountUuid, WalletDb};
 use zcash_keys::keys::UnifiedFullViewingKey;
@@ -87,6 +89,11 @@ pub enum WalletError {
     /// The vault could cover the payment, but some of its notes are held by open proposals.
     #[error("not enough unreserved funds: part of the balance is held by open proposals")]
     FundsReserved,
+    /// A payment that may be signed must have one of its notes spent by the next one, and
+    /// all of them are already spent (by a transaction not yet deep enough to rule out a
+    /// reorg): wait a few blocks.
+    #[error("a cancelled payment's funds were just moved: try again in a few minutes")]
+    NotesSpent,
     /// The database can't be read with this key: a wrong key, or a plain (unencrypted)
     /// database from before encryption. The wallet is a cache of chain data, so callers
     /// delete it and resync.
@@ -978,17 +985,55 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(held)
     }
 
+    /// The vault's outgoing viewing keys for a transaction: payments with the external one,
+    /// change with the internal one, so members can recover every output and check it
+    /// (`verify::verify_pczt`). `OvkPolicy::Sender` sets no internal key
+    /// (zcash_client_backend 0.25.0-pre.1 `data_api/wallet.rs:2225-2231`), which leaves
+    /// change's `out_ciphertext` random: a channel nobody could check. `Custom`'s keys go
+    /// as given (`wallet.rs:2232-2236`); Ironwood change is added with the internal one
+    /// (`wallet.rs:2531-2536`, `builder.add_ironwood_output(internal_ovk, ..)`).
+    fn ovk_policy(&self, payments_external: bool) -> Result<OvkPolicy, WalletError> {
+        let account = self
+            .db
+            .get_account(self.account)
+            .map_err(db_err)?
+            .ok_or_else(|| WalletError::Db("vault account missing".into()))?;
+        let fvk = account
+            .ufvk()
+            .and_then(|u| u.orchard())
+            .ok_or_else(|| WalletError::Db("vault account has no Orchard key".into()))?;
+        let internal =
+            zcash_keys::keys::OutgoingViewingKey::from(fvk.to_ovk(orchard::keys::Scope::Internal));
+        Ok(OvkPolicy::Custom {
+            external_ovk: if payments_external {
+                zcash_keys::keys::OutgoingViewingKey::from(
+                    fvk.to_ovk(orchard::keys::Scope::External),
+                )
+            } else {
+                internal
+            },
+            internal_ovk: Some(internal),
+        })
+    }
+
     /// Selects notes, builds and IO-finalizes a PCZT paying `payments`, with change back to
-    /// the vault in the Ironwood pool. Payment outputs are encrypted with the vault's
-    /// outgoing viewing key (`OvkPolicy::Sender`), which member verification requires.
-    /// The transaction expires `expiry_blocks` after the height it is built for (the vault's
+    /// the vault in the Ironwood pool. Outputs are encrypted with the vault's outgoing
+    /// viewing keys ([`Self::ovk_policy`]), which member verification requires. The
+    /// transaction expires `expiry_blocks` after the height it is built for (the vault's
     /// `proposal_expiry_blocks`), so members can approve and sign over days.
+    ///
+    /// `must_spend`: per payment that may be signed and can still mine (`node::still_sendable`),
+    /// its nullifiers; the transaction spends one of this wallet's notes among each, so at
+    /// most one of them can mine. Those notes are held, so ordinary selection skips them:
+    /// they are added to every selection ([`ForcedInputs`]), and the fee covers them.
     pub fn propose(
         &mut self,
         payments: &[PaymentRequest],
         expiry_blocks: u32,
+        must_spend: &[Vec<[u8; 32]>],
     ) -> Result<Pczt, WalletError> {
-        let proposal = self.transfer_proposal(payments)?;
+        let proposal = self.transfer_proposal(payments, must_spend)?;
+        let ovk_policy = self.ovk_policy(true)?;
         create_pczt_from_proposal::<
             _,
             _,
@@ -1002,7 +1047,7 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             &SystemClock,
             &mut crate::zrng::zrng(),
             self.account,
-            OvkPolicy::Sender,
+            ovk_policy,
             &proposal,
             Some(BlockHeight::from(proposal_expiry(
                 &self.params,
@@ -1018,7 +1063,7 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
     /// selection, without building anything (nothing is written or locked). For the send
     /// review, before anyone proposes.
     pub fn fee_for(&mut self, payments: &[PaymentRequest]) -> Result<u64, WalletError> {
-        let proposal = self.transfer_proposal(payments)?;
+        let proposal = self.transfer_proposal(payments, &[])?;
         Ok(proposal
             .steps()
             .iter()
@@ -1026,10 +1071,17 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             .sum())
     }
 
-    /// Note selection and change for `payments` (ZIP 317 fee, Ironwood change).
+    /// Note selection and change for `payments` (ZIP 317 fee, Ironwood change), spending a
+    /// note of each set in `must_spend` (see [`Self::propose`]).
+    ///
+    /// This is `propose_transfer` (zcash_client_backend 0.25.0-pre.1 `data_api/wallet.rs:
+    /// 779-967`) over [`ForcedInputs`] instead of the database, without its two other parts:
+    /// the ZIP 318 canonical-crossing attempt (`wallet.rs:836-929`) spends an Orchard-pool
+    /// note, which a vault never holds, and input locking is off (`lock_inputs: None`).
     fn transfer_proposal(
         &mut self,
         payments: &[PaymentRequest],
+        must_spend: &[Vec<[u8; 32]>],
     ) -> Result<
         zcash_client_backend::proposal::Proposal<
             StandardFeeRule,
@@ -1037,6 +1089,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         >,
         WalletError,
     > {
+        use zcash_client_backend::data_api::wallet::input_selection::InputSelector;
+
         let request = TransactionRequest::new(
             payments
                 .iter()
@@ -1060,6 +1114,16 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         )
         .map_err(|e| WalletError::Payment(format!("{e:?}")))?;
 
+        let confirmations = ConfirmationsPolicy::default();
+        let (target_height, anchor_height) = self
+            .db
+            .get_target_and_anchor_heights(confirmations.trusted())
+            .map_err(db_err)?
+            .ok_or_else(|| WalletError::Proposal("sync required".into()))?;
+        let inputs = ForcedInputs {
+            forced: self.forced_notes(must_spend, target_height)?,
+            db: &self.db,
+        };
         // Change comes back as several notes while the vault has fewer than
         // CHANGE_NOTES_TARGET: each open proposal holds whole notes, so a vault with one
         // note could only have one payment in flight ("funds are held by open payments").
@@ -1070,30 +1134,113 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             DustOutputPolicy::default(),
             change_split_policy(),
         );
-        propose_transfer::<_, _, _, _, zcash_client_sqlite::wallet::commitment_tree::Error>(
-            &mut self.db,
-            &self.params,
-            self.account,
-            &GreedyInputSelector::new(),
-            &change,
-            request,
-            ConfirmationsPolicy::default(),
-            &SpendPolicy::default(),
-            None,
-            None,
-        )
-        .map_err(|e| {
-            let e = format!("{e:?}");
-            let reserved = self
-                .db
-                .get_locked_outputs(self.account)
-                .is_ok_and(|l| !l.is_empty());
-            if reserved && e.contains("InsufficientFunds") {
-                WalletError::FundsReserved
-            } else {
-                WalletError::Proposal(e)
+        let proposal = GreedyInputSelector::new()
+            .propose_transaction(
+                &self.params,
+                &inputs,
+                target_height,
+                anchor_height,
+                &self.db.pool_migration_params(),
+                confirmations,
+                self.account,
+                request,
+                &change,
+                &SpendPolicy::default(),
+                None,
+            )
+            .map_err(|e| {
+                let e = format!("{e:?}");
+                let reserved = self
+                    .db
+                    .get_locked_outputs(self.account)
+                    .is_ok_and(|l| !l.is_empty());
+                if reserved && e.contains("InsufficientFunds") {
+                    WalletError::FundsReserved
+                } else {
+                    WalletError::Proposal(e)
+                }
+            })?;
+        proposal
+            .check_transaction_size()
+            .map_err(|e| WalletError::Proposal(format!("{e:?}")))?;
+        Ok(proposal.with_proposed_version(None))
+    }
+
+    /// One spendable note of this wallet among each set of nullifiers (lock state ignored:
+    /// they are held for the very proposals they must be spent against). A set whose wallet
+    /// notes are all spent already fails with [`WalletError::NotesSpent`].
+    fn forced_notes(
+        &self,
+        must_spend: &[Vec<[u8; 32]>],
+        target_height: TargetHeight,
+    ) -> Result<Vec<ReceivedNote<zcash_client_sqlite::ReceivedNoteId, orchard::Note>>, WalletError>
+    {
+        let conn = open_connection(&self.path, &self.key, true)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.txid, rn.action_index
+                 FROM ironwood_received_notes rn
+                 JOIN transactions t ON t.id_tx = rn.transaction_id
+                 JOIN accounts a ON a.id = rn.account_id
+                 WHERE rn.nf = ?1 AND a.uuid = ?2",
+            )
+            .map_err(db_err)?;
+        let account = self.account.expose_uuid();
+        let mut forced = Vec::with_capacity(must_spend.len());
+        for nullifiers in must_spend {
+            let mut known = false;
+            let mut found = None;
+            for nf in nullifiers {
+                let row = stmt.query_row(
+                    rusqlite::params![nf.as_slice(), account.as_bytes().as_slice()],
+                    |r| Ok((r.get::<_, [u8; 32]>(0)?, r.get::<_, u32>(1)?)),
+                );
+                let (txid, index) = match row {
+                    Ok(row) => row,
+                    // A dummy spend's nullifier, or a note not scanned yet.
+                    Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                    Err(e) => return Err(db_err(e)),
+                };
+                known = true;
+                let note = self
+                    .db
+                    .get_spendable_note(
+                        &TxId::from_bytes(txid),
+                        ShieldedPool::Ironwood,
+                        index,
+                        target_height,
+                        LockFilter::Unfiltered,
+                    )
+                    .map_err(db_err)?;
+                if let Some(received) = note {
+                    if let zcash_client_backend::wallet::Note::Orchard { note, .. } =
+                        *received.note()
+                    {
+                        found = Some(received.map_note(|_| note));
+                        break;
+                    }
+                }
             }
-        })
+            match found {
+                // Two such payments may share a note: spending it once covers both.
+                Some(note)
+                    if !forced.iter().any(|f: &ReceivedNote<_, _>| {
+                        f.internal_note_id() == note.internal_note_id()
+                    }) =>
+                {
+                    forced.push(note)
+                }
+                Some(_) => {}
+                None if known => return Err(WalletError::NotesSpent),
+                None => {
+                    return Err(WalletError::Proposal(
+                        "a cancelled payment's funds aren't in this wallet yet; sync and try again"
+                            .into(),
+                    ))
+                }
+            }
+        }
+        Ok(forced)
     }
 
     /// Builds and IO-finalizes a PCZT that spends exactly the notes with `nullifiers` (all
@@ -1104,6 +1251,7 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
     pub fn propose_sweep(
         &mut self,
         nullifiers: &[[u8; 32]],
+        owners: &[[u8; 32]],
         recipient: ZcashAddress,
         expiry_blocks: u32,
     ) -> Result<Pczt, WalletError> {
@@ -1181,7 +1329,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             None,
             MaxSpendMode::MaxSpendable,
             ConfirmationsPolicy::default(),
-            &LockedInputPolicy::Exclude,
+            // The target notes are held under their proposals' owners (`owners`).
+            &locked_policy(owners).unwrap_or_default(),
             None,
         )
         .map_err(|e| WalletError::Proposal(format!("{e:?}")));
@@ -1189,6 +1338,7 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             let _ = self.db.unlock_output(output, SWEEP);
         }
         let proposal = proposal?;
+        let ovk_policy = self.ovk_policy(false)?;
         let pczt = create_pczt_from_proposal::<
             _,
             _,
@@ -1202,7 +1352,7 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             &SystemClock,
             &mut crate::zrng::zrng(),
             self.account,
-            OvkPolicy::Sender,
+            ovk_policy,
             &proposal,
             Some(BlockHeight::from(proposal_expiry(
                 &self.params,
@@ -1222,6 +1372,157 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         }
         Ok(pczt)
     }
+}
+
+/// The wallet's notes for input selection, with notes every selection must include
+/// ([`VaultWallet::propose`]). `GreedyInputSelector` funds a transaction with the whole set
+/// `select_spendable_notes` returns and recomputes the fee over it each round
+/// (zcash_client_backend 0.25.0-pre.1 `data_api/wallet/input_selection.rs:1470-1497`), so
+/// adding the forced notes there makes them inputs, paid for. Accumulation asks only for
+/// the rest of the target. `select_single_spendable_note` (used only under
+/// `NoteSelection::PreferSingle`, `input_selection.rs:1453-1468`) finds nothing while notes
+/// are forced, so selection accumulates. Transparent sources keep the trait's defaults: the
+/// default `SpendPolicy` permits no transparent spending, and selection then skips the
+/// transparent gather entirely (`input_selection.rs:1023-1026`).
+struct ForcedInputs<'a, D: InputSource> {
+    db: &'a D,
+    forced: Vec<ReceivedNote<D::NoteRef, orchard::Note>>,
+}
+
+impl<D: InputSource> InputSource for ForcedInputs<'_, D> {
+    type Error = D::Error;
+    type AccountId = D::AccountId;
+    type NoteRef = D::NoteRef;
+
+    fn get_spendable_note(
+        &self,
+        txid: &TxId,
+        protocol: ShieldedPool,
+        index: u32,
+        target_height: TargetHeight,
+        lock_filter: LockFilter<'_>,
+    ) -> Result<Option<ReceivedNote<Self::NoteRef, zcash_client_backend::wallet::Note>>, Self::Error>
+    {
+        self.db
+            .get_spendable_note(txid, protocol, index, target_height, lock_filter)
+    }
+
+    fn anchor_computable(
+        &self,
+        protocol: ShieldedPool,
+        height: BlockHeight,
+    ) -> Result<bool, Self::Error> {
+        self.db.anchor_computable(protocol, height)
+    }
+
+    fn select_spendable_notes(
+        &self,
+        account: Self::AccountId,
+        target_value: TargetValue,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        let forced: Vec<_> = self
+            .forced
+            .iter()
+            .filter(|n| {
+                sources.contains(&ShieldedPool::Ironwood) && !exclude.contains(n.internal_note_id())
+            })
+            .cloned()
+            .collect();
+        let forced_value = forced.iter().map(|n| n.note().value().inner()).sum::<u64>();
+        // The rest of the target from the other notes (none when the forced ones cover it).
+        let rest = match target_value {
+            TargetValue::AtLeast(v) if v.into_u64() <= forced_value => None,
+            TargetValue::AtLeast(v) => Some(TargetValue::AtLeast(
+                Zatoshis::from_u64(v.into_u64() - forced_value).expect("below the target"),
+            )),
+            other => Some(other),
+        };
+        let mut skip = exclude.to_vec();
+        skip.extend(forced.iter().map(|n| *n.internal_note_id()));
+        let found = match rest {
+            Some(rest) => self.db.select_spendable_notes(
+                account,
+                rest,
+                sources,
+                target_height,
+                confirmations_policy,
+                &skip,
+                lock_filter,
+            )?,
+            None => ReceivedNotes::empty(),
+        };
+        let (sapling, orchard, mut ironwood) = (
+            found.sapling().to_vec(),
+            found.orchard().to_vec(),
+            found.ironwood().to_vec(),
+        );
+        ironwood.extend(forced);
+        Ok(ReceivedNotes::new(sapling, orchard, ironwood))
+    }
+
+    fn select_single_spendable_note(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        if !self.forced.is_empty() {
+            return Ok(ReceivedNotes::empty());
+        }
+        self.db.select_single_spendable_note(
+            account,
+            value,
+            sources,
+            target_height,
+            confirmations_policy,
+            exclude,
+            lock_filter,
+        )
+    }
+
+    fn select_unspent_notes(
+        &self,
+        account: Self::AccountId,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        self.db
+            .select_unspent_notes(account, sources, target_height, exclude, lock_filter)
+    }
+
+    fn get_account_metadata(
+        &self,
+        account: Self::AccountId,
+        selector: &zcash_client_backend::data_api::NoteFilter,
+        target_height: TargetHeight,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<zcash_client_backend::data_api::AccountMeta, Self::Error> {
+        self.db
+            .get_account_metadata(account, selector, target_height, exclude, lock_filter)
+    }
+}
+
+/// Input selection that draws on notes held by `owners` first (`LockedInputPolicy::
+/// PreferLocked`: "prefer outputs locked by one of these owners; draw on unlocked outputs
+/// only as needed", zcash_client_backend 0.25.0-pre.1 `data_api/locking.rs:441-443`);
+/// `None` without owners.
+fn locked_policy(owners: &[[u8; 32]]) -> Option<LockedInputPolicy> {
+    zcash_client_backend::data_api::wallet::input_selection::NonEmptyBTreeSet::from_set(
+        owners.iter().map(|o| LockOwner::new(*o)).collect(),
+    )
+    .map(LockedInputPolicy::PreferLocked)
 }
 
 /// `VaultWallet::unspent_note_count` for the account with this UUID in the database at `path`.

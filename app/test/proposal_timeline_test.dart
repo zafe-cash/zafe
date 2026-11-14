@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/features/proposals/proposal_status.dart';
 import 'package:zafe/src/features/proposals/proposal_timeline.dart';
 import 'package:zafe/src/rust/api/proposals.dart';
 
@@ -59,6 +60,8 @@ void main() {
         expiryHeight: 0,
         needsReapproval: false,
         stillSendable: false,
+        maybeSigned: false,
+        sentAnyway: false,
         needsNewProposal: false,
       ),
       members: [a, b],
@@ -87,6 +90,21 @@ void main() {
     expect(
       titles(proposal('p', author: a, stage: ProposalStage.cancelled)).last,
       'Cancelled',
+    );
+    // Signed, cancelled, and its transaction mined anyway: sent, and says why.
+    final anyway = timelineSteps(
+      proposal('p', author: a, stage: ProposalStage.sent, sentAnyway: true),
+      members: [a, b, c],
+      me: b,
+      names: names,
+    ).last;
+    expect(anyway.title, 'Sent anyway');
+    expect(anyway.detail, 'It was signed before it was cancelled');
+    expect(
+      proposalTitle(
+        proposal('p', author: a, stage: ProposalStage.sent, sentAnyway: true),
+      ),
+      'Sent anyway',
     );
     expect(
       timelineSteps(

@@ -72,12 +72,12 @@ pub fn unapproved_spends(
         Err(WalletError::WrongKey) => return Ok(none()),
         Err(e) => return Err(e.into()),
     };
-    let Some(tip) = wallet.chain_height()? else {
+    if wallet.chain_height()?.is_none() {
         return Ok(none());
-    };
+    }
     let spends = wallet.vault_spends()?;
     Ok(UnapprovedSpends {
-        spends: spend_watch::unapproved_spends(&state, &spends, tip)
+        spends: spend_watch::unapproved_spends(&state, &spends)
             .into_iter()
             .map(|s| UnapprovedSpendInfo {
                 txid: TxId::from_bytes(s.txid).to_string(),

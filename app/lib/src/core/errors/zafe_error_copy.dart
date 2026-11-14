@@ -94,6 +94,8 @@ String zafeErrorMessage(
     ZafeErrorKind.moveStale =>
       'This link is from an earlier move. Ask for a new one.',
     ZafeErrorKind.twoMoves => 'Two moves found: ask your group.',
+    ZafeErrorKind.alreadySigned =>
+      'Your signature is already out, so you can\'t decline this payment. Its proposer can cancel it.',
     ZafeErrorKind.other => fallback,
   };
 }

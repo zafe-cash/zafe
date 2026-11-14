@@ -9,11 +9,16 @@
 //! 2. Pools: only Ironwood actions; no transparent, Sapling or Orchard-pool components.
 //! 3. Spends: every spend is either a vault note (nullifier and `rk` checked against the
 //!    vault FVK) or a zero-value padding spend already signed by the IO Finalizer.
-//! 4. Outputs: every non-zero output is either change to the vault's own address that the
-//!    vault can decrypt, or an
-//!    exact match (recipient, amount, memo) for one proposed payment, recovered by
-//!    decrypting with the vault's outgoing viewing key. Every payment is matched once.
-//! 5. Value: spends − outputs = fee, and the fee equals the ZIP 317 conventional fee.
+//! 4. Outputs: every output to the vault is change, recovered with the vault's internal
+//!    outgoing viewing key and exactly the vault's change address (internal, index 0), its
+//!    value and an empty memo, and decryptable by the vault; every other non-zero output is
+//!    an exact match (recipient, amount, memo) for one proposed payment, recovered with the
+//!    vault's external outgoing viewing key. Every payment is matched once. So every
+//!    ciphertext the vault writes is fixed by what members see (zero-value dummy outputs'
+//!    stay random by construction: a residual channel).
+//! 5. Value: spends − outputs = fee, and the fee equals the ZIP 317 conventional fee. The
+//!    Ironwood bundle's value balance (`value_sum`, what the network charges) equals that
+//!    fee, its flags are exactly the builder's, and every other pool is empty.
 //!    The action count it is charged for may not exceed what the transaction needs:
 //!    max(2, vault spends worth more than the marginal fee, payments + change outputs),
 //!    with at most [`MAX_CHANGE_OUTPUTS`] change outputs, and a zero-value change output
@@ -29,7 +34,7 @@ use orchard::{
 };
 use pczt::{roles::verifier::Verifier, Pczt};
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
-use zcash_protocol::constants::V6_TX_VERSION;
+use zcash_protocol::{constants::V6_TX_VERSION, memo::MemoBytes};
 
 use crate::tx::{self, SpendToSign, TxError};
 
@@ -96,6 +101,14 @@ pub enum VerifyError {
     BadOutputNote(usize),
     #[error("action {0}: change output cannot be decrypted by the vault")]
     UndecryptableChange(usize),
+    #[error(
+        "action {0}: change output isn't exactly the vault's change (address, value, empty memo)"
+    )]
+    UnexpectedChange(usize),
+    #[error("Ironwood value balance {actual} zat does not equal the fee {fee} zat")]
+    WrongValueBalance { actual: i64, fee: u64 },
+    #[error("Ironwood bundle flags are not the ones the wallet sets")]
+    WrongFlags,
     #[error("action {0}: output cannot be recovered with the vault's outgoing viewing key")]
     UnrecoverableOutput(usize),
     #[error("action {0}: output does not match any remaining proposed payment")]
@@ -161,9 +174,20 @@ pub fn verify_pczt(
     if !pczt.orchard().actions().is_empty() {
         return Err(VerifyError::ForeignPool("Orchard-pool"));
     }
+    // Empty bundles move nothing: their value sums must say so too.
+    if *pczt.sapling().value_sum() != 0 {
+        return Err(VerifyError::ForeignPool("Sapling"));
+    }
+    if *pczt.orchard().value_sum() != (0, false) {
+        return Err(VerifyError::ForeignPool("Orchard-pool"));
+    }
 
     // 3–5. Walk every Ironwood action with the full Verifier parse.
     let ovk = vault_fvk.to_ovk(Scope::External);
+    let internal_ovk = vault_fvk.to_ovk(Scope::Internal);
+    let change_address = vault_fvk.address_at(0u32, Scope::Internal);
+    let empty_memo = *MemoBytes::empty().as_array();
+    let mut value_balance: Option<i64> = None;
     let mut remaining = expected.payments.clone();
     let mut input_total: u64 = 0;
     let mut output_total: u64 = 0;
@@ -180,6 +204,15 @@ pub fn verify_pczt(
         .with_ironwood::<VerifyError, _>(|bundle| {
             let custom = OrchardError::Custom;
             action_count = bundle.actions().len() as u64;
+            // The flags the wallet's builder sets for an Ironwood bundle: spends, outputs and
+            // cross-address transfers on (zcash_primitives 0.31.0-pre.1
+            // `transaction/builder.rs:388-400`, `BundleVersion::ironwood_v3().default_flags()`;
+            // orchard 0.16 `bundle.rs:175-176`). Others change the sighash (spends off makes
+            // a transaction that can't be mined) without changing what is shown.
+            if *bundle.flags() != orchard::bundle::BundleVersion::ironwood_v3().default_flags() {
+                return Err(custom(VerifyError::WrongFlags));
+            }
+            value_balance = i64::try_from(*bundle.value_sum()).ok();
             // Pass 1: every spend. Checked before any output so a foreign spend is always
             // reported as such, whatever order the builder shuffled the actions into.
             for (i, action) in bundle.actions().iter().enumerate() {
@@ -228,21 +261,10 @@ pub fn verify_pczt(
                 let recipient = output
                     .recipient()
                     .expect("checked by verify_note_commitment");
-                if value == 0 {
-                    // Moves no funds. A dummy goes to a random address; one to the vault is
-                    // zero-value change (the wallet adds it when nothing is left over).
-                    if vault_fvk.scope_for_address(&recipient).is_some() {
-                        zero_change_outputs += 1;
-                    }
-                    continue;
-                }
-                output_total = output_total
-                    .checked_add(value)
-                    .ok_or(custom(VerifyError::ValueOverflow))?;
-
                 let domain = IronwoodDomain::for_pczt_action(action);
                 if let Some(scope) = vault_fvk.scope_for_address(&recipient) {
-                    // Change must be decryptable by the vault, or the wallet would never
+                    // Change (zero-value change too: the wallet adds it when nothing is left
+                    // over). It must be decryptable by the vault, or the wallet would never
                     // detect it and the funds would be lost.
                     let ivk = vault_fvk.to_ivk(scope).prepare();
                     let (note, address, _) = try_note_decryption(&domain, &ivk, action)
@@ -250,12 +272,42 @@ pub fn verify_pczt(
                     if address != recipient || note.value().inner() != value {
                         return Err(custom(VerifyError::UndecryptableChange(i)));
                     }
+                    // And recovered with the internal OVK as exactly what the wallet makes,
+                    // so its `out_ciphertext` (and memo) carry nothing else.
+                    let (note, address, memo) = try_output_recovery_with_ovk(
+                        &domain,
+                        &internal_ovk,
+                        action,
+                        action.cv_net(),
+                        &output.encrypted_note().out_ciphertext,
+                    )
+                    .ok_or(custom(VerifyError::UnexpectedChange(i)))?;
+                    if address != change_address
+                        || note.value().inner() != value
+                        || memo != empty_memo
+                    {
+                        return Err(custom(VerifyError::UnexpectedChange(i)));
+                    }
+                    if value == 0 {
+                        zero_change_outputs += 1;
+                        continue;
+                    }
+                    output_total = output_total
+                        .checked_add(value)
+                        .ok_or(custom(VerifyError::ValueOverflow))?;
                     change_total = change_total
                         .checked_add(value)
                         .ok_or(custom(VerifyError::ValueOverflow))?;
                     change_outputs += 1;
                     continue;
                 }
+                if value == 0 {
+                    // A dummy: moves no funds, to a random address.
+                    continue;
+                }
+                output_total = output_total
+                    .checked_add(value)
+                    .ok_or(custom(VerifyError::ValueOverflow))?;
 
                 // A payment: recover it with the vault OVK. Recovery decrypts the real
                 // ciphertext and checks it against the note commitment, so the recipient,
@@ -333,6 +385,15 @@ pub fn verify_pczt(
         return Err(VerifyError::WrongFee {
             expected: expected_fee,
             actual: fee,
+        });
+    }
+    // What the network charges is the bundle's value balance, not the sum of the actions
+    // above: they must agree, or the signed transaction is another one (unmineable, since
+    // the binding signature ties actions to the balance) than the fee shown.
+    if value_balance != i64::try_from(fee).ok() {
+        return Err(VerifyError::WrongValueBalance {
+            actual: value_balance.unwrap_or(i64::MIN),
+            fee,
         });
     }
 

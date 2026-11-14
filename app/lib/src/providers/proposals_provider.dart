@@ -443,6 +443,7 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     final vault = _vault;
     await rust.rejectProposal(
       relayUrl: _endpoints.relayUrl,
+      stateDir: await (await ZafePaths.get()).stateDir(vault.activeId!),
       seeds: vault.identity!,
       material: vault.material!,
       proposalId: id,

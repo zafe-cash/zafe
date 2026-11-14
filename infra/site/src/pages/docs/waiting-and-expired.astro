@@ -30,7 +30,7 @@ import Doc from '../../layouts/Doc.astro';
   <h2>Cancel a payment</h2>
   <ol class="doc-steps">
     <li>The member who proposed it opens it and taps <strong>Cancel payment</strong>, then confirms.</li>
-    <li>If every signature was already in, it could still be sent until it expires. Tap <strong>Make it unsendable</strong>: this proposes moving its funds back to the vault, which needs the usual approvals.</li>
+    <li>If it may already be signed (it had every approval, or approvals that sign), it can still be sent until it expires. Tap <strong>Make it unsendable</strong>: this proposes moving its funds back to the vault, which needs the usual approvals. Until then, the next payment spends its funds, so only one of them can go out. The same holds for a rejected payment. If it is sent anyway, it shows as “Sent anyway”.</li>
   </ol>
 
   <h2>If it goes wrong</h2>

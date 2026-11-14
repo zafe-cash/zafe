@@ -707,3 +707,85 @@ fn rejects_one_action_over_the_bound() {
         }
     );
 }
+
+/// Change is recovered with the vault's internal outgoing viewing key as exactly what the
+/// wallet makes: the change address, its value, an empty memo. Anything else lets a
+/// proposer put data in change members can't see (a random `out_ciphertext`, a memo) or
+/// park change at another vault address. On 4b5ae0e each of these verified: change was
+/// only trial-decrypted with the vault's incoming viewing key.
+#[test]
+fn change_is_exactly_the_wallets() {
+    let v = Vault::new(31);
+    let payee = outside_address(7);
+    let m = memo("Invoice");
+    let check = |change: Out| {
+        let pczt = v.pczt(vec![v.pay(payee, 400_000, &m), change]);
+        verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)]))
+    };
+    check(v.change(590_000)).unwrap();
+    let unexpected = |r: Result<_, VerifyError>| {
+        assert!(matches!(r, Err(VerifyError::UnexpectedChange(_))), "{r:?}")
+    };
+    // No outgoing key (random out_ciphertext), or the external one.
+    unexpected(check(Out {
+        ovk: None,
+        ..v.change(590_000)
+    }));
+    unexpected(check(Out {
+        ovk: Some(v.fvk.to_ovk(Scope::External)),
+        ..v.change(590_000)
+    }));
+    // A memo in change.
+    unexpected(check(Out {
+        memo: memo("hidden"),
+        ..v.change(590_000)
+    }));
+    // Another vault address.
+    unexpected(check(Out {
+        recipient: v.fvk.address_at(0u32, Scope::External),
+        ..v.change(590_000)
+    }));
+    unexpected(check(Out {
+        recipient: v.fvk.address_at(1u32, Scope::Internal),
+        ..v.change(590_000)
+    }));
+}
+
+/// A payment two notes pay (2 spends, 2 outputs: 2 actions) plus a note of a cancelled
+/// payment that may still be sent, which it must spend (`node::check_vote`): 3 vault
+/// spends, 3 actions. Members accept it at the 3-action fee and refuse the 2-action one, so
+/// the wallet must pay for the forced spend (selection recomputes the fee over all inputs).
+#[test]
+fn a_forced_extra_spend_adds_an_action_and_its_fee() {
+    let v = Vault::new(45);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let exp = || expect(vec![payment(payee, 400_000, &m)]);
+    let build = |notes: usize, fee: u64| {
+        let (anchor, spends) = vault_notes(&v, notes, 300_000);
+        build_pczt_custom(
+            &v.fvk,
+            spends,
+            anchor,
+            vec![
+                v.pay(payee, 400_000, &m),
+                v.change(notes as u64 * 300_000 - 400_000 - fee),
+            ],
+            Some(fee),
+            BundlePadding::DEFAULT,
+        )
+    };
+    let base = build(2, FEE_2_ACTIONS);
+    assert_eq!(base.ironwood().actions().len(), 2);
+    verify_pczt(&base, &v.fvk, &exp()).unwrap();
+    let forced = build(3, FEE_3_ACTIONS);
+    assert_eq!(forced.ironwood().actions().len(), 3);
+    assert_eq!(
+        verify_pczt(&forced, &v.fvk, &exp()).unwrap().fee_zat,
+        FEE_3_ACTIONS
+    );
+    assert!(matches!(
+        verify_pczt(&build(3, FEE_2_ACTIONS), &v.fvk, &exp()),
+        Err(VerifyError::WrongFee { .. })
+    ));
+}

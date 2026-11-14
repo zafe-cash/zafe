@@ -366,6 +366,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiProposalsRejectProposal({
     required String relayUrl,
+    required String stateDir,
     required List<int> seeds,
     required List<int> material,
     required String proposalId,
@@ -2389,6 +2390,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<void> crateApiProposalsRejectProposal({
     required String relayUrl,
+    required String stateDir,
     required List<int> seeds,
     required List<int> material,
     required String proposalId,
@@ -2398,6 +2400,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(relayUrl, serializer);
+          sse_encode_String(stateDir, serializer);
           sse_encode_list_prim_u_8_loose(seeds, serializer);
           sse_encode_list_prim_u_8_loose(material, serializer);
           sse_encode_String(proposalId, serializer);
@@ -2413,7 +2416,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_zafe_error,
         ),
         constMeta: kCrateApiProposalsRejectProposalConstMeta,
-        argValues: [relayUrl, seeds, material, proposalId],
+        argValues: [relayUrl, stateDir, seeds, material, proposalId],
         apiImpl: this,
       ),
     );
@@ -2422,7 +2425,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiProposalsRejectProposalConstMeta =>
       const TaskConstMeta(
         debugName: "reject_proposal",
-        argNames: ["relayUrl", "seeds", "material", "proposalId"],
+        argNames: ["relayUrl", "stateDir", "seeds", "material", "proposalId"],
       );
 
   @override
@@ -4079,8 +4082,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProposalInfo dco_decode_proposal_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 23)
-      throw Exception('unexpected arr length: expect 23 but see ${arr.length}');
+    if (arr.length != 25)
+      throw Exception('unexpected arr length: expect 25 but see ${arr.length}');
     return ProposalInfo(
       id: dco_decode_String(arr[0]),
       author: dco_decode_String(arr[1]),
@@ -4103,8 +4106,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       expiryHeight: dco_decode_u_32(arr[18]),
       needsReapproval: dco_decode_bool(arr[19]),
       stillSendable: dco_decode_bool(arr[20]),
-      invalidatedBy: dco_decode_opt_String(arr[21]),
-      needsNewProposal: dco_decode_bool(arr[22]),
+      sentAnyway: dco_decode_bool(arr[21]),
+      maybeSigned: dco_decode_bool(arr[22]),
+      invalidatedBy: dco_decode_opt_String(arr[23]),
+      needsNewProposal: dco_decode_bool(arr[24]),
     );
   }
 
@@ -5252,6 +5257,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_expiryHeight = sse_decode_u_32(deserializer);
     var var_needsReapproval = sse_decode_bool(deserializer);
     var var_stillSendable = sse_decode_bool(deserializer);
+    var var_sentAnyway = sse_decode_bool(deserializer);
+    var var_maybeSigned = sse_decode_bool(deserializer);
     var var_invalidatedBy = sse_decode_opt_String(deserializer);
     var var_needsNewProposal = sse_decode_bool(deserializer);
     return ProposalInfo(
@@ -5276,6 +5283,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       expiryHeight: var_expiryHeight,
       needsReapproval: var_needsReapproval,
       stillSendable: var_stillSendable,
+      sentAnyway: var_sentAnyway,
+      maybeSigned: var_maybeSigned,
       invalidatedBy: var_invalidatedBy,
       needsNewProposal: var_needsNewProposal,
     );
@@ -6431,6 +6440,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.expiryHeight, serializer);
     sse_encode_bool(self.needsReapproval, serializer);
     sse_encode_bool(self.stillSendable, serializer);
+    sse_encode_bool(self.sentAnyway, serializer);
+    sse_encode_bool(self.maybeSigned, serializer);
     sse_encode_opt_String(self.invalidatedBy, serializer);
     sse_encode_bool(self.needsNewProposal, serializer);
   }

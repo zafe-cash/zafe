@@ -25,6 +25,8 @@ ProposalInfo proposal(String id, int createdAt) => ProposalInfo(
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  maybeSigned: false,
+  sentAnyway: false,
   needsNewProposal: false,
 );
 

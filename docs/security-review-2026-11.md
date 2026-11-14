@@ -273,6 +273,86 @@ Status 2026-11-14 (implemented, not committed; second pass after review):
   a reject. Local only.
 - **Version floor.** Only current members' entries raise the replay version. Gated.
 
+Status 2026-11-14 (implemented, not committed; `VAULT_EVENT` 12, `PROPOSAL_RULES_FROM`):
+- [x] Possibly signed: `ProposalState::possibly_signed`, set on Approved or a vote with
+  shares, for good. It drives holds, "still sendable", the spend alert's grace and
+  `node::check_vote`: a possibly-signed cancelled/rejected proposal W is live while the
+  member's tip < W's expiry + 10 blocks (scaled) and no spend of its notes is that deep
+  (`node::still_sendable`); a new proposal is approved only if it spends a note of every
+  live W earlier in the log. `propose` spends a wallet note of each live W (round 2, below).
+  **Make it unsendable** (a sweep of every live W's notes) stays the user's choice.
+- [x] Round 2 (zafe-e4, `tests/vault.rs` `proposal_attacks`):
+  - A lone member's own shares no longer reserve notes: `reserves()` needs a current
+    approval by a member other than the author (a one-tap vote counts; t = 1: the author's).
+    Replay doesn't verify shares, so "possibly signed" never reserves on its own.
+  - A W made by one member's own shares can't be dropped (one honest share-poster plus t - 1
+    dishonest members can sign it), so it can't stall payments either: `check_vote` asks to
+    respend only Ws logged before the proposal, and `propose` spends a wallet note of every
+    live W. `wallet::ForcedInputs` wraps the wallet's `InputSource`: `GreedyInputSelector`
+    funds the transaction with the whole set `select_spendable_notes` returns and
+    recomputes the fee over it (zcash_client_backend `input_selection.rs:1470-1497`), so the
+    forced notes are added there (the rest of the target from the others), and
+    `select_single_spendable_note` finds nothing while notes are forced (used only under
+    `PreferSingle`, `input_selection.rs:1453-1468`). This replaces `propose_transfer`
+    (`data_api/wallet.rs:779-967`) minus its ZIP 318 crossing attempt (Orchard-pool notes,
+    which vaults don't hold) and input locking (off). `StillSendable` is gone; a W whose
+    wallet notes are all spent shallow gives "try again in a few minutes".
+  - A dropped broadcast (possibly signed, not mined, not in lightwalletd's mempool, before
+    expiry + margin) counts as a W: held under its own owner and respent. One in the
+    mempool or mined isn't: nobody pays it again. `ChainView::with_mempool` reads the
+    mempool whole (never a lookup), only when a broadcast may be pending, and records the
+    absent ones (`ChainView.dropped`), so a cached view never takes a later send for a
+    dropped one. Proofs stay unverified in replay.
+- [x] Precondition: a share leaves a phone only for a request built from logged votes
+  (every signer's commitments are its latest vote's, `check_request_logged` in `respond`
+  and `sign_own_shares`). Before, `respond` signed whenever the nonces were there, e.g.
+  after the vote's append failed. An approval whose append failed now reposts the stored
+  commitments instead of answering "already approved".
+- [x] "Sent" needs proof: `VaultEvent::SignedBroadcast { tx }` (appended);
+  `tx::check_signed`: parses for the PCZT's branch with nothing left over, no transparent
+  part, txid = the PCZT's sighash (equal for v6 without transparent, zcash_primitives
+  `sighash_v5.rs:38-40`, `txid.rs:467-480`), every action's spend-auth signature verifies.
+  A txid-only `Broadcast` is refused from 12. Only for an Approved proposal: a signed
+  cancelled one marked sent would make every phone resend it. Members resend dropped ones
+  from the logged bytes.
+- [x] Reservations: from 12 only with a non-author approval or possibly signed, and until
+  `VaultState::reservation_end` = min(expiry, claimed tip + scaled (window + 96 + 144)).
+  Members refuse a claimed tip more than 10 (scaled) above their tip ("sync first") or more
+  than the window below. Holds: reserving proposals and the phone's own.
+- [x] One-tap and interactive compose: commitments after shares are valid from 12 (shares
+  kept). `ProposalState::one_tap_blocked` (no group can complete: a member approved
+  interactively) shows **Approve again** to members with shares. An interactive request
+  with a pool commitment is refused (`check_request_logged`).
+- [x] Finding G: `node::reject` takes this phone's nonces first, then refuses
+  (`AlreadySigned`, nothing logged) after one-tap shares (logged or kept), a kept or sent
+  reply (an interactive approval in the log whose nonces aren't here) or a claimed nonce
+  file. `respond` skips a member whose latest vote is a reject (no logged commitments).
+- [x] Finding J (`tests/verify_mutation_fuzz.rs`): Ironwood `value_sum` = fee, other pools'
+  value sums 0, flags = `ironwood_v3().default_flags()` (zcash_primitives
+  `builder.rs:388-400`); proposals use `OvkPolicy::Custom` with the internal OVK for change
+  (`Sender` sets none, zcash_client_backend `data_api/wallet.rs:2225-2232`; Ironwood change
+  takes it, `wallet.rs:2531-2536`), and every output to the vault must be recovered with it
+  as exactly the change address, value and an empty memo. Anchor: not checked (below).
+- [x] `FileNonceStore::take` claims by renaming to a per-take name, then reads and deletes.
+- [x] Spend alert (follow-up): a spend whose txid is the PCZT-fixed txid of a
+  possibly-signed proposal is accounted for at any time, whatever its status; the 24-block
+  grace is gone (it covered only the moments before a broadcast entry, which the txid now
+  covers). A cancelled or rejected one mined shows as **Sent anyway** (`sent_anyway`).
+- [x] Reject (follow-up): "our logged approval without its nonces here" refuses only once
+  the proposal is possibly signed, so a restored phone (no nonces) can reject a proposal
+  nobody can have signed.
+- [x] Leaders: a share that doesn't verify ends the round with the culprit named
+  (`InvalidShares`), marked silent, round files dropped; unusable logged commitments are
+  skipped and marked silent. The app shows **Approve** to a member who hasn't voted while a
+  payment is Open or Approved but not complete.
+- Deviation: the per-take claim name (`<file>.<random>.taking`, not `<file>.taking`): with
+  one name a second take could replace the file a first one is still reading.
+- Deviation: `reject` also refuses when the log holds this member's interactive approval,
+  the proposal is possibly signed, and this phone has no nonces for it (a reply was sent,
+  or another phone of the member holds them): "reply sent" leaves no other trace.
+- Testnet: logs where dev builds wrote a version 12 txid-only `Broadcast` now ignore it; the
+  proposal drops back to Approved and its notes stay held (possibly signed) until expiry.
+
 ### Relay moves (rule 6)
 
 - A phone that can't read its move notices, or can't tell whether its own move switched,
@@ -329,6 +409,29 @@ Status 2026-11-14 (implemented, not committed; second pass after review):
   each; the fee is shown at approval (fee rule notes in `verify.rs`).
 - At least two colluding members can still reserve notes, but only for the expiry window
   and only until rejected.
+- A W logged after a proposal N doesn't make N respend its notes, so a later W that
+  duplicates an earlier N can mine alongside it; t members approved both.
+- lightwalletd supplies the tip and spends a member checks a cancelled payment against: a
+  lying server can make one look dead (expired, or its notes spent deep) to a member using
+  it. Every approving member's server must be fooled.
+- "Dropped" is read from the member's own lightwalletd: a broadcast seconds old that hasn't
+  reached it yet reads as dropped. An approver then refuses a payment that doesn't respend
+  it (a retry passes), or a proposer spends its notes in a transaction that conflicts with
+  the mempool copy: a lost round, never funds.
+- A member that re-approved after a signing round (fresh commitments) and released a share
+  in the earlier round can still reject: the earlier reply leaves no trace once sent.
+  Possibly signed already covers it (the proposal reached Approved for that round).
+- Proposal anchors are not checked: the wallet keeps 100 checkpoints (zcash_client_sqlite
+  `PRUNING_DEPTH`) while proposals live for days, so a member can't tell an old anchor from
+  a made-up one. A bad anchor only makes the transaction unmineable (DoS).
+- After a cancelled payment's funds are moved (or another payment spending them is
+  sent), new payments wait until that spend is 10 blocks (scaled) deep, about 12 minutes:
+  until then a reorg could bring the cancelled one back, and `propose` says "try again in a
+  few minutes".
+- Zero-value dummy outputs' ciphertexts are random by construction: a covert channel from
+  the proposer remains there (not in change or payments).
+- `zafe interop` co-signs frost-zec PCZTs with the same checks, so change must carry the
+  internal OVK (the interop test passes: zafe builds those PCZTs).
 - lightwalletd is trusted for chain data (tip, notes, mempool). A lying server can delay or
   hide, not make members sign a different payment. Users can choose their server and Tor.
 - The relay can link one phone's vaults through its push installation id. Push is per app

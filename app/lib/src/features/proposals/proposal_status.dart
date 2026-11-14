@@ -74,7 +74,7 @@ String _title(rust.ProposalInfo p) => switch (p.stage) {
   rust.ProposalStage.approved => 'Ready to send',
   rust.ProposalStage.rejected => 'Rejected',
   rust.ProposalStage.cancelled => 'Cancelled',
-  rust.ProposalStage.sent => 'Sent',
+  rust.ProposalStage.sent => p.sentAnyway ? 'Sent anyway' : 'Sent',
 };
 
 String _icon(rust.ProposalInfo p, int? height) =>

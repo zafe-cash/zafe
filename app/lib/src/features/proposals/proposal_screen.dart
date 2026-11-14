@@ -166,8 +166,8 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     final cancel = await showAppConfirm(
       context,
       title: 'Cancel this payment?',
-      body: p.ready
-          ? 'Its funds become free for new payments. All signatures are in, so it can still be sent until it expires, unless a new payment uses the same funds.'
+      body: p.maybeSigned
+          ? 'It may already be signed, so it can still be sent until it expires. The next payment spends its funds, so only one of them can go out.'
           : 'Signers stop working on it and its funds become available for new '
                 'payments. This can\'t be undone.',
       confirmLabel: 'Cancel payment',
@@ -262,7 +262,10 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
         _holdRequest ||
         !sent &&
             send == null &&
-            p.stage == rust.ProposalStage.open &&
+            // A member who hasn't voted can approve until the payment is complete
+            // (more approvals help when an approver can't sign any more).
+            (p.stage == rust.ProposalStage.open ||
+                (p.stage == rust.ProposalStage.approved && !p.ready)) &&
             p.myVote == rust.MyVote.none &&
             !p.needsReapproval &&
             !p.needsNewProposal &&
@@ -337,7 +340,7 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     ),
     const SizedBox(height: AppSpacing.xs),
     Text(
-      'Approve again: your last signing round didn\'t finish, or this phone was restored.',
+      'Approve again so this payment can be signed.',
       textAlign: TextAlign.center,
       style: note,
     ),
@@ -550,7 +553,8 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
           ),
           ...footer,
         ];
-      case rust.ProposalStage.cancelled when p.invalidatedBy != null:
+      case rust.ProposalStage.cancelled || rust.ProposalStage.rejected
+          when p.invalidatedBy != null:
         return [
           Text(
             'Being made unsendable: a proposal moves its funds back to the vault.',
@@ -565,10 +569,11 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             child: const Text('Open that proposal'),
           ),
         ];
-      case rust.ProposalStage.cancelled when p.stillSendable:
+      case rust.ProposalStage.cancelled || rust.ProposalStage.rejected
+          when p.stillSendable:
         return [
           Text(
-            'All signatures were in, so it can still be sent until it expires. Move its '
+            'It may already be signed, so it can still be sent until it expires. Move its '
             'funds back to the vault to stop that (needs ${p.threshold} approvals).',
             textAlign: TextAlign.center,
             style: note,

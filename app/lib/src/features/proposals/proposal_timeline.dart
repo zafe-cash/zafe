@@ -49,6 +49,16 @@ List<TimelineStep> timelineSteps(
     return steps;
   }
   switch (p.stage) {
+    case rust.ProposalStage.sent when p.sentAnyway:
+      // Signed, then cancelled or declined, and someone sent the signed transaction.
+      final declined = p.rejections.length >= p.rejectionThreshold;
+      steps.add(
+        TimelineStep(
+          StepState.done,
+          'Sent anyway',
+          'It was signed before it was ${declined ? 'declined' : 'cancelled'}',
+        ),
+      );
     case rust.ProposalStage.sent:
       steps.add(const TimelineStep(StepState.done, 'Sent'));
     case rust.ProposalStage.cancelled:

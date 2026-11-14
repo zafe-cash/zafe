@@ -256,14 +256,24 @@ pub struct ProposalInfo {
     pub auto_send: bool,
     /// Last block the transaction can be mined in; after it the proposal is expired.
     pub expiry_height: u32,
-    /// This member approved with signing commitments whose nonces are gone from this
-    /// device (used in a signing round that didn't finish, or restored from a backup): it
-    /// must approve again before a new round can include it.
+    /// This member must approve again before a signing round can include it: it approved
+    /// with signing commitments whose nonces are gone from this device (used in a round
+    /// that didn't finish, or restored from a backup), or it signed one tap and no signer
+    /// group can complete (another signer approved interactively).
     pub needs_reapproval: bool,
-    /// Cancelled, but every signature is already in: anyone holding them could still send
-    /// it until it expires (offer to make it unsendable).
+    /// Cancelled or rejected, but it may have been signed (it reached Approved, or a vote
+    /// carried signatures) and can still be mined: anyone holding the signed transaction
+    /// could send it until it expires (offer to make it unsendable). A new payment must
+    /// spend one of its notes.
     pub still_sendable: bool,
-    /// A live proposal (id) that spends this cancelled one's notes back to the vault.
+    /// Cancelled or rejected after it was signed, and its transaction was mined anyway
+    /// (`stage` is `Sent`, `txid` that transaction's).
+    pub sent_anyway: bool,
+    /// It reached Approved or a vote carried signatures: a signed transaction may exist
+    /// whatever was decided after (cancelling or rejecting can't take it back).
+    pub maybe_signed: bool,
+    /// A live proposal (id) that spends this cancelled one's notes back to the vault, while
+    /// this one can still be sent (`still_sendable` before the sweep).
     pub invalidated_by: Option<String>,
     /// One-tap, open, and no signer group can be completed any more (a member's phone
     /// was restored or replaced while it was open): the proposer should propose it again
@@ -315,6 +325,32 @@ fn info(
     let d = &state.descriptor;
     let nonces = nonce_store(state_dir, seeds, m);
     let pool = pool_store(state_dir, seeds, m);
+    // Cancelled or rejected payments that may be signed and can still mine, as of the last
+    // sync; without one, every such payment counts (it can't be told dead yet). And those
+    // whose transaction was mined anyway.
+    let view = super::vault::synced_view(&m.descriptor.vault_id);
+    let anyway = view
+        .as_ref()
+        .map(|v| zafe_core::spend_watch::sent_anyway(state, &v.spends))
+        .unwrap_or_default();
+    let sendable: Vec<ProposalId> = match &view {
+        Some(view) => node::still_sendable(state, view)
+            .iter()
+            .map(|p| p.id)
+            .collect(),
+        None => state
+            .proposals
+            .values()
+            .filter(|p| {
+                p.possibly_signed
+                    && matches!(
+                        p.status,
+                        ProposalStatus::Cancelled | ProposalStatus::Rejected
+                    )
+            })
+            .map(|p| p.id)
+            .collect(),
+    };
     let mut out: Vec<_> = state
         .proposals
         .values()
@@ -333,6 +369,7 @@ fn info(
                 .collect(),
             total_zat: p.payments.iter().map(|x| x.amount_zat).sum(),
             stage: match p.status {
+                _ if anyway.contains_key(&p.id) => ProposalStage::Sent,
                 ProposalStatus::Open => ProposalStage::Open,
                 ProposalStatus::Approved => ProposalStage::Approved,
                 ProposalStatus::Rejected => ProposalStage::Rejected,
@@ -351,7 +388,8 @@ fn info(
             threshold: d.threshold,
             rejection_threshold: d.rejection_threshold() as u16,
             created_at: p.created_at,
-            txid: p.txid.map(|t| {
+            sent_anyway: anyway.contains_key(&p.id),
+            txid: p.txid.or_else(|| anyway.get(&p.id).copied()).map(|t| {
                 let mut t = t;
                 t.reverse(); // display order, like block explorers
                 hex::encode(t)
@@ -362,24 +400,34 @@ fn info(
             completed_by_me: p.completed_by == Some(me),
             auto_send: p.auto_send,
             expiry_height: p.expiry_height,
-            still_sendable: p.status == ProposalStatus::Cancelled && p.ready_group.is_some(),
-            invalidated_by: (p.status == ProposalStatus::Cancelled)
-                .then(|| {
-                    state.proposals.values().find(|q| {
-                        matches!(
-                            q.status,
-                            ProposalStatus::Open
-                                | ProposalStatus::Approved
-                                | ProposalStatus::Broadcast
-                        ) && q.payments.is_empty()
-                            && q.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
-                    })
+            still_sendable: sendable.contains(&p.id) && !anyway.contains_key(&p.id),
+            maybe_signed: p.possibly_signed,
+            // Only while it can still go out: once the sweep (or any spend of its notes) is
+            // deep, there is nothing left to make unsendable.
+            invalidated_by: (matches!(
+                p.status,
+                ProposalStatus::Cancelled | ProposalStatus::Rejected
+            ) && sendable.contains(&p.id))
+            .then(|| {
+                state.proposals.values().find(|q| {
+                    matches!(
+                        q.status,
+                        ProposalStatus::Open | ProposalStatus::Approved | ProposalStatus::Broadcast
+                    ) && q.payments.is_empty()
+                        && q.nullifiers.iter().any(|nf| p.nullifiers.contains(nf))
                 })
-                .flatten()
-                .map(|q| hex::encode(q.id)),
+            })
+            .flatten()
+            .map(|q| hex::encode(q.id)),
             needs_reapproval: matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
-                && p.approvals.get(&me).is_some_and(|c| !c.is_empty())
-                && !nonces.contains(&p.id, &p.pczt_hash),
+                && match p.approvals.get(&me) {
+                    // Interactive: its nonces were used in a round that didn't finish.
+                    Some(c) if !c.is_empty() => !nonces.contains(&p.id, &p.pczt_hash),
+                    // One tap: no signer group can complete, so this member's shares need
+                    // commitments for an interactive round too (`approve` adds them).
+                    Some(_) => p.shares.contains_key(&me) && p.one_tap_blocked(),
+                    None => false,
+                },
             needs_new_proposal: node::one_tap_stuck(state, &p.id, &me, &pool),
         })
         .collect();
@@ -1002,7 +1050,7 @@ pub fn propose_and_approve(
         &me,
         &m,
         &net,
-        p.tip,
+        &p.view,
         p.id,
         &mut store,
         &mut pool,
@@ -1031,12 +1079,12 @@ pub fn propose_and_approve(
     })
 }
 
-/// A logged proposal, the log state that includes it, and the wallet's synced tip.
+/// A logged proposal, the log state that includes it, and the wallet's view of the chain.
 struct Proposed {
     id: ProposalId,
     chain: Chain,
     state: VaultState,
-    tip: u32,
+    view: node::ChainView,
 }
 
 /// Proposing, timed into `watch`. The network-only steps run first, together and without
@@ -1113,12 +1161,14 @@ fn propose_inner(
             other => other?,
         };
         watch.lap("build");
-        let tip = wallet.chain_height()?.unwrap_or(server_tip);
+        let view = node::ChainView::of(&wallet)?
+            .with_mempool(&state, &mut client)
+            .await?;
         Ok(Proposed {
             id,
             chain,
             state,
-            tip,
+            view,
         })
     })
 }
@@ -1274,6 +1324,34 @@ fn local_tip(
         .ok_or_else(|| ZafeError::new(ZafeErrorKind::NotReady, "The vault has not synced yet"))
 }
 
+/// This device's view of the chain for checking a vote (`node::check_vote`): the last
+/// sync's, when this process has one (see `vault::synced_view`), else read from the wallet,
+/// waiting for any sync holding it, with the mempool read for `state`'s sent payments when
+/// the caller has the log.
+fn chain_view(
+    db_dir: &str,
+    db_key: &[u8],
+    lightwalletd_url: &str,
+    m: &VaultMaterial,
+    state: Option<&VaultState>,
+) -> Result<node::ChainView, ZafeError> {
+    if let Some(view) = super::vault::synced_view(&m.descriptor.vault_id) {
+        return Ok(view);
+    }
+    let _guard = wallet_lock();
+    runtime().block_on(async {
+        let wallet = open_wallet(db_dir, db_key, lightwalletd_url, m).await?;
+        let view = node::ChainView::of(&wallet)?;
+        Ok(match state {
+            Some(state) => {
+                view.with_mempool(state, &mut connect(lightwalletd_url).await?)
+                    .await?
+            }
+            None => view,
+        })
+    })
+}
+
 pub fn review_proposal(
     relay_url: String,
     lightwalletd_url: String,
@@ -1288,11 +1366,12 @@ pub fn review_proposal(
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
     let mut watch = crate::diag::Stopwatch::new("review");
-    let tip = local_tip(&db_dir, &db_key, &lightwalletd_url, &m)?;
-    watch.lap("tip");
     let (_, state) = runtime().block_on(node::load_state(&vault_relay(&relay_url, &m), &me, &m))?;
     watch.lap("log");
-    let reviewed = node::review(&state, &m, &net, tip, id);
+    let view = chain_view(&db_dir, &db_key, &lightwalletd_url, &m, Some(&state))?;
+    let tip = view.tip;
+    watch.lap("tip");
+    let reviewed = node::review(&state, &m, &net, &view, id);
     watch.lap("check");
     watch.finish();
     match reviewed {
@@ -1351,22 +1430,8 @@ pub fn approve_proposal(
     // Timed per step (diagnostic report, "Slow steps"): `lock` is the wait for a sync
     // holding the wallet, `tip` the chain height read, then the core's steps.
     let mut watch = crate::diag::Stopwatch::new("approve");
-    // The height the last sync stored, when there is one (see `vault::synced_tip`);
-    // otherwise read it from the wallet, waiting for a sync that holds it.
-    let cached = super::vault::synced_tip(&m.descriptor.vault_id);
-    let tip = if let Some(tip) = cached {
-        watch.lap("tip");
-        tip
-    } else {
-        let _guard = wallet_lock();
-        watch.lap("lock");
-        let wallet = runtime().block_on(open_wallet(&db_dir, &db_key, &lightwalletd_url, &m))?;
-        let tip = wallet.chain_height()?.ok_or_else(|| {
-            ZafeError::new(ZafeErrorKind::NotReady, "The vault has not synced yet")
-        })?;
-        watch.lap("tip");
-        tip
-    };
+    let view = chain_view(&db_dir, &db_key, &lightwalletd_url, &m, None)?;
+    watch.lap("tip");
     let mut store = nonce_store(&state_dir, &seeds, &m);
     let mut pool = pool_store(&state_dir, &seeds, &m);
     let approved = runtime().block_on(node::approve(
@@ -1374,7 +1439,7 @@ pub fn approve_proposal(
         &me,
         &m,
         &net,
-        tip,
+        &view,
         id,
         &mut store,
         &mut pool,
@@ -1389,8 +1454,11 @@ pub fn approve_proposal(
     })
 }
 
+/// Rejects the proposal, unless this phone's signature for it may already be out
+/// (`ZafeErrorKind::AlreadySigned`: nothing is logged).
 pub fn reject_proposal(
     relay_url: String,
+    state_dir: String,
     seeds: Vec<u8>,
     material: Vec<u8>,
     proposal_id: String,
@@ -1404,6 +1472,8 @@ pub fn reject_proposal(
         &me,
         &m,
         id,
+        &mut nonce_store(&state_dir, &seeds, &m),
+        &pool_store(&state_dir, &seeds, &m),
         &mut OsRng,
     ));
     watch.lap("relay");
@@ -1726,15 +1796,7 @@ pub fn send_with_progress(
                 Err(_) => BTreeSet::new(),
             };
             let sent = runtime().block_on(Box::pin(node::request_signatures(
-                &relay,
-                &me,
-                &m,
-                &net,
-                tip,
-                id,
-                &used,
-                &silent.load(),
-                &mut OsRng,
+                &relay, &me, &m, &net, tip, id, &used, &silent, &mut OsRng,
             )))?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(leader_dir(&state_dir)).map_err(io)?;
@@ -1816,6 +1878,18 @@ pub fn send_with_progress(
                     silent.update(&quiet, &answered);
                 }
                 return Err(e.into());
+            }
+            Err(node::NodeError::InvalidShares(culprits)) => {
+                // This round can't complete with them: start the next one without them
+                // (asked last from now on). Those who signed approve again.
+                silent.update(&culprits, &[]);
+                let _ = fs::remove_file(&req_path);
+                let _ = fs::remove_file(&own_path);
+                return Err(ZafeError::new(
+                    ZafeErrorKind::NotReady,
+                    "A signer sent an invalid signature. Those who signed approve again, then \
+                     send",
+                ));
             }
             Err(e) => return Err(e.into()),
         };

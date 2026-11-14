@@ -461,6 +461,18 @@ Learned while studying it:
   (independent check on this device, votes, approve/reject, "Collect signatures & send"),
   `/proposal/:id/send` (Vizor's transaction progress screen; the send lives in
   `ProposalsNotifier`, so leaving the screen doesn't stop it), `/activity` (all payments).
+  A member who hasn't voted gets the request view (Approve/Decline) while the payment is
+  open, or approved but not complete (2026-11-14: more approvals help when an approver can't
+  sign any more). **Approve again** also shows when another signer approved interactively
+  and no one-tap group can complete (`needs_reapproval`, `one_tap_blocked`). Cancelled or
+  rejected payments that may be signed (`maybe_signed`) and can still mine
+  (`still_sendable`, from the last sync's `ChainView`) offer **Make it unsendable**; the
+  cancel confirm says the next payment spends their funds. Declining after this phone's
+  signature is out fails with "Your signature is already out" (`AlreadySigned`), nothing
+  logged. A new payment spends a note of each signed cancelled, declined or dropped one
+  (an extra action each, in the fee shown at review). A signed cancelled or declined
+  payment whose transaction mined anyway shows as **Sent anyway** ("It was signed before it
+  was cancelled"), from the last sync's spends (`spend_watch::sent_anyway`).
   Home polls every 15 s (60 s while the live watch is connected: `services/live_vault_watch.dart`,
   `docs/tracker.md` "Live activity"):
   proposals refresh + answering signing requests, then wallet sync.
@@ -1117,7 +1129,10 @@ Learned while studying it:
   `adb reverse` for 8787/9067, so the app's localhost defaults work on a device. Its
   `cli` subcommand does not rebuild: `cargo build -p zafe-cli` after core changes.
 - **agent-device tips**: prefer `find "<text>" click`; refs go stale after every
-  snapshot; `scroll down --until 'label="..."'` before pressing bottom buttons.
+  snapshot; `scroll down --until 'label="..."'` before pressing bottom buttons. After a
+  small-phone check, `adb shell wm size reset`: under a `wm size` override its taps miss
+  (an Approve tap opened the Signers tab), and a swipe from the
+  bottom edge opens the app switcher.
 - **Phone measurements**: proof ~1.7 s on 8 threads, FROST round 2 12 ms / 6.8 MB
   (`scripts/android-bench.sh` measures them).
 - **Recording the phone for review**: run `adb shell screenrecord --time-limit 180 /sdcard/x.mp4` as a background

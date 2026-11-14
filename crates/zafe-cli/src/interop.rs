@@ -1227,6 +1227,7 @@ async fn propose(
             memo,
         }],
         1,
+        &[],
     )?;
     println!("proving...");
     let proved = tokio::task::spawn_blocking(move || {

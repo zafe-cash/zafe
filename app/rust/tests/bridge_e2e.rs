@@ -304,11 +304,14 @@ fn payment_flow_through_bridge() {
         .unwrap()
         .items
     };
-    // B's next sync holds back the notes A's open proposal spends: B's spendable balance
-    // (what B could propose) drops, the total doesn't.
+    // A's own sync holds back the notes its open proposal spends: its spendable balance
+    // (what it could propose) drops, the total doesn't. Nobody else's does until a second
+    // member approves it (one member alone can't freeze funds, `VAULT_EVENT` 12).
+    let a_after = sync(a);
+    assert!(a_after.spendable_zat < b_before.spendable_zat);
+    assert_eq!(a_after.total_zat, b_before.total_zat);
     let b_after = sync(&members[1]);
-    assert!(b_after.spendable_zat < b_before.spendable_zat);
-    assert_eq!(b_after.total_zat, b_before.total_zat);
+    assert_eq!(b_after.spendable_zat, b_before.spendable_zat);
     let p = &list(&members[1])[0];
     assert_eq!(p.id, id);
     assert_eq!(p.stage, ProposalStage::Open);
@@ -367,6 +370,10 @@ fn payment_flow_through_bridge() {
     let p = &list(&members[1])[0];
     assert_eq!(p.stage, ProposalStage::Approved);
     assert_eq!(p.my_vote, MyVote::Approved);
+    // Approved by a second member: every phone holds its notes now.
+    let c_after = sync(&members[2]);
+    assert!(c_after.spendable_zat < b_before.spendable_zat);
+    assert_eq!(c_after.total_zat, b_before.total_zat);
     assert!(
         !p.one_tap,
         "no group is covered, so this one signs interactively"
@@ -623,11 +630,57 @@ fn payment_flow_through_bridge() {
             id3.clone(),
         )
     };
+    // Signed before it is cancelled (one tap): it can still be sent, so the next payment
+    // must spend one of its notes (security review 2026-11, rule 5).
+    for m in [a, &members[1]] {
+        proposals::approve_proposal(
+            relay.clone(),
+            lwd.clone(),
+            m.db_dir.clone(),
+            m.db_key.clone(),
+            m.state_dir.clone(),
+            m.seeds.clone(),
+            m.material.clone(),
+            id3.clone(),
+        )
+        .unwrap();
+    }
     assert!(cancel(&members[1]).is_err(), "only the author cancels");
     cancel(a).unwrap();
     let p = list(&members[2]).into_iter().find(|p| p.id == id3).unwrap();
     assert_eq!(p.stage, ProposalStage::Cancelled);
     assert!(p.expiry_height > 0);
+    assert!(p.maybe_signed && p.still_sendable);
+    let id4 = proposals::propose_payment(
+        relay.clone(),
+        lwd.clone(),
+        a.db_dir.clone(),
+        a.db_key.clone(),
+        a.seeds.clone(),
+        a.material.clone(),
+        vec![PaymentInput {
+            address: payee.clone(),
+            amount_zat: 10_000_000,
+            memo: String::new(),
+        }],
+        false,
+    )
+    .unwrap();
+    let r = proposals::review_proposal(
+        relay.clone(),
+        lwd.clone(),
+        members[2].db_dir.clone(),
+        members[2].db_key.clone(),
+        members[2].seeds.clone(),
+        members[2].material.clone(),
+        id4.clone(),
+    )
+    .unwrap();
+    assert!(
+        r.verified,
+        "the next payment spends its funds: {}",
+        r.problem
+    );
 
     // Make the cancelled payment unsendable: a proposal with no payments spends its notes
     // back to the vault. Every member's check accepts it (all outputs are the vault's).
@@ -721,6 +774,23 @@ fn payment_flow_through_bridge() {
         .find(|p| p.id == sweep)
         .unwrap();
     assert_eq!(s.stage, ProposalStage::Sent);
+    // Mined deep enough (10 blocks, scaled), the cancelled payment can't go out any more:
+    // no "being made unsendable" (that is only while the sweep is pending) and no button.
+    let h = sync(b).height + 31;
+    chain.mine(31);
+    for _ in 0..60 {
+        if sync(b).height >= h {
+            break;
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+    let cancelled = list(b).into_iter().find(|p| p.id == id3).unwrap();
+    assert!(
+        cancelled.invalidated_by.is_none() && !cancelled.still_sendable,
+        "the sweep is mined: {:?} {}",
+        cancelled.invalidated_by,
+        cancelled.still_sendable
+    );
 
     // History export (CSV): both sent payments with payee, amount, fee and memo, plus the
     // faucet payments received. A signer named on this device shows as "Name (hexkey)".
@@ -794,9 +864,12 @@ fn payment_flow_through_bridge() {
         }
     };
 
-    // Past vault 2's birthday; everyone synced (vault 1's earlier sends mine here too).
-    chain.mine(3);
-    let tip = after.height + 6;
+    // Past vault 2's birthday; everyone synced (vault 1's earlier sends mine here too),
+    // and the sweep deep enough that a reorg can't bring back the cancelled payment it
+    // made unsendable (10 blocks, 30 on regtest's 25 s blocks): until then every new
+    // payment would have to spend that payment's (swept) notes.
+    chain.mine(33);
+    let tip = after.height + 36;
     for m in members.iter().chain([&e]) {
         let mut b = sync(m);
         for _ in 0..60 {

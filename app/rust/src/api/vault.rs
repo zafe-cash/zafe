@@ -463,21 +463,27 @@ pub(crate) fn note_count(vault_id: &[u8; 16]) -> Option<usize> {
     NOTE_COUNTS.lock().ok()?.get(vault_id).copied()
 }
 
-/// Each vault's wallet chain height as of this process's last sync, so approving can
-/// check a payment's expiry without opening the wallet: that took the wallet lock and
-/// waited for any sync in progress (2.3 s on a phone, right after proposing). A height a
-/// few seconds old only narrows what is accepted (the upper expiry bound) or signs a
-/// payment a block past expiry, which can't be mined.
-static SYNCED_TIPS: std::sync::Mutex<std::collections::BTreeMap<[u8; 16], u32>> =
+/// Each vault's chain as its wallet saw it at this process's last sync (height and vault
+/// spends, `node::ChainView`), so approving can check a payment's expiry and the payments
+/// it must conflict with without opening the wallet: that took the wallet lock and waited
+/// for any sync in progress (2.3 s on a phone, right after proposing). A view a few
+/// seconds old only narrows what is accepted (the upper expiry bound), signs a payment a
+/// block past expiry, which can't be mined, or still counts a cancelled payment as
+/// sendable a block longer.
+static SYNCED: std::sync::Mutex<std::collections::BTreeMap<[u8; 16], node::ChainView>> =
     std::sync::Mutex::new(std::collections::BTreeMap::new());
 
 pub(crate) fn synced_tip(vault_id: &[u8; 16]) -> Option<u32> {
-    SYNCED_TIPS.lock().ok()?.get(vault_id).copied()
+    Some(SYNCED.lock().ok()?.get(vault_id)?.tip)
 }
 
-pub(crate) fn record_synced_tip(vault_id: [u8; 16], tip: u32) {
-    if let Ok(mut tips) = SYNCED_TIPS.lock() {
-        tips.insert(vault_id, tip);
+pub(crate) fn synced_view(vault_id: &[u8; 16]) -> Option<node::ChainView> {
+    SYNCED.lock().ok()?.get(vault_id).cloned()
+}
+
+pub(crate) fn record_synced(vault_id: [u8; 16], view: node::ChainView) {
+    if let Ok(mut views) = SYNCED.lock() {
+        views.insert(vault_id, view);
     }
 }
 
@@ -618,11 +624,19 @@ pub fn sync_vault(
         } else {
             watch.lap("noscan");
         }
+        let state = loaded.ok().map(|(_, state)| state);
         if wallet.chain_height()?.is_some() {
             // Locks persist in the wallet database, so a failure keeps the last holds.
-            if let Ok((_, state)) = loaded {
+            if let Some(state) = &state {
                 let sent = sent_txs(&db_dir, &m);
-                let _ = node::reserve_notes(&state, &mut wallet, &mut client, &sent).await;
+                let _ = node::reserve_notes(
+                    state,
+                    &me.public().sig_pk,
+                    &mut wallet,
+                    &mut client,
+                    &sent,
+                )
+                .await;
                 watch.lap("holds");
             }
         }
@@ -630,8 +644,13 @@ pub fn sync_vault(
         if let (Ok(n), Ok(mut counts)) = (wallet.unspent_note_count(), NOTE_COUNTS.lock()) {
             counts.insert(m.descriptor.vault_id, n);
         }
-        if let Ok(Some(h)) = wallet.chain_height() {
-            record_synced_tip(m.descriptor.vault_id, h);
+        // With the mempool when a sent payment isn't mined yet: whether it dropped
+        // decides whether the next payment must respend its notes. Without the log there
+        // is nothing to check against yet.
+        if let (Ok(view), Some(state)) = (node::ChainView::of(&wallet), &state) {
+            if let Ok(view) = view.with_mempool(state, &mut client).await {
+                record_synced(m.descriptor.vault_id, view);
+            }
         }
         watch.lap("balance");
         // Before the vault's birthday block exists the wallet has no chain height yet.

@@ -15,6 +15,7 @@ ProposalInfo proposal(
   int expiryHeight = 0,
   String author = 'aa',
   List<String> rejections = const [],
+  bool sentAnyway = false,
 }) => ProposalInfo(
   id: id,
   author: author,
@@ -42,6 +43,8 @@ ProposalInfo proposal(
   expiryHeight: expiryHeight,
   needsReapproval: needsReapproval,
   stillSendable: false,
+  maybeSigned: false,
+  sentAnyway: sentAnyway,
   needsNewProposal: false,
 );
 

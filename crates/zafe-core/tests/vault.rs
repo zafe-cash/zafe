@@ -20,9 +20,18 @@ struct Log {
     ids: Vec<Identity>,
     key: LogKey,
     chain: Chain,
+    threshold: u16,
 }
 
 impl Log {
+    /// A 1-of-3 vault: one approval signs.
+    fn one_of_three() -> Self {
+        Self {
+            threshold: 1,
+            ..Self::new()
+        }
+    }
+
     fn new() -> Self {
         let mut rng = StdRng::seed_from_u64(8);
         // Members are 0..3; 3..6 are outsiders (new phones in seat moves).
@@ -33,6 +42,7 @@ impl Log {
             ids,
             key,
             chain: Chain::new(MAILBOX),
+            threshold: 2,
         }
     }
 
@@ -42,7 +52,7 @@ impl Log {
             version: zafe_proto::version::DESCRIPTOR,
             name: "Grants".into(),
             network: "regtest".into(),
-            threshold: 2,
+            threshold: self.threshold,
             members: self.ids[..3]
                 .iter()
                 .enumerate()
@@ -1071,13 +1081,19 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     let state = log.replay().unwrap();
     assert_eq!(state.proposals[&[1; 16]].expiry_height, expiry);
     assert!(!state.proposals[&[1; 16]].nullifiers.is_empty());
-    // Members check before appending, so a raced proposal is caught before it's written.
-    assert_eq!(
-        state.check(log.ids[1].public().sig_pk, &proposal_with(2, &a2, tip)),
-        Err(VaultError::NotesInUse(2))
-    );
+    // Members check before appending, so a raced proposal is caught before it's written:
+    // from version 12 once a second member approved the first (`proposal_rules`).
+    let mut approved = log.replay().unwrap();
+    approved
+        .apply(2, log.ids[2].public().sig_pk, vote(1, true))
+        .unwrap();
+    assert!(matches!(
+        approved.check(log.ids[1].public().sig_pk, &proposal_with(2, &a2, tip)),
+        Err(VaultError::NotesInUse(_))
+    ));
 
-    // Written anyway (two members raced): everyone ignores the second.
+    // Written anyway (two members raced): everyone ignores the second (these entries are
+    // version 8, whose rule reserved at once).
     log.push(1, &proposal_with(2, &a2, tip));
     log.push(1, &proposal_with(3, &b, tip));
     let state = log.replay().unwrap();
@@ -1101,24 +1117,34 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     );
     let state = log.replay().unwrap();
     assert_eq!(state.proposals[&[3; 16]].status, ProposalStatus::Broadcast);
+    // Member 0's phone holds its own lone proposal 1, not member 2's lone proposal 4.
     let owners = |dropped: &[u8]| {
         let dropped = dropped.iter().map(|d| [*d; 16]).collect();
-        node::note_holds(&state, &dropped)
+        node::note_holds(&state, &dropped, &log.ids[0].public().sig_pk)
             .iter()
             .map(|h| h.owner[0])
             .collect::<Vec<_>>()
     };
-    assert_eq!(owners(&[]), vec![1, 3, 4]);
-    assert_eq!(owners(&[3]), vec![1, 4]);
+    assert_eq!(owners(&[]), vec![1, 3]);
+    // A dropped broadcast may still be sent by anyone with the signed bytes: held past its
+    // expiry by the reorg margin, like a signed cancelled one.
+    assert_eq!(owners(&[3]), vec![1, 3]);
+    let until = |dropped: &[u8]| {
+        let dropped = dropped.iter().map(|d| [*d; 16]).collect();
+        node::note_holds(&state, &dropped, &log.ids[0].public().sig_pk)[1].expiry_height
+    };
+    assert_eq!(until(&[3]), until(&[]) + state.reorg_margin(until(&[])));
 
-    // A cancelled proposal holds nothing: its notes can be respent (to invalidate it).
+    // A cancelled proposal that may not be signed holds nothing: its notes can be respent.
     log.push(0, &VaultEvent::Cancelled { proposal: [1; 16] });
     log.push(1, &proposal_with(5, &a2, tip));
     let state = log.replay().unwrap();
     assert!(state.proposals.contains_key(&[5; 16]));
-    assert!(node::note_holds(&state, &Default::default())
-        .iter()
-        .all(|h| h.owner[0] != 1));
+    assert!(
+        node::note_holds(&state, &Default::default(), &log.ids[0].public().sig_pk)
+            .iter()
+            .all(|h| h.owner[0] != 1)
+    );
 }
 
 /// Counts the nonces `forget_closed` deletes (every commitment counts as held here).
@@ -1215,10 +1241,11 @@ fn expiry_heights_are_rounded_up_to_the_grid() {
 mod spend_watch_tests {
     use super::*;
     use zafe_core::{
-        spend_watch::{unapproved_spends, UnapprovedSpend, GRACE_BLOCKS},
+        spend_watch::{sent_anyway, unapproved_spends, UnapprovedSpend},
         wallet::VaultSpend,
     };
 
+    /// An approved proposal (so possibly signed) whose PCZT fixes txid 5.
     fn state_with_proposal(nfs: &[[u8; 32]], txid: Option<[u8; 32]>) -> VaultState {
         let mut log = Log::new();
         log.push(0, &log.created(&[0, 1, 2]));
@@ -1227,7 +1254,9 @@ mod spend_watch_tests {
         let p = s.proposals.get_mut(&[1; 16]).unwrap();
         p.nullifiers = nfs.to_vec();
         p.txid = txid;
+        p.expected_txid = Some([5; 32]);
         p.status = ProposalStatus::Approved;
+        p.possibly_signed = true;
         s
     }
 
@@ -1245,15 +1274,15 @@ mod spend_watch_tests {
     #[test]
     fn a_spend_logged_as_sent_is_accounted_for_whenever_it_mined() {
         let s = state_with_proposal(&[A, B], Some([7; 32]));
-        // Even long after: the log says this proposal's transaction was sent.
-        assert!(unapproved_spends(&s, &[spend(7, Some(10), &[A, B])], 10_000).is_empty());
+        // The log says this proposal's transaction was sent (a version 7-11 entry).
+        assert!(unapproved_spends(&s, &[spend(7, Some(10), &[A, B])]).is_empty());
     }
 
     #[test]
     fn a_spend_no_proposal_explains_is_flagged_at_once() {
         let s = state_with_proposal(&[A], None);
         let c = [0xC3; 32];
-        let flagged = unapproved_spends(&s, &[spend(9, None, &[c])], 100);
+        let flagged = unapproved_spends(&s, &[spend(9, None, &[c])]);
         assert_eq!(
             flagged,
             vec![UnapprovedSpend {
@@ -1261,55 +1290,60 @@ mod spend_watch_tests {
                 mined_height: None
             }]
         );
-        // One unknown note among known ones is enough.
-        assert_eq!(
-            unapproved_spends(&s, &[spend(9, Some(99), &[A, c])], 100).len(),
-            1
-        );
+        // Spending a proposal's notes isn't enough: it must be that proposal's transaction.
+        assert_eq!(unapproved_spends(&s, &[spend(9, Some(99), &[A])]).len(), 1);
     }
 
+    /// A payment signed before it was cancelled, rejected or withdrawn, and mined anyway,
+    /// is the transaction members verified (its txid is fixed by the PCZT): never "keys
+    /// used outside Zafe", however long ago it mined. In the first batch-3 draft it was
+    /// flagged once its 24-block grace ended.
     #[test]
-    fn cancelled_and_rejected_proposals_get_no_grace() {
+    fn a_signed_payment_mined_after_cancel_is_never_flagged() {
         for status in [
             ProposalStatus::Cancelled,
             ProposalStatus::Rejected,
             ProposalStatus::Open,
+            ProposalStatus::Approved,
         ] {
-            let mut s = state_with_proposal(&[A], None);
+            let mut s = state_with_proposal(&[A, B], None);
             s.proposals.get_mut(&[1; 16]).unwrap().status = status;
-            assert_eq!(unapproved_spends(&s, &[spend(5, None, &[A])], 100).len(), 1);
+            let mined = [spend(5, Some(100), &[A, B])];
+            assert!(unapproved_spends(&s, &mined).is_empty(), "{status:?}");
+            // Shown as sent when it was cancelled or rejected.
+            let anyway = sent_anyway(&s, &mined);
+            assert_eq!(
+                anyway.get(&[1; 16]),
+                matches!(status, ProposalStatus::Cancelled | ProposalStatus::Rejected)
+                    .then_some(&[5; 32]),
+                "{status:?}"
+            );
+            // Not yet mined: not sent yet.
+            assert!(sent_anyway(&s, &[spend(5, None, &[A, B])]).is_empty());
         }
-        // A transaction other than the one the PCZT fixes is not that proposal's.
+    }
+
+    /// Nobody can have signed a proposal that never reached Approved and got no shares:
+    /// its transaction mined means keys used outside Zafe.
+    #[test]
+    fn a_proposal_nobody_signed_explains_nothing() {
         let mut s = state_with_proposal(&[A], None);
-        s.proposals.get_mut(&[1; 16]).unwrap().expected_txid = Some([6; 32]);
-        assert_eq!(unapproved_spends(&s, &[spend(5, None, &[A])], 100).len(), 1);
-        assert!(unapproved_spends(&s, &[spend(6, None, &[A])], 100).is_empty());
+        let p = s.proposals.get_mut(&[1; 16]).unwrap();
+        p.status = ProposalStatus::Open;
+        p.possibly_signed = false;
+        assert_eq!(unapproved_spends(&s, &[spend(5, None, &[A])]).len(), 1);
+        assert!(sent_anyway(&s, &[spend(5, Some(1), &[A])]).is_empty());
     }
 
     #[test]
-    fn a_proposals_spend_is_given_time_to_be_logged() {
+    fn rows_of_one_transaction_are_one_spend() {
         let s = state_with_proposal(&[A, B], None);
-        // Sent but the broadcast entry isn't in the log yet: fine while recent...
-        assert!(unapproved_spends(&s, &[spend(5, None, &[A])], 100).is_empty());
-        assert!(
-            unapproved_spends(&s, &[spend(5, Some(100), &[A, B])], 100 + GRACE_BLOCKS).is_empty()
-        );
-        // ...flagged once it has been mined for longer than the grace period with no
-        // matching broadcast (a payment that was cancelled, or paid somewhere else).
+        // The wallet reports one row per spent note.
+        assert!(unapproved_spends(&s, &[spend(5, None, &[A]), spend(5, None, &[B])]).is_empty());
         assert_eq!(
-            unapproved_spends(&s, &[spend(5, Some(100), &[A, B])], 100 + GRACE_BLOCKS + 1).len(),
+            unapproved_spends(&s, &[spend(9, None, &[A]), spend(9, None, &[B])]).len(),
             1
         );
-    }
-
-    #[test]
-    fn rows_of_one_transaction_are_one_spend_and_a_transaction_without_notes_is_flagged() {
-        let s = state_with_proposal(&[A, B], None);
-        // The wallet reports one row per spent note; together they match the proposal.
-        let rows = [spend(5, None, &[A]), spend(5, None, &[B])];
-        assert!(unapproved_spends(&s, &rows, 100).is_empty());
-        let none = state_with_proposal(&[], None);
-        assert_eq!(unapproved_spends(&none, &rows, 100).len(), 1);
     }
 }
 
@@ -1904,4 +1938,629 @@ fn a_stopped_helpers_new_key_stays_stopped() {
         .map(|(i, _)| *i)
         .collect();
     assert!(ignored.ends_with(&[at, at + 1, at + 2]), "{ignored:?}");
+}
+
+// --- Proposal rules (VAULT_EVENT 12, security review 2026-11 "Proposals") ---------------
+
+mod proposal_rules {
+    use super::*;
+    use common::{build_pczt, outside_address, receive_ironwood_note, witness, Out, TARGET_HEIGHT};
+    use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+    use zafe_core::{node::ChainView, wallet::VaultSpend};
+
+    const TIP: u32 = TARGET_HEIGHT - 1;
+
+    fn sk() -> SpendingKey {
+        SpendingKey::from_bytes([3; 32]).unwrap()
+    }
+
+    fn fvk() -> FullViewingKey {
+        FullViewingKey::from(&sk())
+    }
+
+    fn note(i: u32) -> orchard::Note {
+        let fvk = fvk();
+        receive_ironwood_note(&fvk, fvk.address_at(i, Scope::External), 1_000_000)
+    }
+
+    /// Spends `note` whole (minus the fee) back to the vault's change address.
+    fn sweep(note: orchard::Note) -> pczt::Pczt {
+        let fvk = fvk();
+        let (anchor, path) = witness(&note);
+        build_pczt(
+            &fvk,
+            note,
+            path,
+            anchor,
+            vec![Out {
+                ovk: Some(fvk.to_ovk(Scope::Internal)),
+                recipient: fvk.address_at(0u32, Scope::Internal),
+                value: 990_000,
+                memo: zcash_protocol::memo::MemoBytes::empty(),
+            }],
+        )
+    }
+
+    fn nf(note: &orchard::Note) -> [u8; 32] {
+        note.nullifier(&fvk()).to_bytes()
+    }
+
+    fn pk(log: &Log, i: usize) -> [u8; 32] {
+        log.ids[i].public().sig_pk
+    }
+
+    /// A proposal reserves its notes only once a member other than its author approved
+    /// it, or it may be signed (rule 4). On 4b5ae0e a proposal reserved from the moment it
+    /// was logged: one member alone could freeze any note.
+    #[test]
+    fn a_lone_proposal_reserves_nothing() {
+        let a = note(0);
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push_v(0, &proposal_with(1, &sweep(a), TIP), 12);
+        let n = proposal_with(2, &sweep(a), TIP);
+        let check = |log: &Log| log.replay().unwrap().check(pk(log, 2), &n);
+        assert_eq!(check(&log), Ok(()), "only its author's word");
+        log.push_v(0, &vote(1, true), 12);
+        assert_eq!(
+            check(&log),
+            Ok(()),
+            "its author's approval is still one member"
+        );
+
+        // A second member's approval reserves, until it is withdrawn.
+        let mut second = Log::new();
+        second.push(0, &second.created(&[0, 1, 2]));
+        second.push_v(0, &proposal_with(1, &sweep(a), TIP), 12);
+        second.push_v(1, &vote(1, true), 12);
+        assert!(matches!(check(&second), Err(VaultError::NotesInUse(_))));
+        second.push_v(1, &vote(1, false), 12);
+        assert_eq!(check(&second), Ok(()));
+
+        // Once it reached Approved it may be signed, but in the log it reserves only while
+        // a second member approves: when that one withdraws, the author's word is alone
+        // again. Phones still hold its notes (`note_holds`: possibly signed).
+        log.push_v(1, &vote(1, true), 12);
+        log.push_v(1, &vote(1, false), 12);
+        let s = log.replay().unwrap();
+        assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Open);
+        assert!(s.proposals[&[1; 16]].possibly_signed);
+        assert_eq!(check(&log), Ok(()));
+        assert!(node::note_holds(&s, &Default::default(), &pk(&log, 2))
+            .iter()
+            .any(|h| h.owner == [1; 32]));
+
+        // A second member's one-tap vote is its approval (no commitments): it reserves.
+        let mut one_tap = pooled_log(2);
+        one_tap.push_v(0, &proposal_with(1, &sweep(a), TIP), 12);
+        // Groups: 0 = {m0,m1}, 1 = {m0,m2}, 2 = {m1,m2}; member 1 is in 0 and 2.
+        one_tap.push_v(1, &share_vote(1, &[0, 2]), 12);
+        let s = one_tap.replay().unwrap();
+        assert!(s.ignored.is_empty(), "{:?}", s.ignored);
+        assert!(matches!(
+            s.check(pk(&one_tap, 2), &n),
+            Err(VaultError::NotesInUse(_))
+        ));
+    }
+
+    /// With one signer the author's approval signs: no member other than the author ever
+    /// approves, and the proposal reserves at once because it may be signed.
+    #[test]
+    fn with_one_signer_the_authors_approval_reserves() {
+        let a = note(0);
+        let mut log = Log::one_of_three();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push_v(0, &proposal_with(1, &sweep(a), TIP), 12);
+        let n = proposal_with(2, &sweep(a), TIP);
+        assert_eq!(log.replay().unwrap().check(pk(&log, 1), &n), Ok(()));
+        log.push_v(0, &vote(1, true), 12);
+        let s = log.replay().unwrap();
+        let p = &s.proposals[&[1; 16]];
+        assert_eq!(p.status, ProposalStatus::Approved);
+        assert!(p.possibly_signed && p.approvals.keys().all(|m| *m == p.author));
+        assert!(matches!(
+            s.check(pk(&log, 1), &n),
+            Err(VaultError::NotesInUse(_))
+        ));
+    }
+
+    /// The tip a proposal claims is its author's word: its reservation never runs past the
+    /// vault's window from that tip, even when its expiry is later. On 4b5ae0e the expiry
+    /// alone bounded it.
+    #[test]
+    fn a_reservation_ends_at_the_window_from_its_tip() {
+        let a = note(0);
+        let p1 = sweep(a);
+        let expiry = *p1.global().expiry_height();
+        // Regtest counts 25 s blocks: the 75 s window, slack and rounding times 3.
+        let window = 3 * (8064 + 96 + 144);
+        let claimed = expiry - window - 20;
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push_v(0, &proposal_with(1, &p1, claimed), 12);
+        log.push_v(1, &vote(1, true), 12);
+        let s = log.replay().unwrap();
+        assert_eq!(s.reservation_end(&s.proposals[&[1; 16]]), expiry - 20);
+        let at = |tip| s.check(pk(&log, 2), &proposal_with(2, &sweep(a), tip));
+        assert!(matches!(at(expiry - 21), Err(VaultError::NotesInUse(_))));
+        assert_eq!(
+            at(expiry - 20),
+            Ok(()),
+            "past its window, before its expiry"
+        );
+    }
+
+    /// From version 12 a member whose vote carried shares may add interactive commitments
+    /// (its shares stay); it still can't reject or post other shares. Version 11 logs
+    /// replay as before.
+    #[test]
+    fn a_member_who_signed_one_tap_may_add_commitments() {
+        let commit = VaultEvent::Vote {
+            proposal: [1; 16],
+            pczt_hash: [1; 32],
+            approve: true,
+            commitments: vec![vec![9; 64]],
+            shares: vec![],
+        };
+        let log_at = |version: u16| {
+            let mut log = pooled_log(2);
+            log.push(0, &proposal(1));
+            log.push_v(0, &share_vote(1, &[0, 1]), version);
+            log.push_v(0, &commit, version);
+            log
+        };
+        let s = log_at(11).replay().unwrap();
+        assert!(matches!(s.ignored[..], [(_, VaultError::VoteFinal(_))]));
+
+        let mut log = log_at(12);
+        let s = log.replay().unwrap();
+        assert!(s.ignored.is_empty(), "{:?}", s.ignored);
+        let p = &s.proposals[&[1; 16]];
+        assert_eq!(p.approvals[&pk(&log, 0)], vec![vec![9; 64]]);
+        assert_eq!(p.shares[&pk(&log, 0)].len(), 2, "its shares stay");
+        assert!(p.possibly_signed);
+        log.push_v(0, &vote(1, false), 12);
+        log.push_v(0, &share_vote(1, &[0]), 12);
+        let s = log.replay().unwrap();
+        assert_eq!(
+            s.ignored
+                .iter()
+                .filter(|(_, e)| matches!(e, VaultError::VoteFinal(_)))
+                .count(),
+            2
+        );
+    }
+
+    /// Signs every vault spend of `pczt` with the vault key, proves, and extracts: the
+    /// bytes a broadcast sends.
+    fn signed_tx(pczt: &pczt::Pczt) -> Vec<u8> {
+        use pczt::roles::{prover::Prover, signer::Signer, tx_extractor::TransactionExtractor};
+        let ask = orchard::keys::SpendAuthorizingKey::from(&sk());
+        let mut signer = Signer::new(pczt.clone()).unwrap();
+        for spend in zafe_core::tx::spends_to_sign(pczt, &fvk()).unwrap() {
+            signer
+                .sign_ironwood(zafe_core::zrng::zrng(), spend.action_index, &ask)
+                .unwrap();
+        }
+        let proved = Prover::new(signer.finish())
+            .create_ironwood_proof(zafe_core::zrng::zrng(), common::proving_key())
+            .unwrap()
+            .finish();
+        let tx = TransactionExtractor::new(proved)
+            .with_orchard(common::verifying_key())
+            .extract(zafe_core::zrng::zrng())
+            .unwrap();
+        let mut raw = Vec::new();
+        tx.write(&mut raw).unwrap();
+        raw
+    }
+
+    /// From version 12 "sent" needs proof: the signed transaction, every spend's signature
+    /// valid over the PCZT's sighash. On 4b5ae0e a txid alone (which the PCZT fixes, and
+    /// every member knows) closed the proposal for everyone.
+    #[test]
+    fn a_broadcast_needs_the_signed_transaction() {
+        let fvk = fvk();
+        let a = note(0);
+        let (anchor, path) = witness(&a);
+        let pczt = build_pczt(
+            &fvk,
+            a,
+            path,
+            anchor,
+            vec![
+                Out {
+                    ovk: Some(fvk.to_ovk(Scope::External)),
+                    recipient: outside_address(9),
+                    value: 400_000,
+                    memo: zcash_protocol::memo::MemoBytes::empty(),
+                },
+                Out {
+                    ovk: Some(fvk.to_ovk(Scope::Internal)),
+                    recipient: fvk.address_at(0u32, Scope::Internal),
+                    value: 590_000,
+                    memo: zcash_protocol::memo::MemoBytes::empty(),
+                },
+            ],
+        );
+        let txid = zafe_core::tx::shielded_sighash(&pczt).unwrap();
+        let raw = signed_tx(&pczt);
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push(0, &proposal_with(1, &pczt, TIP));
+        log.push(0, &vote(1, true));
+        log.push(1, &vote(1, true));
+
+        log.push_v(
+            2,
+            &VaultEvent::Broadcast {
+                proposal: [1; 16],
+                txid,
+            },
+            12,
+        );
+        // A signature that doesn't verify: signatures aren't in the txid, so flipping a
+        // byte of one keeps the transaction and its txid (the binding signature and the
+        // proof, last in the bundle, aren't checked: those flips still pass).
+        let mut tampered = None;
+        for i in (0..raw.len()).rev() {
+            let mut t = raw.clone();
+            t[i] ^= 0x01;
+            if matches!(
+                zafe_core::tx::check_signed(&pczt, &t),
+                Err(zafe_core::tx::TxError::Sign(_))
+            ) {
+                tampered = Some(t);
+                break;
+            }
+        }
+        let tampered = tampered.expect("a byte that only breaks a spend signature");
+        log.push_v(
+            2,
+            &VaultEvent::SignedBroadcast {
+                proposal: [1; 16],
+                tx: tampered,
+            },
+            12,
+        );
+        let s = log.replay().unwrap();
+        assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Approved);
+        assert!(matches!(
+            s.ignored[..],
+            [
+                (4, VaultError::BadBroadcast(4)),
+                (5, VaultError::BadBroadcast(5))
+            ]
+        ));
+
+        log.push_v(
+            2,
+            &VaultEvent::SignedBroadcast {
+                proposal: [1; 16],
+                tx: raw.clone(),
+            },
+            12,
+        );
+        let s = log.replay().unwrap();
+        let p = &s.proposals[&[1; 16]];
+        assert_eq!(p.status, ProposalStatus::Broadcast);
+        assert_eq!(p.txid, Some(txid));
+        assert_eq!(p.signed_tx.as_deref(), Some(&raw[..]));
+    }
+
+    /// A cancelled payment that may be signed stays sendable until its notes are spent
+    /// deep enough that a reorg won't undo it, or it is past its expiry by that margin;
+    /// until then members approve a new payment only if it spends one of its notes
+    /// (rule 5). On 4b5ae0e nothing tied the two: both could mine.
+    #[test]
+    fn a_cancelled_signed_payment_must_be_respent() {
+        let (a, b) = (note(0), note(1));
+        let w = sweep(a);
+        let expiry = *w.global().expiry_height();
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push_v(0, &proposal_with(1, &w, TIP), 12);
+        log.push_v(0, &vote(1, true), 12);
+        log.push_v(1, &vote(1, true), 12);
+        log.push_v(0, &VaultEvent::Cancelled { proposal: [1; 16] }, 12);
+        log.push_v(2, &proposal_with(2, &sweep(b), TIP), 12);
+        log.push_v(2, &proposal_with(3, &sweep(a), TIP), 12);
+        let s = log.replay().unwrap();
+        let margin = 30; // 10 blocks, regtest's 25 s blocks
+        assert_eq!(s.reorg_margin(TIP), margin);
+        let view = |tip, spends| ChainView {
+            tip,
+            spends,
+            dropped: vec![],
+        };
+        let live = |v: &ChainView| {
+            node::still_sendable(&s, v)
+                .iter()
+                .map(|p| p.id[0])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(live(&view(TIP, vec![])), vec![1]);
+        assert!(matches!(
+            node::check_vote(&s, &[2; 16], &view(TIP, vec![])),
+            Err(node::NodeError::Verification(_))
+        ));
+        node::check_vote(&s, &[3; 16], &view(TIP, vec![])).unwrap();
+
+        // Dead once a spend of its note is `margin` deep; a shallower one can be undone.
+        let spent = |confirmations: u32| {
+            vec![VaultSpend {
+                txid: [7; 32],
+                mined_height: Some(TIP + 1 - confirmations),
+                nullifiers: vec![nf(&a)],
+            }]
+        };
+        assert_eq!(live(&view(TIP, spent(margin - 1))), vec![1]);
+        assert!(live(&view(TIP, spent(margin))).is_empty());
+        node::check_vote(&s, &[2; 16], &view(TIP, spent(margin))).unwrap();
+        // Or past its expiry by the margin.
+        assert_eq!(live(&view(expiry + margin - 1, vec![])), vec![1]);
+        assert!(live(&view(expiry + margin, vec![])).is_empty());
+
+        // Its notes stay held while it can mine, under its own owner (the next proposal
+        // draws on them first), and so do a proposal's own author's.
+        let holds = node::note_holds(&s, &Default::default(), &pk(&log, 2));
+        let held = |id: u8| holds.iter().find(|h| h.owner == [id; 32]);
+        assert_eq!(held(1).unwrap().expiry_height, expiry + margin);
+        assert!(
+            held(2).is_some() && held(3).is_some(),
+            "member 2's own proposals"
+        );
+        let others = node::note_holds(&s, &Default::default(), &pk(&log, 1));
+        assert!(
+            others.iter().all(|h| h.owner[0] == 1),
+            "lone proposals hold nothing"
+        );
+    }
+
+    /// A proposal's claimed tip must be near this member's: far ahead means this phone
+    /// should sync first; far behind, it reserved notes on a tip nobody had.
+    #[test]
+    fn a_vote_checks_the_claimed_tip() {
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push_v(0, &proposal_with(1, &sweep(note(0)), TIP), 12);
+        let s = log.replay().unwrap();
+        let at = |tip| {
+            node::check_vote(
+                &s,
+                &[1; 16],
+                &ChainView {
+                    tip,
+                    spends: vec![],
+                    dropped: vec![],
+                },
+            )
+        };
+        // Regtest: 10 blocks are 30, the window 3 x 8064.
+        at(TIP - 30).unwrap();
+        assert!(matches!(at(TIP - 31), Err(node::NodeError::NotReady(_))));
+        at(TIP + 3 * 8064).unwrap();
+        assert!(matches!(
+            at(TIP + 3 * 8064 + 1),
+            Err(node::NodeError::Verification(_))
+        ));
+    }
+}
+
+/// Attacks on the proposal rules (batch 3 review). Each test states what an attacker does
+/// and asserts what an honest member must see.
+mod proposal_attacks {
+    use super::*;
+    use common::{build_pczt, outside_address, receive_ironwood_note, witness, Out, TARGET_HEIGHT};
+    use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+    use zafe_core::node::ChainView;
+
+    const TIP: u32 = TARGET_HEIGHT - 1;
+
+    fn sk() -> SpendingKey {
+        SpendingKey::from_bytes([3; 32]).unwrap()
+    }
+
+    fn fvk() -> FullViewingKey {
+        FullViewingKey::from(&sk())
+    }
+
+    fn note(i: u32) -> orchard::Note {
+        let fvk = fvk();
+        receive_ironwood_note(&fvk, fvk.address_at(i, Scope::External), 1_000_000)
+    }
+
+    fn pay(note: orchard::Note) -> pczt::Pczt {
+        let fvk = fvk();
+        let (anchor, path) = witness(&note);
+        build_pczt(
+            &fvk,
+            note,
+            path,
+            anchor,
+            vec![
+                Out {
+                    ovk: Some(fvk.to_ovk(Scope::External)),
+                    recipient: outside_address(9),
+                    value: 400_000,
+                    memo: zcash_protocol::memo::MemoBytes::empty(),
+                },
+                Out {
+                    ovk: Some(fvk.to_ovk(Scope::Internal)),
+                    recipient: fvk.address_at(0u32, Scope::Internal),
+                    value: 590_000,
+                    memo: zcash_protocol::memo::MemoBytes::empty(),
+                },
+            ],
+        )
+    }
+
+    fn signed_tx(pczt: &pczt::Pczt) -> Vec<u8> {
+        use pczt::roles::{prover::Prover, signer::Signer, tx_extractor::TransactionExtractor};
+        let ask = orchard::keys::SpendAuthorizingKey::from(&sk());
+        let mut signer = Signer::new(pczt.clone()).unwrap();
+        for spend in zafe_core::tx::spends_to_sign(pczt, &fvk()).unwrap() {
+            signer
+                .sign_ironwood(zafe_core::zrng::zrng(), spend.action_index, &ask)
+                .unwrap();
+        }
+        let proved = Prover::new(signer.finish())
+            .create_ironwood_proof(zafe_core::zrng::zrng(), common::proving_key())
+            .unwrap()
+            .finish();
+        let tx = TransactionExtractor::new(proved)
+            .with_orchard(common::verifying_key())
+            .extract(zafe_core::zrng::zrng())
+            .unwrap();
+        let mut raw = Vec::new();
+        tx.write(&mut raw).unwrap();
+        raw
+    }
+
+    fn pk(log: &Log, i: usize) -> [u8; 32] {
+        log.ids[i].public().sig_pk
+    }
+
+    /// Replay doesn't verify one-tap shares, and one member's shares are enough for
+    /// `possibly_signed`. So member 0, alone, proposes spending note `a`, posts garbage
+    /// "shares" for its own one-tap groups, and the proposal reserves `a`: rule 4 says one
+    /// member alone can't freeze funds.
+    #[test]
+    fn a_lone_members_own_shares_dont_reserve_notes() {
+        let a = note(0);
+        let mut log = pooled_log(2);
+        log.push_v(0, &proposal_with(1, &pay(a), TIP), 12);
+        log.push_v(0, &share_vote(1, &[0, 1]), 12);
+        let s = log.replay().unwrap();
+        assert!(s.ignored.is_empty(), "{:?}", s.ignored);
+        let p = &s.proposals[&[1; 16]];
+        assert!(
+            p.approvals.keys().all(|m| *m == p.author),
+            "nobody else approved"
+        );
+        let n = proposal_with(2, &pay(a), TIP);
+        assert_eq!(
+            s.check(pk(&log, 2), &n),
+            Ok(()),
+            "member 0's own word reserves member 0's proposal's notes"
+        );
+    }
+
+    /// The same lone member then cancels: its proposal is a "still sendable" payment (one
+    /// honest share-poster plus t - 1 dishonest members can sign it, so it can't be
+    /// dropped). It must not stall the others: it blocks no proposal logged before it (a
+    /// sweep waiting for approvals included), and a later payment that spends one of its
+    /// notes is approved (`propose` spends one of each such payment's notes; the wallet test
+    /// is in `regtest_e2e`). Before the fix it blocked the earlier proposal too.
+    #[test]
+    fn a_lone_members_cancelled_shares_dont_block_other_payments() {
+        let (a, b) = (note(0), note(1));
+        let mut log = pooled_log(4);
+        log.push_v(2, &proposal_with(2, &pay(b), TIP), 12);
+        log.push_v(0, &proposal_with(1, &pay(a), TIP), 12);
+        log.push_v(0, &share_vote(1, &[0, 1]), 12);
+        log.push_v(0, &VaultEvent::Cancelled { proposal: [1; 16] }, 12);
+        log.push_v(1, &proposal_with(3, &pay(a), TIP), 12);
+        log.push_v(1, &proposal_with(4, &pay(b), TIP), 12);
+        let s = log.replay().unwrap();
+        assert!(s.ignored.is_empty(), "{:?}", s.ignored);
+        let view = ChainView {
+            tip: TIP,
+            spends: vec![],
+            dropped: vec![],
+        };
+        let vote = |id: u8| node::check_vote(&s, &[id; 16], &view).map_err(|e| e.to_string());
+        assert_eq!(
+            vote(2),
+            Ok(()),
+            "logged before the cancelled one: not blocked"
+        );
+        assert_eq!(vote(3), Ok(()), "spends its note");
+        assert!(
+            vote(4).is_err(),
+            "later, and doesn't spend its note: both could mine"
+        );
+    }
+
+    /// A malicious member logs the payment's `SignedBroadcast` with valid spend signatures
+    /// and a broken proof (not checked), and never sends a valid copy. Every phone's resend
+    /// fails, so `reserve_notes` drops it and releases its notes, and nothing makes the
+    /// next payment respend them. The attacker sends a valid copy (any member can prove)
+    /// once the members paid again with other notes: both mine.
+    #[test]
+    fn a_dropped_broadcast_still_holds_its_notes() {
+        let (a, b) = (note(0), note(1));
+        let pczt = pay(a);
+        let mut raw = signed_tx(&pczt);
+        // Break the proof: the last byte of the bundle is the binding signature's; the proof
+        // sits just before. Flip bytes until check_signed still passes but it isn't the
+        // valid transaction.
+        let valid = raw.clone();
+        let mut broke = false;
+        for i in (0..raw.len()).rev().skip(64) {
+            let mut t = valid.clone();
+            t[i] ^= 0x01;
+            if zafe_core::tx::check_signed(&pczt, &t).is_ok() {
+                raw = t;
+                broke = true;
+                break;
+            }
+        }
+        assert!(broke, "a byte check_signed doesn't cover");
+        let mut log = Log::new();
+        log.push(0, &log.created(&[0, 1, 2]));
+        log.push_v(0, &proposal_with(1, &pczt, TIP), 12);
+        log.push_v(0, &vote(1, true), 12);
+        log.push_v(1, &vote(1, true), 12);
+        log.push_v(
+            1,
+            &VaultEvent::SignedBroadcast {
+                proposal: [1; 16],
+                tx: raw,
+            },
+            12,
+        );
+        log.push_v(2, &proposal_with(2, &pay(b), TIP), 12);
+        let s = log.replay().unwrap();
+        assert!(s.ignored.is_empty(), "{:?}", s.ignored);
+        assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Broadcast);
+        let dropped = [[1u8; 16]].into_iter().collect();
+        let holds = node::note_holds(&s, &dropped, &pk(&log, 2));
+        assert!(
+            holds.iter().any(|h| h.owner == [1; 32]),
+            "a dropped broadcast may be signed: its notes stay held until it can't mine"
+        );
+        let txid = s.proposals[&[1; 16]].txid.unwrap();
+        let view = ChainView {
+            tip: TIP,
+            spends: vec![],
+            dropped: vec![txid],
+        };
+        assert!(
+            node::check_vote(&s, &[2; 16], &view).is_err(),
+            "a payment that doesn't respend a dropped signed one: both can mine"
+        );
+        // While it is in the mempool (or mined) it is going out: nobody pays it again, and
+        // the next payment may use other notes.
+        let pending = ChainView {
+            dropped: vec![],
+            ..view.clone()
+        };
+        assert_eq!(
+            node::check_vote(&s, &[2; 16], &pending).map_err(|e| e.to_string()),
+            Ok(())
+        );
+        let mined = ChainView {
+            spends: vec![zafe_core::wallet::VaultSpend {
+                txid,
+                mined_height: Some(TIP),
+                nullifiers: vec![],
+            }],
+            ..view
+        };
+        assert_eq!(
+            node::check_vote(&s, &[2; 16], &mined).map_err(|e| e.to_string()),
+            Ok(())
+        );
+    }
 }

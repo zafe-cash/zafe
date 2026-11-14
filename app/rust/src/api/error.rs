@@ -88,6 +88,9 @@ pub enum ZafeErrorKind {
     MoveStale,
     /// Two moves switched from the same history: "Two moves found: ask your group."
     TwoMoves,
+    /// This phone's signature for the payment may already be out, so it can't decline it
+    /// (nothing was logged); its proposer can cancel it.
+    AlreadySigned,
 }
 
 /// Which server an error came from, when it came from one.
@@ -224,6 +227,7 @@ impl From<NodeError> for ZafeError {
             NodeError::MoveExpired => ZafeErrorKind::MoveExpired,
             NodeError::MoveStale => ZafeErrorKind::MoveStale,
             NodeError::TwoMoves => ZafeErrorKind::TwoMoves,
+            NodeError::AlreadySigned => ZafeErrorKind::AlreadySigned,
             _ => ZafeErrorKind::Other,
         };
         let members = match &e {

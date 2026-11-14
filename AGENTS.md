@@ -169,13 +169,21 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   v6 + branch id + expiry; Ironwood only; **all spends checked before any output**; each spend
   is a vault note (nullifier/rk vs vault FVK) or a zero-value pre-signed dummy; each payment
   output recovered with the vault **external OVK** and matched exactly (recipient, amount,
-  memo); change must belong to the vault **and trial-decrypt** with its IVK; fee must
-  **equal** ZIP 317 (5000 × max(2, actions)), and actions ≤ max(2, vault spends > 5,000 zat,
-  payments + change outputs ≤ 4) so padding can't raise it (`TooManyActions`; local only,
-  never in replay). Zero-value/dust vault spends are signed but never counted: a zero-value
-  note needs no Merkle path, and upstream selection never spends dust in its own action;
-  sighash computed locally.
-- **Proposals use `OvkPolicy::Sender`** and Ironwood change, or verification fails. A vault can
+  memo); every output to the vault (zero-value too) must **trial-decrypt** with its IVK and be
+  recovered with the **internal OVK** as exactly the change address (internal, 0), its value
+  and an empty memo (no data in change); fee must **equal** ZIP 317 (5000 × max(2, actions)),
+  equal the Ironwood `value_sum`, other pools' value sums 0, flags exactly
+  `ironwood_v3().default_flags()`; actions ≤ max(2, vault spends > 5,000 zat, payments + change
+  outputs ≤ 4) so padding can't raise it (`TooManyActions`; local only, never in replay).
+  Zero-value/dust vault spends are signed but never counted: a zero-value note needs no Merkle
+  path, and upstream selection never spends dust in its own action; sighash computed locally.
+  Not checked: the anchor (the wallet keeps 100 checkpoints, windows are days: a bad anchor
+  only makes an unmineable tx). Before a vote also `node::check_vote` (`ChainView`: synced tip +
+  vault spends): claimed tip ≤ ours + 10 (× scale; else "sync first") and ≥ ours − window; and
+  a note of every `still_sendable` proposal is spent (below).
+- **Proposals use `OvkPolicy::Custom`** (`VaultWallet::ovk_policy`: external OVK for payments,
+  internal for change; sweeps internal for both) and Ironwood change, or verification fails:
+  `Sender` sets no internal OVK, so change's `out_ciphertext` was random. A vault can
   never pay its own addresses (`node::propose` refuses). Change is split into up to 4 notes
   (`wallet::change_split_policy`) while the vault has fewer than 4 spendable notes.
 - **Shares are bound to the exact request** (request hash); aggregate only via
@@ -188,52 +196,94 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   vault id)`; `put` errors so a failed write never publishes an approval. The directory must be
   excluded from backups/device transfer (Android done; iOS `isExcludedFromBackup` not yet).
   Interactive replies are kept (`keep_reply`) until the relay accepts them; `respond` skips
-  closed/expired proposals.
+  closed/expired proposals. `FileNonceStore::take` claims by **renaming** to
+  `<file>.<random>.taking` (one of two racing processes wins), reads, then deletes; a leftover
+  claim counts as released (`NonceStore::claimed`), never read or renamed back.
+- **A share leaves only for logged votes** (`node::check_request_logged`, in `respond` and
+  `sign_own_shares`): every signer's commitments in a request are its latest logged vote's,
+  nobody else is in the packages. So a signature implies the log reached Approved (rule 5);
+  never a failed append, a vote replaced by a reject, or a pool commitment. An approval whose
+  append failed reposts its stored commitments (`approve`).
+- **Reject never follows a released signature** (`node::reject` → `AlreadySigned`, nothing
+  logged): not with one-tap shares (logged or kept), a kept or sent reply (an interactive
+  approval in the log whose nonces aren't here, once the proposal is possibly signed: a
+  restored phone may reject before that), or a claimed nonce file. It `take`s this
+  phone's nonces first.
 - **Leader**: never messages itself (relay 403); when it is a signer it signs locally
   (`node::sign_own_shares`, keeps `<id>.own` until broadcast). Asks itself first, then members
   not in `SilentSigners`, then the silent ones (`node::order_signers`). Persists each request
   (`<id>.req`) and used commitment sets; **Start over** deletes only `.req`/`.own`, so the
   next round needs t fresh approvals. A member can re-approve exactly when it holds no nonces
   for (proposal, pczt hash). `used_commitments.bin` unreadable is an **error**, never empty.
+  A share that doesn't verify ends the round (`NodeError::InvalidShares`, FROST names the
+  culprit): callers mark it silent and drop `.req`/`.own`; unusable logged commitments are
+  skipped and marked silent in `request_signatures`.
 - **Proving runs in parallel with share collection** (`node::finalize`): the proof doesn't
   depend on signatures. Proving keys are process-wide `OnceLock`s.
 - **One-tap signing** (spec §9.5.2): members pre-publish commitments (`VaultEvent::Commitments`,
   nonces stored *before* appending); replaying a `Proposal` assigns each (group, spend, member)
   the member's next pool commitment, never reusing one, and only to groups whose **every**
-  member has a pool (event v6+). **A vote with shares is final.** `sign_groups` checks every
+  member has a pool (event v6+). **A vote with shares can't be withdrawn or replaced**; from
+  v12 it may add interactive commitments (shares kept). `sign_groups` checks every
   commitment is ours and present **before** taking any nonce. The first complete group is
   `ready_group`; anyone can send it (`send_ready` tries every complete group). Falls back to
   interactive when pools are short or C(n, t) > 64. Pools are published at the end of keygen,
   refilled below half by `top_up_pool` (run on every `list_proposals`), and drain when a
   proposal **enters the log**. A signed vote is kept (`PoolStore::keep_vote`) before appending
-  and reposted on retry; never fall back to interactive for a member whose shares were lost
-  (deadlocks a 2-of-2).
+  and reposted on retry. Once no group can complete (`ProposalState::one_tap_blocked`: someone
+  approved interactively), members with shares approve again with commitments
+  (`needs_reapproval`), so a lost pool never strands a payment. An interactive request may use
+  only commitments logged in votes, never a pool commitment.
 - **Restore vs one-tap**: backups never carry nonces, so a restore logs `VaultEvent::PoolReset`
   (retires the author's *unassigned* commitments; only on restore, via the `POOL_RESET` marker,
   CLI `zafe pool --reset`). Open proposals already assigned dead commitments need
   `node::propose_again` (`ProposalInfo.needs_new_proposal`).
+- **Possibly signed** (rule 5, `ProposalState::possibly_signed`): set for good once a proposal
+  reaches Approved or a vote carries shares; cancel/reject never clear it. It, not status,
+  drives holds, "still sendable", the spend alert and `check_vote`, never `NotesInUse`
+  (replay doesn't verify shares). A possibly-signed proposal is live (`node::still_sendable`)
+  when cancelled/rejected, or broadcast but dropped (not mined, and not in lightwalletd's
+  mempool when `ChainView::with_mempool` read it whole: `ChainView.dropped`; a send after
+  that read is never taken for dropped), while tip < expiry + 10 × scale and no spend of its
+  notes is that deep. Members approve a new proposal only if it spends one of the notes of
+  every live one **earlier in the log** (a later one can't stall logged proposals; it may
+  duplicate one). `propose` spends a wallet note of each: `wallet::ForcedInputs` adds them to
+  every `select_spendable_notes` result, fee recomputed; all spent shallow → `NotesSpent`
+  ("try again in a few minutes").
 - **Sweeps**: a `Proposal` with **no payments** spends a cancelled proposal's notes back to the
-  vault so a signed cancelled tx can never mine. UI must handle `payments.isEmpty`. A
-  proposal's `nullifiers` include padding spends: filter to the wallet's notes.
+  vault so a signed cancelled tx can never mine (`invalidate` also takes every other live
+  one's). UI must handle `payments.isEmpty`. A proposal's `nullifiers` include padding spends:
+  filter to the wallet's notes.
 
 ### Notes, expiry, sending
 - **Note reservation** (spec §9.1). *Log rule* (`VaultState::apply`, deterministic): a
-  `Proposal` spending a note of an earlier open/approved proposal with `expiry_height > tip`
-  is ignored (`NotesInUse`); broadcast/cancelled ones don't block. Changing this changes
-  replay: gate it like an event version. *Wallet holds* (`node::reserve_notes` →
-  `VaultWallet::reserve`, upstream `OutputLockStore`): open, approved and broadcast proposals'
-  notes are locked until expiry; a broadcast tx neither mined nor in lightwalletd's mempool
-  releases them. **Read the whole mempool, never look up a txid** (privacy).
-- **Sent transactions**: `finalize`/`send_ready` return `Sent { txid, raw }`; callers keep the
-  raw bytes so `reserve_notes` can resend a dropped tx. A broadcast rejected by the node counts
-  as sent when our txid is in the mempool (two senders race).
+  `Proposal` spending a note of an earlier open/approved proposal is ignored (`NotesInUse`)
+  while that one reserves: up to v11 until `expiry_height > tip`; from v12 only while a member
+  ≠ its author approves it, one-tap votes included (t = 1: the author;
+  `ProposalState::reserves`), and until
+  `VaultState::reservation_end` (min of expiry and its claimed tip + scaled window + 96 + 144)
+  > the new one's tip. Broadcast/cancelled ones don't block. Changing this changes replay: gate
+  it like an event version. *Wallet holds* (`node::note_holds` → `VaultWallet::reserve`,
+  upstream `OutputLockStore`): reserving proposals and this phone's own until
+  `reservation_end`, broadcast ones until expiry (until expiry + margin once dropped: neither
+  mined nor in lightwalletd's mempool nor resendable), possibly-signed cancelled/rejected ones
+  until expiry + margin under their own owner. **Read the whole mempool, never look up a txid** (privacy).
+- **Sent transactions**: `finalize`/`send_ready` return `Sent { txid, raw }` and log
+  `SignedBroadcast { tx: raw }` (v12; a txid-only `Broadcast` is refused from v12). Replay
+  accepts it only for an Approved proposal and if `tx::check_signed` passes (parses for the
+  PCZT's branch, no transparent part, txid = the PCZT's sighash, every action's spend-auth sig
+  verifies; no proof/binding check). Every member keeps the bytes: `reserve_notes` resends a
+  dropped tx from `SentTxs` or the log. A broadcast rejected by the node counts as sent when our
+  txid is in the mempool (two senders race).
 - **Expiry**: `descriptor.proposal_expiry_blocks` (default 7 days, creator picks 1-30); expiry =
   `vault::expiry_height(target, window)` rounded up to 144 blocks; members accept window + 96 +
   144. Never remove expiry. Counts are **75 s blocks**; from NU7 (25 s) `wallet::block_scale`
   = 3 scales window, rounding and slack. `wallet::proposal_expiry` cuts expiry to before a known
   upgrade height. Mainnet heights must come from `ZafeNetwork`, never `MAIN_NETWORK`.
-- **Unapproved-spend alert** (`spend_watch`): a vault spend the log doesn't account for; grace
-  only for Approved/Broadcast proposals and the txid their PCZT fixes. Never blocks anything.
+- **Unapproved-spend alert** (`spend_watch`): a vault spend whose txid is neither logged as
+  sent nor the PCZT-fixed txid of a possibly-signed proposal (any status, any time; no grace
+  window). Such a cancelled/rejected one mined shows as **Sent anyway** (`sent_anyway`).
+  Never blocks anything.
 
 ### Vault log and versions
 - **Replay is lenient after creation**: invalid entries go to `VaultState.ignored`
@@ -270,8 +320,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     and `member_versions` or count in `newer_version_entries` (an "update Zafe" hint only).
     12 pending seat moves: new approval format with round, `RepairHelped`, `KeepSeat`
     (the old key's signed cancel, with its label), `StopHelping`, sigma after the switch,
-    helper-move restarts (gate by tag and floor; no member-version gate: relays on
-    `RELAY_API` 2 serve only apps that write it).
+    helper-move restarts; and the proposal rules (`PROPOSAL_RULES_FROM`): reservations need a
+    second member or possibly signed and end at `reservation_end`, commitments after shares,
+    `SignedBroadcast` (appended) with txid-only `Broadcast` refused (gate by tag and floor; no
+    member-version gate: relays on `RELAY_API` 2 serve only apps that write it).
   - **Version transitions**: shipped older apps keep acting on the old rules. For repair that
     is a stall, never a leak: messages are keyed by (index, attempt, sender), a re-run of
     part 1 is a fresh additive sharing, and a helper named in a retry learns nothing RTS
@@ -450,6 +502,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - A `CARGO_TARGET_DIR` shared between worktrees races (same rlib names): use a private target
   dir when others build. Building `zafe-cli`/`zafe-relay` into `target/` replaces the binaries
   `scripts/app-harness.sh` runs.
+- Disk: stale test binaries pile up in `target/debug/deps` (`<name>-<hash>`), but one name
+  can hold several live ones (a crate's lib test, bin test and bin): after deleting all but
+  the newest of each, `touch` the workspace crates' `src/lib.rs`/`main.rs`, or cargo thinks
+  them fresh and fails "never executed".
 - Disk: `target/` grows past 60 GB (delete `target/debug/incremental`); in CI a bus error or
   "No space left" in a link step means disk, not code.
 

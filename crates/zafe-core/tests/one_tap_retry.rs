@@ -1,109 +1,47 @@
-//! One-tap approvals that don't reach the log on the first try. Signing consumes the pool
-//! nonces, so the vote is kept on the device and posted again on the next approve; and an
-//! interactive approval that could never be used is refused instead of being logged.
+//! One-tap approvals that don't reach the log on the first try, or whose signer groups
+//! can't complete. Signing consumes the pool nonces, so the vote is kept on the device and
+//! posted again on the next approve; and a member whose vote carried shares adds
+//! interactive commitments once no group can complete (`VAULT_EVENT` 12), so a one-tap
+//! approval never strands a payment.
 
-use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet};
 
 use orchard::keys::Scope;
 use rand::{rngs::StdRng, SeedableRng};
 use reddsa::frost::redpallas::Identifier;
+use serde::Deserialize;
 use zafe_core::{
     node::{
-        append_event, approve, create_vault, join_vault, load_state, one_tap_stuck, run_keygen,
-        seal, top_up_pool, KeygenOptions, NodeError, VaultMaterial,
+        append_event, approve, load_state, one_tap_stuck, read_inbox, request_signatures, respond,
+        sign_own_shares, ChainView, SilentSigners, VaultMaterial,
     },
     relay_client::RelayClient,
-    session::{pczt_hash, GroupPlan, Member, MemoryNonceStore, MemoryPoolStore, PoolStore},
+    session::{
+        aggregate_request, pczt_hash, GroupPlan, Member, MemoryNonceStore, MemoryPoolStore,
+        PoolStore,
+    },
     vault::{GroupShares, VaultEvent},
 };
-use zafe_proto::Identity;
+use zafe_proto::{
+    version::{self, Format},
+    Identity, Kind,
+};
 use zcash_protocol::memo::MemoBytes;
 
 mod common;
 // The fixture PCZTs are built for this network (NU6.3, no NU7), so the checks use it too.
-use common::{build_pczt, nu6_3_network, receive_ironwood_note, witness, Out, TARGET_HEIGHT};
+use common::{
+    build_pczt, nu6_3_network, receive_ironwood_note, relay_vault::vault, witness, Out,
+    TARGET_HEIGHT,
+};
 
-async fn start_relay() -> RelayClient {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, zafe_relay::Relay::new().router())
-            .await
-            .unwrap();
-    });
-    RelayClient::new(format!("http://{addr}"))
-}
-
-/// A `t`-of-`n` vault made over the relay; every member publishes a full pool.
-async fn vault(
-    t: u16,
-    n: u16,
-) -> (
-    RelayClient,
-    Vec<Identity>,
-    Vec<VaultMaterial>,
-    Vec<MemoryPoolStore>,
-) {
-    let relay = start_relay().await;
-    let mut rng = StdRng::seed_from_u64(70 + u64::from(n));
-    let ids: Vec<Identity> = (0..n).map(|_| Identity::generate(&mut rng)).collect();
-    let invite = create_vault(&relay, &ids[0], "Retry", t, n, &mut rng)
-        .await
-        .unwrap();
-    for id in &ids[1..] {
-        join_vault(&relay, id, &invite).await.unwrap();
+/// This member's chain as the fixtures assume it: synced to the tip they were built on.
+fn view() -> ChainView {
+    ChainView {
+        tip: TARGET_HEIGHT - 1,
+        spends: Vec::new(),
+        dropped: Vec::new(),
     }
-    seal(&relay, &ids[0], &invite).await.unwrap();
-    let number = futures::future::join_all(ids.iter().map(|id| safety_words(&relay, id, &invite)))
-        .await
-        .into_iter()
-        .map(Result::unwrap)
-        .reduce(|a, b| {
-            assert_eq!(a, b, "every member sees the same safety words");
-            a
-        })
-        .unwrap();
-    let net = nu6_3_network();
-    let runs = ids.iter().enumerate().map(|(i, id)| {
-        let (relay, invite, number, net) = (&relay, &invite, &number, &net);
-        async move {
-            let mut rng = StdRng::seed_from_u64(100 + i as u64);
-            let birthday = (i == 0).then_some(2);
-            run_keygen(
-                relay,
-                id,
-                invite,
-                number,
-                net,
-                "regtest",
-                KeygenOptions {
-                    creator_birthday_height: birthday,
-                    creator_expiry_blocks: None,
-                    max_birthday: None,
-                },
-                member_dir(relay, id),
-                setup_key(id),
-                &mut rng,
-                Duration::from_secs(60),
-            )
-            .await
-            .unwrap()
-        }
-    });
-    let materials = futures::future::join_all(runs).await;
-    let mut pools = Vec::new();
-    for (i, (id, m)) in ids.iter().zip(&materials).enumerate() {
-        let mut pool = MemoryPoolStore::default();
-        let mut rng = StdRng::seed_from_u64(200 + i as u64);
-        assert!(
-            top_up_pool(&relay, id, m, &mut pool, false, None, &mut rng)
-                .await
-                .unwrap()
-                > 0
-        );
-        pools.push(pool);
-    }
-    (relay, ids, materials, pools)
 }
 
 /// Logs a sweep (no payments: everything back to the vault) as member 0; one-tap groups
@@ -210,9 +148,9 @@ async fn sign_and_lose(
 
 #[tokio::test]
 async fn a_lost_one_tap_vote_is_posted_again() {
-    let (relay, ids, materials, mut pools) = vault(2, 2).await;
+    let (relay, ids, materials, mut pools) = vault(2, 2, true).await;
     let net = nu6_3_network();
-    let tip = TARGET_HEIGHT - 1;
+    let tip = view();
     let proposal = propose_sweep(&relay, &ids, &materials[0]).await;
     let mut rng = StdRng::seed_from_u64(1);
 
@@ -227,7 +165,7 @@ async fn a_lost_one_tap_vote_is_posted_again() {
         &ids[1],
         &materials[1],
         &net,
-        tip,
+        &tip,
         proposal,
         &mut MemoryNonceStore::default(),
         &mut pools[1],
@@ -245,7 +183,7 @@ async fn a_lost_one_tap_vote_is_posted_again() {
         &ids[1],
         &materials[1],
         &net,
-        tip,
+        &tip,
         proposal,
         &mut MemoryNonceStore::default(),
         &mut pools[1],
@@ -261,7 +199,7 @@ async fn a_lost_one_tap_vote_is_posted_again() {
         &ids[0],
         &materials[0],
         &net,
-        tip,
+        &tip,
         proposal,
         &mut MemoryNonceStore::default(),
         &mut pools[0],
@@ -275,97 +213,223 @@ async fn a_lost_one_tap_vote_is_posted_again() {
     assert!(state.ignored.is_empty());
 }
 
+/// The leader's inbox: a member's reply to a signing request (as `node` writes it).
+#[derive(Deserialize)]
+struct SharesMsg {
+    #[allow(dead_code)]
+    proposal: [u8; 16],
+    request_hash: [u8; 32],
+    shares: Vec<Vec<u8>>,
+}
+
+/// 2-of-2: member 0 signs one tap, member 1's phone lost its pool nonces. Member 1 approves
+/// interactively; member 0 then adds commitments (its shares stay), and an interactive
+/// round signs. On 4b5ae0e member 1's approval was refused ("too many signers have already
+/// signed it the one-tap way"): a one-tap vote was final, so the payment was stranded.
 #[tokio::test]
-async fn a_useless_interactive_approval_is_refused() {
-    let (relay, ids, materials, mut pools) = vault(2, 2).await;
+async fn a_one_tap_vote_is_completed_interactively() {
+    let (relay, ids, materials, mut pools) = vault(2, 2, true).await;
     let net = nu6_3_network();
-    let tip = TARGET_HEIGHT - 1;
     let proposal = propose_sweep(&relay, &ids, &materials[0]).await;
     let mut rng = StdRng::seed_from_u64(2);
+    let mut stores = [MemoryNonceStore::default(), MemoryNonceStore::default()];
 
-    // Member 0's one-tap vote is final.
-    approve(
+    // Member 0's one-tap vote carries its shares.
+    let first = approve(
         &relay,
         &ids[0],
         &materials[0],
         &net,
-        tip,
+        &view(),
         proposal,
-        &mut MemoryNonceStore::default(),
+        &mut stores[0],
         &mut pools[0],
         &mut rng,
     )
     .await
     .unwrap();
+    assert!(first.signed);
 
-    // Member 1 lost its nonces (and kept no vote): an interactive approval could never
-    // reach 2 signers, so it is refused rather than logged.
-    let err = approve(
+    // Member 1 lost its nonces (and kept no vote): it approves with commitments.
+    let second = approve(
         &relay,
         &ids[1],
         &materials[1],
         &net,
-        tip,
+        &view(),
         proposal,
-        &mut MemoryNonceStore::default(),
+        &mut stores[1],
         &mut MemoryPoolStore::default(),
         &mut rng,
     )
     .await
-    .unwrap_err();
-    assert!(matches!(err, NodeError::NotReady(_)), "{err:?}");
+    .unwrap();
+    assert!(!second.signed);
     let (_, state) = load_state(&relay, &ids[1], &materials[1]).await.unwrap();
-    assert_eq!(state.proposals[&proposal].approvals.len(), 1);
-
-    // Member 1's phone knows the payment is stuck (the proposer is then offered
-    // "Propose again"); member 0's can't tell, since member 1 may still sign.
+    let p = &state.proposals[&proposal];
+    assert!(p.one_tap_blocked(), "the only group can't complete one tap");
     let pk = |i: usize| ids[i].public().sig_pk;
+    // Member 1's phone knows the one-tap way is stuck; member 0's can't tell by its pool.
     assert!(one_tap_stuck(
         &state,
         &proposal,
         &pk(1),
         &MemoryPoolStore::default()
     ));
-    assert!(!one_tap_stuck(&state, &proposal, &pk(0), &pools[0]));
-}
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
-fn member_dir(
-    relay: &zafe_core::relay_client::RelayClient,
-    id: &zafe_proto::Identity,
-) -> std::path::PathBuf {
-    let port = relay
-        .base_url()
-        .rsplit(':')
-        .next()
-        .unwrap_or_default()
-        .to_owned();
-    std::env::temp_dir().join(format!(
-        "zafe-setup-{}-{port}-{}",
-        std::process::id(),
-        hex::encode(&id.public().sig_pk[..8])
-    ))
-}
-
-/// The key that seals one member's setup state (any fixed key per member will do).
-fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
-    zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
-}
-
-/// One member's safety words for `invite`, polled from its setup state dir.
-async fn safety_words(
-    relay: &zafe_core::relay_client::RelayClient,
-    id: &zafe_proto::Identity,
-    invite: &zafe_core::node::Invite,
-) -> Result<String, zafe_core::node::NodeError> {
-    zafe_core::node::wait_for_safety_words(
-        relay,
-        id,
-        invite,
-        &member_dir(relay, id),
-        &setup_key(id),
-        std::time::Duration::from_secs(30),
+    // Member 0 approves again: commitments for an interactive round, shares kept.
+    let again = approve(
+        &relay,
+        &ids[0],
+        &materials[0],
+        &net,
+        &view(),
+        proposal,
+        &mut stores[0],
+        &mut pools[0],
+        &mut rng,
     )
     .await
+    .unwrap();
+    assert!(again.signed);
+    let (_, state) = load_state(&relay, &ids[0], &materials[0]).await.unwrap();
+    let p = &state.proposals[&proposal];
+    assert!(state.ignored.is_empty(), "{:?}", state.ignored);
+    assert!(p.shares.contains_key(&pk(0)), "the one-tap shares stay");
+    assert!(p.approvals.values().all(|c| !c.is_empty()));
+    assert!(p.possibly_signed);
+
+    // An interactive round that doesn't finish: member 0 leads and signs its part (its
+    // nonces are used), then starts over. It approves again with fresh commitments.
+    let silent = SilentSigners::at(
+        std::env::temp_dir().join(format!("zafe-silent-{}-compose.bin", std::process::id())),
+    );
+    let failed = request_signatures(
+        &relay,
+        &ids[0],
+        &materials[0],
+        &net,
+        TARGET_HEIGHT - 1,
+        proposal,
+        &BTreeSet::new(),
+        &silent,
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    sign_own_shares(
+        &relay,
+        &ids[0],
+        &materials[0],
+        &net,
+        TARGET_HEIGHT - 1,
+        &failed.request,
+        &mut stores[0],
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let used = p.approvals[&pk(0)].clone();
+    approve(
+        &relay,
+        &ids[0],
+        &materials[0],
+        &net,
+        &view(),
+        proposal,
+        &mut stores[0],
+        &mut pools[0],
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    let (_, state) = load_state(&relay, &ids[0], &materials[0]).await.unwrap();
+    let p = &state.proposals[&proposal];
+    assert_ne!(
+        p.approvals[&pk(0)],
+        used,
+        "fresh commitments for the next round"
+    );
+
+    // The next round: member 1 answers it, and refuses the first one (its commitments for
+    // member 0 are no longer in the log).
+    let sent = request_signatures(
+        &relay,
+        &ids[0],
+        &materials[0],
+        &net,
+        TARGET_HEIGHT - 1,
+        proposal,
+        &BTreeSet::new(),
+        &silent,
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    let report = respond(
+        &relay,
+        &ids[1],
+        &materials[1],
+        &net,
+        TARGET_HEIGHT - 1,
+        &mut stores[1],
+        &mut rng,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.answered, vec![proposal], "{:?}", report.skipped);
+    assert_eq!(report.skipped.len(), 1, "the unfinished round's request");
+    let own = sign_own_shares(
+        &relay,
+        &ids[0],
+        &materials[0],
+        &net,
+        TARGET_HEIGHT - 1,
+        &sent.request,
+        &mut stores[0],
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    // Both shares aggregate into valid spend authorization signatures.
+    let members = zafe_core::node::members_by_pk(&state);
+    let wanted = zafe_core::node::request_hash(&sent.request).unwrap();
+    let mut shares = BTreeMap::new();
+    let parse = |bytes: &[Vec<u8>]| {
+        bytes
+            .iter()
+            .map(|b| reddsa::frost::redpallas::round2::SignatureShare::deserialize(b).unwrap())
+            .collect::<Vec<_>>()
+    };
+    for (_, from, env) in read_inbox(&relay, &ids[0], materials[0].label(), &members, 0)
+        .await
+        .unwrap()
+    {
+        if env.header.kind != Kind::SignatureShares {
+            continue;
+        }
+        let msg: SharesMsg =
+            version::decode(Format::SignatureShares, &env.open(&ids[0], &from).unwrap()).unwrap();
+        assert_eq!(msg.request_hash, wanted);
+        let id = Identifier::deserialize(&state.descriptor.member(&from.sig_pk).unwrap().frost_id)
+            .unwrap();
+        shares.insert(id, parse(&msg.shares));
+    }
+    shares.insert(
+        *materials[0].key_package().unwrap().identifier(),
+        parse(&own),
+    );
+    let pczt = pczt::Pczt::parse(&p.pczt).unwrap();
+    let fvk = materials[0].vault_keys().unwrap().fvk().clone();
+    let spends = zafe_core::tx::spends_to_sign(&pczt, &fvk).unwrap();
+    let signatures = aggregate_request(
+        &sent.request,
+        &spends,
+        &shares,
+        &materials[0].public_key_package().unwrap(),
+    )
+    .unwrap();
+    // `apply_signatures` checks each against its action's rk and the sighash.
+    zafe_core::tx::apply_signatures(pczt, &signatures).unwrap();
 }

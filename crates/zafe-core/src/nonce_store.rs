@@ -81,8 +81,17 @@ impl NonceKey {
 /// The body of a nonce file of `format`: decrypted for the current version, as stored for
 /// version 1 (plaintext). `None` for anything else, or a file that doesn't decrypt.
 fn file_body(format: Format, key: &NonceKey, path: &std::path::Path) -> Option<Vec<u8>> {
+    file_body_named(format, key, path, path.file_name()?.to_str()?)
+}
+
+/// [`file_body`] for a file sealed under the name `name` (a claimed nonce file was renamed).
+fn file_body_named(
+    format: Format,
+    key: &NonceKey,
+    path: &std::path::Path,
+    name: &str,
+) -> Option<Vec<u8>> {
     let bytes = fs::read(path).ok()?;
-    let name = path.file_name()?.to_str()?;
     match version::split(format, &bytes).ok()? {
         (1, body) => Some(body.to_vec()),
         (v, body) if v == format.current() => key.open(name, body),
@@ -119,14 +128,29 @@ impl FileNonceStore {
         self.0.join(format!("{}.reply", hex::encode(request_hash)))
     }
 
+    /// Where a `take` moves a nonce file while it signs: `<file>.<random>.taking`, one name
+    /// per take, so a later take (of nonces a re-approval wrote afresh) can never replace
+    /// the file an earlier one is still reading.
+    fn claim_file(&self, proposal: &ProposalId, hash: &[u8; 32]) -> PathBuf {
+        let mut tag = [0u8; 8];
+        rand::rngs::OsRng.fill_bytes(&mut tag);
+        let mut name = self.file(proposal, hash).into_os_string();
+        name.push(format!(".{}.taking", hex::encode(tag)));
+        name.into()
+    }
+
     fn read(&self, proposal: &ProposalId, hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
         let body = file_body(Format::Nonces, &self.1, &self.file(proposal, hash))?;
-        let encoded: Vec<Vec<u8>> = postcard::from_bytes(&body).ok()?;
-        encoded
-            .iter()
-            .map(|b| SigningNonces::deserialize(b).ok())
-            .collect()
+        decode_nonces(&body)
     }
+}
+
+fn decode_nonces(body: &[u8]) -> Option<Vec<SigningNonces>> {
+    let encoded: Vec<Vec<u8>> = postcard::from_bytes(body).ok()?;
+    encoded
+        .iter()
+        .map(|b| SigningNonces::deserialize(b).ok())
+        .collect()
 }
 
 impl NonceStore for FileNonceStore {
@@ -168,10 +192,38 @@ impl NonceStore for FileNonceStore {
     }
 
     fn take(&mut self, proposal: &ProposalId, hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
-        let nonces = self.read(proposal, hash)?;
-        // Delete before use, durably: a file back after a power cut could sign twice.
-        crate::durable::remove(&self.file(proposal, hash)).ok()?;
-        Some(nonces)
+        // Claim by renaming: a rename is atomic, so of two processes taking at once (the
+        // app and a background check) only one gets the file. Reading and then deleting by
+        // name let a take that had read the old nonces delete a re-approval's fresh file
+        // instead, and return the old nonces another take already had. A claim a crash
+        // left behind counts as released (`claimed`): never read again nor renamed back.
+        let file = self.file(proposal, hash);
+        let claim = self.claim_file(proposal, hash);
+        fs::rename(&file, &claim).ok()?;
+        let name = file.file_name()?.to_str()?;
+        let body = zeroize::Zeroizing::new(file_body_named(Format::Nonces, &self.1, &claim, name)?);
+        // Delete before use, durably (this also makes the rename durable): a file back
+        // after a power cut could sign twice.
+        crate::durable::remove(&claim).ok()?;
+        decode_nonces(&body)
+    }
+
+    fn claimed(&self, proposal: &ProposalId, hash: &[u8; 32]) -> bool {
+        let file = self.file(proposal, hash);
+        let Some(prefix) = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| format!("{n}."))
+        else {
+            return false;
+        };
+        fs::read_dir(&self.0).is_ok_and(|mut dir| {
+            dir.any(|e| {
+                e.ok()
+                    .and_then(|e| e.file_name().into_string().ok())
+                    .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".taking"))
+            })
+        })
     }
 
     fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError> {
@@ -187,6 +239,19 @@ impl NonceStore for FileNonceStore {
 
     fn drop_reply(&mut self, request_hash: &[u8; 32]) {
         let _ = fs::remove_file(self.reply_file(request_hash));
+    }
+
+    fn kept_replies(&self) -> Vec<Vec<u8>> {
+        fs::read_dir(&self.0).map_or_else(
+            |_| Vec::new(),
+            |dir| {
+                dir.filter_map(Result::ok)
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|x| x == "reply"))
+                    .filter_map(|p| fs::read(p).ok())
+                    .collect()
+            },
+        )
     }
 }
 
@@ -303,6 +368,53 @@ mod tests {
         assert!(!store.contains(&[0; 16], &hash));
         store.drop_reply(&hash);
         assert_eq!(store.kept_reply(&hash), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A take claims the file by renaming it, so of two processes taking at once only one
+    /// gets the nonces; a claim a crash left behind counts as released (`claimed`) and is
+    /// never read again, while a re-approval's fresh nonces are taken normally.
+    #[test]
+    fn a_take_claims_the_file_first() {
+        use std::sync::{Arc, Barrier};
+        let dir = std::env::temp_dir().join(format!("zafe-take-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = || super::NonceKey::derive(b"seeds", b"vault");
+        let (p, h) = ([1u8; 16], [2u8; 32]);
+        for _ in 0..50 {
+            FileNonceStore::new(&dir, key())
+                .put(p, h, vec![nonces()])
+                .unwrap();
+            let barrier = Arc::new(Barrier::new(2));
+            let takers: Vec<_> = (0..2)
+                .map(|_| {
+                    let (barrier, dir) = (barrier.clone(), dir.clone());
+                    std::thread::spawn(move || {
+                        let mut store = FileNonceStore::new(&dir, key());
+                        barrier.wait();
+                        store.take(&p, &h).is_some()
+                    })
+                })
+                .collect();
+            let got = takers
+                .into_iter()
+                .filter_map(|t| t.join().unwrap().then_some(()))
+                .count();
+            assert_eq!(got, 1);
+        }
+
+        // A crash between the claim and the delete: the claim stays, nothing reads it.
+        let mut store = FileNonceStore::new(&dir, key());
+        store.put(p, h, vec![nonces()]).unwrap();
+        assert!(!store.claimed(&p, &h));
+        let file = store.file(&p, &h);
+        std::fs::rename(&file, store.claim_file(&p, &h)).unwrap();
+        assert!(store.claimed(&p, &h) && !store.contains(&p, &h));
+        assert!(store.take(&p, &h).is_none());
+        // A fresh approval's nonces are taken; the old claim still says "released".
+        store.put(p, h, vec![nonces()]).unwrap();
+        assert!(store.take(&p, &h).is_some());
+        assert!(store.claimed(&p, &h));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

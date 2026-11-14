@@ -8,7 +8,7 @@ import 'error.dart';
 import 'names.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `hidden_char`, `info`, `kept_at`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `pending_seat_moves`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `updated_material`, `visible_text`
+// These functions are ignored because they are not marked as `pub`: `backed_up`, `catch_up_to`, `catch_up`, `chain_view`, `hidden_char`, `info`, `kept_at`, `leader_dir`, `local_tip`, `memo_bytes`, `memo_text`, `nonce_key`, `nonce_store`, `parse_id`, `payment_requests`, `pending_seat_moves`, `plain_name`, `pool_store`, `propose_inner`, `repairs`, `request_file`, `seat_moves`, `shared_names`, `store_own_send`, `updated_material`, `visible_text`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Proposed`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
@@ -236,13 +236,17 @@ Future<ApproveResult> approveProposal({
   proposalId: proposalId,
 );
 
+/// Rejects the proposal, unless this phone's signature for it may already be out
+/// (`ZafeErrorKind::AlreadySigned`: nothing is logged).
 Future<void> rejectProposal({
   required String relayUrl,
+  required String stateDir,
   required List<int> seeds,
   required List<int> material,
   required String proposalId,
 }) => RustLib.instance.api.crateApiProposalsRejectProposal(
   relayUrl: relayUrl,
+  stateDir: stateDir,
   seeds: seeds,
   material: material,
   proposalId: proposalId,
@@ -555,16 +559,28 @@ class ProposalInfo {
   /// Last block the transaction can be mined in; after it the proposal is expired.
   final int expiryHeight;
 
-  /// This member approved with signing commitments whose nonces are gone from this
-  /// device (used in a signing round that didn't finish, or restored from a backup): it
-  /// must approve again before a new round can include it.
+  /// This member must approve again before a signing round can include it: it approved
+  /// with signing commitments whose nonces are gone from this device (used in a round
+  /// that didn't finish, or restored from a backup), or it signed one tap and no signer
+  /// group can complete (another signer approved interactively).
   final bool needsReapproval;
 
-  /// Cancelled, but every signature is already in: anyone holding them could still send
-  /// it until it expires (offer to make it unsendable).
+  /// Cancelled or rejected, but it may have been signed (it reached Approved, or a vote
+  /// carried signatures) and can still be mined: anyone holding the signed transaction
+  /// could send it until it expires (offer to make it unsendable). A new payment must
+  /// spend one of its notes.
   final bool stillSendable;
 
-  /// A live proposal (id) that spends this cancelled one's notes back to the vault.
+  /// Cancelled or rejected after it was signed, and its transaction was mined anyway
+  /// (`stage` is `Sent`, `txid` that transaction's).
+  final bool sentAnyway;
+
+  /// It reached Approved or a vote carried signatures: a signed transaction may exist
+  /// whatever was decided after (cancelling or rejecting can't take it back).
+  final bool maybeSigned;
+
+  /// A live proposal (id) that spends this cancelled one's notes back to the vault, while
+  /// this one can still be sent (`still_sendable` before the sweep).
   final String? invalidatedBy;
 
   /// One-tap, open, and no signer group can be completed any more (a member's phone
@@ -594,6 +610,8 @@ class ProposalInfo {
     required this.expiryHeight,
     required this.needsReapproval,
     required this.stillSendable,
+    required this.sentAnyway,
+    required this.maybeSigned,
     this.invalidatedBy,
     required this.needsNewProposal,
   });
@@ -621,6 +639,8 @@ class ProposalInfo {
       expiryHeight.hashCode ^
       needsReapproval.hashCode ^
       stillSendable.hashCode ^
+      sentAnyway.hashCode ^
+      maybeSigned.hashCode ^
       invalidatedBy.hashCode ^
       needsNewProposal.hashCode;
 
@@ -650,6 +670,8 @@ class ProposalInfo {
           expiryHeight == other.expiryHeight &&
           needsReapproval == other.needsReapproval &&
           stillSendable == other.stillSendable &&
+          sentAnyway == other.sentAnyway &&
+          maybeSigned == other.maybeSigned &&
           invalidatedBy == other.invalidatedBy &&
           needsNewProposal == other.needsNewProposal;
 }

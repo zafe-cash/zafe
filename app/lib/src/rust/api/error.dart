@@ -156,4 +156,8 @@ enum ZafeErrorKind {
 
   /// Two moves switched from the same history: "Two moves found: ask your group."
   twoMoves,
+
+  /// This phone's signature for the payment may already be out, so it can't decline it
+  /// (nothing was logged); its proposer can cancel it.
+  alreadySigned,
 }

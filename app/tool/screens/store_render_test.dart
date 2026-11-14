@@ -82,6 +82,8 @@ rust.ProposalInfo _proposal(
   expiryHeight: 0,
   needsReapproval: false,
   stillSendable: false,
+  maybeSigned: false,
+  sentAnyway: false,
   needsNewProposal: false,
 );
 

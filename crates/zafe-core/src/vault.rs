@@ -59,6 +59,11 @@ pub enum VaultError {
     /// A version 7 `Broadcast` whose txid isn't the one the proposal's PCZT determines.
     #[error("entry {0}: broadcast txid doesn't match the proposal's transaction")]
     TxidMismatch(u64),
+    /// From version 12 a broadcast must carry the signed transaction
+    /// ([`VaultEvent::SignedBroadcast`]): a txid alone, or a transaction that isn't the
+    /// proposal's with every spend signed.
+    #[error("entry {0}: broadcast without the proposal's signed transaction")]
+    BadBroadcast(u64),
     #[error("entry {0}: not a valid display name")]
     BadName(u64),
     #[error("entry {0}: backup attestation for another key epoch")]
@@ -312,6 +317,9 @@ pub enum VaultEvent {
     Cancelled {
         proposal: ProposalId,
     },
+    /// The author sent the proposal's transaction. Up to version 11 only. From version 12
+    /// a broadcast is [`VaultEvent::SignedBroadcast`]: a txid is a claim anyone can make
+    /// (rule 4), and it would end the proposal for every member.
     Broadcast {
         proposal: ProposalId,
         txid: [u8; 32],
@@ -408,6 +416,15 @@ pub enum VaultEvent {
     RepairHelped {
         replacement: u64,
         attempt: u32,
+    },
+    /// The author sent the proposal's transaction: `tx` is the signed transaction as sent.
+    /// Valid only if it is the proposal's transaction with every spend authorization
+    /// signature valid ([`crate::tx::check_signed`]), which proves it was signed: the
+    /// signatures aren't part of the txid. Every member keeps the bytes and can send them
+    /// again if they drop out of the mempool. Event version 12.
+    SignedBroadcast {
+        proposal: ProposalId,
+        tx: Vec<u8>,
     },
 }
 
@@ -601,9 +618,53 @@ pub struct ProposalState {
     pub ready_group: Option<u16>,
     /// The member whose approval completed `ready_group` (the one who auto-sends).
     pub completed_by: Option<[u8; 32]>,
+    /// A signature for it may exist: it reached Approved, or a vote carried shares. Set
+    /// once and for good (rule 5): cancelling, rejecting or a withdrawn approval changes
+    /// intent, never whether someone holds a signed transaction. Such a proposal can mine
+    /// until its notes are spent or it expires, so wallet holds, the "still sendable"
+    /// warning, the unapproved-spend grace and member verification follow this flag.
+    pub possibly_signed: bool,
+    /// The signed transaction a version 12 broadcast carried (checked), so any member can
+    /// send it again.
+    pub signed_tx: Option<Vec<u8>>,
 }
 
 impl ProposalState {
+    /// Whether no signer group of a one-tap proposal can complete any more, as the log
+    /// shows: in every group a member rejected, approved interactively (commitments
+    /// without shares: its phone can't sign that group), or posted shares for other groups
+    /// only. Members whose vote carried shares then add interactive commitments (version
+    /// 12), so the payment can still be signed in an interactive round.
+    pub fn one_tap_blocked(&self) -> bool {
+        let Some(pre) = &self.preprocessed else {
+            return false;
+        };
+        let can_sign = |m: &[u8; 32], g: usize| match self.shares.get(m) {
+            Some(posted) => posted.iter().any(|s| usize::from(s.group) == g),
+            None => {
+                !self.rejections.contains_key(m)
+                    && self.approvals.get(m).is_none_or(|c| c.is_empty())
+            }
+        };
+        self.ready_group.is_none()
+            && !(0..pre.subsets.len()).any(|g| pre.subsets[g].iter().all(|m| can_sign(m, g)))
+    }
+
+    /// Whether this proposal holds its notes against later proposals (`NotesInUse`, from
+    /// version 12): only while open or approved, and only while a member other than its
+    /// author approves it (rule 4: one member alone can't freeze funds), interactively or
+    /// one tap (a one-tap vote is an approval with no commitments). With a threshold of 1 the
+    /// author's own approval is the one that signs. The author's shares never count as a
+    /// second member: replay doesn't verify them, so "may be signed" (`possibly_signed`)
+    /// can't reserve on its own; it keeps driving holds and votes on members' phones.
+    pub fn reserves(&self, threshold: u16) -> bool {
+        matches!(self.status, ProposalStatus::Open | ProposalStatus::Approved)
+            && self
+                .approvals
+                .keys()
+                .any(|m| *m != self.author || threshold == 1)
+    }
+
     fn find_ready_group(&self) -> Option<u16> {
         let pre = self.preprocessed.as_ref()?;
         (0..pre.subsets.len())
@@ -870,10 +931,18 @@ impl VaultState {
                 // of the chain tip this proposal was built on, so every member agrees).
                 // Broadcast and cancelled proposals don't block: a new proposal may
                 // deliberately respend their notes, and at most one transaction is mined.
+                // From version 12 a proposal reserves only once a second member approved
+                // it or it may be signed, and never past the vault's window from its own
+                // tip (its `tip_height` is the proposer's word, `reservation_end`).
                 if self.proposals.values().any(|p| {
-                    matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
-                        && p.expiry_height > tip_height
-                        && p.nullifiers.iter().any(|nf| nullifiers.contains(nf))
+                    let live = if event_version >= PROPOSAL_RULES_FROM {
+                        p.reserves(self.descriptor.threshold)
+                            && self.reservation_end(p) > tip_height
+                    } else {
+                        matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
+                            && p.expiry_height > tip_height
+                    };
+                    live && p.nullifiers.iter().any(|nf| nullifiers.contains(nf))
                 }) {
                     return Err(VaultError::NotesInUse(index));
                 }
@@ -902,6 +971,8 @@ impl VaultState {
                         shares: BTreeMap::new(),
                         ready_group: None,
                         completed_by: None,
+                        possibly_signed: false,
+                        signed_tx: None,
                     },
                 );
             }
@@ -925,9 +996,17 @@ impl VaultState {
                     return Err(VaultError::PcztMismatch(index));
                 }
                 // Once a member has released signature shares, their approval cannot be
-                // withdrawn or replaced (the shares are out).
+                // withdrawn or replaced (the shares are out). From version 12 it may add
+                // commitments for interactive signing, so a one-tap approval never strands
+                // a payment whose signer groups can't complete: its shares stay.
                 if p.shares.contains_key(&author) {
-                    return Err(VaultError::VoteFinal(index));
+                    let adds_commitments = event_version >= PROPOSAL_RULES_FROM
+                        && approve
+                        && shares.is_empty()
+                        && !commitments.is_empty();
+                    if !adds_commitments {
+                        return Err(VaultError::VoteFinal(index));
+                    }
                 }
                 if !shares.is_empty() {
                     let pre = p
@@ -947,6 +1026,7 @@ impl VaultState {
                         return Err(VaultError::BadShares(index));
                     }
                     p.shares.insert(author, shares);
+                    p.possibly_signed = true;
                     if p.ready_group.is_none() {
                         p.ready_group = p.find_ready_group();
                         if p.ready_group.is_some() {
@@ -968,6 +1048,7 @@ impl VaultState {
                 } else {
                     ProposalStatus::Open
                 };
+                p.possibly_signed |= p.status == ProposalStatus::Approved;
             }
             VaultEvent::Commitments { batch } => {
                 use reddsa::frost::redpallas::round1::SigningCommitments;
@@ -1003,6 +1084,10 @@ impl VaultState {
                     .ok_or(VaultError::UnknownProposal(index))?;
                 if p.status != ProposalStatus::Approved {
                     return Err(VaultError::ProposalClosed(index));
+                }
+                // Version 12: "sent" needs the signed transaction (`SignedBroadcast`).
+                if event_version >= PROPOSAL_RULES_FROM {
+                    return Err(VaultError::BadBroadcast(index));
                 }
                 // Version 7: the txid is fixed by the PCZT (it excludes signatures and
                 // the proof), so a member can't release the note reservation or fake a
@@ -1303,8 +1388,59 @@ impl VaultState {
                     self.move_seat(old, new, event_version);
                 }
             }
+            VaultEvent::SignedBroadcast { proposal, tx } => {
+                if event_version < PROPOSAL_RULES_FROM {
+                    return Err(VaultError::Encoding);
+                }
+                let p = self
+                    .proposals
+                    .get_mut(&proposal)
+                    .ok_or(VaultError::UnknownProposal(index))?;
+                // Only an approved proposal is sent: a cancelled or rejected one that may be
+                // signed isn't marked sent (every member would then send it again).
+                if p.status != ProposalStatus::Approved {
+                    return Err(VaultError::ProposalClosed(index));
+                }
+                let txid = pczt::Pczt::parse(&p.pczt)
+                    .ok()
+                    .and_then(|pczt| crate::tx::check_signed(&pczt, &tx).ok())
+                    .filter(|txid| Some(*txid) == p.expected_txid)
+                    .ok_or(VaultError::BadBroadcast(index))?;
+                p.status = ProposalStatus::Broadcast;
+                p.txid = Some(txid);
+                p.signed_tx = Some(tx);
+            }
         }
         Ok(())
+    }
+}
+
+impl VaultState {
+    /// How many blocks at `height` last as long as one 75-second block on this vault's
+    /// network (`wallet::block_scale`); 1 for a network this build doesn't know.
+    pub fn block_scale(&self, height: u32) -> u32 {
+        crate::wallet::ZafeNetwork::from_name(&self.descriptor.network)
+            .map_or(1, |n| crate::wallet::block_scale(&n, height))
+    }
+
+    /// Blocks a spend needs on top of it before a reorg is taken not to undo it, scaled
+    /// for the block time at `height`.
+    pub fn reorg_margin(&self, height: u32) -> u32 {
+        REORG_MARGIN_BLOCKS * self.block_scale(height)
+    }
+
+    /// The height from which `p` no longer holds its notes: its expiry, but never later
+    /// than the vault's window from the tip it claims to be built on, with the slack and
+    /// rounding members accept (`node::expectations`), scaled like `expiry_height`. Every
+    /// value comes from the log, so every member computes the same.
+    pub fn reservation_end(&self, p: &ProposalState) -> u32 {
+        let window = self.descriptor.proposal_expiry_blocks
+            + EXPIRY_TIP_SLACK_BLOCKS
+            + EXPIRY_ROUNDING_BLOCKS;
+        let cap = p.tip_height.saturating_add(
+            window.saturating_mul(self.block_scale(p.tip_height.saturating_add(1))),
+        );
+        p.expiry_height.min(cap)
     }
 }
 
@@ -1409,8 +1545,10 @@ impl VaultState {
         for p in self.proposals.values_mut() {
             rekey(&mut p.author);
             if let Some(v) = p.approvals.remove(&old) {
-                if v.is_empty() {
-                    p.approvals.insert(new.sig_pk, v); // one-tap: its shares are in `shares`
+                if v.is_empty() || p.shares.contains_key(&old) {
+                    // One-tap: its shares (in `shares`) still count; commitments it added
+                    // later had their nonces on the lost device.
+                    p.approvals.insert(new.sig_pk, Vec::new());
                 } else if p.status == ProposalStatus::Approved && p.approvals.len() < threshold {
                     // Interactive commitments whose nonces were on the lost device: the
                     // approval is void, and the new device can approve again.
@@ -1566,6 +1704,18 @@ pub const REPAIR_QUORUM_FROM: u16 = 11;
 /// `RepairHelped`, can be voided by the old key's `KeepSeat`, and restart other repairs a
 /// switched seat helped with.
 pub const PENDING_SEATS_FROM: u16 = 12;
+
+/// First `VAULT_EVENT` version with the proposal rules of the November 2026 review
+/// ("Proposals"): a proposal reserves notes only once a second member approved it or it
+/// may be signed, and only within the window from its tip; a member whose vote carried
+/// shares may add interactive commitments; "sent" needs the signed transaction
+/// ([`VaultEvent::SignedBroadcast`]). Joins the seat-move rules of the same version.
+pub const PROPOSAL_RULES_FROM: u16 = 12;
+
+/// Confirmations a spend needs before a reorg is taken not to undo it (75-second blocks,
+/// scaled like the expiry constants): until then a possibly-signed proposal whose notes it
+/// spent can still mine.
+pub const REORG_MARGIN_BLOCKS: u32 = 10;
 
 /// First `VAULT_EVENT` version after which versions only go up (see
 /// `VaultState::max_event_version`), and proposals must carry a usable PCZT.

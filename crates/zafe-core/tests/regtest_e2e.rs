@@ -24,7 +24,7 @@ use zcash_client_backend::proto::service::RawTransaction;
 use zcash_keys::{address::UnifiedAddress, keys::UnifiedFullViewingKey};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
-    memo::Memo,
+    memo::{Memo, MemoBytes},
 };
 
 mod common;
@@ -191,6 +191,7 @@ async fn vault_pays_on_regtest() {
                 memo: Some(memo.clone()),
             }],
             8064,
+            &[],
         )
         .expect("proposal");
 
@@ -208,7 +209,7 @@ async fn vault_pays_on_regtest() {
         memo: None,
     };
     let unreserved = wallets[1]
-        .propose(std::slice::from_ref(&other), 8064)
+        .propose(std::slice::from_ref(&other), 8064, &[])
         .unwrap();
     let overlap = |a: &pczt::Pczt, b: &pczt::Pczt| {
         let a = tx::spent_nullifiers(a).unwrap();
@@ -229,7 +230,7 @@ async fn vault_pays_on_regtest() {
         "idempotent"
     );
     let reserved = wallets[1]
-        .propose(std::slice::from_ref(&other), 8064)
+        .propose(std::slice::from_ref(&other), 8064, &[])
         .unwrap();
     assert!(!overlap(&pczt, &reserved), "reserved notes are skipped");
     let spendable = wallets[1].balance().unwrap().ironwood_spendable;
@@ -242,7 +243,7 @@ async fn vault_pays_on_regtest() {
         ..other.clone()
     };
     assert!(matches!(
-        wallets[1].propose(std::slice::from_ref(&too_much), 8064),
+        wallets[1].propose(std::slice::from_ref(&too_much), 8064, &[]),
         Err(zafe_core::wallet::WalletError::FundsReserved)
     ));
     // Releasing (the proposal closed) makes the notes spendable again.
@@ -251,7 +252,70 @@ async fn vault_pays_on_regtest() {
         wallets[1].balance().unwrap().ironwood_spendable,
         before.ironwood_spendable
     );
-    wallets[1].propose(&[too_much], 8064).unwrap();
+    wallets[1].propose(&[too_much], 8064, &[]).unwrap();
+
+    // 4c. Payments that may be signed and can still mine (cancelled, or dropped after
+    // sending) each need a note spent by the next payment, so at most one of them mines
+    // (security review 2026-11, rule 5). Their notes are held, and the wallet adds one of
+    // each to its selection, paying for the extra actions; members' checks accept it.
+    let small = PaymentRequest {
+        address: recipient_ua.clone(),
+        amount_zat: 1_000_000,
+        memo: None,
+    };
+    let mut ws = Vec::new();
+    let mut holds = Vec::new();
+    for owner in 2..5u8 {
+        let w = wallets[1]
+            .propose(std::slice::from_ref(&small), 8064, &[])
+            .unwrap();
+        holds.push(NoteHold {
+            owner: [owner; 32],
+            nullifiers: tx::spent_nullifiers(&w).unwrap(),
+            expiry_height: *w.global().expiry_height(),
+        });
+        wallets[1].reserve(&holds).unwrap();
+        ws.push(w);
+    }
+    for (i, a) in ws.iter().enumerate() {
+        for b in &ws[i + 1..] {
+            assert!(!overlap(a, b), "three payments on three different notes");
+        }
+    }
+    let must_spend: Vec<Vec<[u8; 32]>> = holds.iter().map(|h| h.nullifiers.clone()).collect();
+    let forced = wallets[1]
+        .propose(std::slice::from_ref(&small), 8064, &must_spend)
+        .unwrap();
+    for w in &ws {
+        assert!(overlap(w, &forced), "a note of each is spent");
+    }
+    let tip = wallets[1].chain_height().unwrap().unwrap();
+    let small_expected = Expectations {
+        payments: vec![Payment {
+            recipient,
+            amount_zat: small.amount_zat,
+            memo: *MemoBytes::empty().as_array(),
+        }],
+        consensus_branch_id: BranchId::for_height(&network, BlockHeight::from_u32(tip + 1)).into(),
+        tip_height: tip,
+        max_expiry_delta: 1 + zafe_core::wallet::block_scale(&network, tip + 1)
+            * (8064 + 96 + zafe_core::vault::EXPIRY_ROUNDING_BLOCKS),
+    };
+    let checked = verify_pczt(&forced, &vault_fvk, &small_expected)
+        .expect("the other members' check accepts the forced spends");
+    let actions = forced.ironwood().actions().len() as u64;
+    assert!(actions >= 3, "three spends");
+    assert_eq!(
+        checked.fee_zat,
+        5_000 * actions,
+        "the fee covers the forced spends"
+    );
+    // Notes this wallet doesn't know (not scanned yet) can't be forced: sync first.
+    assert!(matches!(
+        wallets[1].propose(std::slice::from_ref(&small), 8064, &[vec![[0x77; 32]]]),
+        Err(zafe_core::wallet::WalletError::Proposal(_))
+    ));
+    assert_eq!(wallets[1].reserve(&[]).unwrap(), 0);
 
     // 5. Members verify independently, approve, and sign (2 of 3).
     let tip = wallets[0].chain_height().unwrap().unwrap();
@@ -310,6 +374,7 @@ async fn vault_pays_on_regtest() {
     // The PCZT fixes the txid (v6 txids exclude signatures and the proof): the vault log
     // checks a Broadcast against it (VAULT_EVENT 7).
     let expected_txid = tx::shielded_sighash(&pczt).unwrap();
+    let unsigned = pczt.clone();
     let signed = tx::apply_signatures(pczt, &signatures).unwrap();
     let pk = ProvingKey::build(OrchardCircuitVersion::PostNu6_3);
     let vk = VerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
@@ -323,9 +388,13 @@ async fn vault_pays_on_regtest() {
         .expect("valid transaction");
     let mut raw = Vec::new();
     transaction.write(&mut raw).unwrap();
+    // What a version 12 broadcast entry carries: replay accepts these bytes as the
+    // proposal's signed transaction, and nothing else.
+    assert_eq!(tx::check_signed(&unsigned, &raw).unwrap(), expected_txid);
+    assert!(tx::check_signed(&unsigned, &raw[..raw.len() - 1]).is_err());
     let reply = client
         .send_transaction(RawTransaction {
-            data: raw,
+            data: raw.clone(),
             height: 0,
         })
         .await
