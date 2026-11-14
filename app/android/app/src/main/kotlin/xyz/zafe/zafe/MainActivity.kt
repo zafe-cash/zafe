@@ -28,9 +28,6 @@ import io.flutter.plugin.common.MethodChannel
 
 // A FragmentActivity so local_auth can show the biometric / screen-lock prompt.
 class MainActivity : FlutterFragmentActivity() {
-    /// A secret screen asked to block capture (`xyz.zafe/secure_screen`).
-    private var secureRequested = false
-
     /// The payment sounds (`xyz.zafe/payment_feedback`), loaded once per activity.
     private var soundPool: SoundPool? = null
     private val soundIds = mutableMapOf<String, Int>()
@@ -52,6 +49,9 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Protect every route, including the first frame and activity recreation.
+        // Set this before Flutter starts; Dart route lifetimes must never allow capture.
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         // Edge to edge on every Android version, not only 15+ (where targetSdk 35+ forces
         // it): one layout everywhere, Flutter's padding handles the bars (Play's
         // recommendation, 2026-10-22). Both bars are transparent from Android 10 (auto()
@@ -67,26 +67,9 @@ class MainActivity : FlutterFragmentActivity() {
         // Taps that arrive while another app draws over this one (an overlay trying to
         // trick the owner into approving) are dropped.
         window.decorView.filterTouchesWhenObscured = true
-        // A wallet's balances and payments stay out of the recent-apps view (the card
-        // shows a blank window instead). Screenshots inside the app still work.
+        // Also disable the recent-apps snapshot explicitly on Android 13+.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             setRecentsScreenshotEnabled(false)
-        }
-    }
-
-    // Before Android 13 there is no switch for the thumbnail alone: block capture while
-    // the app is in the background, which also blanks the thumbnail taken as it leaves.
-    override fun onPause() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
-        super.onPause()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !secureRequested) {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
 
@@ -301,22 +284,16 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
-        // Screens showing secrets (invites, backups) block screenshots, screen recording
-        // and the recent-apps thumbnail while they are open.
+        // Keep the route-level channel compatible, but never let a closing secret
+        // screen disable the activity-wide screenshot/recording protection.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "xyz.zafe/secure_screen")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "setSecure" -> {
-                        val secure = call.arguments as? Boolean ?: false
                         runOnUiThread {
-                            secureRequested = secure
-                            if (secure) {
-                                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                            } else {
-                                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                            }
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                            result.success(null)
                         }
-                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }

@@ -1,10 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// Blocks screenshots, screen recording and the app-switcher thumbnail (Android
-/// `FLAG_SECURE`) while any [SecureScreen] is mounted. Counted, so a secure screen pushed
-/// over another doesn't unblock capture when it closes. No-op where unsupported (iOS: a
-/// capture shield is still to do).
+/// Marks routes showing secrets for platform capture protection. Android protects the
+/// whole activity with `FLAG_SECURE`, including routes without this widget; unmounting
+/// the last [SecureScreen] never relaxes that policy. Counted for route-level platform
+/// handlers. No-op where unsupported (iOS: a capture shield is still to do).
 class SecureScreen extends StatefulWidget {
   const SecureScreen({super.key, required this.child});
   final Widget child;
