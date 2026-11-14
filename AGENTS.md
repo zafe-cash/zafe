@@ -570,6 +570,8 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 
 ## App essentials (details: `docs/app-notes.md`)
 
+- Android capture protection is activity-wide: set `FLAG_SECURE` before Flutter starts
+  in `MainActivity.onCreate`, never clear it on resume or a `SecureScreen` disposal.
 - Flutter (fvm, **3.47.7**) + `flutter_rust_bridge` 2.11.1 + Riverpod + go_router, built on
   Vizor (chainapsis/vizor-wallet, Apache-2.0) with **Zafe's own look**: keep attribution in
   `app/NOTICE`; no Vizor references in code comments; never copy Vizor's art, name or IDs.

@@ -69,8 +69,8 @@ enum CoverMode { none, now }
 /// covers only when another activity is on top ([topResumed] false: the app switcher,
 /// whose live tile shows the running app). The screenshot overlay and the notification
 /// shade take focus but leave the app on top: covering then put the lock tile on screen
-/// right after a screenshot, as if capture were blocked (it isn't, outside the secret
-/// screens). [topResumed] null: the platform doesn't say (Android 9 and older), cover on
+/// after capture UI closes. Android blocks capture separately with `FLAG_SECURE`.
+/// [topResumed] null: the platform doesn't say (Android 9 and older), cover on
 /// any focus loss. [prompting]: our own unlock prompt.
 CoverMode privacyCoverFor(
   AppLifecycleState state, {

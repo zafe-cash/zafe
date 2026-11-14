@@ -63,6 +63,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["zafeLinkHost"] = zafeLinkHost.ifEmpty { "links.zafe.invalid" }
     }
 
@@ -108,6 +109,9 @@ kotlin {
 }
 
 dependencies {
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // AppCompat window themes (res/values*/styles.xml): local_auth's biometric prompt
     // crashes on Android 8 and below under a platform theme.

@@ -728,14 +728,13 @@ Learned while studying it:
   "Update ready" card whose Restart is refused mid-send. Debug/sideloaded installs get a
   Play error and nothing shows. Can only be tested end to end with a Play install
   (internal app sharing or an internal testing track).
-- **Secret screens** block capture: wrap a route's page in `SecureScreen`
-  (`core/platform/secure_screen.dart`, counted) → `xyz.zafe/secure_screen` `setSecure`
-  in `MainActivity.kt` (`FLAG_SECURE`; screenshots and recordings come out black). The
-  list (`app.dart`): `/join`, `/setup` (invite, safety words), `/export`, `/restore`
-  (backup), `/recover`, `/scan-recovery` (recovery code), `/replace-signer` (the seat
-  move's safety words), `/scan-invite` (the camera shows an invite), `/viewing-key`. Not
-  secret, so capture stays on: balances, payments, receive addresses, seat and move links
-  (relay + mailbox only). `xyz.zafe/haptics` and `modal_corners` have no
+- **Android capture protection is app-wide** (2026-11-14): `MainActivity.onCreate`
+  sets `FLAG_SECURE` before Flutter starts. Screenshots are rejected or blank and screen
+  recordings omit the protected window, including balances, payments and receive addresses.
+  The flag stays set across pause/resume and activity recreation. Existing `SecureScreen`
+  route markers and `xyz.zafe/secure_screen` remain compatible, but `setSecure(false)`
+  cannot disable the native policy when the last secret route closes. iOS capture
+  protection is still unimplemented. `xyz.zafe/haptics` and `modal_corners` have no
   Android handler (Dart swallows `MissingPluginException`). Check with `adb shell dumpsys window windows | grep SECURE`.
 - **Settings** (`/settings` tab; groups in "Settings and sheets" above; font licences and
   `NOTICE` registered in `main.dart` for the licenses page). Other vaults live in **Manage
@@ -836,17 +835,15 @@ Learned while studying it:
   re-prompting. No screen lock on the phone → the app unlocks (Settings warns). It is
   separate from the per-action unlock (`confirmUnlock`). Background engines are
   unaffected. **Recent apps**: `MainActivity` calls `setRecentsScreenshotEnabled(false)`
-  (Android 13+; screenshots in the app still work) and below 13 sets `FLAG_SECURE` only
-  between `onPause` and `onResume` (never clearing one a `SecureScreen` asked for:
-  `secureRequested`). That flag doesn't hide the **live** tile Android 13+ shows for the
-  running app, so `AppLockGate` also draws `PrivacyCover` whenever the lifecycle isn't
+  (Android 13+) in addition to the activity-wide `FLAG_SECURE` capture policy described
+  above. `AppLockGate` also draws `PrivacyCover` whenever the lifecycle isn't
   `resumed` (never for our unlock prompt) and, when it only lost focus (`inactive`), only
   if another activity is on top (`privacyCoverFor`; `onTopResumedActivityChanged` on
   `xyz.zafe/privacy`, Android 10+). The switcher puts the launcher on top; the
   **screenshot** overlay and the notification shade take focus but leave Zafe on top
   (checked with `dumpsys activity`, API 35). Covering on focus alone put the lock tile on
   screen right after every screenshot (Flutter maps resumed + no focus to `inactive`,
-  `LifecycleChannel.java`), as if capture were blocked. Rejected: Android 14's
+  `LifecycleChannel.java`). This cover is separate from capture protection. Rejected: Android 14's
   `registerScreenCaptureCallback` reports the capture 1.1-1.4 s after the focus loss and
   makes the system show "Zafe detected this screenshot.". The switcher's live tile keeps
   the activity `RESUMED`, so `onPause` can't tell either. Android 9 and older: cover on

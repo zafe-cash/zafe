@@ -157,6 +157,8 @@ Done:
 
 ## App
 
+- [x] Android capture protection applies to every route from activity creation; resume
+      and leaving a secret route cannot disable it (2026-11-14; `docs/app-notes.md`).
 - [ ] Android Back with the keyboard open pops a pushed screen (seen on Send and the server
       list over adb). Check with a real gesture before changing anything.
 - [ ] Replace lost phone (1080x1920, 1.0 text): the safety-words card's "Their new phone
