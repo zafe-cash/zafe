@@ -66,6 +66,21 @@ its syntax. Meaning lives in names, types and tests; reasons live in `docs/`. No
 check is silenced where it fires (`#[allow]`, `// ignore`): fix the code, or change the
 rule once, centrally (`clippy.toml`, `analysis_options.yaml`, the check script).
 
+**Feature map** (`scripts/featuremap/catalog.py`, run with `python3 scripts/features.py`):
+every feature, the code it owns (files, or functions in a shared file), how a person
+reaches it (app route and labels, `zafe` command, relay route) and what proves it (tests
+by name, scripts, live flows in `featuremap/flows.py`). `check` fails unless every source
+file, app route, CLI command, relay route and test is claimed, every name exists, every
+app feature has a flow, every route is visited by a flow and every Dart file is imported:
+add a feature or extend one in the same change. `touched A..B` lists what a diff touched;
+`verify --essential` runs the core flows on the emulator against the regtest harness
+(needs the testnet app installed: flows read the clipboard through its join field);
+`verify --range <last tag>..HEAD --flows --needs regtest --record <version>` runs the
+touched features' proofs (`--needs regtest` adds the ignored tests that need a regtest
+chain; without it they're skipped) and flows and writes
+`docs/releases/<version>.features.json`; `flow <name>` runs one flow. Shared code is
+plumbing: touching it runs every feature.
+
 Type: `python3 scripts/check_typography.py` (CI) fails on a `fontSize`/`fontFamily`
 outside `app_typography.dart` and `material_theme.dart`, a size under 14, the no-op
 `lnum`/`case` features, or a font name that isn't bundled. Use the roles (`hero`, `title`,
