@@ -42,9 +42,11 @@ x-relay: &relay
     ZAFE_RELAY_CLIENT_IP_HEADER: x-forwarded-for
     # The whole database's cap (writes past it are 507; at 90% new vaults stop, and so do
     # writes from vaults less than 30 days old here). Each
-    # network keeps 14 daily backups on the same disk (backup.sh), so a full database takes
-    # ~15x its size: (75 GB - ~10 GB for the system and images) / (2 networks x 15) ≈ 2 GiB.
-    ZAFE_RELAY_MAX_DB_MB: "2048"
+    # network's backups share the disk (backup.sh: at most 15 nightly + 2 deploy copies,
+    # plus 2 while one is taken and gzipped; ciphertext barely compresses), so a full
+    # database takes up to 20x its size, and both networks back up at 03:17:
+    # (75 GB - ~10 GB for the system and images) / (2 networks x 20) ≈ 1.5 GiB.
+    ZAFE_RELAY_MAX_DB_MB: "1536"
   networks: [relay]
   # No published ports: only Caddy reaches the relay.
 

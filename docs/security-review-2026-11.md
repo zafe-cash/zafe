@@ -440,7 +440,7 @@ Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
   half (a 1/n share would stop a 2-of-3 treasurer at a third, years before the total).
   Reseed takes a signed history whole but counts it per author, so a move gives no fresh
   share (k moves would otherwise let one member write k halves).
-- **NEW 8, a stranger** (second review): with 2 GiB per network and 768 MiB per mailbox,
+- **NEW 8, a stranger** (second review): with 2 GiB per network (1.5 GiB since backups are counted) and 768 MiB per mailbox,
   three fresh mailboxes from one IP filled a relay in minutes and froze every vault on it
   (before batch 4: the disk). Above 90%, mailboxes created here in the last 30 days stop
   writing, so established vaults keep the last 10%; an attacker must prepare its
@@ -559,9 +559,11 @@ Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
   ahead (one IP makes 20 a day), and then every vault on it stops writing until the
   operator deletes them; quotas only set how many it takes. The real fix is admission
   control on hosted relays (a create token, or proof of work in create and reseed: a body
-  change) plus an operator alert on database size. The hosted 2 GiB per network comes
-  from 14 daily backups on the same disk; fewer local copies, or compressed or off-site
-  ones, would allow a larger cap. Operator calls, not made here.
+  change) plus an operator alert on database size. The hosted 1.5 GiB per network comes
+  from the backups on the same disk (15 nightly + 2 deploy copies, bounded since
+  2026-11-16: before, every deploy added two copies kept 14 days); fewer local copies or
+  off-site ones would allow a larger cap. Operator calls; the owner chose to leave
+  creation open for now (2026-11-16).
 - **The log is a lifetime limit per relay**: 512 MiB hosted is about seven years at 10
   payments a day, one author's half about three and a half; a move copies the log, so
   only a relay with a larger cap helps (the app says so).

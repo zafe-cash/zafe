@@ -68,7 +68,7 @@ Runtime contract (both paths):
   (`PRAGMA max_page_count`). Past it writes answer `507` ("this relay is full"). At 90%
   new vaults stop, and so do writes from vaults created (or moved in) in the last 30 days,
   so established vaults keep the rest. Mailboxes are cheap (20 a day per IP), so a public
-  relay needs it: size it to the disk, counting backups. The hosted relays use 2048 each
+  relay needs it: size it to the disk, counting backups. The hosted relays use 1536 each
   (`vps/compose.yml` has the arithmetic). Without a create token anyone can still fill a
   public relay with enough mailboxes made a month ahead; watch the database size.
 - Reads stop at 16 MiB of entries or envelopes per page (at least one item), so no member
@@ -300,8 +300,10 @@ restore the newest backup you have.
 
 - **Nightly `sqlite3 .backup`** (VPS: the `backup-testnet` sidecar, `vps/backup.sh`):
   an online, consistent copy through SQLite's backup API, checked with
-  `integrity_check`, gzipped, kept 14 days in `/var/backups/zafe-relay/testnet`. One
-  runs at 03:17 UTC, one whenever the sidecar starts, and one before every deploy. Ship
+  `integrity_check`, gzipped into `/var/backups/zafe-relay/testnet`. One runs at 03:17
+  UTC (kept 14 days), one when the sidecar starts without a nightly copy from the last
+  day, and one before every deploy (`relay-<time>-once.sqlite.gz`, newest 2 kept). The
+  count is bounded because the database cap is sized from it (`vps/compose.yml`). Ship
   that directory off the machine too (restic, rclone, the provider's backups).
 - **Litestream** (mainnet on the VPS: `litestream-mainnet`, config `vps/litestream.yml`):
   streams the WAL to S3-compatible storage about every second, snapshots every 6 hours,

@@ -75,7 +75,8 @@ sudo docker compose up -d</code></pre>
   <h2>Back it up</h2>
   <p>
     A backup runs every night at 03:17 UTC into <code>/var/backups/zafe-relay/testnet</code>,
-    kept 14 days. Copy that folder off the machine too. Take one by hand with:
+    kept 14 days, plus the newest 2 taken before updates. Copy that folder off the machine
+    too. Take one by hand with:
   </p>
   <pre><code>sudo docker compose exec backup-testnet sh /backup.sh once</code></pre>
   <p>
