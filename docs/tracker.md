@@ -449,7 +449,8 @@ Security audit and races (2026-10-14, fixed by 2026-10-15; `docs/audit-scope.md`
       vault notes > 5,000 zat to spend (5,000 zat each; note selection is the proposer's
       choice, the fee row shows it).
 - [ ] Ship the action bound in the next app release (and `zafe` CLI members): class
-      `essential` (security fix), notes credit "@danielgorgonha from @deegalabs".
+      `essential` (security fix), notes credit "@danielgorgonha from @deegalabs"
+      (`docs/releases/0.1.29.md`, 2026-11-16).
 
 Security review 2026-11, batch 1: safety words, recovery and address
 (`docs/security-review-2026-11.md`; not committed yet, 2026-11-13):
