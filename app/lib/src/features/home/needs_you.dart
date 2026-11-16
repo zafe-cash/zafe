@@ -278,10 +278,12 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
           who: move.moved
               ? '$vaultName moved to ${move.host}'
               : 'Move $vaultName to ${move.host}',
+          by: move.moved
+              ? null
+              : '${memberLabel(move.moverHex, me: me, names: names)} asked',
           detail: move.moved
               ? 'Move to continue · your funds don\'t move'
-              : '${memberLabel(move.moverHex, me: me, names: names)} asked · '
-                    '${move.arrived} of ${move.members} moved · your funds don\'t move',
+              : '${move.arrived} of ${move.members} moved · your funds don\'t move',
           action: _following ? 'Moving...' : 'Move',
           onTap: tap(
             () => context.push(
@@ -499,6 +501,7 @@ class RequestCard extends StatelessWidget {
     super.key,
     required this.tileKey,
     required this.who,
+    this.by,
     this.amount,
     required this.detail,
     required this.action,
@@ -511,7 +514,12 @@ class RequestCard extends StatelessWidget {
 
   /// Key hex the signer tile is drawn from.
   final String tileKey;
+
+  /// Never cut: a member's own name comes with its key, and the key must stay in view.
   final String who;
+
+  /// Who asked, under [who] (also never cut), when [who] says what is asked.
+  final String? by;
 
   /// Without the ticker ("0.8"); the card adds it.
   final String? amount;
@@ -542,7 +550,8 @@ class RequestCard extends StatelessWidget {
         children: [
           AppTappable(
             onTap: onTap,
-            semanticsLabel: '${amount == null ? '' : '$amount. '}$who. $detail',
+            semanticsLabel:
+                '${amount == null ? '' : '$amount. '}$who. ${by == null ? '' : '$by. '}$detail',
             child: Row(
               children: [
                 SignerTile(keyHex: tileKey, size: 40),
@@ -553,12 +562,7 @@ class RequestCard extends StatelessWidget {
                     children: [
                       // The amount leads (what is asked); who and why under it.
                       if (amount == null)
-                        Text(
-                          who,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: strong,
-                        )
+                        Text(who, style: strong)
                       else
                         Text.rich(
                           TextSpan(
@@ -579,8 +583,15 @@ class RequestCard extends StatelessWidget {
                           ),
                         ),
                       const SizedBox(height: 2),
+                      for (final line in [if (amount != null) who, ?by])
+                        Text(
+                          line,
+                          style: AppTypography.bodySmall.copyWith(
+                            color: colors.text.secondary,
+                          ),
+                        ),
                       Text(
-                        amount == null ? detail : '$who · $detail',
+                        detail,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: AppTypography.bodySmall.copyWith(

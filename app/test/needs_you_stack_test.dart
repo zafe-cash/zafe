@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:zafe/src/core/storage/member_names.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/features/home/needs_you.dart';
 import 'package:zafe/src/providers/member_names_provider.dart';
@@ -67,7 +68,7 @@ Future<List<String>> _pump(WidgetTester tester, int n) async {
         ),
         vaultProvider.overrideWith(_Vault.new),
         privacyModeProvider.overrideWith(_Privacy.new),
-        signerNamesProvider.overrideWithValue(const {}),
+        signerNamesProvider.overrideWithValue(SignerNames.none),
       ],
       child: MaterialApp.router(
         routerConfig: router,

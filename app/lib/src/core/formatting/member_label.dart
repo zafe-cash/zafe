@@ -1,18 +1,14 @@
-/// A member: "You", the local name this device gave them, or a short key.
-/// [withKey] adds the short key after a name ("Bob (97c9ce...123e)") where who did
-/// something matters (who proposed a payment): names are chosen by members themselves.
-String memberLabel(
-  String keyHex, {
-  String? me,
-  Map<String, String> names = const {},
-  bool withKey = false,
-}) {
+import '../storage/member_names.dart';
+
+/// A member: "You", the label this phone gave them, the name they gave themselves with
+/// their short key ("Bob (97c9ce...123e)": any member can pick any name), or the short
+/// key alone.
+String memberLabel(String keyHex, {String? me, SignerNames? names}) {
   if (keyHex == me) return 'You';
-  final name = names[keyHex];
-  if (name != null && name.isNotEmpty) {
-    return withKey ? '$name (${shortKey(keyHex)})' : name;
-  }
-  return shortKey(keyHex);
+  final n = names ?? SignerNames.none;
+  final name = n.nameOf(keyHex);
+  if (name == null) return shortKey(keyHex);
+  return n.isClaim(keyHex) ? '$name (${shortKey(keyHex)})' : name;
 }
 
 /// "97c9ce...123e".

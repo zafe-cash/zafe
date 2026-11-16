@@ -16,6 +16,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/core/storage/member_names.dart';
 import 'package:zafe/src/core/layout/mobile/app_mobile_tab_bar.dart';
 import 'package:zafe/src/core/layout/mobile/mobile_top_nav.dart';
 import 'package:zafe/src/core/layout/mobile/zafe_screen.dart';
@@ -298,7 +299,7 @@ Widget _request() => ZafeScreen(
       proposal: _asked,
       members: _members,
       me: _me,
-      names: _names,
+      names: SignerNames(local: _names),
     ),
   ],
 );
@@ -318,7 +319,7 @@ Widget _proposer() => ZafeScreen(
       ),
       members: _members,
       me: _maya,
-      names: const {_me: 'Alex', _ravi: 'Ravi'},
+      names: SignerNames(local: const {_me: 'Alex', _ravi: 'Ravi'}),
     ),
   ],
 );

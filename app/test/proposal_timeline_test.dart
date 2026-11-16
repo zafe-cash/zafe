@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/core/storage/member_names.dart';
 import 'package:zafe/src/features/proposals/proposal_status.dart';
 import 'package:zafe/src/features/proposals/proposal_timeline.dart';
 import 'package:zafe/src/rust/api/proposals.dart';
@@ -7,7 +8,7 @@ import 'vault_updates_test.dart' show proposal;
 
 void main() {
   final a = 'aa' * 32, b = 'bb' * 32, c = 'cc' * 32;
-  final names = {a: 'Alice', b: 'Bob', c: 'Carol'};
+  final names = SignerNames(local: {a: 'Alice', b: 'Bob', c: 'Carol'});
   List<String> titles(ProposalInfo p, {bool sending = false}) => [
     for (final s in timelineSteps(
       p,

@@ -7,11 +7,35 @@ void main() {
   const key =
       '97c9ce75aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa123e';
 
-  test('a member shows as You, their local name, or a short key', () {
-    expect(memberLabel(key, me: key, names: {key: 'Alice'}), 'You');
-    expect(memberLabel(key, names: {key: 'Alice'}), 'Alice');
-    expect(memberLabel(key, names: {key: ''}), '97c9ce...123e');
+  test('a member shows as You, this phone\'s label, or a short key', () {
+    expect(
+      memberLabel(key, me: key, names: SignerNames(local: {key: 'Alice'})),
+      'You',
+    );
+    expect(memberLabel(key, names: SignerNames(local: {key: 'Alice'})), 'Alice');
+    expect(memberLabel(key, names: SignerNames(local: {key: ''})), '97c9ce...123e');
     expect(memberLabel(key), '97c9ce...123e');
+  });
+
+  test('a name a member gave itself always shows with its key', () {
+    // Anyone can claim any name in the log, lookalike letters included.
+    final names = SignerNames(shared: {key: 'Alic\u0435'});
+    expect(memberLabel(key, names: names), 'Alic\u0435 (97c9ce...123e)');
+    expect(names.nameOf(key), 'Alic\u0435');
+    expect(names.isClaim(key), isTrue);
+  });
+
+  test('a claim of another key\'s label is dropped', () {
+    // Bob named Alice's key "Alice"; Mallory calls herself "alice ".
+    final alice = 'a' * 64;
+    final mallory = 'c' * 64;
+    final names = SignerNames(
+      local: {alice: 'Alice'},
+      shared: {mallory: 'alice ', alice: 'Ally'},
+    );
+    expect(memberLabel(alice, names: names), 'Alice');
+    expect(memberLabel(mallory, names: names), 'cccccc...cccc');
+    expect(names.merged, {alice: 'Alice'});
   });
 
   test('this phone\'s label wins over the name a member shared', () {

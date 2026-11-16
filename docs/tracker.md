@@ -10,7 +10,7 @@ update it in the same change when you finish, defer or find something. `§` refe
 - Legend: `[ ]` open · `[x]` done · **(you)** needs the user · *(idea)* not decided ·
   *(check)* not verified, look before relying on it.
 
-Last updated: 2026-11-14.
+Last updated: 2026-11-16.
 
 ## Now: relay moves (merged 2026-10-27)
 
@@ -160,11 +160,11 @@ Done:
 
 - [ ] Android Back with the keyboard open pops a pushed screen (seen on Send and the server
       list over adb). Check with a real gesture before changing anything.
-- [ ] Replace lost phone (1080x1920, 1.0 text): the safety-words card's "Their new phone
-      shows these words" row starts under the pinned **Approve move** bar and only toggles
-      after scrolling (live run 2026-11-14). Pad the content by the bar's height.
-- [ ] A sweep (**Make it unsendable**) reads "You proposed moving funds / 0.00 TAZ / Back to
-      the vault": show the amount it moves (its spent notes), not the zero payment total.
+- [x] Replace lost phone (1080x1920): "Their new phone shows these words" isn't under the
+      **Approve move** bar (`ZafeScreen` pins it below the list, measured 2026-11-16); the
+      row is below the fold and toggles once scrolled into view. Not a bug.
+- [x] A sweep (**Make it unsendable**) read "0.00 TAZ": the request shows its checked change
+      (the amount it moves back), nothing until checked (security review batch 6).
 - [ ] Proposals refresh takes 6-11 s over Tor (pool top-up and log read are sequential
       round trips): batch or parallelise the relay requests.
 - [ ] The vault's approval window isn't shown anywhere after creation.
@@ -503,9 +503,14 @@ yet, 2026-11-14; review doc "Proposals"):
       (`VAULT_EVENT` 12). Follow-up: the spend alert accounts a signed cancelled payment's
       txid at any time (no grace; shown as **Sent anyway**); a restored phone may reject
       what nobody signed.
-- [ ] Live emulator run: cancel a signed payment and propose another (must spend its
-      funds), **Make it unsendable**, decline after signing ("Your signature is already
-      out"), **Approve again** after another signer approves interactively.
+- [x] Live emulator run (2026-11-16): a signed payment cancelled, a new proposal refused
+      ("funds were just moved") until the sweep was deep, **Make it unsendable** (request
+      shows 4.9999 TAZ), approved and sent; the cancelled one stops reading "can still be
+      sent" once the sweep is 30 blocks deep.
+- [x] Live: after a one-tap approval the payment offers no Decline ("You approved and
+      signed this payment"), 2026-11-16.
+- [ ] Live: **Approve again** after another signer approves interactively (the harness
+      CLI approves one-tap while pools last; `tests/one_tap_retry.rs` and `bridge_e2e` cover it).
 - [x] Round 2 (zafe-e4): own shares never reserve; a W only blocks proposals logged after
       it; `propose` spends a note of every live W (`wallet::ForcedInputs`); a dropped
       broadcast counts as a W (2026-11-14).
@@ -530,6 +535,15 @@ Security review 2026-11, batch 4: relay server (rule 7, NEW 6-9; not committed y
 - [ ] Admission control on the hosted relays (create token or proof of work on create and
       reseed; a body change), an operator alert on database size, and the backup layout
       (14 local copies are why the cap is 2 GiB): operator calls (review doc Residuals).
+
+Security review 2026-11, batch 6: privacy and display (review doc "Privacy and display"):
+- [x] N1: a member's own name always shows with its short key, a claim of another key's
+      label is dropped, shown claims hold only letters, digits, spaces and `- ' ’ &` (the
+      name fields take only those), and lines naming a member are never cut (2026-11-16).
+- [x] Envelope kinds and vote sizes stay visible to relays: residuals, with reasons.
+- [x] Live emulator run (2026-11-16): with B labelled "Bob" here, C's claims "Bob" and
+      "Bob (32552b...c146)" show as C's key only on Needs you, the request and the
+      timeline; "Carol" shows as "Carol (6710a8...d386)".
 
 Onboarding (`docs/onboarding.md`):
 - [x] P0 and P1 done by 2026-10-16: typed error copy, keygen timeout naming who's missing,

@@ -627,10 +627,15 @@ Learned while studying it:
   (`MemberNames.read`, no providers in that isolate) and pass `names:` to `vaultUpdates`.
 - **Shared names**: each member can also name *themselves* in the log
   (`VaultEvent::Name`, `node::set_name`, bridge `set_my_name`; only the author, trimmed,
-  ≤ 32 chars, no control chars, empty clears). `ProposalList.shared_names` carries them;
-  display uses `MemberNames.merge(shared, local)` (`signerNamesProvider`): this phone's
-  label wins, then the shared name, then the short key. Tiles stay key-derived, so a
-  member calling themselves "Bob" still shows their own tile and key. "Your name" is the
+  ≤ 32 chars, no control chars, empty clears). `ProposalList.shared_names` carries them,
+  minus any that could pass for someone else (`plain_name`: only letters, digits, single
+  spaces and `- ' ’ &`, not "You", no duplicates; the "Your name" fields take only those,
+  `MemberNames.ownName`). `signerNamesProvider` is a `SignerNames` (labels and claims
+  apart): this phone's label wins and shows alone; a claim always shows with the short
+  key (`memberLabel`, "Bob (97c9ce...123e)"), and one that folds equal to another key's
+  label is dropped. Text holding a member label is never cut (`RequestCard` who/by), so
+  the key stays in view; `SignerRow` shows the name alone with the key under it (security
+  review 2026-11, N1). Tiles stay key-derived. "Your name" is the
   sheet behind your own row on the Signers tab; the CLI has `zafe name`.
 - **Name in setup** (2026-10-16): Create and Join take "Your name" (`core/storage/my_name.dart`, last one
   in prefs `zafe_last_my_name` prefills); it can't be published before the vault exists (a `Name` is a log

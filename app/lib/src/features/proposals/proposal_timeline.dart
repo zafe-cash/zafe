@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../../core/formatting/member_label.dart';
+import '../../core/storage/member_names.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/animated_keyed_column.dart';
 import '../../core/widgets/app_icon.dart';
@@ -26,7 +27,7 @@ List<TimelineStep> timelineSteps(
   rust.ProposalInfo p, {
   required List<String> members,
   required String? me,
-  required Map<String, String> names,
+  required SignerNames names,
   int? height,
   bool sending = false,
 }) {

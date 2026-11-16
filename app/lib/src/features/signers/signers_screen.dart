@@ -189,7 +189,7 @@ class SignersScreen extends ConsumerWidget {
                           SignerRow(
                             keyHex: m,
                             me: me,
-                            name: names[m],
+                            name: names.nameOf(m),
                             trailing: backedUp == null
                                 ? null
                                 : BackupLabel(backedUp: backedUp.contains(m)),

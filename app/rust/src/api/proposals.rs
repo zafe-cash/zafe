@@ -883,11 +883,18 @@ pub(crate) fn visible_text(text: &str) -> String {
         .collect()
 }
 
-/// No invisible or direction-changing characters, and not "You" (with anything after).
+/// Only letters, digits, single spaces and `- ' ’ &` (the app's name fields take only
+/// these), and not "You" (with anything after). Screens add a member's short key after
+/// the name it gave itself, "Alice (97c9ce...123e)", so a name must not hold anything that
+/// could pass for one (brackets, dots) or push the real key out of view (runs of spaces).
+/// This also keeps out invisible and direction-changing characters.
 fn plain_name(name: &str) -> bool {
     let lower = name.trim().to_lowercase();
     let you = lower == "you" || lower.starts_with("you ") || lower.starts_with("you(");
-    !you && !name.chars().any(hidden_char)
+    !you && !name.contains("  ")
+        && name.chars().all(|c| {
+            c.is_alphabetic() || c.is_numeric() || matches!(c, ' ' | '-' | '\'' | '\u{2019}' | '&')
+        })
 }
 
 #[cfg(test)]
@@ -904,6 +911,14 @@ mod name_tests {
         assert_eq!(visible_text("pay \u{202E}01 ZEC"), "pay \u{FFFD}01 ZEC");
         assert_eq!(visible_text("plain memo"), "plain memo");
         assert!(!plain_name("Ali\u{200B}ce"));
+        // A name with a key in it: screens would read "Alice (a1a1a1...a1a1) (c3c3...)".
+        assert!(!plain_name("Alice (a1a1a1...a1a1)"));
+        assert!(!plain_name("Alice a1a1a1\u{2026}a1a1"));
+        assert!(!plain_name("Alice\u{00A0}\u{00A0}\u{00A0}"));
+        assert!(!plain_name("Alice    x"));
+        assert!(plain_name("Anne-Marie O\u{2019}Neil & Co 2"));
+        assert!(plain_name("\u{0905}\u{0928}\u{092E}\u{094B}\u{0932}")); // अनमोल
+        assert!(plain_name("José"));
     }
 }
 

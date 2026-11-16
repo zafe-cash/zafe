@@ -587,7 +587,10 @@ unapproved spend that a newer entry, not yet seen, would explain. ✓
   mailboxes.
 - **Size gives moves away.** The old relay sees a sealed message from the mover to each
   member, and a fixed-size message stands out. *Added:* move messages are padded to a
-  multiple of 1 KiB, the bucket a small signing request falls in (§7.3).
+  multiple of 1 KiB, the bucket a small signing request falls in (§7.3). The envelope's
+  kind is still in its plaintext header, so the relay can tell a move message from a
+  signing request; it learns of the move anyway once members stop writing there
+  (security review 2026-11, Residuals).
 - **Create token:** checked in `create` and in reseed's create branch, compared in constant time,
   never logged. A wrong token counts against `creates_per_ip`.
 

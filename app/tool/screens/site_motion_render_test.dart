@@ -16,6 +16,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/core/storage/member_names.dart';
 import 'package:zafe/src/core/widgets/app_icon.dart';
 import 'package:zafe/src/features/home/home_screen.dart';
 import 'package:zafe/src/features/home/needs_you.dart';
@@ -129,7 +130,7 @@ Widget _requestCard() => _card(
         proposal: _asked,
         members: _members,
         me: _me,
-        names: _names,
+        names: SignerNames(local: _names),
       ),
       const SizedBox(height: 20),
       ActionButton(

@@ -202,7 +202,7 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
                 SignerRow(
                   keyHex: m,
                   me: me,
-                  name: names[m],
+                  name: names.nameOf(m),
                   trailing: AppIcon(
                     m == _signer ? AppIcons.checkCircle : AppIcons.user,
                     size: 20,

@@ -603,7 +603,12 @@ class SignerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final isMe = keyHex == me;
-    final named = isMe || (name?.isNotEmpty ?? false);
+    final hasName = name?.isNotEmpty ?? false;
+    final named = isMe || hasName;
+    // The short key shows under a name, so a name a member gave itself needs none here.
+    final title = isMe
+        ? (hasName ? 'You · $name' : 'You')
+        : (hasName ? name! : shortKey(keyHex));
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -615,9 +620,7 @@ class SignerRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isMe && (name?.isNotEmpty ?? false)
-                      ? 'You · $name'
-                      : memberLabel(keyHex, me: me, names: {keyHex: ?name}),
+                  title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: named

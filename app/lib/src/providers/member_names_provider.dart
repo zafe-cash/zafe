@@ -38,11 +38,11 @@ final memberNamesProvider =
       MemberNamesNotifier.new,
     );
 
-/// The names to show for the active vault's signers: this device's labels first, then
-/// the names members shared in the vault log.
-final signerNamesProvider = Provider<Map<String, String>>(
-  (ref) => MemberNames.merge(
-    ref.watch(proposalsProvider.select((s) => s.sharedNames)),
-    ref.watch(memberNamesProvider),
+/// The active vault's signers as this phone knows them: its own labels, and the names
+/// members shared in the vault log.
+final signerNamesProvider = Provider<SignerNames>(
+  (ref) => SignerNames(
+    local: ref.watch(memberNamesProvider),
+    shared: ref.watch(proposalsProvider.select((s) => s.sharedNames)),
   ),
 );

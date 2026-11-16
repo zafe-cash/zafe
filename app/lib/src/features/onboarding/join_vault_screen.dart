@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../core/storage/member_names.dart';
 import '../../core/storage/my_name.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -214,6 +215,10 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
             controller: _myName,
             focusNode: _myNameFocus,
             hintText: 'Shown to the other members',
+            inputFormatters: [
+              MemberNames.ownName,
+              LengthLimitingTextInputFormatter(MemberNames.maxLength),
+            ],
           ),
         ],
         if (info != null && _fromLink) ...[

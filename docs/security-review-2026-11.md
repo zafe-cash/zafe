@@ -507,10 +507,20 @@ Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
   each entry's author).
 - Dropped: unknown and foreign mailboxes answering the same (see Residuals).
 
-### Privacy
+### Privacy and display (rules 2, 3)
 
-- Message kinds that reveal a move travel inside the sealed payload; votes are padded to
-  fixed sizes so entry lengths don't show who approved.
+- **N1, a member passing as another on the payment screen** (found by the peer review,
+  2026-11-16): a member's own name is a claim anyone can make, and since `9532cdd` the
+  proposer, the timeline and Needs you showed it alone, so Mallory calling herself
+  "Alice" (or "Alicе" with a Cyrillic е) read as Alice to a co-signer who had labelled
+  Alice's key "Alice". Now a claim always shows with the member's short key, a label this
+  phone gave shows alone, a claim equal to another key's label is dropped, a shown claim
+  holds only letters, digits, single spaces and `- ' ’ &` (no fake key in brackets), and
+  no line holding a member is cut, so the real key stays in view.
+- A sweep shows the amount it moves back (its change, once this phone checked it), not
+  the zero payment total.
+- Planned and dropped: sealing envelope kinds and padding log entries (see Residuals:
+  sizes alone don't hide what authors and timing show).
 
 ## Residuals (accepted, with reasons)
 
@@ -600,6 +610,21 @@ Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
   only a relay with a larger cap helps (the app says so).
 - Two colluding members can fill a vault's log or its undelivered messages (each may use
   half); the threat model is one dishonest member.
+- **A relay sees each envelope's kind** (`Header.kind` is plaintext; the relay never
+  reads it), so the old relay can tell that a move message was sent and by whom; the 1 KiB
+  padding only hides its size. It learns of the move anyway once members stop writing
+  there, and never where they went. Sealing the kind is an envelope format change with
+  nothing to gain against that.
+- **A relay can tell a vote from its size and author**: an approval carries commitments
+  or shares, a decline doesn't. Padding entries wouldn't hide it: every entry's author and
+  time are visible, and whether a signed transaction followed shows the outcome. Hiding
+  votes needs entries without visible authors (tracker idea), which the relay's quotas and
+  membership checks rely on today.
+- A claimed name may still use letters that look like dots or hex digits (Lisu ꓸ,
+  Cyrillic а): it can't carry brackets, and the real key follows it in the app's own
+  format and is never cut.
+- A memo that isn't text shows as no memo, and batch memos are cut to two lines on the
+  card (the details show them whole); the recipient is the proposer's choice either way.
 
 ## Order
 
@@ -608,7 +633,7 @@ Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
 3. Proposals.
 4. Relay server.
 5. Relay moves.
-6. Privacy.
+6. Privacy and display.
 
 Each batch: a failing test first for every finding, then the change, then the full local
 CI and the live end-to-end scripts; reviewed and attacked again before it lands.

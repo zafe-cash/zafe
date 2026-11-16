@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 import '../../rust/api/names.dart';
 import 'zafe_paths.dart';
 
@@ -13,13 +15,19 @@ class MemberNames {
   static Map<String, String> merge(
     Map<String, String> shared,
     Map<String, String> local,
-  ) => {...shared, ...local};
+  ) => SignerNames(local: local, shared: shared).merged;
 
   static Future<File> _file(String vaultId) async =>
       File('${(await ZafePaths.get()).vaultDir(vaultId)}/names.json');
 
   /// Longest name kept (it has to fit a signer row).
   static const maxLength = 32;
+
+  /// What a name a member gives itself may hold: letters, digits, spaces and - ' ’ &,
+  /// as the bridge shows them (`plain_name`); nothing that could pass for a short key.
+  static final ownName = FilteringTextInputFormatter.allow(
+    RegExp(r"[\p{Alphabetic}\p{N} '’&-]", unicode: true),
+  );
 
   static Future<Map<String, String>> read(String vaultId) async {
     try {
@@ -63,4 +71,56 @@ class MemberNames {
     final t = name.trim().replaceAll(RegExp(r'\s+'), ' ');
     return t.length > maxLength ? t.substring(0, maxLength) : t;
   }
+}
+
+/// Who each signer is to this phone. A **label** is a name this phone's owner gave a key
+/// here; a **claim** is the name a member gave itself in the vault log, which any member
+/// can pick, so it never shows without the member's short key ([memberLabel]). A claim
+/// that reads like a label of another key is left out: that member shows as its short key.
+class SignerNames {
+  SignerNames({
+    Map<String, String> local = const {},
+    Map<String, String> shared = const {},
+  }) : local = {
+         for (final e in local.entries)
+           if (e.value.trim().isNotEmpty) e.key: e.value,
+       },
+       shared = _claims(local, shared);
+
+  static final none = SignerNames();
+
+  final Map<String, String> local;
+
+  /// Claims still shown: none for a key this phone labelled, none that reads like
+  /// another key's label.
+  final Map<String, String> shared;
+
+  static Map<String, String> _claims(
+    Map<String, String> local,
+    Map<String, String> shared,
+  ) {
+    String fold(String s) => s.trim().toLowerCase();
+    final labels = {
+      for (final e in local.entries)
+        if (e.value.trim().isNotEmpty) fold(e.value),
+    };
+    return {
+      for (final e in shared.entries)
+        if (e.value.trim().isNotEmpty &&
+            (local[e.key]?.trim().isEmpty ?? true) &&
+            !labels.contains(fold(e.value)))
+          e.key: e.value,
+    };
+  }
+
+  /// The name alone, label first (signer rows, which show the key under it).
+  String? nameOf(String keyHex) => local[keyHex] ?? shared[keyHex];
+
+  /// Whether [nameOf] is the member's own claim rather than this phone's label.
+  bool isClaim(String keyHex) =>
+      !local.containsKey(keyHex) && shared.containsKey(keyHex);
+
+  /// Key → name, labels first (backups of names, CSV export, notifications, which add
+  /// the key to every name).
+  Map<String, String> get merged => {...shared, ...local};
 }

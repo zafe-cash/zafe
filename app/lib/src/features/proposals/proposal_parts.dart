@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/network_config.dart';
 import '../../core/errors/zafe_error_copy.dart';
 import '../../core/formatting/member_label.dart';
+import '../../core/storage/member_names.dart';
 import '../../core/formatting/zec_amount.dart';
 import '../../core/privacy/amount_display.dart';
 import '../../core/privacy/privacy_mask.dart';
@@ -34,15 +35,15 @@ class ProposalBody extends ConsumerWidget {
     required this.me,
     this.send,
     this.height,
-    this.names = const {},
+    this.names,
   });
   final rust.ProposalInfo proposal;
   final List<String> members;
   final String? me;
   final SendState? send;
 
-  /// Local names of the signers (key hex → name).
-  final Map<String, String> names;
+  /// Who the signers are to this phone.
+  final SignerNames? names;
 
   /// Synced chain tip, to show expiry.
   final int? height;
@@ -97,7 +98,7 @@ class ProposalBody extends ConsumerWidget {
             p,
             members: members,
             me: me,
-            names: names,
+            names: names ?? SignerNames.none,
             height: height,
             sending: sending,
           ),
@@ -139,7 +140,7 @@ class PaymentRequestView extends ConsumerStatefulWidget {
   final rust.ProposalInfo proposal;
   final List<String> members;
   final String? me;
-  final Map<String, String> names;
+  final SignerNames names;
   final int? height;
 
   @override
@@ -155,6 +156,15 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
     final p = widget.proposal;
     final hide = ref.watch(privacyModeProvider);
     final payment = p.payments.isEmpty ? null : p.payments.first;
+    // A sweep pays nobody: what it moves is its change, known once this phone checked it.
+    final review = payment == null
+        ? ref.watch(proposalReviewProvider(p.id)).value
+        : null;
+    final amountZat = payment != null
+        ? p.totalZat
+        : review?.verified == true
+        ? review!.changeZat
+        : null;
     final who = memberLabel(p.author, me: widget.me, names: widget.names);
     final soon = widget.height == null || p.expiryHeight <= 0
         ? null
@@ -183,28 +193,29 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
           ),
         ),
         const SizedBox(height: AppSpacing.xs),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: hide
-                      ? fixedPrivacyMask()
-                      : ZecAmount.fromZatoshi(p.totalZat).receipt.amountText,
-                  style: AppTypography.hero.copyWith(color: display.color),
-                ),
-                TextSpan(
-                  text: ' $kZcashDefaultCurrencyTicker',
-                  style: AppTypography.heroTicker.copyWith(
-                    color: colors.text.value,
+        if (amountZat != null)
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: hide
+                        ? fixedPrivacyMask()
+                        : ZecAmount.fromZatoshi(amountZat).receipt.amountText,
+                    style: AppTypography.hero.copyWith(color: display.color),
                   ),
-                ),
-              ],
+                  TextSpan(
+                    text: ' $kZcashDefaultCurrencyTicker',
+                    style: AppTypography.heroTicker.copyWith(
+                      color: colors.text.value,
+                    ),
+                  ),
+                ],
+              ),
+              maxLines: 1,
             ),
-            maxLines: 1,
           ),
-        ),
         const SizedBox(height: AppSpacing.s),
         if (payment == null)
           Text(

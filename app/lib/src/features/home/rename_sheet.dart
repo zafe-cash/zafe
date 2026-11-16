@@ -50,6 +50,7 @@ Future<void> showMyNameSheet(BuildContext context, WidgetRef ref) async {
       current: current,
       removeLabel: 'Remove name',
       errorFallback: 'Couldn\'t save your name. Try again.',
+      formatter: MemberNames.ownName,
       onSave: (name) async {
         if (MemberNames.clean(name) == current) return;
         await ref
@@ -92,6 +93,7 @@ class _RenameSheet extends StatefulWidget {
     required this.onSave,
     this.removeLabel,
     this.errorFallback,
+    this.formatter,
   });
   final String title;
   final String? body;
@@ -106,6 +108,7 @@ class _RenameSheet extends StatefulWidget {
   /// shows under the button.
   final Future<void> Function(String name) onSave;
   final String? errorFallback;
+  final TextInputFormatter? formatter;
 
   @override
   State<_RenameSheet> createState() => _RenameSheetState();
@@ -153,6 +156,7 @@ class _RenameSheetState extends State<_RenameSheet> {
             hintText: widget.hint,
             textInputAction: TextInputAction.done,
             inputFormatters: [
+              ?widget.formatter,
               LengthLimitingTextInputFormatter(widget.maxLength),
             ],
           ),

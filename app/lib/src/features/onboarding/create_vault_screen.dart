@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../core/storage/member_names.dart';
 import '../../core/storage/my_name.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -161,6 +163,10 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
           controller: _myName,
           focusNode: _myNameFocus,
           hintText: 'Shown to the other members',
+          inputFormatters: [
+            MemberNames.ownName,
+            LengthLimitingTextInputFormatter(MemberNames.maxLength),
+          ],
         ),
         const SizedBox(height: AppSpacing.md),
         MobileSurfaceCard(

@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zafe/src/core/storage/member_names.dart';
 import 'package:zafe/src/core/config/network_config.dart';
 import 'package:zafe/src/core/layout/mobile/zafe_screen.dart';
 import 'package:zafe/src/core/theme/app_theme.dart';
@@ -274,7 +275,7 @@ final _scenarios = <String, (String, List<Widget>)>{
         ),
         members: _members,
         me: _bob,
-        names: const {_me: 'You', _cara: 'Cara'},
+        names: SignerNames(local: const {_me: 'You', _cara: 'Cara'}),
       ),
     ],
   ),
@@ -324,7 +325,7 @@ Widget _request() => ZafeScreen(
       proposal: _proposal(approvals: [_bob]),
       members: _members,
       me: _me,
-      names: const {_bob: 'Bob', _cara: 'Cara'},
+      names: SignerNames(local: const {_bob: 'Bob', _cara: 'Cara'}),
     ),
   ],
 );

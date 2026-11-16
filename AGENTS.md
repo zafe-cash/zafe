@@ -607,6 +607,10 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   Settings' first level keeps discoverable features (Tor first).
 - Never drop a refresh request because work is running (`CoalescedRun`, `refreshSoon`).
 - Gated actions call `confirmUnlock` first; background checks act only on approvals already given.
+- **Member names are claims** (`SignerNames`): a name a member gave itself always shows
+  with its short key (`memberLabel`), a label this phone gave shows alone; never
+  ellipsize text that holds a member label (the key must stay in view). Rust
+  `plain_name` limits shown claims to letters, digits, single spaces and `- ' ’ &`.
 - UX rules (user): minimal text, exact values, no toasts (`ActionButton` + `appNoticesProvider`),
   no dead ends; check 360x640 at 1.0 and 2.0 text scale and both proposer and approver flows.
 - `pubspec.yaml` has a single `flutter:` key; font names match it exactly.
