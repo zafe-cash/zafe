@@ -1,8 +1,5 @@
-//! Local signer names (this device's labels for the vault's members) crossing the bridge.
-
 use std::collections::BTreeMap;
 
-/// One local name: the signer's signing key (hex) and the name this device gave it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignerName {
     pub key_hex: String,

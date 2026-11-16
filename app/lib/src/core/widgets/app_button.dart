@@ -1,19 +1,11 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import '../layout/app_form_factor.dart';
 import '../theme/app_theme.dart';
 
-/// Visual style variant of an [AppButton]. Mapped onto our semantic color
-/// tokens — not onto Figma's variant naming (which calls primary "Accent").
 enum AppButtonVariant { primary, secondary, ghost, destructive }
 
-/// Vertical density. Large uses 20px icons while MediumLarge/Medium/Small
-/// use form-factor-aware metrics; label family/weight stays consistent,
-/// with Small using the reduced label token from the Figma component.
 enum AppButtonSize { large, mediumLarge, medium, small }
-
-const _mobile = kAppFormFactor == AppFormFactor.mobile;
 
 class _Sizing {
   const _Sizing({
@@ -24,11 +16,6 @@ class _Sizing {
     required this.labelStyle,
   });
 
-  /// Fixed pill height pinned by the Figma component. Intrinsic sizing
-  /// from padding + content alone undershoots Medium and overshoots
-  /// Small, so an explicit height matches the design — see
-  /// `AppButton.build` for why the Small variant also needs
-  /// `clipBehavior` + centered alignment to land visually.
   final double height;
   final EdgeInsets padding;
   final double gap;
@@ -36,7 +23,6 @@ class _Sizing {
   final TextStyle labelStyle;
 }
 
-// Large button — the primary CTA. Uses Figma `Label M`.
 const _largeSizing = _Sizing(
   height: AppButtonSizing.largeHeight,
   padding: EdgeInsets.symmetric(
@@ -48,9 +34,6 @@ const _largeSizing = _Sizing(
   labelStyle: AppTypography.labelLarge,
 );
 
-// Medium-large button — the 36px modal CTA from the Figma modal button set
-// (e.g. "Add to contacts" in the verify-address modal). Uses Desktop
-// `Label M` with 12px side padding.
 const _mediumLargeSizing = _Sizing(
   height: 36,
   padding: EdgeInsets.symmetric(
@@ -62,34 +45,17 @@ const _mediumLargeSizing = _Sizing(
   labelStyle: AppTypography.labelLarge,
 );
 
-// Medium button — standard inline action.
-//
-// Desktop preserves the pre-mobile merge density (`Label S`/13px and 16px
-// icons). Mobile follows the mobile Figma component (`Label M` and 20px
-// icons) without changing desktop call sites.
-const _mediumSizingDesktop = _Sizing(
+const _mediumSizing = _Sizing(
   height: 32,
   padding: EdgeInsets.symmetric(
     horizontal: AppSpacing.xs,
     vertical: AppSpacing.xxs,
   ),
   gap: AppSpacing.xxs,
-  iconSize: AppIconSize.medium,
-  labelStyle: AppTypographyDesktop.labelMedium,
+  iconSize: AppButtonSizing.mediumSmallIconSize,
+  labelStyle: AppTypography.labelLarge,
 );
 
-const _mediumSizingMobile = _Sizing(
-  height: 32,
-  padding: EdgeInsets.symmetric(
-    horizontal: AppSpacing.xs,
-    vertical: AppSpacing.xxs,
-  ),
-  gap: AppSpacing.xxs,
-  iconSize: AppButtonSizingMobile.mediumSmallIconSize,
-  labelStyle: AppTypographyMobile.labelLarge,
-);
-
-// Small (compact) button — inline/dense actions. Uses Figma `Label S`.
 const _smallSizing = _Sizing(
   height: 24,
   padding: EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
@@ -157,8 +123,6 @@ _VariantPalette _paletteFor(AppButtonVariant variant, AppColors c) {
         focusRingHover: c.state.focusRing,
       );
     case AppButtonVariant.ghost:
-      // Ghost's visible base is transparent regardless of the nominal token
-      // value — that way it composes correctly over any surface.
       return _VariantPalette(
         bg: c.background.ground.withValues(alpha: 0),
         bgHover: c.button.ghost.bgHover,
@@ -189,18 +153,6 @@ _VariantPalette _paletteFor(AppButtonVariant variant, AppColors c) {
   }
 }
 
-/// A button with a default pill shape and three style variants.
-///
-/// Width and height are intrinsic — the button wraps the leading icon +
-/// label + trailing icon and centers them both axes. Composed rows can
-/// override [borderRadius]; padding and typography determine the rest.
-///
-/// States handled:
-/// * default / hover / pressed — ambient fill swaps via [_Sizing] + palette
-/// * focused — ring painted outside the pill using the per-variant
-///   focus-ring color (2dp on large/medium, 1.5dp on small)
-/// * disabled — `onPressed == null` switches to the explicit disabled
-///   palette from Figma and removes pointer/focus interaction
 class AppButton extends StatefulWidget {
   const AppButton({
     super.key,
@@ -229,80 +181,45 @@ class AppButton extends StatefulWidget {
     this.constrainContent = false,
   });
 
-  /// Tap handler. `null` disables the button.
   final VoidCallback? onPressed;
 
-  /// Label content. Usually a [Text] but any widget is allowed (e.g. a
-  /// [Row] with a badge). The size's [TextStyle] is merged in as the
-  /// ambient [DefaultTextStyle].
   final Widget child;
 
   final AppButtonVariant variant;
   final AppButtonSize size;
 
-  /// Optional visual height override for one-off composed components that
-  /// use the button palette but have a different fixed height in Figma.
   final double? height;
 
-  /// Treat the configured height as a minimum, allowing wrapped content to
-  /// make the button taller. Pair with [constrainContent] for wrapping labels.
   final bool growWithContent;
 
-  /// Optional override for the button's internal padding. Default (`null`)
-  /// keeps the design-system sizing for all regular buttons; narrow composed
-  /// rows can opt in without changing the global component metrics.
   final EdgeInsets? contentPadding;
 
-  /// Optional corner radius for composed rows. Null keeps the default pill.
-  /// The focus ring follows the same shape outside the button.
   final BorderRadius? borderRadius;
 
-  /// Optional widget shown before [child]. Auto-sized to 16×16 and tinted
-  /// to the label color via [IconTheme].
   final Widget? leading;
 
-  /// Optional widget shown after [child]. Same auto-sizing/tint as [leading].
   final Widget? trailing;
 
-  /// Optional minimum width. Default (`null`) keeps the button fully
-  /// intrinsic — content drives size. Callers opt in to a floor when a
-  /// specific screen or layout demands a consistent button width.
   final double? minWidth;
 
-  /// Optional gap between the label and any leading/trailing icon. Defaults
-  /// to the size token's gap.
   final double? iconGap;
 
-  /// Optional focus ring color override for one-off surface-specific cases.
   final Color? focusRingColor;
 
-  /// Optional disabled fill override for one-off surface-specific cases.
   final Color? disabledBackgroundColor;
 
-  /// Optional enabled-state palette overrides for one-off surfaces that still
-  /// need the shared button's interaction, focus, disabled, and semantics
-  /// behavior.
   final Color? enabledBackgroundColor;
   final Color? pressedBackgroundColor;
   final Color? enabledLabelColor;
   final Color? pressedLabelColor;
 
-  /// Optional border color override for enabled states.
   final Color? enabledBorderColor;
 
   final FocusNode? focusNode;
   final bool autofocus;
 
-  /// Opt-in full-width behavior. The pill normally stays intrinsic even
-  /// under tight constraints (the focus-ring Stack loosens them); with
-  /// `expand: true` the incoming constraints pass through, so wrapping
-  /// in `Expanded` or a stretched `Column` makes the pill fill — the
-  /// mobile Figma frames use full-width primary CTAs throughout.
   final bool expand;
 
-  /// Allows the label area to shrink inside bounded/expanded layouts instead
-  /// of letting long text overflow the pill. Intended for one-line CTAs in
-  /// narrow mobile rows; default keeps the historical intrinsic layout.
   final bool constrainContent;
 
   @override
@@ -335,8 +252,7 @@ class _AppButtonState extends State<AppButton> {
     final sizing = switch (widget.size) {
       AppButtonSize.large => _largeSizing,
       AppButtonSize.mediumLarge => _mediumLargeSizing,
-      AppButtonSize.medium =>
-        _mobile ? _mediumSizingMobile : _mediumSizingDesktop,
+      AppButtonSize.medium => _mediumSizing,
       AppButtonSize.small => _smallSizing,
     };
     final height = widget.height ?? sizing.height;
@@ -344,7 +260,6 @@ class _AppButtonState extends State<AppButton> {
 
     final disabled = colors.button.disabled;
 
-    // Fill priority: disabled > pressed > hover > default.
     final Color currentBg = !_enabled
         ? widget.disabledBackgroundColor ?? disabled.bg
         : _pressed
@@ -369,7 +284,6 @@ class _AppButtonState extends State<AppButton> {
     final borderWidth = _enabled ? palette.borderWidth : 0.0;
     final iconGap = widget.iconGap ?? sizing.gap;
     final contentPadding = widget.contentPadding ?? sizing.padding;
-    // Zafe: squared-off buttons (rounded rectangles) rather than pills.
     final radius =
         widget.borderRadius ?? BorderRadius.circular(zafeButtonRadius(height));
     final OutlinedBorder shape = RoundedRectangleBorder(borderRadius: radius);
@@ -396,7 +310,6 @@ class _AppButtonState extends State<AppButton> {
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
             child: label,
           );
-    // Placeholder for the label: filled in below once the available width is known.
     final labelIndex = rowChildren.length;
     rowChildren.add(const SizedBox.shrink());
     if (widget.trailing != null) {
@@ -411,15 +324,6 @@ class _AppButtonState extends State<AppButton> {
         );
     }
 
-    // Always wrap in ConstrainedBox — toggling wrappers conditionally would
-    // change the widget tree's shape and force Flutter to unmount/remount
-    // the AnimatedContainer below (losing its animation state) whenever
-    // `minWidth` transitions between null and a value. With a constant
-    // wrapper, only the constraints value updates in place.
-    //
-    // The default `BoxConstraints()` has `minWidth: 0` and is effectively a
-    // no-op pass-through, so callers that leave `minWidth` null keep the
-    // pre-existing fully-intrinsic behavior.
     final pill = ConstrainedBox(
       constraints: BoxConstraints(
         minWidth: widget.minWidth ?? 0,
@@ -440,10 +344,6 @@ class _AppButtonState extends State<AppButton> {
         padding: contentPadding,
         child: IconTheme.merge(
           data: IconThemeData(color: labelColor, size: sizing.iconSize),
-          // Zafe: with a bounded width (a phone screen, an Expanded) the label shrinks
-          // to fit instead of overflowing: long labels at large system text sizes on
-          // narrow phones (tool/screens/size_sweep_test.dart). Unbounded (inside a bare
-          // Row) it keeps its natural size, as before.
           child: LayoutBuilder(
             builder: (context, constraints) {
               final children = [...rowChildren];
@@ -482,9 +382,6 @@ class _AppButtonState extends State<AppButton> {
       borderRadius: radius + BorderRadius.circular(focusRingOutset),
     );
 
-    // Keep the stack's layout size equal to the pill's design height and
-    // paint the focus ring outside via overflow. Reserving outer padding
-    // here would inflate the button's real layout box by 4px.
     final focusShell = Stack(
       clipBehavior: Clip.none,
       alignment: Alignment.center,
@@ -518,18 +415,12 @@ class _AppButtonState extends State<AppButton> {
       ],
     );
 
-    // Zafe: expose a real button with a tap action to accessibility services (upstream's
-    // onTapUp-only detector gives screen readers an unlabeled image). One node holds the
-    // role, enabled state, label and the focus action: `Focus` sits inside the merge,
-    // because outside it adds its own focusable node and screen readers announced the
-    // button twice (an unlabeled focusable node, then the label).
     final pointer = MouseRegion(
       cursor: _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: _enabled ? (_) => _setHovered(true) : null,
       onExit: _enabled ? (_) => _setHovered(false) : null,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        // The tap action comes from the Semantics below, not the detector.
         excludeFromSemantics: true,
         onTapDown: _enabled ? (_) => _setPressed(true) : null,
         onTapUp: _enabled
@@ -554,7 +445,6 @@ class _AppButtonState extends State<AppButton> {
           canRequestFocus: _enabled,
           onFocusChange: _handleFocusChange,
           onKeyEvent: _handleKeyEvent,
-          // Presses in slightly while held, so a tap feels physical.
           child: AnimatedScale(
             scale: _pressed && _enabled ? 0.96 : 1,
             duration: const Duration(milliseconds: 90),
@@ -566,11 +456,6 @@ class _AppButtonState extends State<AppButton> {
     );
   }
 
-  /// Keyboard activation — mirrors standard button behavior in browsers and
-  /// desktop toolkits: Space and Enter (including numpad Enter) activate the
-  /// focused button. Pressed state tracks key-down so the fill visibly
-  /// reacts while the key is held; the actual tap callback fires on key-up
-  /// to match how `onTapUp` behaves for mouse clicks.
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (!_enabled) return KeyEventResult.ignored;
     final key = event.logicalKey;
@@ -591,13 +476,9 @@ class _AppButtonState extends State<AppButton> {
       }
       return KeyEventResult.handled;
     }
-    // KeyRepeatEvent — swallow to prevent holding Enter from firing
-    // `onPressed` multiple times.
     return KeyEventResult.handled;
   }
 }
 
-/// Zafe's button corner radius for a button [height]: 14 for full-size buttons, a bit
-/// less for compact ones.
 double zafeButtonRadius(double height) =>
     height >= 44 ? 14 : (height >= 32 ? 10 : 8);

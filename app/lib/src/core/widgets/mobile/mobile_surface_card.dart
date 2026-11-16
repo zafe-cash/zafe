@@ -2,9 +2,6 @@ import 'package:flutter/widgets.dart';
 
 import '../../theme/app_theme.dart';
 
-/// Rounded content surface used by the mobile screens (Figma `Surface`
-/// groups in the mobile frames): a ground-colored card that sections
-/// settings rows, activity groups, and similar list content.
 class MobileSurfaceCard extends StatelessWidget {
   const MobileSurfaceCard({
     required this.child,
@@ -13,8 +10,6 @@ class MobileSurfaceCard extends StatelessWidget {
     super.key,
   });
 
-  /// Corner radius measured from the Figma mobile surfaces (not
-  /// tokenized as a variable yet).
   static const defaultRadius = 20.0;
 
   final Widget child;

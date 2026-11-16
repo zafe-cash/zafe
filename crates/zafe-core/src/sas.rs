@@ -1,26 +1,6 @@
-//! Setup safety words (spec §5.3): a commit-then-reveal short authentication string.
-//!
-//! Members compare a few words out of band before key generation, to catch a relay that
-//! shows members different member lists (inserting identities of its own). A plain hash
-//! of the member keys, as before, could be ground: the relay can try key after key until
-//! two views hash alike (12 digits is about 40 bits, days on one core). Here every member
-//! also contributes a secret value, commits to it, and reveals it only after it has every
-//! other member's commitment. The words cover all members' keys and values, so whatever
-//! the relay commits to in one view, the honest member's value in the other is fixed
-//! after it and unknown to it: matching words are a one-shot guess (2^-44 for 4 words).
-//!
-//! The value is random per setup attempt and kept sealed in the setup's state before its
-//! commitment is sent, so a restarted app reveals what it committed to and a new attempt
-//! (after leaving) never brings a revealed value back. Before the value leaves the phone
-//! the member also pins the sealed member list and every other member's commitment
-//! (`node::safety_check`), and from then on refuses any other list or commitment. Without
-//! the pin a relay could serve a member it controls again, with a value ground against the
-//! revealed one.
-
 use bip0039::{English, Language};
 use zafe_proto::{IdentityPublic, MailboxId};
 
-/// Words members compare; 11 bits each (BIP-39 English list).
 pub const WORDS: usize = 4;
 
 fn hash(personal: &[u8; 16], parts: &[&[u8]]) -> [u8; 32] {
@@ -34,12 +14,10 @@ fn hash(personal: &[u8; 16], parts: &[&[u8]]) -> [u8; 32] {
     state.finalize().as_bytes().try_into().expect("32 bytes")
 }
 
-/// The commitment a member publishes first.
 pub fn commitment(mailbox: &MailboxId, sig_pk: &[u8; 32], secret: &[u8; 32]) -> [u8; 32] {
     hash(b"Zafe_SasCommit__", &[mailbox, sig_pk, secret])
 }
 
-/// The words, from every member's identity and revealed value (any order).
 pub fn words(mailbox: &MailboxId, members: &[(IdentityPublic, [u8; 32])]) -> String {
     let mut sorted: Vec<&(IdentityPublic, [u8; 32])> = members.iter().collect();
     sorted.sort_by_key(|m| m.0);
@@ -55,7 +33,6 @@ pub fn words(mailbox: &MailboxId, members: &[(IdentityPublic, [u8; 32])]) -> Str
     words_of(&hash(b"Zafe_SafetyWords", &refs))
 }
 
-/// [`WORDS`] BIP-39 words from the first 44 bits of `h`.
 fn words_of(h: &[u8; 32]) -> String {
     let bits = u64::from_be_bytes(h[..8].try_into().expect("8 bytes"));
     (0..WORDS)
@@ -64,16 +41,10 @@ fn words_of(h: &[u8; 32]) -> String {
         .join(" ")
 }
 
-/// Seat recovery (spec §10.1): the commitment a new phone publishes to its secret value
-/// for one co-signer, before that co-signer challenges it.
 pub fn recovery_commitment(new: &IdentityPublic, secret: &[u8; 32]) -> [u8; 32] {
     hash(b"Zafe_RecovCommit", &[&new.fingerprint(), secret])
 }
 
-/// The words a new phone and one co-signer compare before the co-signer approves moving
-/// a seat to it: over the new identity, the co-signer's key, the new phone's secret for
-/// that co-signer and the co-signer's challenge. A recovery code swapped on the way commits
-/// to its value before the challenge exists, so a match is a one-shot guess (2^-44).
 pub fn recovery_words(
     new: &IdentityPublic,
     cosigner: &[u8; 32],
@@ -86,7 +57,6 @@ pub fn recovery_words(
     ))
 }
 
-/// The same words, however a person typed them (case, spacing).
 pub fn normalize(words: &str) -> String {
     words
         .split_whitespace()

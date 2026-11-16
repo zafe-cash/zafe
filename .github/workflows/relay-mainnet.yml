@@ -1,28 +1,5 @@
 name: Relay mainnet
 
-# Promotes a relay image that has already been running on testnet to the mainnet relay
-# (relay.zafe.cash) on the same VPS. It builds nothing: the image is the exact digest the
-# Relay deploy workflow pushed (with build provenance) and put on testnet.
-#
-# Manual only. The `relay-mainnet` GitHub environment must have REQUIRED REVIEWERS (the
-# run waits for one to approve) and deploy only from `main`. Before it deploys, this
-# workflow checks, on the server, that
-#   - the digest is the one testnet runs right now, and has run there for `min_soak_hours`;
-#   - GitHub's build provenance for that digest verifies (built by relay-deploy.yml from
-#     this repository).
-#
-# Environment `relay-mainnet`:
-#   secret   RELAY_MAINNET_SSH_KEY               private key of the VPS user `zafe-mainnet`, set
-#                                                ONLY here (never as a repository or testnet
-#                                                secret): its forced command can only deploy
-#                                                mainnet, so the testnet job cannot reach it
-#   secret   RELAY_KNOWN_HOSTS                   `ssh-keyscan -t ed25519 <host>`, checked out of band
-#   variable RELAY_HOST                          the VPS address
-#   variable RELAY_DOMAIN                        relay.zafe.cash (DNS only, same VPS)
-#   secret   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY   bucket-only keys
-#   variable LITESTREAM_BUCKET / LITESTREAM_ENDPOINT / LITESTREAM_REGION   the S3 bucket
-#   secret   RELAY_FCM_SERVICE_ACCOUNT_JSON      optional, pushes (the mainnet app's project)
-
 on:
   workflow_dispatch:
     inputs:
@@ -95,11 +72,8 @@ jobs:
         env:
           DIGEST: ${{ inputs.digest }}
           SOAK: ${{ inputs.min_soak_hours }}
-        # The server decides (and checks again when it deploys): the digest is the one
-        # testnet runs, it has run there for SOAK hours, and testnet is healthy now.
         run: ssh relay "check $DIGEST $SOAK"
       - name: Install the compose files
-        # The server downloads this commit from GitHub itself (only commits on main).
         run: ssh relay "sync ${{ github.sha }}"
       - name: Relay secrets
         env:
@@ -110,14 +84,12 @@ jobs:
           LS_ENDPOINT: ${{ vars.LITESTREAM_ENDPOINT }}
           LS_REGION: ${{ vars.LITESTREAM_REGION }}
         run: |
-          # The replica is not optional on mainnet: without it a lost disk is a lost relay.
           for v in LS_KEY LS_SECRET LS_BUCKET LS_ENDPOINT LS_REGION; do
             [ -n "${!v}" ] || { echo "::error::missing Litestream setting $v (secrets/variables LITESTREAM_*)"; exit 1; }
           done
           for v in LS_KEY LS_SECRET LS_BUCKET LS_ENDPOINT LS_REGION; do
             case "${!v}" in *"'"*|*$'\n'*) echo "::error::$v contains a quote or newline"; exit 1;; esac
           done
-          # Single-quoted: Compose then takes the values literally (a `$` or `#` in a key).
           printf "LITESTREAM_ACCESS_KEY_ID='%s'\nLITESTREAM_SECRET_ACCESS_KEY='%s'\nLITESTREAM_BUCKET='%s'\nLITESTREAM_ENDPOINT='%s'\nLITESTREAM_REGION='%s'\n" \
             "$LS_KEY" "$LS_SECRET" "$LS_BUCKET" "$LS_ENDPOINT" "$LS_REGION" |
             ssh relay 'secrets litestream'
@@ -137,7 +109,6 @@ jobs:
           printf '%s' "$TOKEN" | ssh relay "deploy $DIGEST ${{ vars.RELAY_DOMAIN }} $SOAK"
       - name: Public health check
         run: |
-          # The first deploy waits for Caddy's certificate.
           for _ in $(seq 30); do
             if [ "$(curl -fsS --max-time 10 "https://${{ vars.RELAY_DOMAIN }}/health")" = ok ]; then
               echo "https://${{ vars.RELAY_DOMAIN }} is healthy"; exit 0

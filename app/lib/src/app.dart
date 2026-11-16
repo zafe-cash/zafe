@@ -65,14 +65,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ? '/setup'
       : '/welcome';
 
-  // Every page is a phone-width column in wide windows, clear of a hinge (Welcome lays
-  // out wide windows itself).
   Page<void> page(Widget child) =>
       CupertinoPage(child: AppColumn(child: child));
 
   late final GoRouter router;
-  // Tapped notifications open their payment (also the one that launched the app),
-  // switching to that payment's vault first.
   Future<void> openTapped() async {
     final payload = notificationTaps.value;
     final ids = payload == null ? null : parsePayload(payload);
@@ -81,13 +77,9 @@ final _routerProvider = Provider<GoRouter>((ref) {
     final (vaultId, proposalId) = ids;
     final vaults = ref.read(vaultProvider);
     if (proposalId == kSetupPayload || proposalId == kVaultReadyPayload) {
-      // A setup's notification: show that vault (its setup screen, or Home once the
-      // background check saved its keys; reload picks those up), then the backup.
       if (!vaults.vaults.any((v) => v.id == vaultId)) return;
       await ref.read(vaultProvider.notifier).showVault(vaultId);
       final settingUp = ref.read(vaultProvider).isSettingUp;
-      // The backup prompt as right after keys are made in the app (`go`: no way back
-      // past its "Later" acknowledgement).
       router.go(
         settingUp
             ? '/setup'
@@ -103,15 +95,15 @@ final _routerProvider = Provider<GoRouter>((ref) {
       router.go('/home');
     }
     if (proposalId.startsWith(kSeatMovePrefix)) {
-      router.go('/signers'); // a tab: go, never push
+      router.go('/signers');
       return;
     }
     if (proposalId.startsWith(kKeepSeatPrefix)) {
-      router.go('/home'); // the Keep my seat card
+      router.go('/home');
       return;
     }
     if (proposalId.startsWith(kUnapprovedPrefix)) {
-      router.go('/activity'); // a tab
+      router.go('/activity');
       return;
     }
     router.push(
@@ -126,15 +118,9 @@ final _routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(() => notificationTaps.removeListener(onTap));
   WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(openTapped()));
 
-  // Invite links open the Join screen with the invite filled in; joining still takes a
-  // tap there and the safety-word check after it. From inside a vault it's "Add vault".
-  // A link that arrives during key generation or the backup prompt right after it waits
-  // for the next navigation away from them.
   void openInviteLink() {
     final invite = inviteLinks.value;
     if (invite == null) return;
-    // Like payment links: nothing moves while the app is locked, and a link never pulls
-    // the owner out of a setup in progress or a payment that is being sent.
     if (ref.read(appLockedProvider)) return;
     final vaults = ref.read(vaultProvider);
     if (vaults.isSettingUp) return;
@@ -145,15 +131,12 @@ final _routerProvider = Provider<GoRouter>((ref) {
     if (vaults.activeId != null) {
       ref.read(vaultProvider.notifier).beginAddVault();
     }
-    router.go('/welcome'); // so back from Join lands on onboarding
+    router.go('/welcome');
     router.push(
       Uri(path: '/join', queryParameters: {'invite': invite}).toString(),
     );
   }
 
-  // Move links open the follow screen of the vault they name; nothing connects to the
-  // new relay until Move there. A link waits while the app is locked or a setup or a
-  // send runs.
   void openMoveLink() {
     final link = moveLinks.value;
     if (link == null) return;
@@ -210,10 +193,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
     openInviteLink();
   });
 
-  // Payment links (`zcash:`) open the payment request screen, which warns, shows the
-  // details and lets the owner pick a vault; nothing is proposed without their tick and
-  // the send flow after it. A link waits while the app is locked, during key generation
-  // and on the backup prompt, and is dropped once it waited past `kPaymentLinkTtl`.
   void openPaymentLink() {
     final link = paymentLinks.value;
     if (link == null) return;
@@ -237,7 +216,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
     final here = router.routerDelegate.currentConfiguration.uri.path;
     if (here == '/backup-prompt') return;
     paymentLinks.value = null;
-    // A newer link replaces the one on screen.
     here == '/payment-request'
         ? router.pushReplacement('/payment-request', extra: link)
         : router.push('/payment-request', extra: link);
@@ -250,7 +228,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
     scheduleMicrotask(openInviteLink);
     scheduleMicrotask(openMoveLink);
   });
-  // Sync moved to another listed Zcash server: say so once.
   ref.listen(serverFailoverProvider, (_, moved) {
     if (moved == null) return;
     ref
@@ -273,9 +250,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
   const serverRoutes = ['/pick-server', '/zcash-server'];
   return router = GoRouter(
     initialLocation: initial,
-    // Ignore the platform's start route: on Android any app can start this activity
-    // with a `route` extra, which would otherwise open any screen (e.g. the viewing key)
-    // straight away. Links arrive through `app_links` and are checked there.
     overridePlatformDefaultLocation: true,
     redirect: (context, state) {
       final vault = ref.read(vaultProvider);
@@ -300,10 +274,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
         '/status',
         '/diagnostics',
       ].any(loc.startsWith);
-      // Picks its own vault, so it also opens while another one is being added.
       if (loc == '/payment-request') return null;
-      // The server screens and the relay scanner open from Create and Welcome (no vault
-      // on screen) and from a vault.
       if (loc == '/scan-relay' || serverRoutes.any(loc.startsWith)) {
         return null;
       }
@@ -334,7 +305,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/scan-invite',
-        // The camera shows someone's invite: no screenshots (SecureScreen).
         pageBuilder: (_, _) =>
             page(const SecureScreen(child: ScanInviteScreen())),
       ),
@@ -346,7 +316,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/zcash-server',
         pageBuilder: (_, _) => page(const ZcashServerScreen()),
       ),
-      // Server screens open with or without a vault (Create and Welcome use them too).
       GoRoute(
         path: '/pick-server',
         pageBuilder: (_, state) {
@@ -371,7 +340,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/scan-recovery',
-        // A new phone's recovery code, as secret as on its own screen (/recover).
         pageBuilder: (_, _) =>
             page(const SecureScreen(child: ScanRecoveryScreen())),
       ),
@@ -380,12 +348,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (_, _) =>
             page(const ScanRecipientScreen(network: kZafeNetwork)),
       ),
-      // Screens showing invites or backups block screenshots (SecureScreen).
       GoRoute(
         path: '/setup',
         pageBuilder: (_, _) => page(const SecureScreen(child: SetupScreen())),
       ),
-      // The vault's tabs; everything else is pushed over the tab bar.
       StatefulShellRoute.indexedStack(
         builder: (_, _, shell) => AppColumn(child: VaultShell(shell: shell)),
         branches: [
@@ -434,7 +400,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/replace-signer',
         pageBuilder: (_, state) {
           final args = state.extra as (String, String)?;
-          // The safety words, like the new phone's own screen (/recover).
           return page(
             SecureScreen(
               child: ReplaceSignerScreen(signer: args?.$1, code: args?.$2),
@@ -481,7 +446,6 @@ final _routerProvider = Provider<GoRouter>((ref) {
           final PendingPaymentLink link => page(
             PaymentRequestScreen(link: link),
           ),
-          // Only `openPaymentLink` opens this route, with the link as `extra`.
           _ => page(const SizedBox.shrink()),
         },
       ),
@@ -512,11 +476,8 @@ class ZafeApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
-    // Pending incoming payments while the app is open (starts and stops by itself).
     ref.watch(mempoolWatchProvider);
-    // "Use Tor": connect at launch, dormant in the background.
     ref.watch(torLifecycleProvider);
-    // Play in-app updates: checks at launch and on resume (Android, Play installs).
     ref.watch(appUpdateProvider);
     return AppThemeHost(
       themeMode: themeMode,
@@ -527,7 +488,6 @@ class ZafeApp extends ConsumerWidget {
         darkTheme: buildMaterialDarkTheme(),
         themeMode: themeMode,
         routerConfig: ref.watch(_routerProvider),
-        // Over every route, sheet and toast: the app lock.
         builder: (context, child) => AppLockGate(child: child!),
       ),
     );

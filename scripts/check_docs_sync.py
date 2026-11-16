@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""Checks that the website docs (infra/site) still match the app and the server.
-
-  * Every app label a docs page names (`<strong>…</strong>` in
-    infra/site/src/pages/docs/*.astro and infra/site/src/docs/*.ts) appears as text in
-    the app's Dart code (app/lib, generated bridge code excluded). `<b>` is plain
-    emphasis and isn't checked; a `…` in a label stands for a name or value and matches
-    anything ("Help instead of …").
-  * Every server setting the docs mention (`ZAFE_RELAY_*`) is read by the relay
-    (crates/zafe-relay, infra/relay).
-  * Every screen a page shows (`<Shot name="x">`) exists as
-    infra/site/public/assets/screens/x_light.webp and is listed in infra/site/assets.py,
-    so it is regenerated from the app's own renders.
-
-Run with scripts/check_docs_links.py (links from the app to the site). Rename a button,
-a screen or a setting, and this fails until the docs say the same.
-
-Usage: scripts/check_docs_sync.py   (exit 1 on findings)
-"""
 import html
 import pathlib
 import re
@@ -30,7 +12,6 @@ DOC_SOURCES = sorted((SITE / "src/pages/docs").glob("*.astro")) + sorted(
 
 
 def norm(text):
-    """One spelling for quotes and spaces, so ’ in the docs matches ' in Dart."""
     text = text.replace("’", "'").replace("‘", "'").replace("\\'", "'")
     return re.sub(r"\s+", " ", text).strip()
 
@@ -43,12 +24,11 @@ def app_text():
 
 
 def labels():
-    """(label, file, line) for every <strong> in the docs sources."""
     for path in DOC_SOURCES:
         text = path.read_text()
         for m in re.finditer(r"<strong>(.*?)</strong>", text, re.S):
             raw = m.group(1)
-            if "{" in raw:  # an expression (`{p.title}`), not a label
+            if "{" in raw:
                 continue
             label = norm(html.unescape(re.sub(r"<[^>]+>", "", raw)))
             if label:

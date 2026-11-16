@@ -14,7 +14,6 @@ void main() {
     expect(kTestnetPreset.network, 'test');
     expect(Uri.parse(kTestnetPreset.lightwalletdUrl).scheme, 'https');
     expect(Uri.parse(kTestnetPreset.relayUrl).scheme, 'https');
-    // Until a relay is deployed, the testnet relay is a placeholder that never resolves.
     expect(kTestnetPreset.relayUrl, kPlaceholderRelayUrl);
     expect(Uri.parse(kPlaceholderRelayUrl).host, endsWith('.invalid'));
   });

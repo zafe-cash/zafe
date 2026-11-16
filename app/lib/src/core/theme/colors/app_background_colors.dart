@@ -2,23 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Depth hierarchy for the app shell.
-///
-/// Layered from deepest to highest:
-/// * [window] — Desktop window backing and matching onboarding pane background.
-/// * [ground] — Scaffold background, deepest layer.
-/// * [base] — Primary content surface, main panels.
-/// * [raised] — Cards, modals, sidebars, drawers.
-/// * [overlay] — Dropdowns, popovers, floating elements.
-/// * [neutralScrim] / [neutralSubtleOpacity] / [neutralStrongOpacity] —
-///   Alpha neutral overlays.
-/// * [brandSubtle] / [brandStrong] — Brand-accent backgrounds.
-/// * [brandAlpha] — Alpha brand overlay.
-/// * [destructiveSubtle] / [destructiveStrong] — Error (rose) backgrounds.
-/// * [destructiveAlphaSubtle] / [destructiveAlpha] — Alpha error overlays.
-/// * [valueAlpha] — Alpha value (Zcash gold) overlay: received-money tiles.
-/// * [darkCard] — A dark card in both themes (QR codes on receive, viewing key and
-///   invite); text on it is `text.darkCard`.
 class AppBackgroundColors {
   const AppBackgroundColors({
     required this.window,

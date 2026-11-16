@@ -8,16 +8,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`
 
-/// Reads a move link (`https://zafe.cash/move#…`, or a message containing it). Contacts
-/// nothing.
 MoveLinkInfo parseMoveLink({required String text}) =>
     RustLib.instance.api.crateApiRelayMoveParseMoveLink(text: text);
 
-/// Starts moving the vault to `new_relay_url` (call after unlock): the vault is restored
-/// there from this phone's history, this phone's arrival goes there, and move notices go
-/// to the others on the current relay. Fails with `MembersMustUpdate` (listing them) while
-/// a member's app is older than moves, `MoveInProgress` while this phone is in another
-/// move, `CreateTokenRefused` for a private relay without the right token.
 Future<RelayMoveStarted> startRelayMove({
   required String relayUrl,
   required List<int> seeds,
@@ -32,10 +25,6 @@ Future<RelayMoveStarted> startRelayMove({
   createToken: createToken,
 );
 
-/// Follows a move from its link: **only after the member tapped Move** (with unlock). This
-/// is the first time the new relay is contacted. Refuses (`MoveNotFound`, `MoveExpired`,
-/// `MoveStale`, `RelayForked`, `RelayMembership`, `MoveInProgress`, `TwoMoves`) unless a
-/// current member's arrival for this move is there and the relay's history checks out.
 Future<RelayMoveStatus> followRelayMove({
   required String relayUrl,
   required List<int> seeds,
@@ -48,8 +37,6 @@ Future<RelayMoveStatus> followRelayMove({
   link: link,
 );
 
-/// This phone's move, moved on: arrivals counted on the new relay (only when this phone
-/// moved there itself), the switch made at m. `None`: no move.
 Future<RelayMoveStatus?> relayMoveStatus({
   required String relayUrl,
   required List<int> seeds,
@@ -60,7 +47,6 @@ Future<RelayMoveStatus?> relayMoveStatus({
   material: material,
 );
 
-/// Withdraws this phone from its move (the mover: calls the move off).
 Future<void> cancelRelayMove({
   required String relayUrl,
   required List<int> seeds,
@@ -71,8 +57,6 @@ Future<void> cancelRelayMove({
   material: material,
 );
 
-/// A move notice on the vault's current relay, for the Home card (reads only that relay).
-/// `None` when there is none, it was cancelled or expired, or this phone is already in it.
 Future<RelayMoveNotice?> relayMoveNotice({
   required String relayUrl,
   required List<int> seeds,
@@ -83,8 +67,6 @@ Future<RelayMoveNotice?> relayMoveNotice({
   material: material,
 );
 
-/// Members (hex keys) whose app must update before the vault can move: from the vault's
-/// relay, or this phone's copy when it can't be reached.
 Future<List<String>> relayMoveBlockers({
   required String relayUrl,
   required List<int> seeds,
@@ -95,7 +77,6 @@ Future<List<String>> relayMoveBlockers({
   material: material,
 );
 
-/// The move link text the mover shares (§4.2).
 String moveShareText({
   required String vaultName,
   required String host,
@@ -106,13 +87,10 @@ String moveShareText({
   link: link,
 );
 
-/// What a move link says (nothing is checked or contacted yet).
 class MoveLinkInfo {
   final String vaultId;
   final String relayUrl;
   final String host;
-
-  /// The link, normalized (pass it to [`follow_relay_move`]).
   final String link;
 
   const MoveLinkInfo({
@@ -137,20 +115,14 @@ class MoveLinkInfo {
           link == other.link;
 }
 
-/// A move announced on the vault's current relay (the Home card).
 class RelayMoveNotice {
   final String relayUrl;
   final String host;
   final String link;
   final String moverHex;
-
-  /// Members known to have moved, as far as the notice tells (the mover; everyone in the
-  /// switch once it happened).
   final int arrived;
   final int needed;
   final int members;
-
-  /// The vault already switched there: "Grants moved to relay.dao.org. Move to continue."
   final bool moved;
 
   const RelayMoveNotice({
@@ -190,12 +162,8 @@ class RelayMoveNotice {
           moved == other.moved;
 }
 
-/// A move this phone started.
 class RelayMoveStarted {
-  /// `https://zafe.cash/move#…` (share it with the group).
   final String link;
-
-  /// `relay.dao.org`.
   final String host;
   final String relayUrl;
 
@@ -218,33 +186,19 @@ class RelayMoveStarted {
           relayUrl == other.relayUrl;
 }
 
-/// Where a move stands on this phone.
 class RelayMoveStatus {
   final String relayUrl;
   final String host;
   final String link;
-
-  /// Who started it (signing key, hex).
   final String moverHex;
-
-  /// This phone started it.
   final bool mine;
-
-  /// Members known to have moved (hex keys, descriptor order; this phone included once
-  /// it moved).
   final List<String> arrived;
-
-  /// m: "Payments switch when m of n have moved."
   final int needed;
   final int members;
   final bool thisPhoneArrived;
   final bool expired;
   final bool cancelled;
-
-  /// The vault is on the new relay and this phone follows it.
   final bool switched;
-
-  /// The vault switched but this phone hasn't followed: "Move to continue."
   final bool movedElsewhere;
 
   const RelayMoveStatus({

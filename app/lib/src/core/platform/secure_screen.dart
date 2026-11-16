@@ -1,10 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// Blocks screenshots, screen recording and the app-switcher thumbnail (Android
-/// `FLAG_SECURE`) while any [SecureScreen] is mounted. Counted, so a secure screen pushed
-/// over another doesn't unblock capture when it closes. No-op where unsupported (iOS: a
-/// capture shield is still to do).
+import '../diagnostics/crash_log.dart';
+
 class SecureScreen extends StatefulWidget {
   const SecureScreen({super.key, required this.child});
   final Widget child;
@@ -15,10 +13,8 @@ class SecureScreen extends StatefulWidget {
   static Future<void> _set(bool secure) async {
     try {
       await _channel.invokeMethod<void>('setSecure', secure);
-    } on MissingPluginException {
-      // Platform without a handler (tests, iOS for now).
-    } on PlatformException {
-      // Best effort: never block the screen itself.
+    } on Exception catch (error, stack) {
+      await CrashLog.instance?.record('secure-screen', error, stack);
     }
   }
 

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-/// What the mempool watch should follow: one vault's wallet through one lightwalletd.
 @immutable
 class MempoolWatchTarget {
   const MempoolWatchTarget({
@@ -26,16 +25,11 @@ class MempoolWatchTarget {
   String toString() => 'MempoolWatchTarget($vaultId, $lightwalletdUrl)';
 }
 
-/// Whether the app counts as in the foreground for the watch. `inactive` is kept (a
-/// permission prompt or the app switcher passes through it); `hidden`, `paused` and
-/// `detached` stop it. Before the first frame the state is unknown (`null`): foreground.
 bool isForeground(AppLifecycleState? state) =>
     state == null ||
     state == AppLifecycleState.resumed ||
     state == AppLifecycleState.inactive;
 
-/// The watch to run, or `null` for none: only in the foreground, for the active vault,
-/// once it has synced this session (so its wallet database exists).
 MempoolWatchTarget? mempoolWatchTarget({
   required bool foreground,
   required String? vaultId,
@@ -46,14 +40,9 @@ MempoolWatchTarget? mempoolWatchTarget({
   return MempoolWatchTarget(vaultId: vaultId, lightwalletdUrl: lightwalletdUrl);
 }
 
-/// Starts a watch; must call `onEnded` once if the watch ends by itself (its stream
-/// closed), whether or not it was stopped.
 typedef StartMempoolWatch =
     void Function(MempoolWatchTarget target, void Function() onEnded);
 
-/// Keeps at most one mempool watch running, matching the latest target: a new target
-/// stops the old watch before starting the next; `null` stops it. A watch that ends by
-/// itself while still wanted is started again after [retryDelay].
 class MempoolWatchController {
   MempoolWatchController({
     required this.start,
@@ -73,13 +62,11 @@ class MempoolWatchController {
   Timer? _retry;
   bool _disposed = false;
 
-  /// The target of the running watch, if any.
   MempoolWatchTarget? get running => _running;
 
   void update(MempoolWatchTarget? desired) {
     if (_disposed) return;
     _desired = desired;
-    // A pending restart is either done now or no longer wanted.
     _retry?.cancel();
     _retry = null;
     if (desired == _running) return;

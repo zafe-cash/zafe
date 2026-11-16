@@ -354,15 +354,14 @@ that Zafe **not look like a copy**. Zafe's visual identity, keep it when resynci
   `SignerTile`s (hue + mirrored 5x5 pattern from the key; "You" outlined in the brand accent) and
   `ApprovalDots` for votes; pushed pages use a boxed back button with a left-aligned 22 px
   title. Icon: Seam on a deep verdigris tile (`scripts/brand/`).
-- **No Vizor references in code comments** (the user asked); attribution stays in `app/NOTICE`
+- **No Vizor references in code** (the user asked); attribution stays in `app/NOTICE`
   and the licenses page.
-- `ZAFE_FORM_FACTOR` defaults to `mobile` (the phone app previously used desktop tokens
-  because no build passed the flag).
+- Mobile only: Vizor's desktop token set and the `ZAFE_FORM_FACTOR` flag were removed
+  (2026-11-16); no build shipped desktop.
 
 What still follows Vizor:
 Flutter (pinned **3.47.7** via fvm since 2026-10-22, was 3.41.6) + `flutter_rust_bridge` **2.11.1** + Rust core; Riverpod
-+ go_router; `flutter_secure_storage`; design tokens with Desktop/Mobile sets selected at
-build time by a `--dart-define` form-factor flag; sentence-case copy; Rust API surface
++ go_router; `flutter_secure_storage`; design tokens (mobile set only); sentence-case copy; Rust API surface
 limited to primitives/flat structs (complex types stay behind it); bootstrap snapshot before
 the first frame; broadcast-before-store for PCZT sends. Zafe's vault account is exactly
 Vizor's Keystone account shape (UFVK-only, external signer), with FROST instead of a device.

@@ -26,15 +26,12 @@ import '../../providers/vault_relay.dart';
 import '../../rust/api/vault.dart' as rust_vault;
 import '../settings/relay_picker.dart';
 
-/// The failure Home shows for the active vault, if any.
 SyncFailure? currentSyncFailure(WidgetRef ref) {
   final syncError = ref.watch(vaultProvider.select((v) => v.syncError));
   final relayError = ref.watch(proposalsProvider.select((p) => p.error));
   return homeSyncFailure(syncError: syncError, relayError: relayError);
 }
 
-/// Since when this phone can't reach vault `vaultId`'s relay (`vault_relay_status`,
-/// written by every relay request), or null.
 DateTime? relayUnreachableSince(String vaultId) {
   try {
     return fromUnixSeconds(
@@ -45,12 +42,8 @@ DateTime? relayUnreachableSince(String vaultId) {
   }
 }
 
-/// How long the vault's server must be down before the Status screen suggests moving to
-/// a listed one.
 const kSuggestMoveAfter = Duration(hours: 6);
 
-/// The first listed server other than `current` that answers and can hold the vault,
-/// for "Move Grants to relay2.zafe.cash?" (only the listed ones are asked, one by one).
 Future<String?> suggestedServer(
   String current, {
   List<RelayPreset>? presets,
@@ -63,14 +56,9 @@ Future<String?> suggestedServer(
   return null;
 }
 
-/// Home's status line opens this: whether the vault is in sync, or why not (the reason,
-/// the server, when it last worked) and what can fix it: Try again, restore or follow
-/// the server's history, and after [kSuggestMoveAfter] of a server outage, a move to a
-/// listed server the app picked. A pushed screen, not a sheet.
 class SyncStatusScreen extends ConsumerStatefulWidget {
   const SyncStatusScreen({super.key, this.retry});
 
-  /// Runs a refresh and a sync (Home's); null: the proposals and the wallet directly.
   final Future<void> Function()? retry;
 
   @override
@@ -80,10 +68,8 @@ class SyncStatusScreen extends ConsumerStatefulWidget {
 class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
   bool _retrying = false;
 
-  /// Last sync saved by an earlier session or a background check.
   DateTime? _savedSyncedAt;
 
-  /// The server the app suggests moving to during a long outage (asked once).
   String? _suggested;
   bool _asked = false;
 
@@ -98,10 +84,8 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
     }
   }
 
-  /// What the last repair did (shown under the buttons).
   String? _repaired;
 
-  /// Puts the vault's history back on the server from this phone's copy.
   Future<void> _restore() async {
     if (!await confirmUnlock(
       context,
@@ -119,7 +103,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
     );
   }
 
-  /// Drops this phone's copy of the history and follows the server's, after asking.
   Future<void> _follow() async {
     if (!await showAppConfirm(
       context,
@@ -144,7 +127,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
   Future<void> _retry() async {
     setState(() => _retrying = true);
     try {
-      // A failed Tor must connect before anything else can.
       final tor = ref.read(torProvider);
       if (tor.failed) await ref.read(torProvider.notifier).retry();
       final retry = widget.retry;
@@ -159,8 +141,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
     }
   }
 
-  /// Moves to the suggested server: the unlock, then the Server screen's waiting room
-  /// (the old server is down, so Nudge is how the others hear of it).
   Future<void> _moveTo(String url) async {
     final name =
         ref.read(activeVaultNameProvider) ??
@@ -202,8 +182,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
         (vault.activeId == null ? null : vault.syncedAt[vault.activeId]) ??
         _savedSyncedAt;
 
-    // No error is not the same as "up to date": a sync may be running, and the first one of
-    // a new vault takes a while (no balance yet).
     final syncing = failure == null && (vault.syncing || _retrying);
     final firstSync = syncing && vault.firstSync;
     final downSince =
@@ -250,7 +228,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
       if (endpoint != null)
         DetailRow(
           label: endpoint == SyncEndpoint.relay ? 'Server' : 'Zcash server',
-          // The vault's server is the whole group's, the Zcash server this phone's.
           value: _host(
             endpoint == SyncEndpoint.relay
                 ? vaultRelay ?? endpoints.relayUrl
@@ -277,7 +254,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
         child: Column(children: details),
       ),
     );
-    // The technical detail goes to the diagnostic report, never on screen.
     if (failure != null) _logDetail(failure);
     if (suggested != null) {
       body.addAll([
@@ -329,7 +305,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
           onPressed: _follow,
         ),
       ],
-      // Docs/relay-move.md §5: a way off a server that is down or can't be trusted.
       if ((failure?.canMoveRelay ?? false) && suggested == null) ...[
         const SizedBox(height: AppSpacing.xs),
         AppButton(
@@ -339,8 +314,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
           child: Text(moving ? 'See the move' : 'Move to another server'),
         ),
       ],
-      // The vault's server has its own button above (Move); this is for the Zcash server
-      // and Tor.
       if ((failure?.suggestsSettings ?? false) &&
           endpoint != SyncEndpoint.relay) ...[
         const SizedBox(height: AppSpacing.xs),
@@ -371,8 +344,6 @@ class _SyncStatusScreenState extends ConsumerState<SyncStatusScreen> {
   }
 }
 
-/// A long server outage: the app picked a listed server that answers. Plain data, so it
-/// renders without Rust.
 class MoveSuggestion extends StatelessWidget {
   const MoveSuggestion({
     super.key,
@@ -432,8 +403,6 @@ class MoveSuggestion extends StatelessWidget {
 
 String _host(String url) => Uri.tryParse(url)?.authority ?? url;
 
-/// Failures already written to the diagnostic report this session (one line each, so
-/// a poll that keeps failing doesn't fill the log).
 final _loggedDetails = <String>{};
 
 void _logDetail(SyncFailure failure) {

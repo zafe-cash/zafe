@@ -1,61 +1,42 @@
-/// Why the vault can't stay up to date, from the typed errors of the last wallet sync
-/// (lightwalletd) and the last vault refresh (relay). Pure: unit-tested in
-/// `test/sync_failure_test.dart`.
 library;
 
 import '../../rust/api/error.dart';
 
 enum SyncFailureKind {
-  /// Neither server answers: most likely this phone is offline.
   offline,
   lightwalletdUnreachable,
   relayUnreachable,
 
-  /// The secure connection failed (certificate or TLS setup).
   tls,
 
-  /// A server accepted the connection but didn't answer in time.
   timeout,
 
-  /// lightwalletd is behind blocks this wallet already has.
   serverBehind,
 
-  /// lightwalletd serves another network (e.g. mainnet in a testnet build).
   wrongNetwork,
 
-  /// This phone's wallet database failed.
   walletDatabase,
 
-  /// The relay or another member uses a newer Zafe.
   updateRequired,
 
-  /// The relay runs an older Zafe than this app.
   relayOutdated,
 
-  /// The relay has fewer log entries than this phone saw (lost data, an older backup).
   relayRolledBack,
 
-  /// The relay doesn't know this vault any more (a wiped database).
   relayLostVault,
 
-  /// The relay's log differs from the history this phone saw.
   relayForked,
 
-  /// This phone's own saved copy of the vault history doesn't verify.
   logCopyInvalid,
 
-  /// The relay's member list or threshold differs from the vault's.
   relayMembership,
 
-  /// "Use Tor" is on and Tor is still connecting: nothing is sent meanwhile.
   torConnecting,
 
-  /// "Use Tor" is on but Tor couldn't connect: nothing is sent until it does.
   torFailed,
   other,
 }
 
-/// Which server a failure concerns.
 enum SyncEndpoint { relay, lightwalletd }
 
 class SyncFailure {
@@ -63,13 +44,10 @@ class SyncFailure {
 
   final SyncFailureKind kind;
 
-  /// The server that failed, when known (`null` for offline, database and app issues).
   final SyncEndpoint? endpoint;
 
-  /// The technical message from Rust, shown small in the details sheet.
   final String detail;
 
-  /// Short status for the top of Home (fits next to the vault name).
   String get statusLabel => switch (kind) {
     SyncFailureKind.offline => 'Offline',
     SyncFailureKind.lightwalletdUnreachable => 'Can\'t reach Zcash server',
@@ -91,10 +69,8 @@ class SyncFailure {
     SyncFailureKind.other => 'Sync failed',
   };
 
-  /// Waiting rather than broken (shown without the error colour).
   bool get isTransient => kind == SyncFailureKind.torConnecting;
 
-  /// Title of the details sheet.
   String get title => switch (kind) {
     SyncFailureKind.offline => 'You seem to be offline',
     SyncFailureKind.lightwalletdUnreachable => 'Can\'t reach the Zcash server',
@@ -116,7 +92,6 @@ class SyncFailure {
     SyncFailureKind.other => 'Sync failed',
   };
 
-  /// What happened and what to do, in a sentence or two.
   String get explanation => switch (kind) {
     SyncFailureKind.offline =>
       'Neither the Zcash server nor the vault\'s server answers. Check this phone\'s '
@@ -159,19 +134,14 @@ class SyncFailure {
       'Something went wrong while updating the vault. Zafe keeps trying.',
   };
 
-  /// A member can put the vault back on the relay from this phone's copy of its history.
   bool get canRestoreRelay =>
       kind == SyncFailureKind.relayRolledBack ||
       kind == SyncFailureKind.relayLostVault;
 
-  /// This phone can drop its own copy of the history and follow the relay's (after the
-  /// relay showed another history; the other members must agree the relay is right).
   bool get canFollowRelay =>
       kind == SyncFailureKind.relayForked ||
       kind == SyncFailureKind.logCopyInvalid;
 
-  /// Moving the vault to another relay is a way out (the relay is down, lost or rewound
-  /// the vault, or can't be trusted): docs/relay-move.md §5.
   bool get canMoveRelay => switch (kind) {
     SyncFailureKind.relayUnreachable ||
     SyncFailureKind.relayRolledBack ||
@@ -182,7 +152,6 @@ class SyncFailure {
     _ => false,
   };
 
-  /// Whether changing a server address in Settings could fix it.
   bool get suggestsSettings => switch (kind) {
     SyncFailureKind.lightwalletdUnreachable ||
     SyncFailureKind.relayUnreachable ||
@@ -201,8 +170,6 @@ SyncEndpoint? _endpoint(ZafeEndpoint e) => switch (e) {
   ZafeEndpoint.none => null,
 };
 
-/// Classifies one error. `fallback` is the server the call talked to, for errors that
-/// don't name one (a sync is lightwalletd, a vault refresh the relay).
 SyncFailure classifySyncFailure(Object error, {SyncEndpoint? fallback}) {
   if (error is! ZafeError) {
     return SyncFailure(
@@ -249,10 +216,6 @@ SyncFailure classifySyncFailure(Object error, {SyncEndpoint? fallback}) {
   );
 }
 
-/// The failure Home shows, from the last wallet sync error and the last vault refresh
-/// error (either may be null). Tor comes first (it stops both); both servers unreachable
-/// reads as "offline"; otherwise the wallet sync's failure comes first (balances), then
-/// the relay's.
 SyncFailure? homeSyncFailure({Object? syncError, Object? relayError}) {
   final sync = syncError == null
       ? null
@@ -292,8 +255,6 @@ const _months = [
   'Dec',
 ];
 
-/// "Just now", "5 min ago", "3 h ago", or a date and time for older ones; "Not yet" when
-/// it never happened.
 String formatLastSuccess(DateTime? at, {DateTime? now}) {
   if (at == null) return 'Not yet';
   final ago = (now ?? DateTime.now()).difference(at);
@@ -305,8 +266,6 @@ String formatLastSuccess(DateTime? at, {DateTime? now}) {
   return '${at.day} ${_months[at.month - 1]}, $hh:$mm';
 }
 
-/// When the relay became unreachable, for `Can't reach relay · since 09:14`: the time
-/// today, else the date.
 String formatSince(DateTime at, {DateTime? now}) {
   final today = now ?? DateTime.now();
   if (at.year == today.year && at.month == today.month && at.day == today.day) {
@@ -317,19 +276,15 @@ String formatSince(DateTime at, {DateTime? now}) {
   return '${at.day} ${_months[at.month - 1]}';
 }
 
-/// A Unix time from Rust (seconds) as a local time.
 DateTime? fromUnixSeconds(BigInt? secs) => secs == null
     ? null
     : DateTime.fromMillisecondsSinceEpoch(secs.toInt() * 1000);
 
-/// Title of the confirmation before this phone follows the relay's history.
 const followRelayTitle = 'Follow the server\'s history?';
 
-/// What following the relay does, said before the user confirms.
 const followRelayWarning =
     'This phone replaces its saved history with the server\'s. Anything only this phone saw is lost. Your keys and funds are not touched. Do it only once the other members confirm the server is right.';
 
-/// The toast after following: how many entries only this phone had.
 String followRelayDone(int dropped) => dropped == 0
     ? 'This phone now follows the server.'
     : 'This phone now follows the server. $dropped entries only it had were dropped.';

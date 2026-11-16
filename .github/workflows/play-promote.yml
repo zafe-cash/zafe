@@ -1,15 +1,5 @@
 name: Promote to Google Play production
 
-# Moves a tested build from Play's internal track to production, with the in-app update
-# priority and notes from docs/releases/<version>.md (scripts/play_promote.py). Manual only.
-#
-# Environment `play-production` (REQUIRED REVIEWERS, deploys only from `main`):
-#   secret PLAY_PRODUCTION_SERVICE_ACCOUNT_JSON   key of the second Play service account,
-#                                                 the only one allowed to release to
-#                                                 production; set ONLY here. The one in
-#                                                 `android-release` can only reach testing
-#                                                 tracks, so a tag workflow can't ship to users.
-
 on:
   workflow_dispatch:
     inputs:

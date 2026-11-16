@@ -1,6 +1,3 @@
-//! Shared test helpers: an in-process simulation of vault creation.
-#![allow(dead_code)]
-
 pub mod relay_vault;
 
 use std::collections::BTreeMap;
@@ -19,7 +16,6 @@ pub fn identifiers(params: &KeygenParams) -> Vec<Identifier> {
         .collect()
 }
 
-/// Runs the full ceremony for every member, as if messages were relayed faithfully.
 pub fn run_keygen(params: KeygenParams, rng: &mut StdRng) -> Vec<(Identifier, KeygenOutput)> {
     let ids = identifiers(&params);
 
@@ -74,8 +70,6 @@ pub fn run_keygen(params: KeygenParams, rng: &mut StdRng) -> Vec<(Identifier, Ke
         .collect()
 }
 
-// --- Ironwood transaction fixtures on a local NU6.3 network --------------------------
-
 use std::sync::OnceLock;
 
 use orchard::{
@@ -105,7 +99,6 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 
-/// Height the fixture transactions target; the tip is one below.
 pub const TARGET_HEIGHT: u32 = 10_000_000;
 
 pub fn proving_key() -> &'static ProvingKey {
@@ -138,13 +131,11 @@ pub fn branch_id() -> u32 {
     BranchId::for_height(&nu6_3_network(), BlockHeight::from_u32(TARGET_HEIGHT)).into()
 }
 
-/// An address controlled by nobody in the test (a stand-in for a payee or attacker).
 pub fn outside_address(seed: u8) -> Address {
     FullViewingKey::from(&SpendingKey::from_bytes([seed; 32]).unwrap())
         .address_at(0u32, Scope::External)
 }
 
-/// Simulates receiving an Ironwood note at `recipient`, decrypted with `fvk`.
 pub fn receive_ironwood_note(fvk: &FullViewingKey, recipient: Address, value: u64) -> Note {
     let version = BundleVersion::ironwood_v3();
     let mut builder = orchard::builder::Builder::new(
@@ -173,7 +164,6 @@ pub fn receive_ironwood_note(fvk: &FullViewingKey, recipient: Address, value: u6
     note
 }
 
-/// A single-leaf Ironwood tree containing `note`.
 pub fn witness(note: &Note) -> (Anchor, MerklePath) {
     let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
     let leaf = MerkleHashOrchard::from_cmx(&cmx);
@@ -189,7 +179,6 @@ pub fn witness(note: &Note) -> (Anchor, MerklePath) {
     (path.root(leaf).into(), path.into())
 }
 
-/// One output for [`build_pczt`].
 pub struct Out {
     pub ovk: Option<OutgoingViewingKey>,
     pub recipient: Address,
@@ -197,8 +186,6 @@ pub struct Out {
     pub memo: MemoBytes,
 }
 
-/// Builds an IO-finalized PCZT spending `note` (owned by `spend_fvk`) to `outputs`,
-/// paying the ZIP 317 fee.
 pub fn build_pczt(
     spend_fvk: &FullViewingKey,
     note: Note,
@@ -209,8 +196,6 @@ pub fn build_pczt(
     build_pczt_with_fee(spend_fvk, note, path, anchor, outputs, None)
 }
 
-/// Like [`build_pczt`], optionally forcing a non-standard fixed fee (to model a
-/// malicious proposer).
 pub fn build_pczt_with_fee(
     spend_fvk: &FullViewingKey,
     note: Note,
@@ -229,8 +214,6 @@ pub fn build_pczt_with_fee(
     )
 }
 
-/// A tree holding every note in `notes`, and each note's path in it (one shared anchor,
-/// so they can be spent together).
 pub fn witness_all(notes: &[Note]) -> (Anchor, Vec<MerklePath>) {
     let mut tree =
         ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
@@ -262,9 +245,6 @@ pub fn witness_all(notes: &[Note]) -> (Anchor, Vec<MerklePath>) {
     (anchor.unwrap(), paths)
 }
 
-/// The general fixture builder: several spends, an optional non-standard fixed fee, and
-/// the Ironwood bundle padding (a builder can pad to any number of actions; the ZIP 317
-/// fee then charges every one of them).
 pub fn build_pczt_custom(
     spend_fvk: &FullViewingKey,
     spends: Vec<(Note, MerklePath)>,
@@ -317,7 +297,6 @@ pub fn build_pczt_custom(
         .unwrap()
 }
 
-/// Member expectations for fixture transactions.
 pub fn expectations(payments: Vec<zafe_core::verify::Payment>) -> zafe_core::verify::Expectations {
     zafe_core::verify::Expectations {
         payments,

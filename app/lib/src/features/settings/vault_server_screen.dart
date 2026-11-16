@@ -28,11 +28,6 @@ import '../home/sync_status_screen.dart' show currentSyncFailure;
 import '../relay_move/relay_move_screen.dart';
 import 'relay_picker.dart';
 
-/// Settings > `<vault name>` > Server: the server everyone in the vault uses (docs/relay-move.md),
-/// what it says about itself, its create token when it is private, and **Move to another
-/// server**. While a move runs, the same screen is its waiting room: who has moved, a
-/// Nudge for each member who hasn't, and Cancel. Moving is a state of this one place, never
-/// a separate flow.
 class VaultServerScreen extends ConsumerStatefulWidget {
   const VaultServerScreen({super.key});
 
@@ -46,7 +41,6 @@ class _VaultServerScreenState extends ConsumerState<VaultServerScreen> {
   final _tokenFocus = FocusNode();
   List<String>? _blockers;
 
-  /// This visit showed the move in progress: its switch then shows once, with Done.
   bool _sawMoving = false;
 
   @override
@@ -82,8 +76,6 @@ class _VaultServerScreenState extends ConsumerState<VaultServerScreen> {
       ref.read(vaultProvider).summary?.name ??
       'the vault';
 
-  /// Saves the token into the vault's material (any member may need it to restore the
-  /// vault on a private server).
   Future<void> _saveToken() async {
     final vault = ref.read(vaultProvider);
     final id = vault.activeId, material = vault.material;
@@ -103,9 +95,6 @@ class _VaultServerScreenState extends ConsumerState<VaultServerScreen> {
     _token.clear();
   }
 
-  /// Move to another server: the list (the current one shown, never chosen), the unlock,
-  /// then this screen becomes the waiting room. The others see it in Needs you; Nudge
-  /// sends one of them the link.
   Future<void> _move() async {
     final current = ref.read(activeVaultRelayProvider)?.url ?? '';
     final choice = await showRelayPicker(
@@ -230,9 +219,6 @@ class _VaultServerScreenState extends ConsumerState<VaultServerScreen> {
   }
 }
 
-/// The Server screen from plain data (rendered without Rust in previews): the facts in
-/// one card, what the server is for, its create token when it is private and needs one,
-/// and why Move is off (a member must update, two moves found).
 class VaultServerBody extends StatelessWidget {
   const VaultServerBody({
     super.key,
@@ -274,7 +260,6 @@ class VaultServerBody extends StatelessWidget {
     final secondary = AppTypography.bodyMedium.copyWith(
       color: colors.text.secondary,
     );
-    // A private server that needs a token this phone doesn't have yet.
     final askToken = !hasCreateToken && (info?.createTokenRequired ?? false);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -352,8 +337,6 @@ class VaultServerBody extends StatelessWidget {
   }
 }
 
-/// A move in progress, like setup's waiting room: who has moved, a Nudge (the link, sent
-/// to that member) for each one who hasn't, and when the vault switches.
 class MoveWaitingRoom extends StatelessWidget {
   const MoveWaitingRoom({
     super.key,
@@ -368,12 +351,10 @@ class MoveWaitingRoom extends StatelessWidget {
   final String vaultName;
   final String host;
 
-  /// (label, moved, nudge), this phone first (no nudge).
   final List<(String, bool, VoidCallback?)> members;
   final int needed;
   final int total;
 
-  /// "Payments resume when ..." while the old server is down.
   final String? resume;
 
   @override

@@ -1,13 +1,3 @@
-// Renders the screens for the Google Play listing: Home with a request waiting, the
-// payment request a co-signer sees, and the same screens' parts as the app builds them,
-// with fake data and the mainnet ticker. Not part of `flutter test`; run it explicitly
-// (from app/):
-//
-//   flutter test --dart-define=ZAFE_NETWORK=main tool/screens/store_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/):
-// store_{home,request}_{dark,light}.png at 3x (1170 px wide).
-
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -123,8 +113,6 @@ Future<void> _loadFonts() async {
   }
 }
 
-// Home as HomeScreen lays it out: top bar, vault card, buttons, the request waiting for
-// this member, recent activity, tab bar.
 Widget _home() => Builder(
   builder: (context) {
     final colors = context.colors;
@@ -274,7 +262,6 @@ Widget _home() => Builder(
   },
 );
 
-// The payment request as ProposalScreen shows it to a member who hasn't voted.
 Widget _request() => ZafeScreen(
   title: 'Payment request',
   bottom: Column(
@@ -304,8 +291,6 @@ Widget _request() => ZafeScreen(
   ],
 );
 
-// The same payment on Maya's phone: she proposed it (and so approved it), and waits
-// for one more signer.
 Widget _proposer() => ZafeScreen(
   title: 'Awaiting votes',
   children: [
@@ -324,7 +309,6 @@ Widget _proposer() => ZafeScreen(
   ],
 );
 
-// The Signers tab: backup health and each signer's phone.
 Widget _signers() => ZafeScreen(
   title: 'Signers',
   showBack: false,
@@ -348,7 +332,6 @@ Widget _signers() => ZafeScreen(
   ],
 );
 
-// Key generation: each member's shard drifts on its own (the whole key never exists).
 Widget _keys() => CreatingKeysScreen(onAbandon: () {});
 
 Widget _protection() => const ZafeScreen(
@@ -374,7 +357,6 @@ void main() {
       ('keys', _keys),
       ('proposer', _proposer),
     ]) {
-      // The key screen on a shorter phone (390 x 700): its art and words sit closer.
       tester.view.physicalSize = Size(
         390 * 3,
         (name == 'keys' ? 700 : 844) * 3,
@@ -393,7 +375,6 @@ void main() {
               key: boundary,
               child: MaterialApp(
                 debugShowCheckedModeBanner: false,
-                // No desktop scrollbars in a phone screenshot.
                 scrollBehavior: const MaterialScrollBehavior().copyWith(
                   scrollbars: false,
                 ),
@@ -404,7 +385,6 @@ void main() {
             ),
           ),
         );
-        // Enough frames for the key art to load and close.
         for (var i = 0; i < 12; i++) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 50)),
@@ -421,8 +401,7 @@ void main() {
         });
         final path = '${out.path}/store_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

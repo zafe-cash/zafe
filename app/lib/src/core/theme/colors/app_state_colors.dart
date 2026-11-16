@@ -2,21 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Interaction-state colors from the Figma `Semantic/State` group.
-///
-/// [hover], [pressed], and [selected] are standalone neutral backgrounds.
-/// [hoverOpacity] is the matching alpha overlay token for hover states that
-/// need to preserve the underlying surface.
-/// [selectedOpacity] is the matching alpha overlay token for selected states
-/// that need to preserve the underlying surface.
-///
-/// [focusRing] + [focusGap] form the 2dp focus indicator: a ring with max
-/// contrast against the page, separated from the element by a 2dp gap so it
-/// reads cleanly on any surface.
-///
-/// [focusRingBrand] is the retained brand-crimson focus variant for one-off
-/// accent cases. The current button component uses the neutral ring for its
-/// primary variant.
 class AppStateColors {
   const AppStateColors({
     required this.hover,

@@ -1,5 +1,3 @@
-//! The vault's history as CSV (spec §11.3), generated on this device.
-
 use zafe_core::{
     history, node,
     wallet::{VaultWallet, WalletError},
@@ -13,9 +11,6 @@ use super::{
     },
 };
 
-/// CSV of every payment the vault sent (from the vault log) and received (from this
-/// device's wallet database), oldest first. Before the first sync the wallet part is empty.
-/// Proposers and approvers this device named show as "Name (hexkey)".
 pub fn export_history_csv(
     relay_url: String,
     db_dir: String,

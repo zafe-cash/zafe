@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Runs examples/mobile_bench on a connected Android device (spec §19 V7/V8).
-# Needs: Android NDK (ANDROID_NDK_HOME), `cargo install cargo-ndk`, `rustup target add
-# aarch64-linux-android`, and a device with USB debugging (`adb devices` lists it).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"

@@ -2,8 +2,6 @@ import Flutter
 import UIKit
 
 class SceneDelegate: FlutterSceneDelegate {
-  /// Covers the app while it isn't active, so the app switcher's snapshot shows the
-  /// launch screen instead of balances and payments.
   private var privacyCover: UIView?
 
   override func sceneWillResignActive(_ scene: UIScene) {

@@ -14,8 +14,6 @@ import '../../providers/vault_provider.dart';
 import '../../core/widgets/line_icon.dart';
 import '../../rust/api/vault.dart' as rust;
 
-/// The vault's viewing key (UFVK) for an auditor or accountant: copy or QR. Opened from
-/// Settings after an unlock; the route blocks screenshots (SecureScreen).
 class ViewingKeyScreen extends ConsumerWidget {
   const ViewingKeyScreen({super.key});
 

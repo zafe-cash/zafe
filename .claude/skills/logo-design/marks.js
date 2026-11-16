@@ -1,14 +1,6 @@
 #!/usr/bin/env node
-// Geometry helpers for flat, one-colour-safe marks on a 100-unit tile, plus a proof sheet.
-//
-//   node marks.js proof <out.html>     # every mark below at 200/48/24/16 px, tiled and as
-//                                      # a silhouette; screenshot it with agent-browser
-//
-// Everything is plain <path> geometry (no <line>, <polyline>, patterns or filters), so the
-// same numbers can be ported to scripts/brand/brand.py and rendered by flutter_svg.
 const f = v => +v.toFixed(2);
 
-/** Closed polygon with each vertex rounded (quadratic, control at the vertex). Same as brand.py. */
 function rounded(points, r) {
   const k = points.length, radii = Array.isArray(r) ? r : points.map(() => r);
   let d = '';
@@ -21,7 +13,6 @@ function rounded(points, r) {
   return d + 'Z';
 }
 
-/** Both offset sides of a polyline at half-width w/2, with mitred joins. up = left of travel. */
 function offsets(pts, w) {
   const h = w / 2, n = pts.length;
   const seg = i => { const [x0, y0] = pts[i], [x1, y1] = pts[i + 1]; const len = Math.hypot(x1 - x0, y1 - y0); return [(y0 - y1) / len, (x1 - x0) / len]; };
@@ -33,18 +24,15 @@ function offsets(pts, w) {
   return { up: side(-1), dn: side(1) };
 }
 
-// The Z used by the old icon (scripts/brand/brand.py): 27..73 x 26..74, bars 12.5.
 const ZL = 27, ZR = 73, ZT = 26, ZB = 74, BAR = 12.5, DW = 19;
 const leftEdge = y => (ZR - DW) - ((ZR - DW) - ZL) * (y - ZT) / (ZB - ZT);
 const rightEdge = y => ZR - (ZR - (ZL + DW)) * (y - ZT) / (ZB - ZT);
 
-/** One-piece Z. Returns [{ d, tone }]. */
 function zSolid(r = 2) {
   const pts = [[ZL, ZT], [ZR, ZT], [ZR, ZT + BAR], [ZL + DW - 1.5, ZB - BAR], [ZR, ZB - BAR], [ZR, ZB], [ZL, ZB], [ZL, ZB - BAR], [ZR - DW + 1.5, ZT + BAR], [ZL, ZT + BAR]];
   return [{ d: rounded(pts, [r, r, r * .7, r * .3, r, r, r, r * .7, r * .3, r]), tone: 0 }];
 }
 
-/** Quorum Z: three strokes (top bar, diagonal, bottom bar) separated by gap g. */
 function zQuorum(r = 2, g = 6) {
   const top = [[ZL, ZT], [leftEdge(ZT) - g, ZT], [leftEdge(ZT + BAR) - g, ZT + BAR], [ZL, ZT + BAR]];
   const bot = [[rightEdge(ZB - BAR) + g, ZB - BAR], [ZR, ZB - BAR], [ZR, ZB], [rightEdge(ZB) + g, ZB]];
@@ -52,11 +40,6 @@ function zQuorum(r = 2, g = 6) {
   return [{ d: rounded(top, [r, r * .6, r * .6, r]), tone: 0 }, { d: rounded(diag, r), tone: 1 }, { d: rounded(bot, [r * .6, r, r, r * .6]), tone: 0 }];
 }
 
-/**
- * Seam (Zafe's app icon): block 22..78 split by a Z-shaped channel, the polyline
- * (19,37) -> (63,37) -> (37,63) -> (81,63), into an upper piece (tone 0) and a lower piece
- * (tone 1). Patina: r 2.6, w 9.5. Outer corner radius r*2+1.2, channel corners r*0.5.
- */
 function seam(r = 2.6, w = 9.5) {
   const l = 22, rr = 78, t = 22, b = 78, ro = r * 2 + 1.2, ri = Math.max(.4, r * .5);
   const { up: U, dn: D } = offsets([[l - 3, 37], [63, 37], [37, 63], [rr + 3, 63]], w);
@@ -68,7 +51,6 @@ function seam(r = 2.6, w = 9.5) {
   ];
 }
 
-/** An SVG string: optional tile (square rx 22.4 or circle) + paths coloured by tone. */
 function svg(paths, { px = 100, tile = null, shape = 'square', colors = ['#111'], scale = 1 } = {}) {
   const bg = !tile ? '' : shape === 'circle' ? `<circle cx="50" cy="50" r="50" fill="${tile}"/>` : `<rect width="100" height="100" rx="22.4" fill="${tile}"/>`;
   const g = scale === 1 ? '<g>' : `<g transform="translate(${50 - 50 * scale} ${50 - 50 * scale}) scale(${scale})">`;
@@ -86,8 +68,8 @@ if (require.main === module) {
   for (const [name, paths] of Object.entries(marks)) {
     html += `<h3>${name}</h3><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">`;
     for (const px of [200, 48, 24, 16]) html += svg(paths, { px, tile, colors });
-    html += `<div style="background:#111;padding:8px;border-radius:8px">${svg(paths, { px: 24, colors: ['#fff', '#fff'], scale: 1.25 })}</div>`; // notification silhouette
-    html += svg(paths, { px: 72, tile: '#C9DDF2', shape: 'circle', colors: ['#16324F', '#16324F'], scale: .8 }); // themed
+    html += `<div style="background:#111;padding:8px;border-radius:8px">${svg(paths, { px: 24, colors: ['#fff', '#fff'], scale: 1.25 })}</div>`;
+    html += svg(paths, { px: 72, tile: '#C9DDF2', shape: 'circle', colors: ['#16324F', '#16324F'], scale: .8 });
     html += '</div>';
   }
   require('fs').writeFileSync(out, html + '</body>');

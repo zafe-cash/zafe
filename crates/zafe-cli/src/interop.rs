@@ -1,17 +1,3 @@
-//! `zafe interop`: one member of a vault shared with frost-zec
-//! (OpenPGP-Wallet/frost-zec), through the JSON files of its interop format v0
-//! (`frost-zec-interop-v0`, frost-zec `docs/interop.md`).
-//!
-//! A thin wrapper: the key generation, signing and verification are zafe-core's own
-//! (`keygen`, `signing`, `tx`, `verify`), so a test runs real Zafe code. Each command is a
-//! step function: run it again when the other member's file arrives. Files are exchanged
-//! through `--dir`; round 2 files and `request.json` hold secrets and must travel only
-//! end to end encrypted.
-//!
-//! Dev-only like the rest of this CLI: the seat (FROST share, `sk`) and the nonces sit in
-//! plain files under `<home>/interop`. Each nonce file is deleted before the share it
-//! covers is written.
-
 use std::{
     collections::BTreeMap,
     fs,
@@ -48,7 +34,6 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
 };
 
-/// Written in every message; a reader refuses any other format or kind.
 const FORMAT: &str = "frost-zec-interop-v0";
 const KIND_ROUND1: &str = "dkg-round1";
 const KIND_ROUND2: &str = "dkg-round2";
@@ -56,30 +41,21 @@ const KIND_COMMITMENTS: &str = "sign-commitments";
 const KIND_REQUEST: &str = "sign-request";
 const KIND_REPLY: &str = "sign-reply";
 
-// This member's state, in `<home>/interop`.
 const KEYGEN_FILE: &str = "keygen.json";
 const SEAT_FILE: &str = "vault.json";
 const COSIGN_FILE: &str = "cosign.json";
 const COORDINATE_FILE: &str = "coordinate.json";
-/// The vault's wallet (`interop propose`): a cache of chain data, rebuilt from the
-/// birthday if lost. Dev-only: its key sits in a plain file next to it.
 const WALLET_DB_FILE: &str = "wallet.sqlite";
 const WALLET_KEY_FILE: &str = "wallet.key";
-// Exchanged messages, in `--dir` (round 1 and 2 names carry identifiers).
 const COMMITMENTS_MSG: &str = "commitments.json";
 const REQUEST_MSG: &str = "request.json";
 const REPLY_MSG: &str = "reply.json";
 
-/// Commitments a co-signer offers: one per spend it can sign (frost-zec offers 4).
 const OFFERED_COMMITMENTS: usize = 4;
 
 #[derive(Subcommand)]
 pub enum InteropCmd {
-    /// Key generation, one step per run: writes `round1.<id8>.json`; once the other
-    /// members' round 1 files are in `--dir`, writes `round2.<me>-to-<them>.json`; once
-    /// theirs to this member are there, finishes and prints the vault address.
     Keygen {
-        /// The 16-byte vault id (hex) the members agreed on. Needed on the first run.
         #[arg(long)]
         vault_id: Option<String>,
         #[arg(long, default_value_t = 2)]
@@ -89,48 +65,30 @@ pub enum InteropCmd {
         #[arg(long, default_value = "exchange")]
         dir: PathBuf,
     },
-    /// Show this member's seat (vault id, members, viewing key, address).
     Show,
-    /// Co-sign, one step per run: writes `commitments.json`; once `request.json` is in
-    /// `--dir`, verifies the PCZT against `--to`/`--amount`/`--memo` and writes
-    /// `reply.json` (shares, or the reason it refused).
     Cosign {
         #[arg(long, default_value = "session")]
         dir: PathBuf,
-        /// Only show what `request.json` pays (decoded with this vault's keys); signs
-        /// nothing and keeps the session. Then sign with the values you agreed on.
         #[arg(long)]
         inspect: bool,
         #[command(flatten)]
         expect: ExpectArgs,
     },
-    /// Build and prove a PCZT from this vault's own wallet (synced through
-    /// `--lightwalletd`): pays `--to`/`--amount`/`--memo`, change back to the vault. The
-    /// input for `coordinate --pczt`.
     Propose {
-        /// Where to write the proven PCZT.
         #[arg(long)]
         out: PathBuf,
-        /// A height before the vault was first funded (needed the first time only).
         #[arg(long)]
         birthday: Option<u32>,
         #[command(flatten)]
         expect: ExpectArgs,
     },
-    /// Coordinate, one step per run: once the co-signer's `commitments.json` is in
-    /// `--dir`, verifies `--pczt` and writes `request.json`; once `reply.json` is there,
-    /// aggregates and writes the signed PCZT to `--out`.
     Coordinate {
         #[arg(long, default_value = "session")]
         dir: PathBuf,
-        /// The proven PCZT to sign (e.g. from `zcash-devtool pczt prove`).
         #[arg(long)]
         pczt: Option<PathBuf>,
-        /// Where to write the signed PCZT.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Once signed, extract the transaction (checking proofs and signatures) and send
-        /// it through `--lightwalletd`.
         #[arg(long)]
         broadcast: bool,
         #[command(flatten)]
@@ -138,23 +96,16 @@ pub enum InteropCmd {
     },
 }
 
-/// What this member expects the transaction to do, given independently of the PCZT.
 #[derive(Args)]
 pub struct ExpectArgs {
-    /// The recipient's unified address.
     #[arg(long)]
     to: Option<String>,
-    /// The amount paid, in zatoshis.
     #[arg(long)]
     amount: Option<u64>,
-    /// The memo text (none: an empty memo).
     #[arg(long)]
     memo: Option<String>,
-    /// The chain tip (default: asked from `--lightwalletd`).
     #[arg(long)]
     tip_height: Option<u32>,
-    /// Largest accepted `expiry - tip`: the builder's default is 40 blocks; `interop
-    /// propose` rounds expiry up to a multiple of 432 blocks after NU7 (up to ~435 ahead).
     #[arg(long, default_value_t = 450)]
     max_expiry_delta: u32,
 }
@@ -212,8 +163,6 @@ pub async fn run(
         }
     }
 }
-
-// ---- Messages (field names as frost-zec writes them) ----
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Round1Message {
@@ -278,9 +227,6 @@ fn check_kind(format: &str, kind: &str, expected: &str) -> Result<()> {
     Ok(())
 }
 
-// ---- Key generation ----
-
-/// A key generation in progress. Written before anything it covers is sent.
 #[derive(Serialize, Deserialize)]
 struct KeygenState {
     network: String,
@@ -292,12 +238,9 @@ struct KeygenState {
     round1_secret: String,
     round1_package: String,
     sk_contribution: String,
-    /// The other members' round 1, once all of it arrived (it is never replaced).
     others: Option<Vec<Round1Message>>,
 }
 
-/// One member's seat in a vault made with `interop keygen` (frost-zec's `vault.json`
-/// fields, so the two sides print the same facts).
 #[derive(Serialize, Deserialize)]
 struct Seat {
     network: String,
@@ -342,7 +285,6 @@ impl Seat {
         identifier(&self.identifier)
     }
 
-    /// The other signer named in a message: another member of this vault.
     fn other_member(&self, hex_id: &str) -> Result<Identifier> {
         let id = identifier(hex_id)?;
         ensure!(
@@ -403,7 +345,6 @@ fn keygen(
     let my_contribution = SkContribution::from_bytes(bytes32(&ks.sk_contribution)?);
     let others_needed = usize::from(ks.max_signers) - 1;
 
-    // Round 1 is public: write it on every run, in case the first copy got lost.
     let round1_name = format!("round1.{me}.json");
     write_json(
         &dir.join(&round1_name),
@@ -452,7 +393,6 @@ fn keygen(
         }
     };
 
-    // Part 2 is deterministic, so each run rebuilds the same round 2 from the saved round 1.
     let mut received1 = BTreeMap::new();
     let mut identities = BTreeMap::new();
     let mut commitments =
@@ -591,7 +531,6 @@ fn keygen(
     };
     write_json(&state.join(SEAT_FILE), &seat)?;
     durable::remove(&state.join(KEYGEN_FILE))?;
-    // The round 2 files to this member are consumed (they hold its share's inputs).
     for path in &incoming {
         let _ = fs::remove_file(path);
     }
@@ -645,7 +584,6 @@ fn start_keygen(
     Ok(ks)
 }
 
-/// The parameters must be ours, and the identifier must follow from the identity key.
 fn check_round1(m: &Round1Message, ks: &KeygenState) -> Result<()> {
     check_kind(&m.format, &m.kind, KIND_ROUND1)?;
     ensure!(
@@ -685,9 +623,6 @@ fn print_seat(seat: &Seat) {
     println!("address      {}", seat.address);
 }
 
-// ---- Signing ----
-
-/// A co-signer's open session: its nonces, deleted before any share is written.
 #[derive(Serialize, Deserialize)]
 struct CosignState {
     session: String,
@@ -695,22 +630,16 @@ struct CosignState {
     commitments: Vec<String>,
 }
 
-/// A coordinator's open session.
 #[derive(Serialize, Deserialize)]
 struct CoordinateState {
     session: String,
     cosigner: String,
-    /// The co-signer's commitment for each spend, in spend order.
     their_commitments: Vec<String>,
     nonces: Vec<String>,
     commitments: Vec<String>,
     pczt: String,
 }
 
-/// What a request's PCZT does, read with this vault's keys: spends from the vault,
-/// each payment (recovered with the vault's outgoing viewing key), change and fee. Only
-/// a display: signing still checks the transaction against the values given on the
-/// command line.
 fn inspect(state: &Path, network: &ZafeNetwork, dir: &Path) -> Result<()> {
     use orchard::note_encryption::IronwoodDomain;
     use pczt::roles::verifier::Verifier;
@@ -864,8 +793,6 @@ async fn cosign(
     let open = match read_json::<CosignState>(&state_file)? {
         Some(open) => open,
         None => {
-            // A request left over from an earlier session would be answered with nonces
-            // it never saw: start clean.
             for name in [COMMITMENTS_MSG, REQUEST_MSG, REPLY_MSG] {
                 let _ = fs::remove_file(dir.join(name));
             }
@@ -907,10 +834,8 @@ async fn cosign(
         return Ok(());
     }
 
-    // Check what this member expects before anything is consumed.
     let payment = expected_payment(network, expect)?;
     let request: RequestMessage = read_json(&request_path)?.context("request vanished")?;
-    // The request holds the PCZT and its alphas; the nonces are taken once: both go now.
     let _ = fs::remove_file(&request_path);
     durable::remove(&state_file)?;
     let nonces = open
@@ -961,7 +886,6 @@ async fn cosign(
     print_verified(&verified);
 
     let mut shares = Vec::new();
-    // Spend i uses commitment i on both sides; the nonces left over are dropped unused.
     for ((i, spend), nonce) in spends.iter().enumerate().zip(nonces) {
         let commitments = BTreeMap::from([
             (coordinator, commitment(&request.commitments[i])?),
@@ -991,7 +915,6 @@ async fn cosign(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn coordinate(
     state: &Path,
     network: &ZafeNetwork,
@@ -1032,7 +955,6 @@ async fn coordinate(
         let pczt_bytes =
             fs::read(&pczt_path).with_context(|| format!("reading {}", pczt_path.display()))?;
         let pczt = Pczt::parse(&pczt_bytes).map_err(|e| anyhow!("PCZT: {e:?}"))?;
-        // The coordinator checks too: whatever built the PCZT is not trusted.
         let verified = check_pczt(
             &pczt,
             &seat,
@@ -1085,7 +1007,6 @@ async fn coordinate(
         return Ok(());
     };
     let out = out.ok_or_else(|| anyhow!("--out is required (where the signed PCZT goes)"))?;
-    // The nonces are used once, whatever the reply says.
     durable::remove(&state_file)?;
     for name in [COMMITMENTS_MSG, REQUEST_MSG, REPLY_MSG] {
         let _ = fs::remove_file(dir.join(name));
@@ -1132,7 +1053,6 @@ async fn coordinate(
         let signature = signing::aggregate(&package, &shares, &public_key_package, spend.alpha)?;
         signatures.push((spend.action_index, signature));
     }
-    // Checks each signature against its action's rk and the sighash.
     let signed = tx::apply_signatures(pczt, &signatures)?;
     let bytes = signed
         .clone()
@@ -1143,7 +1063,7 @@ async fn coordinate(
         let mut client = connect(lightwalletd).await?;
         let sent = zafe_core::node::broadcast(signed, &mut client).await?;
         let mut txid = sent.txid;
-        txid.reverse(); // txids display in reversed byte order
+        txid.reverse();
         println!("broadcast: txid {}", hex::encode(txid));
     }
     println!(
@@ -1156,8 +1076,6 @@ async fn coordinate(
     Ok(())
 }
 
-/// Syncs the vault's own wallet, builds the PCZT (ZIP 317 fee, payment outputs
-/// recoverable with the vault OVK, change back to the vault) and proves it.
 async fn propose(
     state: &Path,
     network: &ZafeNetwork,
@@ -1262,7 +1180,6 @@ fn write_request(dir: &Path, seat: &Seat, open: &CoordinateState) -> Result<()> 
     )
 }
 
-/// The one payment this member expects, from the command line (never from the PCZT).
 fn expected_payment(network: &ZafeNetwork, expect: &ExpectArgs) -> Result<Payment> {
     let to = expect
         .to
@@ -1282,7 +1199,6 @@ fn expected_payment(network: &ZafeNetwork, expect: &ExpectArgs) -> Result<Paymen
     })
 }
 
-/// The chain tip: `--tip-height`, or the lightwalletd's.
 async fn tip_height(expect: &ExpectArgs, lightwalletd: &str) -> Result<u32> {
     if let Some(tip) = expect.tip_height {
         return Ok(tip);
@@ -1291,9 +1207,6 @@ async fn tip_height(expect: &ExpectArgs, lightwalletd: &str) -> Result<u32> {
     Ok(latest_height(&mut client).await?)
 }
 
-/// zafe-core's member verification (spec §9.3): v6, branch id, expiry, Ironwood only,
-/// every spend a vault note, the payment matched exactly, change the vault's, ZIP 317 fee,
-/// and the sighash computed here.
 fn check_pczt(
     pczt: &Pczt,
     seat: &Seat,
@@ -1325,9 +1238,6 @@ fn print_verified(v: &VerifiedTx) {
     println!("  spends to sign         {}", v.spends_to_sign.len());
 }
 
-// ---- Helpers ----
-
-/// `main` or `test`: the interop format has no regtest.
 fn interop_network(network: &ZafeNetwork) -> Result<&'static str> {
     match network.name() {
         n @ ("main" | "test") => Ok(n),
@@ -1347,7 +1257,6 @@ fn identifier(hex_id: &str) -> Result<Identifier> {
     Ok(Identifier::deserialize(&hex::decode(hex_id)?)?)
 }
 
-/// The first 4 bytes of an identifier, in hex (file names).
 fn short(id: &Identifier) -> String {
     hex::encode(&id.serialize()[..4])
 }
@@ -1358,7 +1267,6 @@ fn bytes32(text: &str) -> Result<[u8; 32]> {
         .map_err(|_| anyhow!("expected 32 bytes"))
 }
 
-/// `*.json` files in `dir` whose names `keep` accepts, sorted.
 fn files(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<Vec<PathBuf>> {
     let mut found = Vec::new();
     for entry in fs::read_dir(dir)? {
@@ -1381,7 +1289,6 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     }
 }
 
-/// Atomic (temp + fsync + rename), so the other side never reads half a file.
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     durable::write(path, &serde_json::to_vec_pretty(value)?)
         .with_context(|| format!("writing {}", path.display()))

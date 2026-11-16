@@ -1,8 +1,3 @@
-//! Key generation that nobody has to wait for: each member's part is a step it repeats
-//! (`node::keygen_step`) with its state on disk, so members take part at different times,
-//! a phone can stop mid-ceremony and resume, and two processes of one member can't split
-//! it.
-
 use std::{path::PathBuf, time::Duration};
 
 use rand::{rngs::StdRng, SeedableRng};
@@ -34,7 +29,6 @@ async fn start_relay() -> String {
     format!("http://{addr}")
 }
 
-/// One member of the setup: its identity and where its key-generation state lives.
 struct Member {
     id: Identity,
     dir: PathBuf,
@@ -45,8 +39,6 @@ impl Member {
         NonceKey::derive(&self.id.public().sig_pk, &invite.vault_id)
     }
 
-    /// One step, from a fresh relay client (as a restarted app or a background check
-    /// would): seals when full (creator), the safety check, then key generation.
     async fn step(
         &self,
         relay_url: &str,
@@ -78,7 +70,6 @@ impl Member {
     }
 }
 
-/// A 2-of-3 setup everyone has joined; nobody locked it (the creator's first step does).
 async fn setup() -> (String, Vec<Member>, Invite) {
     let url = start_relay().await;
     let relay = RelayClient::new(url.clone());
@@ -101,7 +92,6 @@ async fn setup() -> (String, Vec<Member>, Invite) {
     (url, members, invite)
 }
 
-/// Steps every member until each shows the safety words.
 async fn words(url: &str, members: &[Member], invite: &Invite) -> String {
     for _ in 0..50 {
         let mut all = Vec::new();
@@ -128,12 +118,9 @@ async fn members_take_part_at_different_times() {
     let (url, members, invite) = setup().await;
     let words = words(&url, &members, &invite).await;
 
-    // A and B confirm and step; C hasn't looked yet. They get as far as they can, then
-    // wait for C, by name.
     for m in &members[..2] {
         assert!(done(m.step(&url, &invite, Some(&words)).await.unwrap().1).is_none());
     }
-    // Before confirming, C's step does nothing (no state, nothing sent).
     let (_, p) = members[2].step(&url, &invite, None).await.unwrap();
     assert!(
         matches!(
@@ -154,8 +141,6 @@ async fn members_take_part_at_different_times() {
         other => panic!("{other:?}"),
     }
 
-    // C confirms later. From then on every step (no words needed: the state remembers
-    // them) moves the ceremony on, in any order, until each member holds the vault.
     members[2].step(&url, &invite, Some(&words)).await.unwrap();
     let mut out: Vec<Option<VaultMaterial>> = vec![None, None, None];
     for _ in 0..40 {
@@ -170,7 +155,6 @@ async fn members_take_part_at_different_times() {
     }
     let out: Vec<VaultMaterial> = out.into_iter().map(Option::unwrap).collect();
     assert!(out.iter().all(|m| m.descriptor == out[0].descriptor));
-    // Once done, a step returns the same vault again until the state is forgotten.
     let again = done(members[1].step(&url, &invite, None).await.unwrap().1).unwrap();
     assert_eq!(again.key_package, out[1].key_package);
 }
@@ -179,7 +163,6 @@ async fn members_take_part_at_different_times() {
 async fn two_processes_of_one_member_make_one_round_1() {
     let (url, members, invite) = setup().await;
     let words = words(&url, &members, &invite).await;
-    // The app and a background check of member A start at the same moment.
     let (x, y) = tokio::join!(
         members[0].step(&url, &invite, Some(&words)),
         members[0].step(&url, &invite, Some(&words)),
@@ -197,8 +180,6 @@ async fn two_processes_of_one_member_make_one_round_1() {
             break;
         }
     }
-    // Had they made two round 1s, the others would hold a package A's state can't
-    // finish with, and the descriptors (transcript hash) wouldn't agree.
     let out: Vec<VaultMaterial> = out.into_iter().map(Option::unwrap).collect();
     assert!(out.iter().all(|m| m.descriptor == out[0].descriptor));
 }
@@ -208,7 +189,6 @@ async fn a_state_file_that_does_not_decrypt_is_an_error_not_a_fresh_start() {
     let (url, members, invite) = setup().await;
     let words = words(&url, &members, &invite).await;
     members[1].step(&url, &invite, Some(&words)).await.unwrap();
-    // Same member, another key (say, a broken restore): it must not start over.
     let relay = RelayClient::new(url.clone());
     let m = membership(
         &relay,
@@ -237,9 +217,6 @@ async fn a_state_file_that_does_not_decrypt_is_an_error_not_a_fresh_start() {
     assert!(matches!(err, NodeError::Protocol(_)), "{err:?}");
 }
 
-/// The setup screen's poll and the "They match" tap can both send for one member, and
-/// over Tor the later seq can reach the relay first: the earlier send then gets 409. The
-/// keygen and safety sends seal again with a fresh seq instead of failing the tap.
 #[tokio::test]
 async fn a_send_overtaken_by_a_later_seq_is_sealed_again() {
     use zafe_core::node::{send_fresh, SeqCounter};
@@ -270,8 +247,6 @@ async fn a_send_overtaken_by_a_later_seq_is_sealed_again() {
     .unwrap();
 }
 
-/// A sealed setup on `relay` for `vault_id` under `label`: what one member list looks like
-/// to its members (the first creates and seals it).
 async fn view(
     relay: &RelayClient,
     ids: &[&Identity],
@@ -300,8 +275,6 @@ async fn view(
     }
 }
 
-/// Every member's safety words for `invite`, polled together (A from its own state dir);
-/// they must agree.
 async fn all_words(
     relay: &RelayClient,
     a: &Member,
@@ -325,9 +298,6 @@ async fn all_words(
     mine
 }
 
-/// Rule 1: a member pins the member list it revealed its safety value against. Here A
-/// sees {A, B, C} and reveals; a relay that then shows A {A, B, M} (where it could pick M's
-/// value knowing A's) gets a hard stop, and so does A's key generation.
 #[tokio::test]
 async fn a_member_list_switched_after_the_reveal_stops_the_setup() {
     let url = start_relay().await;
@@ -355,9 +325,6 @@ async fn a_member_list_switched_after_the_reveal_stops_the_setup() {
     ));
 }
 
-/// Rule 1: a member pins the commitments it revealed against. After A revealed, the relay
-/// drops M's commitment and value from A's inbox and serves new ones, chosen knowing A's
-/// value: A refuses instead of showing words over them. Finishing the setup deletes the pin.
 #[tokio::test]
 async fn a_commitment_served_again_after_the_reveal_stops_the_setup() {
     use zafe_core::node::SeqCounter;
@@ -374,7 +341,6 @@ async fn a_commitment_served_again_after_the_reveal_stops_the_setup() {
     let invite = view(&relay, &[&ids[0], b, m], [9; 16], [3; 16]).await;
     let words = all_words(&relay, &a, &[b, m], &invite).await;
 
-    // Gone from A's inbox: M's commitment and value (the relay can drop anything).
     let theirs: Vec<u64> = relay
         .inbox(&a.id, invite.label, 0)
         .await
@@ -405,9 +371,6 @@ async fn a_commitment_served_again_after_the_reveal_stops_the_setup() {
     assert!(!a.dir.join(zafe_core::state_dir::SAFETY_PIN).exists());
 }
 
-/// Rule 1: a revealed safety value never comes back. A member who leaves a setup (its state
-/// dir is deleted) and joins the same invite again commits to a new value and never sends
-/// the old one again; the others, whose pins hold the old commitment, stop.
 #[tokio::test]
 async fn rejoining_a_setup_never_reveals_the_old_value_again() {
     use zafe_proto::envelope::Kind;
@@ -440,7 +403,6 @@ async fn rejoining_a_setup_never_reveals_the_old_value_again() {
     );
     assert_eq!((b_words.unwrap(), c_words.unwrap()), (words.clone(), words));
 
-    // "Leave": the setup's state dir is deleted; the same invite is opened again.
     std::fs::remove_dir_all(&a.dir).unwrap();
     let _ = membership(&relay, &a.id, &invite, &a.dir, &a.key(&invite)).await;
 
@@ -466,14 +428,12 @@ async fn rejoining_a_setup_never_reveals_the_old_value_again() {
         reveals.iter().skip(1).all(|r| *r != reveals[0]),
         "the old value is never sent again"
     );
-    // B pinned A's first commitment: it stops.
     assert!(matches!(
         membership(&relay, &b_side.id, &invite, &b_side.dir, &key).await,
         Err(NodeError::Verification(_))
     ));
 }
 
-/// One member's safety words for `invite`, polled with its own state dir for the pin.
 async fn safety_words(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,

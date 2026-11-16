@@ -1,12 +1,3 @@
-// Renders the relay screens without a device: the relay picker (our relay, another
-// address that needs a create token and sends no notifications, a relay too old for new
-// vaults), the vault's relay in Settings, Create > More options > Relay, the join
-// screen's fact line, the seat-recovery vault link on both phones and Home during a
-// relay outage, in both themes. Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/relay_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): relay_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -89,7 +80,6 @@ Widget picker(
   ],
 );
 
-/// (name, page title or null for a sheet, content)
 List<(String, String?, Widget)> relayCases() => [
   (
     'picker_ours',
@@ -293,8 +283,7 @@ void main() {
         });
         final path = '${out.path}/relay_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

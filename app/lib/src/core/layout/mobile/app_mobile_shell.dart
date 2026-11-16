@@ -6,16 +6,6 @@ import 'package:flutter/widgets.dart';
 import '../../theme/app_theme.dart';
 import 'mobile_bottom_safe_area.dart';
 
-/// Mobile counterpart of `AppDesktopShell`: a full-bleed body with the
-/// floating tab bar overlaid at the bottom.
-///
-/// Layout from the Figma mobile frames (e.g. `Home Default`, node
-/// 4394:88353): the tab bar floats 16px from the horizontal edges and
-/// page content scrolls underneath it (`extendBody`). Below the bar,
-/// Android keeps the Figma 12px gap above the navigation-bar inset; on
-/// iOS the home indicator floats inside the gap instead, which is
-/// widened to 16px so all three margins around the bar match (see
-/// [MobileBottomSafeArea]).
 class AppMobileShell extends StatelessWidget {
   const AppMobileShell({required this.body, required this.tabBar, super.key});
 
@@ -30,8 +20,6 @@ class AppMobileShell extends StatelessWidget {
     return Scaffold(
       backgroundColor: context.colors.background.window,
       extendBody: true,
-      // Desktop hosts toasts inside AppDesktopPane; the mobile shell is
-      // the equivalent surface, so it hosts them for all tab content.
       body: body,
       bottomNavigationBar: MobileBottomSafeArea(
         bottomPadding: bottomGap,

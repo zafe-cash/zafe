@@ -5,17 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'member_names.dart';
 import 'zafe_paths.dart';
 
-/// The name a member gives themselves while setting up a vault (Create or Join). It
-/// can't be published before the vault exists (a shared name is a vault log entry), so
-/// it waits here until the first refresh after key generation sends it
-/// (`ProposalsNotifier`). The last one used prefills the next setup.
 class MyName {
   static const _lastKey = 'zafe_last_my_name';
 
   static Future<File> _file(String vaultId) async =>
       File('${(await ZafePaths.get()).vaultDir(vaultId)}/my_name_pending.txt');
 
-  /// The name used in the last setup, to prefill the field.
   static Future<String> lastUsed() async {
     try {
       return (await SharedPreferences.getInstance()).getString(_lastKey) ?? '';
@@ -24,7 +19,6 @@ class MyName {
     }
   }
 
-  /// Keeps `name` for `vaultId` until it can be published; empty keeps nothing.
   static Future<void> setPending(String vaultId, String name) async {
     final cleaned = MemberNames.clean(name);
     if (cleaned.isEmpty) return;

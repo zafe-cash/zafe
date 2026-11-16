@@ -9,14 +9,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `fmt`
 
-/// Checks the one relay the user selected (never a list of them in the background: each
-/// would learn this phone's address): that a Zafe relay answers at `relay_url` (`GET
-/// /health`), and what it says about itself. Through Tor when Tor is on.
 Future<RelayCheck> checkRelay({required String relayUrl}) =>
     RustLib.instance.api.crateApiEndpointsCheckRelay(relayUrl: relayUrl);
 
-/// Checks that lightwalletd answers at `lightwalletd_url` and serves `network_name`
-/// (`main`, `test`, `regtest`). Returns its chain tip height.
 Future<int> checkLightwalletd({
   required String lightwalletdUrl,
   required String networkName,
@@ -25,32 +20,15 @@ Future<int> checkLightwalletd({
   networkName: networkName,
 );
 
-/// What a relay says about itself (`GET /v1/info`), for the relay picker.
 class RelayCheck {
-  /// The relay is older than labelled mailboxes (no `/v1/info`): it can't hold a new
-  /// vault (grey it out). The other fields are then unknown (zero / false / `None`).
   final bool tooOld;
   final int relayApiVersion;
-
-  /// It sends push notifications ("No notifications" when false).
   final bool push;
-
-  /// Creating or restoring a vault there needs its create token.
   final bool createTokenRequired;
-
-  /// Most members one vault may have.
   final int maxMembers;
-
-  /// Requests per minute per signing key (`None`: unlimited).
   final int? requestsPerMinute;
-
-  /// Bytes of vault history one vault may keep (`None`: unlimited).
   final BigInt? logBytes;
-
-  /// Days an undelivered message is kept.
   final int deliveryRetentionDays;
-
-  /// Days without use after which the relay deletes a vault (`None`: never).
   final int? idleDays;
 
   const RelayCheck({

@@ -7,7 +7,6 @@ import '../rust/api/proposals.dart' as rust;
 import '../rust/api/received.dart' as rust;
 import '../rust/api/spends.dart' as rust;
 
-/// A notification to show for a change in the vault.
 class VaultUpdate {
   const VaultUpdate({
     required this.proposalId,
@@ -15,7 +14,6 @@ class VaultUpdate {
     required this.body,
   });
 
-  /// The proposal id, or `rx:<txid>` for a received payment (see [receivedKey]).
   final String proposalId;
   final String title;
   final String body;
@@ -24,54 +22,35 @@ class VaultUpdate {
   String toString() => 'VaultUpdate($proposalId, $title, $body)';
 }
 
-/// What this device last saw of each proposal (`stage/myVote/ready`), plus one
-/// `rx:<txid>` entry per received payment and the [kReceivedMarker].
 typedef SeenSnapshot = Map<String, String>;
 
-/// Snapshot keys of received payments start with this.
 const kReceivedPrefix = 'rx:';
 
-/// Present once received payments are part of the snapshot. Older snapshots lack it, and
-/// then the vault's past receipts must not be announced as new.
 const kReceivedMarker = 'rx:*';
 
 String receivedKey(String txid) => '$kReceivedPrefix$txid';
 
-/// Snapshot keys of pending seat moves (a signer replacing a lost phone) start with this,
-/// and so does the [VaultUpdate.proposalId] of their notification (opens Signers).
 const kSeatMovePrefix = 'mv:';
 
-/// Present once seat moves are part of the snapshot (older snapshots lack it: moves
-/// already pending then aren't announced).
 const kSeatMoveMarker = 'mv:*';
 
 String seatMoveKey(rust.SeatMove m) =>
     '$kSeatMovePrefix${m.oldKeyHex}:${m.newKeyHex}';
 
-/// Snapshot keys of this phone's own seat moving (every approval is in: the old phone can
-/// keep its seat) start with this, and so does the notification's id (opens Home, where
-/// the Keep my seat card is).
 const kKeepSeatPrefix = 'ks:';
 
 String keepSeatKey(rust.PendingSeatMove m) =>
     '$kKeepSeatPrefix${m.replacement}:${m.newKeyHex}';
 
-/// Snapshot keys of unapproved spends (vault money that left with no approved payment in
-/// the log; spec §10.4.4) start with this, and so does the [VaultUpdate.proposalId] of
-/// their notification (opens the activity list).
 const kUnapprovedPrefix = 'sp:';
 
 String unapprovedKey(String txid) => '$kUnapprovedPrefix$txid';
 
-/// What the unapproved-spend card and notification say. `fromCopyAt`: the relay couldn't
-/// be reached, so the check ran on this phone's copy of the history, last matched then
-/// (a newer entry may explain the spend).
 String unapprovedSpendText({
   DateTime? fromCopyAt,
   bool notification = false,
   DateTime? now,
 }) {
-  // The card's title already says money left without approval.
   final base = notification
       ? 'A transaction spent this vault\'s funds with no approved payment. '
             'Open Zafe and check with the other members now.'
@@ -81,21 +60,11 @@ String unapprovedSpendText({
       : '$base Based on this phone\'s history from ${formatSince(fromCopyAt, now: now)}.';
 }
 
-/// Present while this member has to approve a proposal again (its signature went into an
-/// unfinished signing round), so the request is announced once.
 String reapprovalKey(String proposalId) => 're:$proposalId';
 
 String seenKey(rust.ProposalInfo p) =>
     '${p.stage.name}/${p.myVote.name}/${p.ready}';
 
-/// The notifications worth showing between the last snapshot and now. Pure, so it is the
-/// same in the app and in background checks, and testable.
-///
-/// Without an earlier snapshot nothing is announced (a fresh install shouldn't replay the
-/// vault's history). Amounts are left out when `hideAmounts` (privacy mode) is on.
-/// `names` are this device's local signer names (key hex → name): a signer it named is
-/// mentioned by name (who proposed, rejected or cancelled); unnamed signers aren't
-/// mentioned (a short key means little in a notification).
 List<VaultUpdate> vaultUpdates({
   required SeenSnapshot? previous,
   required List<rust.ProposalInfo> proposals,
@@ -109,15 +78,12 @@ List<VaultUpdate> vaultUpdates({
   DateTime? unapprovedFromCopyAt,
   String? me,
 }) {
-  // A name with the member's short key: names are chosen by the members themselves.
   String? nameOf(String keyHex) {
     final n = names[keyHex]?.trim();
     return n == null || n.isEmpty ? null : '$n (${shortKey(keyHex)})';
   }
 
   final out = <VaultUpdate>[];
-  // Never held back: not by privacy mode, and not by a missing snapshot (a fresh install
-  // must still hear that money left the vault).
   for (final s in unapprovedSpends) {
     if (previous?.containsKey(unapprovedKey(s.txid)) ?? false) continue;
     out.add(
@@ -131,8 +97,6 @@ List<VaultUpdate> vaultUpdates({
       ),
     );
   }
-  // This phone's own seat is moving: never held back either (a phone restored from a
-  // backup holds the seat too). Only its owner's tap keeps it.
   for (final m in pendingSeatMoves) {
     if (m.oldKeyHex != me || !m.canKeep) continue;
     if (previous?.containsKey(keepSeatKey(m)) ?? false) continue;
@@ -165,10 +129,7 @@ List<VaultUpdate> vaultUpdates({
   if (previous.containsKey(kSeatMoveMarker)) {
     for (final m in seatMoves) {
       final key = seatMoveKey(m);
-      // Members who already approved needn't act.
       if (previous.containsKey(key) || m.approvals.contains(me)) continue;
-      // The seat's own phone hears first: if it is still in its owner's hands, someone
-      // is asking for its seat.
       if (m.oldKeyHex == me) {
         out.add(
           VaultUpdate(
@@ -222,7 +183,6 @@ List<VaultUpdate> vaultUpdates({
 
     switch (p.stage) {
       case rust.ProposalStage.open:
-        // New proposals that need this member's vote (not their own).
         if (before == null && !p.isMine && p.myVote == rust.MyVote.none) {
           final by = nameOf(p.author);
           out.add(
@@ -239,7 +199,7 @@ List<VaultUpdate> vaultUpdates({
             before!.endsWith('/${p.ready}')) {
           break;
         }
-        if (p.ready && p.autoSend) break; // it is being sent; "sent" follows
+        if (p.ready && p.autoSend) break;
         out.add(
           update(
             p.ready ? 'payment ready to send' : 'payment approved',
@@ -274,8 +234,6 @@ List<VaultUpdate> vaultUpdates({
   return out;
 }
 
-/// The snapshot for `proposals` and/or `received`; a `null` list keeps that kind's
-/// entries from `previous`.
 SeenSnapshot snapshotOf(
   List<rust.ProposalInfo>? proposals, {
   List<rust.ReceivedInfo>? received,
@@ -322,6 +280,5 @@ SeenSnapshot snapshotOf(
   },
 };
 
-/// How many payments are waiting for this member ([needsMyAction]).
 int actionableCount(List<rust.ProposalInfo> proposals, {int? height}) =>
     proposals.where((p) => needsMyAction(p, height: height)).length;

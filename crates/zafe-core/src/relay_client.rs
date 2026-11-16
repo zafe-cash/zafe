@@ -1,5 +1,3 @@
-//! Client for the Zafe relay (spec §6). Signs every request with the member identity.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -22,54 +20,35 @@ use zafe_proto::{
 pub enum RelayClientError {
     #[error("relay returned {status}: {body}")]
     Status { status: u16, body: String },
-    /// The relay could not be reached (or the connection failed part way).
     #[error("transport: {message}")]
     Transport {
         failure: crate::net::NetFailure,
         message: String,
     },
-    /// The relay is limiting this key or address (HTTP 429).
     #[error("the relay is busy; try again in {retry_after_secs} s")]
     RateLimited { retry_after_secs: u64 },
-    /// The relay refused to store more for this vault (HTTP 507): a member's inbox, the
-    /// vault's undelivered messages or its log is over the relay's storage quota.
-    /// `detail` is the relay's explanation.
     #[error("the relay's storage for this vault is full: {detail}")]
     StorageFull { detail: String },
     #[error("encoding")]
     Encoding,
-    /// The relay refused this client's version of `format` (HTTP 426). `ours` newer than
-    /// `relay_supports` means the relay needs updating; older means the app does.
     #[error("the relay speaks {format} version {relay_supports}, this app {ours}")]
     VersionRejected {
         format: Format,
         ours: u16,
         relay_supports: u16,
     },
-    /// The relay sent data in a version this build can't read.
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
-    /// The response was over [`MAX_RESPONSE_BYTES`] (a misbehaving relay; audit L6).
     #[error("the relay's response is over {MAX_RESPONSE_BYTES} bytes")]
     ResponseTooLarge,
-    /// The relay doesn't have `route` (HTTP 404 that isn't "unknown mailbox"): it is older
-    /// than this app's feature and needs updating.
     #[error("the relay is too old for {route}")]
     RelayTooOld { route: &'static str },
-    /// The relay is private: creating or restoring a mailbox there needs its create token,
-    /// and this client sent none or the wrong one (HTTP 401 `www-authenticate:
-    /// zafe-create-token`; see [`RelayClient::with_create_token`]).
     #[error("this relay needs a create token")]
     CreateTokenRefused,
-    /// The relay already holds its cap of pending moves for this seat (HTTP 409).
     #[error("the server holds too many open moves for this seat")]
     TooManySeatMoves,
 }
 
-/// Development only: connect to `to` whenever a relay move names `from`. One relay can have
-/// different addresses for different members (the emulator reaches the host's
-/// `127.0.0.1:18900` as `10.0.2.2:18900`), while every member signs the same URL; the
-/// CLI's `--relay-alias` sets this. The app never does.
 pub fn set_relay_alias(from: &str, to: &str) {
     let mut map = ALIASES.lock().expect("lock");
     map.insert(
@@ -91,15 +70,9 @@ fn relay_alias(url: &str) -> String {
         .unwrap_or_else(|| url.to_owned())
 }
 
-/// Largest response body read from a relay. A page is at most 500 envelopes or log
-/// entries, almost all a few KB, so this is far above anything real while bounding the
-/// memory a hostile relay can make the app allocate.
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
 impl RelayClientError {
-    /// The relay couldn't be reached or didn't answer itself: no connection, a timeout, Tor
-    /// not connected, or a gateway error (502-504) from a proxy in front of it. Anything
-    /// else came from the relay.
     pub fn is_unreachable(&self) -> bool {
         match self {
             RelayClientError::Transport { .. } => true,
@@ -108,7 +81,6 @@ impl RelayClientError {
         }
     }
 
-    /// This app is older than what it talked to: updating the app fixes it.
     pub fn app_outdated(&self) -> bool {
         match self {
             RelayClientError::VersionRejected {
@@ -122,8 +94,6 @@ impl RelayClientError {
     }
 }
 
-/// A 404 from a relay without `route` (its own 404s for a missing mailbox say so) becomes
-/// [`RelayClientError::RelayTooOld`].
 fn route_missing(route: &'static str) -> impl FnOnce(RelayClientError) -> RelayClientError {
     move |e| match e {
         RelayClientError::Status { status: 404, body } if body != UNKNOWN_MAILBOX => {
@@ -140,7 +110,6 @@ fn decoding(e: ProtoError) -> RelayClientError {
     }
 }
 
-/// The format a request body to `path` is tagged with (every route since relay API 2).
 fn body_format(_path: &str) -> Format {
     Format::RelayApi
 }
@@ -149,15 +118,10 @@ fn body_format(_path: &str) -> Format {
 pub struct RelayClient {
     base: String,
     http: reqwest::Client,
-    /// This device's copy of the vault logs (see [`crate::log_cache`]); `None` = the
-    /// relay is trusted to remember the log (tests, tools).
     log_cache: Option<crate::log_cache::LogCache>,
-    /// A private relay's create token, sent with mailbox creations and restores only.
     create_token: Option<String>,
 }
 
-/// A transport error with its causes, so "invalid peer certificate: UnknownIssuer" isn't
-/// hidden behind reqwest's "error sending request".
 fn transport(e: impl std::error::Error + 'static) -> RelayClientError {
     RelayClientError::Transport {
         failure: crate::net::NetFailure::of(&e),
@@ -165,23 +129,14 @@ fn transport(e: impl std::error::Error + 'static) -> RelayClientError {
     }
 }
 
-/// Time to establish a connection to the relay.
 pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-/// Whole request, response included (relay answers are small; only `/v1/wait` is held
-/// open, for at most [`MAX_WAIT_SECS`]).
 pub const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// How much longer than the relay's wait a long poll may take before the client gives up
-/// (network latency, a slow proxy).
 pub const WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Extra time a request through Tor may take on top of the direct timeouts: every request
-/// opens a new Tor stream and TLS session (several round trips through the circuit).
 pub const TOR_EXTRA_TIME: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Marks an oversized body inside the Tor client's error type.
 const TOO_LARGE: &str = "relay response too large";
 
-/// What the client needs from a relay response, whichever way it travelled.
 struct RawResponse {
     status: u16,
     retry_after: Option<String>,
@@ -190,12 +145,8 @@ struct RawResponse {
     body: Vec<u8>,
 }
 
-/// One extra request header (name, value).
 type ExtraHeader = Option<(&'static str, String)>;
 
-/// One request through Tor (`zcash_client_backend`'s HTTP-over-Tor: a fresh Tor stream and
-/// rustls session with the bundled roots per request, no retries). A private root added
-/// with [`RelayClient::with_extra_root`] is not trusted on this path.
 async fn over_tor(
     client: &zcash_client_backend::tor::Client,
     url: String,
@@ -206,7 +157,6 @@ async fn over_tor(
     use zcash_client_backend::tor::{self, http::HttpError};
 
     let uri: tonic::transport::Uri = url.parse().map_err(transport)?;
-    // Read frame by frame so an oversized body is cut off, not collected.
     let read_body = |mut incoming: hyper::body::Incoming| async move {
         let mut out = Vec::new();
         while let Some(frame) = incoming.frame().await {
@@ -260,12 +210,6 @@ async fn over_tor(
     })
 }
 
-/// Every relay client (pooled or not) comes from here. Redirects are never followed:
-/// reqwest's default follows up to 10 (`reqwest-0.12.28/src/redirect.rs:161-163`), resends
-/// the body on 307/308 (`tower-http-0.6.11/src/follow_redirect/mod.rs:291`) and strips only
-/// the standard credential headers across hosts (`redirect.rs:239-250`), so a relay could
-/// send a phone's signed requests and the create token anywhere. A redirect answers as its
-/// status. The Tor path follows none either (`zcash_client_backend` `tor::http`).
 fn http_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -281,26 +225,15 @@ fn now() -> u64 {
 }
 
 impl RelayClient {
-    /// `base` is the relay URL, e.g. `http://127.0.0.1:8787` or `https://relay.example`.
-    /// `https` uses rustls with the bundled Mozilla root store (webpki-roots), so it works
-    /// the same on Android, iOS and desktop without the platform's certificate store.
     pub fn new(base: impl Into<String>) -> Self {
         Self {
             base: base.into().trim_end_matches('/').to_owned(),
-            // Only fails if the TLS backend can't initialise; fall back to the defaults.
             http: http_builder().build().unwrap_or_default(),
             log_cache: crate::log_cache::configured(),
             create_token: None,
         }
     }
 
-    /// Like [`RelayClient::new`], but every client made this way shares one connection
-    /// pool, so a call reuses the TLS connection the previous one opened instead of a new
-    /// handshake (~0.7 s to the hosted relay from a phone: most of an approval's time).
-    /// Only for a process whose relay calls all run on **one long-lived runtime** (the
-    /// app's bridge): pooled connections belong to the runtime that opened them, so tests
-    /// and tools that start a runtime per call use [`RelayClient::new`]. Tor is unaffected:
-    /// with Tor on no request takes the direct path, so pooled connections sit unused.
     pub fn pooled(base: impl Into<String>) -> Self {
         static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
         Self {
@@ -313,21 +246,15 @@ impl RelayClient {
         }
     }
 
-    /// Replaces the log copy this client keeps and checks the relay against (the default
-    /// is the one set with [`crate::log_cache::configure`]).
     pub fn with_log_cache(mut self, cache: Option<crate::log_cache::LogCache>) -> Self {
         self.log_cache = cache;
         self
     }
 
-    /// The relay's base URL.
     pub fn base_url(&self) -> &str {
         &self.base
     }
 
-    /// A client for another relay (`url`) like this one: same connection pool, log copy
-    /// and network path; no create token. A relay move talks to the new relay this way.
-    /// The URL goes through [`set_relay_alias`] (development: one relay, two addresses).
     pub fn at(&self, url: &str) -> Self {
         Self {
             base: relay_alias(url).trim_end_matches('/').to_owned(),
@@ -341,9 +268,6 @@ impl RelayClient {
         self.log_cache.as_ref()
     }
 
-    /// Like [`RelayClient::new`], but also trusts `root_der` (a DER CA certificate) on top
-    /// of the bundled roots: for a self-hosted relay behind a private CA, and for tests.
-    /// Certificate and hostname verification stay fully on.
     pub fn with_extra_root(
         base: impl Into<String>,
         root_der: &[u8],
@@ -361,9 +285,6 @@ impl RelayClient {
         })
     }
 
-    /// Sends `token` (a private relay's `ZAFE_RELAY_CREATE_TOKEN`) with mailbox creations
-    /// and restores (`/v1/mailbox/create`, `/v1/mailbox/reseed`), never with anything else.
-    /// `None` or blank: no token.
     pub fn with_create_token(mut self, token: Option<&str>) -> Self {
         self.create_token = token
             .map(str::trim)
@@ -372,12 +293,10 @@ impl RelayClient {
         self
     }
 
-    /// The create token this client sends with creations and restores, if any.
     pub fn create_token(&self) -> Option<&str> {
         self.create_token.as_deref()
     }
 
-    /// `GET /health`: whether a Zafe relay answers at this URL (200 `ok`).
     pub async fn health(&self) -> Result<(), RelayClientError> {
         let response = self.exchange("/health", None, None, None).await?;
         if (200..300).contains(&response.status) && response.body == b"ok" {
@@ -393,9 +312,6 @@ impl RelayClient {
         }
     }
 
-    /// One request, through Tor or directly as the route policy says ([`crate::tor`]):
-    /// `body` makes it a POST. While Tor is on but unusable this fails with
-    /// `NetFailure::TorConnecting`/`TorFailed` and sends nothing.
     async fn exchange(
         &self,
         path: &str,
@@ -500,7 +416,6 @@ impl RelayClient {
         body: Vec<u8>,
         timeout: Option<std::time::Duration>,
     ) -> Result<Vec<u8>, RelayClientError> {
-        // The create token goes only where the relay checks it.
         let header = self
             .create_token
             .clone()
@@ -606,9 +521,6 @@ impl RelayClient {
             .await
     }
 
-    /// Creator only, before sealing: records the vault's threshold, which moving a lost
-    /// member's seat later needs. `Ok(false)` from a relay without the route (HTTP 404):
-    /// such a vault can't move seats.
     pub async fn set_threshold(
         &self,
         creator: &Identity,
@@ -629,10 +541,6 @@ impl RelayClient {
         }
     }
 
-    /// Creator only, before sealing: deletes the mailbox, so the invite stops working and
-    /// members waiting in it learn the setup is gone. `Ok(false)` when there was nothing to
-    /// delete there: a relay without the route, or a mailbox that is already gone (both
-    /// answer HTTP 404).
     pub async fn cancel_setup(
         &self,
         creator: &Identity,
@@ -648,8 +556,6 @@ impl RelayClient {
         }
     }
 
-    /// Restarts the invite's clock (creator only, before the setup locks). `Ok(false)`:
-    /// a relay without the route (its invites never expire).
     pub async fn renew_invite(
         &self,
         creator: &Identity,
@@ -665,10 +571,6 @@ impl RelayClient {
         }
     }
 
-    /// Approves a seat move on the relay that files the vault under `mailbox` (its label
-    /// there), with the approvals of at least the vault's threshold of other members: the
-    /// new key becomes a pending member (see [`LabelledReplace`]). Succeeds if the relay
-    /// already holds the move.
     pub async fn replace_member_at(
         &self,
         who: &Identity,
@@ -690,7 +592,6 @@ impl RelayClient {
         .map_err(route_missing(ROUTE))
     }
 
-    /// Posts `who`'s finish of a pending seat move (see [`SeatFinish`]).
     pub async fn finish_seat_move(
         &self,
         who: &Identity,
@@ -706,8 +607,6 @@ impl RelayClient {
         decode_body(&self.post(ROUTE, body).await.map_err(route_missing(ROUTE))?).map_err(decoding)
     }
 
-    /// Posts the old key's signed cancel of a pending first-round move of its seat (see
-    /// [`SeatCancel`]; it names the mailbox). Anyone may post it.
     pub async fn cancel_seat_move(
         &self,
         cancel: SeatCancel,
@@ -719,8 +618,6 @@ impl RelayClient {
         decode_body(&self.post(ROUTE, body).await.map_err(route_missing(ROUTE))?).map_err(decoding)
     }
 
-    /// Leaves one value of the safety check between `subject`'s new phone and the
-    /// co-signer `cosigner` (see [`RecoveryPut`]). A relay without the route answers 404.
     pub async fn recovery_put(
         &self,
         who: &Identity,
@@ -740,9 +637,6 @@ impl RelayClient {
             .await
     }
 
-    /// The values left for `subject`'s recovery whose signature verifies, that are about
-    /// `subject` and signed by the side whose value they are (the relay is not trusted
-    /// with them).
     pub async fn recovery_read(
         &self,
         who: &Identity,
@@ -769,7 +663,6 @@ impl RelayClient {
             .collect())
     }
 
-    /// The mailboxes `who` is a member of. Empty from a relay without the route (404).
     pub async fn mailboxes(&self, who: &Identity) -> Result<Vec<MailboxId>, RelayClientError> {
         match self
             .signed::<_, MailboxesResponse>(
@@ -785,7 +678,6 @@ impl RelayClient {
         }
     }
 
-    /// Creator only, before sealing: removes a joined member.
     pub async fn remove(
         &self,
         creator: &Identity,
@@ -796,7 +688,6 @@ impl RelayClient {
             .await
     }
 
-    /// Registers this member's push token for the mailbox (content-free notifications).
     pub async fn register_push(
         &self,
         member: &Identity,
@@ -832,8 +723,6 @@ impl RelayClient {
         .await
     }
 
-    /// Members, sealed flag and approval threshold the relay holds. A relay older than
-    /// the route answers 404 (`Status { status: 404 }`).
     pub async fn mailbox_info(
         &self,
         who: &Identity,
@@ -850,7 +739,6 @@ impl RelayClient {
         .await
     }
 
-    /// Delivers `envelope`, whose sender is `who` (the request is signed by it).
     pub async fn send(&self, who: &Identity, envelope: &Envelope) -> Result<(), RelayClientError> {
         let envelope = envelope
             .to_bytes()
@@ -859,8 +747,6 @@ impl RelayClient {
             .await
     }
 
-    /// Envelopes delivered to `who` after cursor `after`, oldest first. Envelopes in a
-    /// version this build can't read are dropped.
     pub async fn inbox(
         &self,
         who: &Identity,
@@ -881,8 +767,6 @@ impl RelayClient {
         Ok(response.decoded())
     }
 
-    /// Deletes envelopes `who` has handled, by delivery cursor. Returns how many the relay
-    /// deleted; a relay without the endpoint (404) deletes none (they expire there).
     pub async fn ack_inbox(
         &self,
         who: &Identity,
@@ -914,9 +798,6 @@ impl RelayClient {
         Ok(deleted)
     }
 
-    /// Appends `entry` to the mailbox this relay files the vault under (`mailbox`, its label
-    /// there, which may differ from the vault id the entry carries). `who` is a member of
-    /// that mailbox, not necessarily the entry's author.
     pub async fn append_log_to(
         &self,
         who: &Identity,
@@ -931,8 +812,6 @@ impl RelayClient {
             .map_err(route_missing(ROUTE))
     }
 
-    /// Deletes `who`'s push token for `mailbox` on this relay (its vault left it). A relay
-    /// older than the route fails with [`RelayClientError::RelayTooOld`].
     pub async fn forget_push(
         &self,
         who: &Identity,
@@ -948,9 +827,6 @@ impl RelayClient {
             .map_err(route_missing(ROUTE))
     }
 
-    /// `GET /v1/info`: the relay's versions, limits, whether it sends push notifications
-    /// and needs a create token. Unauthenticated. A relay older than the route fails with
-    /// [`RelayClientError::RelayTooOld`].
     pub async fn info(&self) -> Result<RelayInfo, RelayClientError> {
         const ROUTE: &str = "/v1/info";
         let response = self.exchange(ROUTE, None, None, None).await?;
@@ -975,7 +851,6 @@ impl RelayClient {
         }
     }
 
-    /// Restores a vault on this relay from a saved copy of its log (see [`Reseed`]).
     pub async fn reseed(
         &self,
         who: &Identity,
@@ -994,9 +869,6 @@ impl RelayClient {
         Ok(self.read_log_page(who, mailbox, from).await?.0)
     }
 
-    /// [`RelayClient::read_log`], with the page's size as the relay measures it
-    /// ([`zafe_proto::relay::page_bytes`] of the stored entries), for
-    /// [`zafe_proto::relay::page_may_continue`].
     pub async fn read_log_page(
         &self,
         who: &Identity,
@@ -1018,10 +890,6 @@ impl RelayClient {
         Ok((response.decoded().map_err(decoding)?, bytes))
     }
 
-    /// Long poll: returns as soon as the vault log has more than `log_len` entries or an
-    /// envelope for `who` is delivered past cursor `inbox_after`, or after `max_wait`
-    /// (the relay caps it at [`MAX_WAIT_SECS`]) with where things are. `Ok(None)`: this
-    /// relay has no long polls (older than the endpoint, HTTP 404); poll instead.
     pub async fn wait_for_activity(
         &self,
         who: &Identity,
@@ -1049,8 +917,6 @@ impl RelayClient {
             .await
         {
             Ok(bytes) => decode_body(&bytes).map(Some).map_err(decoding),
-            // The relay answers 403 (never 404) for an unknown mailbox here, so a 404 is a
-            // relay without the route.
             Err(RelayClientError::Status { status: 404, .. }) => Ok(None),
             Err(e) => Err(e),
         }

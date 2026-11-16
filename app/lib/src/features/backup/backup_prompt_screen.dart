@@ -11,15 +11,12 @@ import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
 
-/// Whether the active vault has a backup (drives the home reminder).
 final backupStatusProvider = FutureProvider.autoDispose<bool>((ref) async {
   final id = ref.watch(vaultProvider.select((v) => v.activeId));
   if (id == null) return true;
   return (await VaultSummaries.read(id)).backedUp;
 });
 
-/// Shown right after a vault's keys are created: the member's key share now exists only on
-/// this phone, so offer to back it up before anything else.
 class BackupPromptScreen extends ConsumerWidget {
   const BackupPromptScreen({super.key});
 
@@ -44,7 +41,6 @@ class BackupPromptScreen extends ConsumerWidget {
           AppButton(
             expand: true,
             variant: AppButtonVariant.ghost,
-            // No second question: Home keeps reminding until it's done.
             onPressed: () => context.go('/home'),
             child: const Text('Later'),
           ),

@@ -8,7 +8,6 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/zafe-cash/zafe"
 
-# Security-critical crates are pinned exactly (spec §4.4). Bumps require review.
 [workspace.dependencies]
 reddsa = { version = "=0.5.2", default-features = false, features = ["std", "frost", "serde"] }
 frost-rerandomized = { version = "=3.0.0", features = ["serde"] }
@@ -19,14 +18,11 @@ zcash_primitives = "=0.31.0-pre.1"
 zcash_protocol = { version = "=0.11.0-pre.0", features = ["local-consensus"] }
 zcash_keys = { version = "=0.17.0-pre.1", features = ["orchard", "unstable-frost"] }
 zcash_client_backend = { version = "=0.25.0-pre.1", features = ["orchard", "pczt", "lightwalletd-tonic", "lightwalletd-tonic-transport", "lightwalletd-tonic-tls-webpki-roots", "sync", "tor"] }
-# zcash_client_backend/pczt enables transparent-inputs; sqlite must enable it too or it fails to compile.
 zcash_client_sqlite = { version = "=0.23.0-pre.1", features = ["orchard", "transparent-inputs", "serde"] }
 
 zcash_spec = "=0.2.1"
 zip321 = "=0.10.0-pre.1"
 zcash_address = "0.14.0-pre.1"
-# TLS for lightwalletd: rustls with ring (builds with the NDK, no cmake) and the bundled
-# Mozilla roots (webpki-roots), so Android needs no system certificate plumbing.
 tonic = { version = "0.14", features = ["tls-ring", "tls-webpki-roots"] }
 async-trait = "0.1"
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -37,8 +33,6 @@ blake2b_simd = "1"
 subtle = "2.6"
 blake3 = "1"
 rand = "0.8"
-# The Zcash stack (librustzcash pre-releases for NU7) moved to rand_core 0.10; our own crypto
-# (ed25519-dalek 2, hpke, FROST) is still on 0.6. This second rand is for Zcash APIs only.
 rand10 = { package = "rand", version = "0.10" }
 ff14 = { package = "ff", version = "0.14" }
 rand_core = "0.6"
@@ -46,16 +40,12 @@ thiserror = "2"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 hex = "0.4"
 
-# Messaging crypto (zafe-proto). The previous dalek/hpke generation: the newest
-# releases need sha2 0.11 stable, which conflicts with bip32's sha2 =0.11.0-pre.4 pin
-# (via zcash_client_backend 0.24). This generation shares rand_core 0.6 with the Zcash stack.
 ed25519-dalek = { version = "2.2", features = ["rand_core", "zeroize"] }
 hpke = { version = "=0.12.0", default-features = false, features = ["x25519", "alloc"] }
 chacha20poly1305 = "0.10"
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["alloc"] }
 
-# Relay server
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "signal", "time"] }
 tower = { version = "0.5", features = ["util"] }
@@ -63,7 +53,6 @@ http-body-util = "0.1"
 tracing = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
-# `rustls-tls` = rustls + ring + webpki-roots (see tonic above). Crates opt in per crate.
 reqwest = { version = "0.12", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = "1"
@@ -71,7 +60,5 @@ incrementalmerkletree = "0.9"
 shardtree = "0.8"
 zcash_note_encryption = "0.5"
 
-# Halo 2 proving and key generation are unusably slow unoptimized; optimize
-# dependencies even in dev and test builds.
 [profile.dev.package."*"]
 opt-level = 3

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Regenerate the SVGs from scenes.py and render them with flutter_svg (what the app draws).
-# Usage: scripts/illustrations/preview.sh [--no-gen] [scene ...]
-# Output: app/build/illustration_preview/{<name>.png,<name>_hero.png,contact_sheet.png}
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"

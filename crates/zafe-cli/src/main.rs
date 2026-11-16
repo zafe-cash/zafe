@@ -1,9 +1,3 @@
-//! `zafe`: a headless Zafe member (spec §15, milestone M0).
-//!
-//! State lives in `--home` as plain files. That is for development only: identity seeds,
-//! the FROST share, the vault secret and nonces belong in platform secure storage on real
-//! devices (spec §14).
-
 use std::{fs, path::PathBuf, time::Duration};
 
 mod interop;
@@ -22,17 +16,13 @@ use zafe_core::{
     wallet::{connect, latest_height, PaymentRequest, VaultWallet, WalletKey, ZafeNetwork},
 };
 
-// Files in a member's home (dev-only plain files). Signing state uses `state_dir` names.
 const IDENTITY_FILE: &str = "identity.bin";
 const INVITE_FILE: &str = "invite.txt";
 const VAULT_FILE: &str = "vault.bin";
 const WALLET_DB_FILE: &str = "wallet.sqlite";
 const WALLET_KEY_FILE: &str = "wallet.key";
-/// This member's copy of the vault log (`zafe_core::log_cache`).
 const LOG_DIR: &str = "log";
-/// The leader's signing requests and used commitments.
 const REQUESTS_DIR: &str = "requests";
-/// A vault shared with frost-zec (`zafe interop`); its file names are in `interop.rs`.
 const INTEROP_DIR: &str = "interop";
 use zafe_proto::{Identity, IdentitySeeds};
 use zcash_protocol::memo::Memo;
@@ -43,20 +33,12 @@ use zcash_protocol::memo::Memo;
     about = "Headless Zafe multisig member (development only)"
 )]
 struct Cli {
-    /// Directory holding this member's state.
     #[arg(long, env = "ZAFE_HOME", default_value = "./zafe-home")]
     home: PathBuf,
-    /// The relay. Always used (a dev tool: one relay can have different addresses from the
-    /// host and an emulator); the vault's own relay URL is recorded but not followed.
     #[arg(long, env = "ZAFE_RELAY", default_value = "http://127.0.0.1:8787")]
     relay: String,
-    /// `FROM=TO` (comma-separated): connect to `TO` whenever a relay move names relay
-    /// `FROM` (one relay, two addresses: the emulator's `10.0.2.2` is the host's
-    /// `127.0.0.1`). Development only.
     #[arg(long, env = "ZAFE_RELAY_ALIAS")]
     relay_alias: Option<String>,
-    /// A private relay's create token (`ZAFE_RELAY_CREATE_TOKEN` there): sent when
-    /// creating or restoring a vault. Restores fall back to the vault's own token.
     #[arg(long, env = "ZAFE_CREATE_TOKEN")]
     create_token: Option<String>,
     #[arg(
@@ -65,7 +47,6 @@ struct Cli {
         default_value = "http://127.0.0.1:9067"
     )]
     lightwalletd: String,
-    /// Zcash network: regtest (local, default), test or main. Read from `ZAFE_NETWORK`.
     #[arg(long, env = "ZAFE_NETWORK", default_value = "regtest")]
     network: String,
     #[command(subcommand)]
@@ -74,70 +55,54 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create this member's identity.
     Init,
-    /// Vault setup.
     #[command(subcommand)]
     Vault(VaultCmd),
-    /// Sync the vault wallet and print the balance.
     Sync,
-    /// Propose a payment.
     Propose {
         #[arg(long)]
         to: String,
-        /// Amount in zatoshis.
         #[arg(long)]
         amount: u64,
         #[arg(long)]
         memo: Option<String>,
-        /// Send as soon as the approvals complete (one-tap vaults).
         #[arg(long)]
         auto_send: bool,
     },
-    /// Publish fresh commitments so proposals can be signed at approval time (one tap).
     Pool {
-        /// First retire this member's unassigned commitments (use after this member's
-        /// nonces were lost, e.g. a state directory restored without its `pool` folder).
         #[arg(long)]
         reset: bool,
     },
-    /// Send a proposal whose approvals already carry every signature (one tap).
-    Send { proposal: String },
-    /// Export this member's seat as an encrypted backup (text form, as the app's "Copy as
-    /// text"). Never includes signing nonces.
+    Send {
+        proposal: String,
+    },
     Backup {
         #[arg(long)]
         passphrase: String,
     },
-    /// Restore the vault's log on the relay from this member's saved copy: a relay that was
-    /// wiped (or moved to another URL) is recreated, one rewound to an older backup gets
-    /// the missing entries.
     RestoreRelay,
-    /// List proposals.
     Proposals,
-    /// Set this member's display name for the other members (empty clears it).
-    Name { name: String },
-    /// Verify a proposal independently and approve it. Never sends (scripts decide when):
-    /// once approvals complete, run `zafe send` (one tap) or `request`, `respond` and
-    /// `finalize` (interactive). The app sends by itself.
-    Approve { proposal: String },
-    /// Reject a proposal.
-    Reject { proposal: String },
-    /// Cancel a proposal this member authored (open or approved, not yet sent).
-    Cancel { proposal: String },
-    /// Leader: send signing requests for an approved proposal.
-    Request { proposal: String },
-    /// Answer pending signing requests.
+    Name {
+        name: String,
+    },
+    Approve {
+        proposal: String,
+    },
+    Reject {
+        proposal: String,
+    },
+    Cancel {
+        proposal: String,
+    },
+    Request {
+        proposal: String,
+    },
     Respond,
-    /// Leader: aggregate shares, prove, broadcast.
-    Finalize { proposal: String },
-    /// Move the vault to another relay (`docs/relay-move.md` §4.2): prints the link for the
-    /// others. `--status` shows the move (and switches when enough members moved);
-    /// `--cancel` withdraws this member from it.
+    Finalize {
+        proposal: String,
+    },
     Move {
-        /// The new relay's URL (as every member should reach it; see `--relay-alias`).
         url: Option<String>,
-        /// The new relay's create token, if it is private.
         #[arg(long)]
         create_token: Option<String>,
         #[arg(long)]
@@ -145,82 +110,58 @@ enum Command {
         #[arg(long)]
         status: bool,
     },
-    /// Follow a move from its link (`https://zafe.cash/move#…`): checks it on the new relay
-    /// and sends this member's arrival.
-    Follow { link: String },
-    /// Moving a signer's seat to a new device (a lost phone; spec §10.1).
+    Follow {
+        link: String,
+    },
     #[command(subcommand)]
     Seat(SeatCmd),
-    /// On a new device with no backup: print this device's recovery code for a co-signer,
-    /// and (with `--wait`) wait until the seat has moved and the key is repaired.
     Recover {
         #[arg(long)]
         wait: bool,
-        /// The co-signer's seat link (`zafe seat link`): the vault's relay and mailbox.
-        /// Without it, every mailbox `--relay` lists for this device is checked.
         #[arg(long)]
         link: Option<String>,
-        /// A co-signer (hex key) whose safety words matched; the vault is taken only
-        /// through one of them. Repeat for each.
         #[arg(long)]
         confirm: Vec<String>,
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
-    /// A 2-of-2 vault shared with frost-zec through its interop files (format v0):
-    /// key generation and signing in both roles, with zafe-core's own code.
     #[command(subcommand)]
     Interop(interop::InteropCmd),
 }
 
 #[derive(Subcommand)]
 enum SeatCmd {
-    /// Approve moving a signer's seat to the device that printed `code`, after comparing
-    /// `words` (from `zafe seat words`) with it.
     Approve {
         old: String,
         code: String,
         #[arg(long)]
         words: String,
     },
-    /// Run the safety check with the device that printed `code` and print the words to
-    /// compare with it (waits up to `timeout_secs` for the new device).
     Words {
         code: String,
         #[arg(long, default_value_t = 60)]
         timeout_secs: u64,
     },
-    /// Seat moves waiting for approvals, pending moves and repairs.
     List,
-    /// Do this member's part in repairing a moved seat's key (and save the new membership).
-    /// A pending move's part completes only `wait_secs` after this home first saw it
-    /// pending (72 h; tests pass 0).
     Repair {
         #[arg(long, default_value_t = repair::SEAT_MOVE_WAIT.as_secs())]
         wait_secs: u64,
     },
-    /// This member still has its device: keep its seat, voiding the pending move of it
-    /// (only a first-round move; the co-signers can ask once more after this).
     Keep,
-    /// Stop helping the pending move at `replacement`, for good (its owner says they didn't
-    /// lose their phone): the seat can't switch with this member as a helper.
-    Stop { replacement: u64 },
-    /// Take over from a helper who stalled the repair of the seat moved at `replacement`;
-    /// a helper passes `--taker` to agree to another member's offer.
+    Stop {
+        replacement: u64,
+    },
     Retry {
         replacement: u64,
         stalled: String,
         #[arg(long)]
         taker: Option<String>,
     },
-    /// Print the link a new device recovering a seat needs (`zafe recover --link`): the
-    /// vault's relay and mailbox.
     Link,
 }
 
 #[derive(Subcommand)]
 enum VaultCmd {
-    /// Create a vault and print the invite.
     Create {
         #[arg(long)]
         name: String,
@@ -229,32 +170,24 @@ enum VaultCmd {
         #[arg(long)]
         members: u16,
     },
-    /// Join a vault from an invite string.
-    Join { invite: String },
-    /// Show members, whether membership is sealed, and (once every member's part of the
-    /// check is in) the safety words. With `--wait`, keep going until the words are known
-    /// (each call sends this member's part; the others can take part at any time). Once
-    /// the vault exists: the current members from the log.
+    Join {
+        invite: String,
+    },
     Members {
         #[arg(long)]
         wait: bool,
     },
-    /// Creator: freeze membership once everyone has joined.
     Seal,
-    /// Run key generation. Requires the safety words you compared with the others.
     Keygen {
         #[arg(long)]
         safety_number: String,
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
-        /// Creator only: vault birthday height (default: lightwalletd tip + 1).
         #[arg(long)]
         birthday: Option<u32>,
-        /// Creator only: how many days a proposal stays approvable (1 to 30, default 7).
         #[arg(long)]
         expiry_days: Option<u32>,
     },
-    /// Show the vault address and details.
     Show,
 }
 
@@ -270,8 +203,6 @@ impl Home {
         Ok(Identity::from_seeds(IdentitySeeds::from_bytes(&bytes)?))
     }
 
-    /// The key this member's nonce files in the vault are encrypted with (derived from
-    /// the identity seeds, like the app).
     fn nonce_key(&self, material: &VaultMaterial) -> Result<NonceKey> {
         let seeds = fs::read(self.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?;
         Ok(NonceKey::derive(&seeds, &material.descriptor.vault_id))
@@ -290,11 +221,8 @@ impl Home {
     }
 }
 
-/// Nonces on disk, one file per (proposal, PCZT hash). `take` deletes before returning.
-/// Set once from `--network` / `ZAFE_NETWORK` at startup.
 static NETWORK: std::sync::OnceLock<ZafeNetwork> = std::sync::OnceLock::new();
 
-/// The network this run uses (regtest unless `--network` says otherwise).
 fn network() -> ZafeNetwork {
     NETWORK.get().cloned().expect("network is set at startup")
 }
@@ -313,7 +241,6 @@ async fn open_wallet(
     let mut client = connect(lwd).await?;
     let path = home.path(WALLET_DB_FILE);
     let ufvk = material.vault_keys()?.ufvk()?;
-    // Dev-only: the wallet key sits in a plain file next to the database.
     let key_path = home.path(WALLET_KEY_FILE);
     let key = match fs::read(&key_path) {
         Ok(bytes) => WalletKey::from_slice(&bytes)?,
@@ -326,8 +253,6 @@ async fn open_wallet(
     let mut wallet = if VaultWallet::exists(&path, &key, network()) {
         VaultWallet::open(&path, &key, network())?
     } else {
-        // Missing, or not readable with this key (e.g. a plain database from an older
-        // build): the wallet is a cache of chain data, so start over from the birthday.
         let _ = fs::remove_file(&path);
         VaultWallet::create(
             &path,
@@ -359,7 +284,6 @@ async fn main() -> Result<()> {
     let _ = NETWORK.set(net);
     let home = Home(cli.home.clone());
     fs::create_dir_all(&home.0)?;
-    // Keep a copy of the vault log: a relay that loses or rewinds it is then refused.
     zafe_core::log_cache::configure(home.path(LOG_DIR));
     for pair in cli.relay_alias.iter().flat_map(|a| a.split(',')) {
         if let Some((from, to)) = pair.split_once('=') {
@@ -367,7 +291,6 @@ async fn main() -> Result<()> {
         }
     }
     let relay = RelayClient::new(&cli.relay).with_create_token(cli.create_token.as_deref());
-    // After a relay move, the vault's own relay wins over `--relay` (through the alias).
     let relay = match home.material() {
         Ok(m) => followed(&home, &relay, m)?,
         Err(_) => relay,
@@ -455,7 +378,6 @@ async fn main() -> Result<()> {
             let material = home.material()?;
             let me = home.identity()?;
             let (mut chain, mut state) = node::load_state(&relay, &me, &material).await?;
-            // Like the app's refresh: announce this app's version once, move a move on.
             node::announce_version(&relay, &me, &material, &mut chain, &mut state, &mut rng)
                 .await?;
             if let Some(s) = node::move_progress(&relay, &me, &material, &mut rng).await? {
@@ -480,7 +402,6 @@ async fn main() -> Result<()> {
         }
         Command::Approve { proposal } => {
             let material = home.material()?;
-            // With the log, to read the mempool (whole) for payments that were sent.
             let (_, state) = node::load_state(&relay, &home.identity()?, &material).await?;
             let view =
                 node::ChainView::of(&open_wallet(&home, &material, &cli.lightwalletd).await?)?
@@ -671,7 +592,6 @@ async fn main() -> Result<()> {
             let material = home.material()?;
             let tip = tip(&home, &material, &cli.lightwalletd).await?;
             let id = parse_proposal(&proposal)?;
-            // Commitment sets already put in a request must never be reused.
             let used_path = home.path(REQUESTS_DIR).join(state_dir::USED_COMMITMENTS);
             let mut used = match fs::read(&used_path) {
                 Ok(bytes) => node::decode_used_commitments(&bytes)?,
@@ -696,7 +616,6 @@ async fn main() -> Result<()> {
                 &home.path(&format!("requests/{proposal}.bin")),
                 &node::encode_request(&sent.request)?,
             )?;
-            // If this member is also a signer, it signs its own part now (never via relay).
             let mut store =
                 FileNonceStore::new(home.path(state_dir::NONCES), home.nonce_key(&material)?);
             if let Some(own) = node::sign_own_shares(
@@ -914,7 +833,6 @@ async fn main() -> Result<()> {
             let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
             let mut shown = std::collections::BTreeSet::new();
             loop {
-                // The safety check: each co-signer's words, once, as they arrive.
                 if let Ok(checks) =
                     repair::recovery_checks(&relay, &me, &home.path(state_dir::RECOVERY)).await
                 {
@@ -997,14 +915,11 @@ async fn main() -> Result<()> {
                     sent
                 }
                 Err(e) => {
-                    // A signer whose share didn't verify: this round is over (the next
-                    // `zafe request` starts another, asking it last).
                     if let node::NodeError::InvalidShares(culprits) = &e {
                         silent.update(culprits, &[]);
                         let _ = fs::remove_file(home.path(&format!("requests/{proposal}.bin")));
                         let _ = fs::remove_file(home.path(&format!("requests/{proposal}.own")));
                     }
-                    // After a timeout, the next `zafe request` asks the silent signers last.
                     if matches!(e, node::NodeError::Timeout(_)) {
                         if let Ok(quiet) =
                             node::unanswered_signers(&relay, &me, &material, &request).await
@@ -1053,9 +968,6 @@ async fn vault(
             println!("joined vault {}", parsed.name);
         }
         VaultCmd::Members { .. } if home.path(VAULT_FILE).exists() => {
-            // After setup: the current members from the log (seat moves change them).
-            // Never the setup check again: it would start a new safety value and compare
-            // its pin with a member list that moved on.
             let material = home.material()?;
             let (_, state) = node::load_state(relay, &home.identity()?, &material).await?;
             for member in &state.descriptor.members {
@@ -1064,7 +976,6 @@ async fn vault(
         }
         VaultCmd::Members { wait } => {
             let (me, invite) = (home.identity()?, home.invite()?);
-            // The home is the state dir, as for key generation.
             let key = NonceKey::derive(&fs::read(home.path(IDENTITY_FILE))?, &invite.vault_id);
             let m = node::membership(relay, &me, &invite, &home.0, &key).await?;
             for member in &m.members {
@@ -1124,7 +1035,6 @@ async fn vault(
                     creator_expiry_blocks: expiry_days.map(|d| d * 1152),
                     max_birthday: None,
                 },
-                // The home is the state dir; the state is deleted once the vault exists.
                 home.0.clone(),
                 NonceKey::derive(
                     &fs::read(home.path(IDENTITY_FILE)).context("no identity; run `zafe init`")?,
@@ -1136,8 +1046,6 @@ async fn vault(
             .await?;
             fs::write(home.path(VAULT_FILE), material.to_bytes()?)?;
             println!("vault created: {}", material.descriptor.address);
-            // Like the app: publish the one-tap commitment pool while every member is
-            // present, so the first payment can be one tap.
             let mut pool =
                 FilePoolStore::new(home.path(state_dir::POOL), home.nonce_key(&material)?);
             let n = node::top_up_pool(relay, &me, &material, &mut pool, false, None, rng).await?;
@@ -1164,9 +1072,6 @@ async fn vault(
     Ok(())
 }
 
-/// The relay for the vault in `home`: once this member's phone verified a relay move,
-/// its material follows the new relay (saved here), and the client uses the vault's own
-/// relay whenever it names one other than `--relay`.
 fn followed(home: &Home, base: &RelayClient, material: VaultMaterial) -> Result<RelayClient> {
     let mut material = material;
     if let Some(relay) = node::followed_relay(&material) {
@@ -1204,6 +1109,6 @@ fn print_move(s: &node::MoveStatus) {
 
 fn hex_txid(txid: &[u8; 32]) -> String {
     let mut display = *txid;
-    display.reverse(); // txids display in reversed byte order
+    display.reverse();
     hex::encode(display)
 }

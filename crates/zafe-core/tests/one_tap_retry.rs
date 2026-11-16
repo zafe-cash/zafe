@@ -1,9 +1,3 @@
-//! One-tap approvals that don't reach the log on the first try, or whose signer groups
-//! can't complete. Signing consumes the pool nonces, so the vote is kept on the device and
-//! posted again on the next approve; and a member whose vote carried shares adds
-//! interactive commitments once no group can complete (`VAULT_EVENT` 12), so a one-tap
-//! approval never strands a payment.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use orchard::keys::Scope;
@@ -28,14 +22,12 @@ use zafe_proto::{
 };
 use zcash_protocol::memo::MemoBytes;
 
-mod common;
-// The fixture PCZTs are built for this network (NU6.3, no NU7), so the checks use it too.
+pub mod common;
 use common::{
     build_pczt, nu6_3_network, receive_ironwood_note, relay_vault::vault, witness, Out,
     TARGET_HEIGHT,
 };
 
-/// This member's chain as the fixtures assume it: synced to the tip they were built on.
 fn view() -> ChainView {
     ChainView {
         tip: TARGET_HEIGHT - 1,
@@ -44,8 +36,6 @@ fn view() -> ChainView {
     }
 }
 
-/// Logs a sweep (no payments: everything back to the vault) as member 0; one-tap groups
-/// are assigned from the pools.
 async fn propose_sweep(relay: &RelayClient, ids: &[Identity], m: &VaultMaterial) -> [u8; 16] {
     let fvk = m.vault_keys().unwrap().fvk().clone();
     let note = receive_ironwood_note(&fvk, fvk.address_at(0u32, Scope::External), 1_000_000);
@@ -86,8 +76,6 @@ async fn propose_sweep(relay: &RelayClient, ids: &[Identity], m: &VaultMaterial)
     id
 }
 
-/// What `approve` does before its append: sign every group this member is in (consuming
-/// the nonces) and keep the vote. The append itself is "lost".
 async fn sign_and_lose(
     relay: &RelayClient,
     me: &Identity,
@@ -154,12 +142,10 @@ async fn a_lost_one_tap_vote_is_posted_again() {
     let proposal = propose_sweep(&relay, &ids, &materials[0]).await;
     let mut rng = StdRng::seed_from_u64(1);
 
-    // Member 1 signs, but its vote never reaches the relay; its nonces are gone.
     sign_and_lose(&relay, &ids[1], &materials[1], &mut pools[1], proposal).await;
     let (_, state) = load_state(&relay, &ids[1], &materials[1]).await.unwrap();
     assert!(state.proposals[&proposal].shares.is_empty());
 
-    // Approving again posts the kept shares: still one tap.
     let again = approve(
         &relay,
         &ids[1],
@@ -177,7 +163,6 @@ async fn a_lost_one_tap_vote_is_posted_again() {
     let pczt_hash = state.proposals[&proposal].pczt_hash;
     assert!(pools[1].kept_vote(&proposal, &pczt_hash).is_none());
 
-    // And once more: the vote is already in the log, so this is a no-op, not an error.
     let twice = approve(
         &relay,
         &ids[1],
@@ -193,7 +178,6 @@ async fn a_lost_one_tap_vote_is_posted_again() {
     .unwrap();
     assert!(twice.signed);
 
-    // Member 0 completes the 2-of-2 group the one-tap way.
     let last = approve(
         &relay,
         &ids[0],
@@ -213,19 +197,13 @@ async fn a_lost_one_tap_vote_is_posted_again() {
     assert!(state.ignored.is_empty());
 }
 
-/// The leader's inbox: a member's reply to a signing request (as `node` writes it).
 #[derive(Deserialize)]
 struct SharesMsg {
-    #[allow(dead_code)]
     proposal: [u8; 16],
     request_hash: [u8; 32],
     shares: Vec<Vec<u8>>,
 }
 
-/// 2-of-2: member 0 signs one tap, member 1's phone lost its pool nonces. Member 1 approves
-/// interactively; member 0 then adds commitments (its shares stay), and an interactive
-/// round signs. On 4b5ae0e member 1's approval was refused ("too many signers have already
-/// signed it the one-tap way"): a one-tap vote was final, so the payment was stranded.
 #[tokio::test]
 async fn a_one_tap_vote_is_completed_interactively() {
     let (relay, ids, materials, mut pools) = vault(2, 2, true).await;
@@ -234,7 +212,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
     let mut rng = StdRng::seed_from_u64(2);
     let mut stores = [MemoryNonceStore::default(), MemoryNonceStore::default()];
 
-    // Member 0's one-tap vote carries its shares.
     let first = approve(
         &relay,
         &ids[0],
@@ -250,7 +227,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
     .unwrap();
     assert!(first.signed);
 
-    // Member 1 lost its nonces (and kept no vote): it approves with commitments.
     let second = approve(
         &relay,
         &ids[1],
@@ -269,7 +245,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
     let p = &state.proposals[&proposal];
     assert!(p.one_tap_blocked(), "the only group can't complete one tap");
     let pk = |i: usize| ids[i].public().sig_pk;
-    // Member 1's phone knows the one-tap way is stuck; member 0's can't tell by its pool.
     assert!(one_tap_stuck(
         &state,
         &proposal,
@@ -277,7 +252,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
         &MemoryPoolStore::default()
     ));
 
-    // Member 0 approves again: commitments for an interactive round, shares kept.
     let again = approve(
         &relay,
         &ids[0],
@@ -299,8 +273,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
     assert!(p.approvals.values().all(|c| !c.is_empty()));
     assert!(p.possibly_signed);
 
-    // An interactive round that doesn't finish: member 0 leads and signs its part (its
-    // nonces are used), then starts over. It approves again with fresh commitments.
     let silent = SilentSigners::at(
         std::env::temp_dir().join(format!("zafe-silent-{}-compose.bin", std::process::id())),
     );
@@ -351,8 +323,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
         "fresh commitments for the next round"
     );
 
-    // The next round: member 1 answers it, and refuses the first one (its commitments for
-    // member 0 are no longer in the log).
     let sent = request_signatures(
         &relay,
         &ids[0],
@@ -392,7 +362,6 @@ async fn a_one_tap_vote_is_completed_interactively() {
     .unwrap()
     .unwrap();
 
-    // Both shares aggregate into valid spend authorization signatures.
     let members = zafe_core::node::members_by_pk(&state);
     let wanted = zafe_core::node::request_hash(&sent.request).unwrap();
     let mut shares = BTreeMap::new();
@@ -411,6 +380,7 @@ async fn a_one_tap_vote_is_completed_interactively() {
         }
         let msg: SharesMsg =
             version::decode(Format::SignatureShares, &env.open(&ids[0], &from).unwrap()).unwrap();
+        assert_eq!(msg.proposal, proposal);
         assert_eq!(msg.request_hash, wanted);
         let id = Identifier::deserialize(&state.descriptor.member(&from.sig_pk).unwrap().frost_id)
             .unwrap();
@@ -430,6 +400,5 @@ async fn a_one_tap_vote_is_completed_interactively() {
         &materials[0].public_key_package().unwrap(),
     )
     .unwrap();
-    // `apply_signatures` checks each against its action's rk and the sighash.
     zafe_core::tx::apply_signatures(pczt, &signatures).unwrap();
 }

@@ -16,8 +16,6 @@ import 'onboarding_art.dart';
 import 'welcome_art.dart';
 import '../../core/widgets/line_icon.dart';
 
-/// Taps on the Welcome door (one Welcome screen exists at a time): each replays its
-/// unlock.
 final _doorTaps = ValueNotifier<int>(0);
 
 class WelcomeScreen extends ConsumerWidget {
@@ -26,7 +24,6 @@ class WelcomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = context.colors;
-    // Adding another vault: offer the way back to the one that was on screen.
     final adding = ref.watch(vaultProvider.select((v) => v.isAdding));
     void servers() => context.push('/zcash-server');
     Future<void> cancel() async {
@@ -34,10 +31,6 @@ class WelcomeScreen extends ConsumerWidget {
       if (context.mounted) context.go('/home');
     }
 
-    // The title, the card and the buttons, below the hero art (`top` = half its height:
-    // the title sits on its faded lower part) or beside it. On a phone the free height
-    // goes above the title (buttons at the bottom, in reach); in a large window
-    // (`centred`) the block sits in the middle of the space it has.
     Widget content({double top = 0, required bool centred}) => Padding(
       padding: EdgeInsets.fromLTRB(16, centred ? 12 : 0, 16, 12),
       child: Column(
@@ -89,9 +82,6 @@ class WelcomeScreen extends ConsumerWidget {
       ),
     );
 
-    // Fills its box when it fits; scrolls on short windows or with large system text
-    // (it used to cut off the last buttons on a 360x640 phone). `inset` centres content
-    // at most [maxWidth] wide (padding, which intrinsic sizing measures correctly).
     Widget scrolling(double maxWidth, Widget Function(double inset) child) =>
         LayoutBuilder(
           builder: (context, box) => SingleChildScrollView(
@@ -105,10 +95,6 @@ class WelcomeScreen extends ConsumerWidget {
         );
 
     final art = WelcomeArt(replay: _doorTaps);
-    // Phones, portrait windows and nearly square ones: the art on top, the content
-    // below it, scrolling together (content scrolled over a fixed art put buttons on
-    // the picture).
-    // The scroll view stops above the navigation bar (as before the art scrolled).
     Widget stacked(Size size) => SafeArea(
       top: false,
       left: false,
@@ -133,7 +119,6 @@ class WelcomeScreen extends ConsumerWidget {
         ),
       ),
     );
-    // Landscape: the art fills the start half, the content is centred in the other.
     Widget beside() => Row(
       children: [
         Expanded(
@@ -156,7 +141,6 @@ class WelcomeScreen extends ConsumerWidget {
 
     final scaffold = Scaffold(
       backgroundColor: colors.background.window,
-      // Clear of a hinge or a half-opened fold; otherwise the whole window.
       body: AppColumn(
         maxWidth: double.infinity,
         child: Builder(
@@ -197,9 +181,6 @@ class WelcomeScreen extends ConsumerWidget {
   }
 }
 
-/// A member back on a new phone: restore from a backup if they have one, otherwise
-/// co-signers move the seat (two paths whose names mean little to a newcomer, so the
-/// question picks for them).
 Future<void> _alreadyInAVault(BuildContext context) async {
   final route = await showAppMobileSheet<String>(
     context: context,
@@ -207,7 +188,6 @@ Future<void> _alreadyInAVault(BuildContext context) async {
       final colors = sheetContext.colors;
       void go(String route) => Navigator.of(sheetContext).pop(route);
       return SingleChildScrollView(
-        // Scrolls once the sheet runs out of height (a short window).
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.sm,
@@ -256,9 +236,6 @@ Future<void> _alreadyInAVault(BuildContext context) async {
   if (route != null && context.mounted) context.push(route);
 }
 
-/// The Welcome art filling the start half of a landscape window: cropped to fill it,
-/// fading into the window colour at the top (status bar), the bottom and toward the
-/// content. Tapping it turns the door's wheel.
 class _ArtPanel extends StatelessWidget {
   const _ArtPanel({required this.art, required this.onTap});
   final Widget art;
@@ -315,7 +292,6 @@ class _ArtPanel extends StatelessWidget {
   }
 }
 
-/// A round button in a top corner, over the hero art.
 class _CornerButton extends StatelessWidget {
   const _CornerButton({
     required this.alignment,
@@ -355,8 +331,6 @@ class _CornerButton extends StatelessWidget {
     );
   }
 }
-
-/// This build has no relay URL, so creating or joining would fail.
 
 class _InfoCard extends StatelessWidget {
   const _InfoCard();

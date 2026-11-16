@@ -17,8 +17,6 @@ class _Privacy extends PrivacyModeNotifier {
   bool build() => false;
 }
 
-// 2-of-3, Bob's phone. Bob named Alice's key "Alice" here; Mallory calls herself "Alice"
-// in the vault log, or "Alicе" with a Cyrillic е next to Alice's own shared "Alice".
 void main() {
   final alice = 'a1' * 32, bob = 'b0' * 32, mallory = 'c3' * 32;
   final members = [alice, bob, mallory];
@@ -76,8 +74,6 @@ void main() {
     });
   }
 
-  // The key after a name must stay in view: a long claim at 360 dp and 2.0 text size
-  // used to cut it off (one line for a seat move, two for "who · detail").
   for (final (what, amount, by) in [
     ('a payment', '100', null),
     ('a seat move', null, null),

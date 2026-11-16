@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Builds Zafe's illustrations into app/assets/illustrations as <name>_light.svg / <name>_dark.svg.
-
-    python3 scripts/illustrations/scenes.py               # all scenes
-    python3 scripts/illustrations/scenes.py key_shards    # one scene
-
-Add a scene: write `def my_scene(p): ...` (copy scene_template.py) and register it in SCENES.
-"""
 import argparse
 import math
 import random
@@ -16,25 +9,14 @@ from zafe_art import PALETTES, coin, defs, dial, f, key, line_d, pts, sparks, st
 ASSETS = Path(__file__).resolve().parents[2] / "app" / "assets" / "illustrations"
 
 
-# ---------------------------------------------------------------- (a) welcome vault
-# The Welcome door's hand wheel centre; the app turns the wheel layer around it
-# (lib/src/features/onboarding/welcome_art.dart).
 WELCOME_WHEEL = (540, 560)
 
 
 def welcome(p, layer=None):
-    """The vault door: three of five keys turned, so it opens. `layer` writes one part for
-    the app's unlock animation (all on the scene's canvas, each part in its final place):
-    "bg" (wall, floor, frame), "boltsL"/"boltsR", "door" (face and dial), "glow<k>" (behind a
-    turned key), "locks" (escutcheons, keyholes), "key<k>" (a turned key), "wheel",
-    "rim" (the wheel's ring, which needn't turn), "glint" (its light, which stays put),
-    "wheel" (spokes, grips, hub: the part that turns), "top" (floor coins, vignette). The gold
-    arc joining the keys is drawn by the app (it grows), so no layer has it.
-    None: the whole still scene."""
     W, H = 1080, 1240
     rnd = random.Random(7)
     cx, cy = 540, 560
-    parts = []  # (layer, svg) in drawing order
+    parts = []
 
     class _B(list):
         tag = "bg"
@@ -47,40 +29,33 @@ def welcome(p, layer=None):
     b.append(f'<rect width="{W}" height="{H}" fill="{p["sky1"]}"/>')
     b.append(stone_wall(p, rnd, 0, 0, W, 930, hole=(cx, cy, 395)))
     b.append(f'<rect width="{W}" height="{H}" fill="url(#grit)" opacity=".55"/>')
-    # floor
     b.append(f'<rect y="930" width="{W}" height="{H-930}" fill="{p["stone3"]}"/>')
     for i, y in enumerate([930, 975, 1035, 1110, 1200]):
         b.append(f'<path d="M0 {y}H{W}" stroke="{p["ink"]}" stroke-width="3"/>')
     for k in range(-8, 9):
         b.append(f'<path d="M{f(cx + k*40)} 930L{f(cx + k*190)} {H}" stroke="{p["ink"]}" stroke-width="2.5"/>')
     b.append(f'<rect y="930" width="{W}" height="{H-930}" fill="url(#dots)" opacity="{p["texop"]}"/>')
-    # recess shadow around the door
     b.append(f'<circle cx="{cx}" cy="{cy}" r="410" fill="{p["ink"]}" opacity=".35"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="392" fill="{p["stone3"]}" stroke="{p["ink"]}" stroke-width="4"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="392" fill="url(#hatch2)" opacity=".45"/>')
-    # frame ring
     b.append(f'<circle cx="{cx}" cy="{cy}" r="368" fill="{p["metal"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="336" fill="none" stroke="{p["ink"]}" stroke-width="4"/>')
     for a in range(0, 360, 12):
         r = math.radians(a)
         b.append(f'<circle cx="{f(cx+352*math.cos(r))}" cy="{f(cy+352*math.sin(r))}" r="6" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="2.5"/>')
-    # locking bolts at left/right into the frame
     for side in (-1, 1):
         b.tag = "boltsL" if side < 0 else "boltsR"
         for dy in (-120, 0, 120):
             x = cx + side * 318
             b.append(f'<rect x="{f(x - 40 if side > 0 else x - 20)}" y="{cy+dy-14}" width="60" height="28" rx="6" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="3.5"/>')
-    # door face
     b.tag = "door"
     b.append(f'<circle cx="{cx}" cy="{cy}" r="318" fill="{p["stone2"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="318" fill="url(#grit)" opacity=".4"/>')
-    # lower-right shading on the door (crescent of hatch)
     b.append(f'<path d="M{cx+318} {cy}A318 318 0 0 1 {cx} {cy+318}A318 318 0 0 1 {cx-225} {cy+225}A300 300 0 0 0 {cx+318} {cy}Z" bb="{cx-230} {cy} {cx+318} {cy+318}" fill="url(#hatch)" opacity=".55"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="290" fill="none" stroke="{p["ink"]}" stroke-width="3"/>')
-    b.append(dial(p, cx, cy, 316, ticks=90, major=6, color=p["ink"], op=".55", rings=()))  # the dial motif
+    b.append(dial(p, cx, cy, 316, ticks=90, major=6, color=p["ink"], op=".55", rings=()))
     b.append(f'<circle cx="{cx}" cy="{cy}" r="178" fill="none" stroke="{p["ink"]}" stroke-width="3"/>')
     b.append(f'<path d="M{cx-270} {cy-40}A275 275 0 0 1 {cx-40} {cy-272}" fill="none" stroke="{p["hi"]}" stroke-width="4" stroke-linecap="round" opacity=".7"/>')
-    # threshold arc joining the three turned keys (members 0,1,4 -> top, upper-right, upper-left)
     ring = 225
     ang = [-90 + 72 * k for k in range(5)]
     turned = [0, 1, 4]
@@ -96,13 +71,11 @@ def welcome(p, layer=None):
         if on:
             b.tag = f"glow{k}"
             b.append(f'<circle cx="{f(kx)}" cy="{f(ky)}" r="110" fill="url(#glow)"/>')
-        # escutcheon
         b.tag = "locks"
         b.append(f'<circle cx="{f(kx)}" cy="{f(ky)}" r="38" fill="{p["metal2"] if not on else p["gold2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
         b.append(f'<circle cx="{f(kx)}" cy="{f(ky)}" r="28" fill="none" stroke="{p["ink"]}" stroke-width="2"/>')
         if on:
-            # key inserted: bow pointing outward, rotated a quarter turn (turned)
-            t = a + 180  # turned a quarter: the bow lies along the ring
+            t = a + 180
             bx, by = kx, ky - 96
             lobes = "".join(
                 f'<circle cx="{f(bx + 24*math.cos(math.radians(q)))}" cy="{f(by + 24*math.sin(math.radians(q)))}" r="22" fill="url(#goldg)" stroke="{p["ink"]}" stroke-width="4"/>'
@@ -118,13 +91,9 @@ def welcome(p, layer=None):
                      f'<circle cx="{f(kx)}" cy="{f(ky)}" r="13" fill="{p["gold"]}" stroke="{p["ink"]}" stroke-width="3"/>'
                      "</g>")
         else:
-            # empty keyhole
             b.tag = "locks"
             b.append(f'<path d="M{f(kx)} {f(ky-14)}a10 10 0 1 1 -.1 0zM{f(kx-6)} {f(ky-2)}h12l5 24h-22z" fill="{p["ink"]}"/>')
-    # central hand wheel: rim, five spokes (one per member), brand grips
     assert (cx, cy) == WELCOME_WHEEL
-    # The rim is a plain ring (it needn't turn); its light sits on it, under the spokes
-    # and grips that turn above both.
     b.tag = "rim"
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["ink"]}" stroke-width="30"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="122" fill="none" stroke="{p["metal2"]}" stroke-width="20"/>')
@@ -146,7 +115,6 @@ def welcome(p, layer=None):
     b.append(f'<circle cx="{cx}" cy="{cy}" r="50" fill="url(#hatch2)" opacity=".35"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="22" fill="{p["brand2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
     b.tag = "top"
-    # coins on the floor
     for (x, y, rx, rot) in [(150, 1010, 34, -8), (205, 1040, 30, 6), (930, 1000, 36, 10),
                             (880, 1060, 28, -4), (990, 1075, 32, 0), (120, 1090, 26, 12)]:
         b.append(coin(p, x, y, rx, rx * 0.42, rot))
@@ -156,25 +124,21 @@ def welcome(p, layer=None):
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- (b) create: stone circle
 def create(p):
     W, H = 1080, 560
     rnd = random.Random(3)
     b = [f'<rect width="{W}" height="{H}" fill="url(#sky)"/>']
     b.append(f'<rect width="{W}" height="{H}" fill="url(#fine)" opacity="{float(p["texop"])*0.7:.2f}"/>')
-    # rising coin-moon
     b.append(f'<circle cx="540" cy="250" r="230" fill="url(#glow)" opacity=".7"/>')
     b.append(f'<circle cx="540" cy="250" r="118" fill="url(#goldg)" stroke="{p["ink"]}" stroke-width="4"/>')
     b.append(f'<circle cx="540" cy="250" r="88" fill="none" stroke="{p["gold2"]}" stroke-width="3"/>')
     b.append(f'<path d="M462 238a80 80 0 0 1 50 -62" fill="none" stroke="{p["gold3"]}" stroke-width="5" stroke-linecap="round"/>')
-    # distant hills
     hill = [(0, 360)] + [(x, 350 - 30 * math.sin(x / 150) - rnd.randint(0, 10)) for x in range(0, W + 60, 60)] + [(W, H), (0, H)]
     b.append(f'<polygon points="{pts(hill)}" fill="{p["stone3"]}" stroke="{p["ink"]}" stroke-width="3"/>')
     b.append(f'<polygon points="{pts(hill)}" fill="url(#dots)" opacity="{p["texop"]}"/>')
-    # ground
     b.append(f'<path d="M0 430Q540 380 1080 430V560H0Z" fill="{p["stone"]}" stroke="{p["ink"]}" stroke-width="4"/>')
     b.append(f'<path d="M0 470Q540 430 1080 470V560H0Z" bb="0 440 1080 560" fill="url(#hatch2)" opacity=".35"/>')
-    for _ in range(40):  # grass ticks
+    for _ in range(40):
         x, y = rnd.randint(0, W), rnd.randint(440, 550)
         b.append(f'<path d="M{x} {y}l-4 -12M{x+5} {y}l2 -14" stroke="{p["ink"]}" stroke-width="2" opacity=".6"/>')
 
@@ -194,12 +158,10 @@ def create(p):
             s.append(f'<path d="M{f(x)} {f(t+h*0.4-16)}l10 16l-10 16l-10 -16z" fill="none" stroke="{p["ink"]}" stroke-width="3" opacity=".7"/>')
         return "".join(s)
 
-    # outer ring of unlit stones
     b.append(stone(250, 420, 56, 150, False, -4))
     b.append(stone(830, 420, 56, 150, False, 4))
     b.append(stone(120, 540, 76, 200, False, -6))
     b.append(stone(960, 540, 76, 190, False, 6))
-    # the stones that complete the arch
     b.append(stone(410, 480, 92, 260, True))
     b.append(stone(670, 480, 92, 260, True))
     lint = [(344, 218), (736, 212), (742, 262), (338, 268)]
@@ -208,13 +170,11 @@ def create(p):
     b.append(f'<polygon points="340,248 740,242 742,262 338,268" fill="url(#hatch)" opacity=".6"/>')
     b.append(f'<path d="M362 228H716" stroke="{p["hi"]}" stroke-width="3" opacity=".6"/>')
     b.append(f'<path d="M540 222l13 18l-13 18l-13 -18z" fill="{p["gold"]}" stroke="{p["ink"]}" stroke-width="3" stroke-linejoin="round"/>')
-    # brand thread of light connecting the lit stones on the ground
     b.append(f'<path d="M410 486Q540 520 670 486" fill="none" stroke="{p["brand"]}" stroke-width="6" stroke-dasharray="2 12" stroke-linecap="round"/>')
     b.append(f'<rect width="{W}" height="{H}" fill="url(#vig)"/>')
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- (c) join: doorway + sealed invite
 def join(p):
     W, H = 1080, 560
     rnd = random.Random(11)
@@ -223,9 +183,7 @@ def join(p):
     b.append(stone_wall(p, rnd, 0, -60, W, 440, row_h=54, blk=(100, 180)))
     b.append(f'<rect y="-60" width="{W}" height="500" fill="url(#grit)" opacity=".55"/>')
     cx = 540
-    # arch opening
     arch = f"M{cx-150} 440V190A150 150 0 0 1 {cx+150} 190V440Z"
-    # voussoirs
     for k in range(11):
         a0 = math.radians(180 + k * 180 / 11)
         a1 = math.radians(180 + (k + 1) * 180 / 11)
@@ -237,28 +195,22 @@ def join(p):
         b.append(f'<rect x="{cx + side*177 - 27}" y="190" width="54" height="250" fill="{p["stone2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
         for y in (250, 320, 390):
             b.append(f'<path d="M{cx + side*177 - 27} {y}h54" stroke="{p["ink"]}" stroke-width="3"/>')
-    # warm light inside
     b.append(f'<path d="{arch}" fill="{p["gold3"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="300" r="220" fill="url(#glow)"/>')
-    # inner room hint: far wall line + a pedestal with a coin
     b.append(f'<path d="M{cx-150} 380H{cx+150}" stroke="{p["gold2"]}" stroke-width="3" opacity=".7"/>')
-    # door leaf swung open inward (left), in perspective
     leaf = [(cx - 150, 440), (cx - 150, 190), (cx - 70, 150 + 25), (cx - 70, 420)]
     b.append(f'<path d="M{cx-150} 440V190Q{cx-120} 150 {cx-70} 158V420Z" fill="{p["brand3"]}" stroke="{p["ink"]}" stroke-width="4" stroke-linejoin="round"/>')
     b.append(f'<path d="M{cx-150} 440V190Q{cx-120} 150 {cx-70} 158V420Z" bb="{cx-150} 150 {cx-70} 440" fill="url(#hatch2)" opacity=".45"/>')
     for y in (230, 360):
         b.append(f'<path d="M{cx-150} {y}L{cx-70} {y-12}" stroke="{p["ink"]}" stroke-width="9"/>')
         b.append(f'<path d="M{cx-150} {y}L{cx-70} {y-12}" stroke="{p["metal2"]}" stroke-width="4"/>')
-    # light spilling on the floor
     b.append(f'<rect y="440" width="{W}" height="{H-400}" fill="{p["stone3"]}"/>')
     b.append(f'<path d="M0 440H{W}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<path d="M{cx-150} 440L{cx-330} {H}H{cx+390}L{cx+150} 440Z" fill="{p["gold"]}" opacity=".35"/>')
     for y in (470, 510):
         b.append(f'<path d="M0 {y}H{W}" stroke="{p["ink"]}" stroke-width="2.5" opacity=".7"/>')
     b.append(f'<rect y="440" width="{W}" height="{H-440}" fill="url(#dots)" opacity="{p["texop"]}"/>')
-    # step
     b.append(f'<path d="M{cx-200} 440h400l20 26h-440z" fill="{p["stone2"]}" stroke="{p["ink"]}" stroke-width="4" stroke-linejoin="round"/>')
-    # sealed invite on the step
     ex, ey = cx + 60, 462
     b.append(f'<g transform="rotate(-8 {ex} {ey})">'
              f'<rect x="{ex-70}" y="{ey-40}" width="140" height="86" rx="4" fill="{p["paper"]}" stroke="{p["ink"]}" stroke-width="4"/>'
@@ -266,7 +218,6 @@ def join(p):
              f'<circle cx="{ex}" cy="{ey+8}" r="20" fill="{p["brand"]}" stroke="{p["ink"]}" stroke-width="3.5"/>'
              f'<path d="M{ex-7} {ey+8}l5 6l10 -12" fill="none" stroke="{p["gold3"]}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>'
              "</g>")
-    # wall lanterns
     for side in (-1, 1):
         lx = cx + side * 300
         b.append(f'<circle cx="{lx}" cy="250" r="90" fill="url(#glow)"/>')
@@ -278,9 +229,7 @@ def join(p):
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- (d) keys: one key, never in one place
 def key_shapes(p, fill, stroke, sw, extra=""):
-    """A large ornate key in local coordinates, centred on the origin, pointing right."""
     ink = stroke
     out = []
     for q in (180, 60, -60):
@@ -293,17 +242,10 @@ def key_shapes(p, fill, stroke, sw, extra=""):
     return "".join(out)
 
 
-# Where each shard sits apart from its place in the whole key (dx, dy, degrees). The
-# app's key-shards animation reads the same numbers (lib/src/features/onboarding/
-# key_shards_art.dart): change both together.
 SHARD_OFFSETS = [(-80, -18, -7), (-30, 48, 6), (0, -46, -4), (34, 42, 6), (84, -14, 10)]
 
 
 def shards(p, layer=None):
-    """The key cut into five shards, held apart. `layer` writes one layer of it for the
-    app's animation, on the same 1080 x 1240 canvas: "bg" (sky, rays, rings, the ghost
-    key), "piece0".."piece4" (one shard and its edges, in its place in the whole key),
-    "top" (sparks and the vignette). None: the whole still scene."""
     W, H = 1080, 1240
     rnd = random.Random(5)
     cx, cy = 540, 470
@@ -316,12 +258,10 @@ def shards(p, layer=None):
     for r in (330, 430):
         b.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{p["hi"] if p["dark"] else p["ink"]}" stroke-width="2.5" stroke-dasharray="3 12" opacity=".5"/>')
     rot = -20
-    # ghost of the whole key: dashed, empty. It is never assembled.
     ghost = p["hi"] if p["dark"] else p["ink"]
     b.append(f'<g transform="translate({cx} {cy}) rotate({rot})" opacity=".55">'
              + key_shapes(p, "none", ghost, 3, 'stroke-dasharray="8 10"') + "</g>")
     b[-1] = b[-1].replace(f'rotate({rot})"', f'rotate({rot}) scale(1.04)"')
-    # the shards: the same key cut into five jagged pieces, each held apart
     cuts = [-420, -148, -28, 90, 200, 420]
 
     def zig(x, down=True):
@@ -330,17 +270,15 @@ def shards(p, layer=None):
         return pts_ if down else pts_[::-1]
 
     edges = [zig(c) for c in cuts]
-    # A layer piece sits in its place; the app moves it out and back.
     offsets = [(0, 0, 0)] * 5 if layer and layer.startswith("piece") else SHARD_OFFSETS
     bg_end = len(b)
     pieces = {i: [] for i in range(5)}
     for i in range(5):
         left, right = edges[i], edges[i + 1]
-        poly = left[::-1] + right  # up the left edge, down the right
+        poly = left[::-1] + right
         poly = [(x, y) for x, y in left] + [(x, y) for x, y in right[::-1]]
         dx, dy, dr = offsets[i]
         body = key_shapes(p, "url(#goldg)", p["ink"], 5)
-        # engraving + shade inside the piece
         body += f'<path d="M-150 -16H320" stroke="{p["gold3"]}" stroke-width="6" stroke-linecap="round"/>'
         body += f'<rect x="-232" y="8" width="570" height="26" fill="url(#hatch)" opacity=".35"/>'
         body += f'<circle cx="-300" cy="0" r="30" fill="{p["sky1"]}" stroke="{p["ink"]}" stroke-width="5"/>'
@@ -355,12 +293,10 @@ def shards(p, layer=None):
              "</g>")
         b.append(g)
         pieces[i].append(g)
-        # a member mark on each piece
         mx = max(-300, min(300, mid)) if i else -300
         gx = cx + dx + mx * math.cos(math.radians(rot + dr))
         gy = cy + dy + mx * math.sin(math.radians(rot + dr))
 
-    # jagged ink edges drawn on top so the breaks read clearly
     for i in range(5):
         dx, dy, dr = offsets[i]
         for e in (edges[i], edges[i + 1]):
@@ -386,9 +322,7 @@ def shards(p, layer=None):
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- shared props
 def envelope(p, x, y, w, h, flap_open=False):
-    """A sealed-backup envelope: body at (x, y) size w x h; the flap closed (V) or open (up)."""
     cx = x + w / 2
     ink = p["ink"]
     o = []
@@ -406,7 +340,6 @@ def envelope(p, x, y, w, h, flap_open=False):
 
 
 def dial_lock(p, cx, cy, r=58, shackle_open=False):
-    """A combination padlock with a round dial face: the passphrase."""
     ink = p["ink"]
     o = []
     lift = 34 if shackle_open else 0
@@ -431,7 +364,6 @@ def dial_lock(p, cx, cy, r=58, shackle_open=False):
 
 
 def word_tiles(p, rnd, x, y, n=3):
-    """A few blank word cards, fanned: the passphrase (no text in the art)."""
     o = []
     for i in range(n):
         tx, ty, r = x + i * 18, y + i * 64, (-10, 4, -3)[i % 3]
@@ -452,7 +384,6 @@ def ledge(p, y, W, H):
     return "".join(o)
 
 
-# ---------------------------------------------------------------- (e) backup: key share sealed with a passphrase
 def backup(p):
     W, H = 1080, 560
     rnd = random.Random(21)
@@ -462,32 +393,26 @@ def backup(p):
     b.append(dial(p, cx, 300, 300, ticks=72, major=6, op=".35", rings=(0, 40)))
     b.append(f'<circle cx="{cx}" cy="300" r="300" fill="url(#glow)" opacity=".55"/>')
     b.append(ledge(p, 470, W, H))
-    # passphrase words on the left, a dotted thread to the lock
     b.append(word_tiles(p, rnd, 110, 236))
     b.append(f'<path d="M270 300Q380 250 470 330" fill="none" stroke="{p["brand"]}" stroke-width="5" stroke-dasharray="2 12" stroke-linecap="round"/>')
-    # envelope with the key share inside (a dashed ghost: sealed, not visible)
     ex, ey, ew, eh = cx - 190, 200, 380, 260
     b.append(f'<ellipse cx="{cx}" cy="474" rx="230" ry="16" fill="{p["ink"]}" opacity=".35"/>')
     b.append(envelope(p, ex, ey, ew, eh))
     b.append(key(p, ex + 44, ey + eh - 46, 0.8, 0, ghost=p["gold2"]))
-    # light leaking from the seal
     b.append(f'<circle cx="{cx}" cy="{ey + eh * 0.62}" r="120" fill="url(#glow)"/>')
     b.append(dial_lock(p, cx, ey + eh * 0.62, 56))
-    # the key share glints on the right, going in
     b.append(sparks(p, rnd, 5, 250, 60, 830, 200, avoid=(cx, 330, 190)))
     b.append(sparks(p, rnd, 6, 780, 180, 980, 440))
     b.append(f'<rect width="{W}" height="{H}" fill="url(#vig)"/>')
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- (f) restore: the seal opens, the key goes home
 def restore(p):
     W, H = 1080, 560
     rnd = random.Random(22)
     b = [f'<rect width="{W}" height="{H}" fill="url(#sky)"/>']
     b.append(f'<rect width="{W}" height="{H}" fill="url(#fine)" opacity="{float(p["texop"]) * 0.7:.2f}"/>')
     b.append(ledge(p, 470, W, H))
-    # the vault on the right: a round door with a glowing, empty keyhole
     vx, vy, vr = 770, 300, 170
     b.append(f'<rect x="{vx - 210}" y="{vy - 215}" width="420" height="385" rx="26" fill="{p["stone"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<rect x="{vx - 210}" y="{vy - 215}" width="420" height="385" rx="26" fill="url(#grit)" opacity=".5"/>')
@@ -504,13 +429,11 @@ def restore(p):
     b.append(f'<circle cx="{vx}" cy="{vy}" r="46" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="4"/>')
     b.append(f'<circle cx="{vx}" cy="{vy}" r="46" fill="none" stroke="{p["brand"]}" stroke-width="6" opacity=".9"/>')
     b.append(f'<path d="M{vx} {vy - 18}a11 11 0 1 1 -.1 0zM{vx - 7} {vy - 4}h14l6 26h-26z" fill="{p["ink"]}"/>')
-    # the opened backup on the left: envelope, flap up, lock open beside it
     ex, ey, ew, eh = 70, 300, 260, 170
     b.append(f'<ellipse cx="{ex + ew / 2}" cy="474" rx="160" ry="12" fill="{p["ink"]}" opacity=".35"/>')
     b.append(envelope(p, ex, ey, ew, eh, flap_open=True))
     b.append(f'<circle cx="{ex + ew / 2}" cy="{ey}" r="120" fill="url(#glow)"/>')
     b.append(dial_lock(p, 380, 428, 38, shackle_open=True))
-    # the key's path home: a dotted arc from the envelope to the keyhole
     b.append(f'<path d="M{ex + ew / 2} {ey - 10}Q300 70 {vx - 70} {vy - 6}" fill="none" stroke="{p["gold"]}" stroke-width="5" stroke-dasharray="2 13" stroke-linecap="round"/>')
     b.append(f'<circle cx="440" cy="170" r="110" fill="url(#glow)"/>')
     b.append(key(p, 395, 175, 0.95, 22))
@@ -519,25 +442,16 @@ def restore(p):
     return svg(W, H, defs(p) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- (g) sent: coins leave through the vault's slot
-# The sent scene's coin trails (start in the slot, control point, end) and where each
-# coin sits on its trail. The app's "Sent" animation flies the coins along the same
-# curves (lib/src/features/proposals/sent_art.dart): change both together.
 SENT_TRAILS = [[(480, 300 + 20), (250, 560), (70, 1000)], [(600, 300 + 20), (840, 520), (1010, 940)]]
 SENT_COIN_U = (0.22, 0.48, 0.74)
 
 
 def sent(p, layer=None):
-    """Full-page background behind the send progress screen: detail at the top and the
-    edges, the middle (status circle and text) left empty. `layer`, for the app's
-    animation: "bg" (below the slot's light), "glow" (the light), "fore" (slot, trails,
-    sparks, ripples; no coins), "coin" (one coin on a small canvas)."""
     W, H = 1080, 2340
     rnd = random.Random(31)
     cx, cy, R = 540, -150, 600
     b = [f'<rect width="{W}" height="{H}" fill="{p["sky1"]}"/>',
          f'<rect width="{W}" height="900" fill="url(#skyt)"/>']
-    # the vault door, mostly above the screen
     b.append(f'<circle cx="{cx}" cy="{cy}" r="{R + 30}" fill="{p["ink"]}" opacity="{".3" if p["dark"] else ".1"}"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="{R}" fill="{p["metal"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<circle cx="{cx}" cy="{cy}" r="{R - 34}" fill="{p["stone2"]}" stroke="{p["ink"]}" stroke-width="5"/>')
@@ -551,18 +465,15 @@ def sent(p, layer=None):
     b.append(f'<path d="M{cx + R - 34} {cy}A{R - 34} {R - 34} 0 0 1 {cx} {cy + R - 34}A{R - 34} {R - 34} 0 0 1 {f(cx - 0.5 * (R - 34))} {f(cy + 0.866 * (R - 34))}A{R - 60} {R - 60} 0 0 0 {cx + R - 34} {cy}Z" bb="{f(cx - 0.5 * (R - 34))} {cy} {cx + R - 34} {cy + R - 34}" fill="url(#hatch)" opacity=".45"/>')
     b.append(dial(p, cx, cy, R - 60, ticks=90, major=6, color=p["ink"], op=".6", rings=(0, 44)))
     b.append(f'<path d="M{f(cx - (R - 70) * 0.98)} {f(cy + (R - 70) * 0.2)}A{R - 70} {R - 70} 0 0 0 {f(cx - (R - 70) * 0.6)} {f(cy + (R - 70) * 0.8)}" fill="none" stroke="{p["hi"]}" stroke-width="4" stroke-linecap="round" opacity=".6"/>')
-    # the slot, light pouring out
     sy = cy + R - 150
     slot_glow = f'<ellipse cx="{cx}" cy="{sy + 60}" rx="340" ry="200" fill="url(#glow)"/>'
-    glow_at = len(b)  # "bg" ends here, "fore" starts: the glow sits between them
+    glow_at = len(b)
     if layer is None:
         b.append(slot_glow)
     b.append(f'<rect x="{cx - 150}" y="{sy - 18}" width="300" height="36" rx="18" fill="{p["metal2"]}" stroke="{p["ink"]}" stroke-width="5"/>')
     b.append(f'<rect x="{cx - 128}" y="{sy - 7}" width="256" height="14" rx="7" fill="{p["gold3"]}" stroke="{p["ink"]}" stroke-width="3"/>')
-    # brand member marks around the slot (the signatures that let it out)
     for dx in (-210, -180, 180, 210):
         b.append(f'<circle cx="{cx + dx}" cy="{sy}" r="9" fill="{p["brand"]}" stroke="{p["ink"]}" stroke-width="3"/>')
-    # coins drifting out to the edges along two dotted trails
     trails = [[(cx - 60, sy + 20), (250, 560), (70, 1000)], [(cx + 60, sy + 20), (840, 520), (1010, 940)]]
     assert trails == SENT_TRAILS, "keep SENT_TRAILS (and the app) in step"
     for t in trails:
@@ -582,7 +493,6 @@ def sent(p, layer=None):
                 b.append(coins[f"coin{side}{k}"])
     b.append(sparks(p, rnd, 10, 30, 420, 260, 1150))
     b.append(sparks(p, rnd, 10, 820, 420, 1050, 1150))
-    # quiet ripples rising from the bottom edge
     for i, r_ in enumerate((360, 520, 700)):
         b.append(f'<circle cx="{cx}" cy="{H + 240}" r="{r_}" fill="none" stroke="{p["hi"] if p["dark"] else p["ink"]}" stroke-width="3" stroke-dasharray="{"3 12" if i else "none"}" opacity="{0.35 - i * 0.08:.2f}"/>')
     b.append(dial(p, cx, H + 240, 470, ticks=72, major=6, op=".25", rings=(0,)))
@@ -598,16 +508,12 @@ def sent(p, layer=None):
     if layer == "fore":
         return svg(W, H, defs(p, extra) + "".join(b[glow_at:]), p["dot"])
     if layer == "glow":
-        # The light from the slot, its own layer so the app can breathe and dim it.
         return svg(W, H, defs(p, extra) + slot_glow, p["dot"])
     if layer == "coin":
-        # One coin on its own small canvas (80 wide, centre 50,30): the app draws many
-        # of them streaming out on "Sent!".
         return svg(100, 64, defs(p, extra) + coin(p, 50, 28, 40, 18), p["dot"])
     return svg(W, H, defs(p, extra) + "".join(b), p["dot"])
 
 
-# ---------------------------------------------------------------- (h) empty activity: a quiet shelf, a blank ledger
 def empty(p):
     W, H = 1080, 440
     rnd = random.Random(41)
@@ -617,7 +523,6 @@ def empty(p):
     b.append(dial(p, cx, 330, 330, ticks=72, major=6, op=".25", rings=(0, 40)))
     b.append(f'<circle cx="{cx}" cy="260" r="260" fill="url(#glow)" opacity=".35"/>')
     sy = 340
-    # shelf with brackets
     b.append(f'<rect y="{sy + 34}" width="{W}" height="{H - sy - 34}" fill="{p["stone3"]}"/>')
     b.append(f'<rect y="{sy + 34}" width="{W}" height="{H - sy - 34}" fill="url(#dots)" opacity="{p["texop"]}"/>')
     b.append(f'<rect x="60" y="{sy}" width="960" height="34" rx="6" fill="{p["stone2"]}" stroke="{p["ink"]}" stroke-width="5"/>')
@@ -625,7 +530,6 @@ def empty(p):
     b.append(f'<path d="M74 {sy + 9}H700" stroke="{p["hi"]}" stroke-width="3" opacity=".6" stroke-linecap="round"/>')
     for bx in (150, 930):
         b.append(f'<path d="M{bx - 18} {sy + 34}h36v24l-18 30l-18 -30z" fill="{p["metal"]}" stroke="{p["ink"]}" stroke-width="4" stroke-linejoin="round"/>')
-    # a small safe on the left, shut
     x0, w, h = 190, 190, 176
     y0 = sy - h
     b.append(f'<rect x="{x0}" y="{y0}" width="{w}" height="{h}" rx="14" fill="{p["metal"]}" stroke="{p["ink"]}" stroke-width="5"/>')
@@ -638,7 +542,6 @@ def empty(p):
     b.append(f'<path d="M{x0 + w - 30} {y0 + 60}v56" stroke="{p["metal2"]}" stroke-width="6" stroke-linecap="round"/>')
     for fx in (x0 + 26, x0 + w - 44):
         b.append(f'<rect x="{fx}" y="{sy - 4}" width="18" height="8" fill="{p["ink"]}"/>')
-    # the open ledger, blank
     lx, ly = 650, sy - 6
     left = f"M{lx} {ly - 6}C{lx - 60} {ly - 30} {lx - 140} {ly - 24} {lx - 200} {ly}L{lx - 180} {ly - 150}C{lx - 120} {ly - 172} {lx - 50} {ly - 170} {lx} {ly - 148}Z"
     right = f"M{lx} {ly - 6}C{lx + 60} {ly - 30} {lx + 140} {ly - 24} {lx + 200} {ly}L{lx + 180} {ly - 150}C{lx + 120} {ly - 172} {lx + 50} {ly - 170} {lx} {ly - 148}Z"
@@ -652,7 +555,6 @@ def empty(p):
         rules.append(f"M{lx - 168 + i * 4} {y + 4}Q{lx - 90} {y - 12} {lx - 16} {y + 2}M{lx + 16} {y + 2}Q{lx + 90} {y - 12} {lx + 168 - i * 4} {y + 4}")
     b.append(f'<path d="{"".join(rules)}" fill="none" stroke="{p["light"] if p["dark"] else p["stone3"]}" stroke-width="3"/>')
     b.append(f'<path d="M{lx + 70} {ly - 162}v150l14 -14l14 14v-150" fill="{p["brand"]}" stroke="{p["ink"]}" stroke-width="3.5" stroke-linejoin="round"/>')
-    # a single coin resting at the right: the vault is ready, nothing moved yet
     b.append(coin(p, 930, sy - 16, 38, 16, 0))
     b.append(sparks(p, rnd, 5, 820, 120, 1020, 260))
     b.append(sparks(p, rnd, 3, 60, 90, 170, 230))
@@ -664,7 +566,6 @@ SCENES = {"welcome_vault": welcome, "create_stones": create, "join_doorway": joi
           "backup_seal": backup, "restore_key": restore,
           "sent_slot": sent, "empty_ledger": empty}
 
-# Scenes the app animates, and the layers it moves.
 LAYERS = {"welcome_vault": ["bg", "boltsL", "boltsR", "door", "glow0", "glow1", "glow4", "locks",
                             "key0", "key1", "key4", "rim", "glint", "wheel", "top"],
           "key_shards": ["bg", "piece0", "piece1", "piece2", "piece3", "piece4", "top"],
@@ -682,7 +583,6 @@ def main():
             path.write_text(SCENES[name](pal))
             kb = path.stat().st_size / 1024
             print(f"{path}  {kb:.1f} KB" + ("  <-- over the 60 KB budget" if kb > 60 else ""))
-            # Layers for the app's animation of this scene.
             for layer in LAYERS.get(name, []):
                 lp = args.out / "layers" / f"{name}_{layer}_{theme}.svg"
                 lp.parent.mkdir(parents=True, exist_ok=True)

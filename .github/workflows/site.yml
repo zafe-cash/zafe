@@ -1,17 +1,5 @@
 name: Site
 
-# Builds infra/site (Astro) and deploys it to Cloudflare Workers: production on pushes to
-# main, a preview version for pull requests. The site is built here by build.sh; Cloudflare
-# serves dist/ as static assets and runs the Worker only for the waitlist and the testnet
-# host's /join (infra/site/wrangler.jsonc). Static requests are free and uncounted.
-#
-# Needs (Settings > Secrets and variables > Actions), see infra/site/README.md:
-#   secret   CLOUDFLARE_API_TOKEN       a Cloudflare API token (README "Deploy")
-#   variable CLOUDFLARE_ACCOUNT_ID      the Cloudflare account id
-#   variable ZAFE_ANDROID_CERT_SHA256   optional: release signing cert, for assetlinks.json
-#   variable ZAFE_IOS_APP_IDS           optional: for apple-app-site-association
-# Without the Cloudflare settings the site is still built and checked, just not deployed.
-
 on:
   push:
     branches: [main]
@@ -50,15 +38,12 @@ jobs:
           cache-dependency-path: infra/site/package-lock.json
       - run: npm ci --no-audit --no-fund
 
-      # "Get Zafe" and "Try the testnet build" point at the newest release of each kind
-      # (pre-releases never show under /releases/latest). The release workflows start this
-      # workflow after publishing, so the links follow every new APK.
       - name: Latest releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           repo="${{ github.repository }}"
-          newest() { # <jq filter on tagName>
+          newest() {
             gh release list --repo "$repo" --limit 100 --json tagName,createdAt \
               --jq "[.[] | select(.tagName | $1)] | sort_by(.createdAt) | last | .tagName // empty"
           }
@@ -68,9 +53,6 @@ jobs:
           [ -z "$testnet" ] || echo "ZAFE_TESTNET_URL=https://github.com/$repo/releases/tag/$testnet" >> "$GITHUB_ENV"
           echo "mainnet: ${mainnet:-none}, testnet: ${testnet:-none}"
       - run: ./build.sh
-      # The docs say what the app and the server do: labels, settings and screens still
-      # exist, and every link the app opens resolves on this build (one main build, one
-      # set of docs).
       - name: Docs match the app
         working-directory: .
         run: |
@@ -89,8 +71,6 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Production: the site (zafe.cash, testnet.zafe.cash) and the www redirect. A pull
-      # request uploads a preview version (its own URL) without touching production.
       - name: Deploy
         id: deploy
         if: steps.cloudflare.outputs.ready == 'true'
@@ -111,7 +91,6 @@ jobs:
             echo "production=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Bing & co. recrawl the sitemap's pages soon after a release; never fails the deploy.
       - name: IndexNow
         if: steps.deploy.outputs.production == 'true'
         run: ./indexnow.sh || echo "::warning::IndexNow submission failed"

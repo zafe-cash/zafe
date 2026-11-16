@@ -1,7 +1,3 @@
-# The shared world of the site's scenes: one room, its colour script, and the props every
-# scene draws from (lamp, books, mug, slips under a magnifier, coins, an envelope with its
-# wax, the stamp, the plant, the signers' board, clock, notes) and the window light.
-# Each builder takes positions so scenes can rearrange the room; motion stays in the scenes.
 import math
 import os
 
@@ -11,8 +7,6 @@ from mathutils import Vector
 import kit
 from kit import adopt, ball, blade, disc, ellipse_shadow, empty, lathe, rod, slab, toon
 
-# Colour script: (shadow, mid, light) per material, picked by hand and checked in grey.
-# The room sits in shade (mid values); only sunlit things and the window patch reach light.
 C = {
     "wall": ("#7DA8A1", "#9DC5BD", "#E8F1E6"),
     "desk": ("#9F8160", "#BC9F78", "#F1E2C2"),
@@ -81,8 +75,6 @@ def room(M, desk_size=(16, 8), desk_y=-1.4):
 
 
 def lamp(M, lx, ly, up=(-0.5, 0.3, 0.81), reach=(1.05, -0.3)):
-    """A weighted base, two brass arms, a rolled-rim bell shade. Returns the bulb's place
-    and the shade's axis (for a lamp that is on)."""
     lathe("lamp_base", M["verdigris"], (lx, ly, 0),
           [(0, 0), (0.42, 0), (0.44, 0.03), (0.4, 0.09), (0.2, 0.12), (0.08, 0.15), (0, 0.15)])
     ellipse_shadow("lamp_contact", M["contact"], (lx, ly, 0), 0.5, 0.42)
@@ -90,7 +82,7 @@ def lamp(M, lx, ly, up=(-0.5, 0.3, 0.81), reach=(1.05, -0.3)):
     rod("lamp_arm1", M["brass"], (lx, ly, 0.13), elbow, 0.035)
     ball("lamp_joint", M["brass"], elbow, 0.075)
     rod("lamp_arm2", M["brass"], elbow, head, 0.035)
-    up = Vector(up).normalized()  # the shade's axis; the opening faces the desk
+    up = Vector(up).normalized()
     shade = lathe("lamp_shade", M["verdigris"], (0, 0, 0),
                   [(0.42, 0.0), (0.41, 0.03), (0.37, 0.07), (0.26, 0.18), (0.16, 0.32), (0.11, 0.42), (0.08, 0.45), (0, 0.46)],
                   caps=(False, True))
@@ -102,7 +94,6 @@ def lamp(M, lx, ly, up=(-0.5, 0.3, 0.81), reach=(1.05, -0.3)):
 
 
 def book(M, name, mat, loc, w, d, h, rz):
-    """Two boards and a spine around a paper page block, the pages facing the camera."""
     g = empty(name, loc, (0, 0, math.radians(rz)))
     board = 0.025
     for k, z in enumerate((board / 2, h - board / 2)):
@@ -136,7 +127,6 @@ def mug(M, x, y, mat=None, name="mug", rz=-12):
 
 
 def slips_and_magnifier(M, sx, sy):
-    """Payment slips; the magnifier lies over the top one's address and shows it enlarged."""
     for i, (dx, dy, rz) in enumerate([(0.12, 0.06, 15), (-0.05, 0.02, 4)]):
         slab(f"slip{i}", M["paper"], (sx + dx, sy + dy, 0.006 + i * 0.012), (1.5, 1.03, 0.01), rot=(0, 0, rz))
     top = 0.006 + 2 * 0.012
@@ -148,7 +138,7 @@ def slips_and_magnifier(M, sx, sy):
     ring.name = "loupe_ring"
     ring.data.materials.append(M["brass"])
     disc("loupe_lens", M["lens"], tuple(lens_c + Vector((0, 0, 0.005))), 0.42, rot=(0, 0, 9))
-    hd = Vector((-0.62, -0.78, 0)).normalized()  # the handle points to the bottom-left corner
+    hd = Vector((-0.62, -0.78, 0)).normalized()
     axis = hd.to_track_quat("Z", "Y").to_euler()
     ferrule = lathe("loupe_ferrule", M["brass"], (0, 0, 0), [(0, 0), (0.05, 0), (0.06, 0.04), (0.06, 0.14), (0.05, 0.16), (0, 0.16)])
     ferrule.location, ferrule.rotation_euler = lens_c + hd * 0.47, axis
@@ -171,8 +161,6 @@ def coins(M, cx, cy, stack=5, loose=((0.5, 0.18), (0.36, -0.34))):
 
 
 def envelope(M, ex, ey, rz=-8, name="envelope", sealed=None):
-    """An envelope with its flap; returns (wax blob, seal) at its centre. sealed=True shows
-    only the pressed seal, False only the blob, None both (the scene animates them)."""
     g = empty(name, (ex, ey, 0), (0, 0, math.radians(rz)))
     slab(f"{name}_body", M["envelope"], (0, 0, 0.008), (1.1, 0.72, 0.016)).parent = g
     me = bpy.data.meshes.new(f"{name}_flap")
@@ -197,7 +185,6 @@ def envelope(M, ex, ey, rz=-8, name="envelope", sealed=None):
 
 
 def stamp(M, tx, ty):
-    """The wax stamp at rest; returns (its empty, its contact shadow)."""
     s = empty("stamp", (tx, ty, 0))
     adopt(s,
           lathe("stamp_base", M["brass"], (tx, ty, 0),
@@ -208,7 +195,6 @@ def stamp(M, tx, ty):
 
 
 def plant(M, px, py, z=0.0):
-    """A flared terracotta pot with folded leaves on pivots; returns the leaves for a breeze."""
     lathe("pot", M["terracotta"], (px, py, z),
           [(0, 0), (0.3, 0), (0.33, 0.03), (0.4, 0.56), (0.47, 0.58), (0.48, 0.74), (0.43, 0.75), (0.41, 0.68), (0, 0.68)],
           wobble=0.01, seed=4)
@@ -226,7 +212,6 @@ def plant(M, px, py, z=0.0):
 
 
 def breeze(leaves):
-    """One breeze with two harmonics; longer leaves lag and move more. Seamless."""
     for pivot, tilt, ang, length in leaves:
         lag, amp = 3 + 10 * (length - 0.55), 1.4 + 6 * (length - 0.55)
 
@@ -239,7 +224,6 @@ def breeze(leaves):
 
 
 def board(M, bx, bz):
-    """The three signers pinned on a cork board, joined by a string: one vault."""
     wy = WALL_Y - 0.01
     slab("board_frame", M["wood"], (bx, wy, bz), (2.3, 0.06, 1.45), bevel=0.02)
     slab("board", M["cork"], (bx, wy - 0.03, bz), (2.15, 0.02, 1.3))
@@ -273,8 +257,6 @@ def notes(M, places):
 
 
 def window_light(target, direction=(0.5, 0.66, -0.56), size=(2.1, 2.3), key=6.0, fill=1.1, drift=True):
-    """The room in shade; a key sun through a window opening (out of shot) lands on `target`;
-    a cool shadowless fill keeps shaded forms in two tones. The window drifts slowly."""
     d = Vector(direction).normalized()
     kit.sun(d, key)
     kit.sun((-0.45, 0.85, -0.35), fill, color=(0.82, 0.92, 1.0), shadow=False)
@@ -286,8 +268,8 @@ def window_light(target, direction=(0.5, 0.66, -0.56), size=(2.1, 2.3), key=6.0,
         o = slab(f"occluder{k}", None, (x, y, 0), (pw, ph, 0.05))
         o.parent = window
         o.visible_camera = False
-        o.lineart.usage = "EXCLUDE"  # Line Art ignores ray visibility: it would hide every line
-    if drift:  # a slow continuous drift, never easing to a stop
+        o.lineart.usage = "EXCLUDE"
+    if drift:
         w0 = Vector(window.location)
         kit.key_every_frame(window, "location", lambda f: tuple(
             w0 + Vector((0.1 * math.sin(2 * math.pi * f / kit.LOOP), 0, 0.04 * math.sin(2 * math.pi * f / kit.LOOP + 1.3)))))

@@ -1,17 +1,3 @@
-// Renders every SVG in assets/illustrations to PNG with flutter_svg itself, so what
-// you see is what the app draws (browsers render some SVG features that flutter_svg
-// does not, e.g. <pattern>). Not part of `flutter test`; run it explicitly:
-//
-//   scripts/illustrations/preview.sh          (or, from app/:)
-//   flutter test tool/illustrations/preview_test.dart
-//
-// Output (ILLUSTRATION_PREVIEW_OUT, default build/illustration_preview/):
-//   <name>.png        the raw art at 1080 px wide
-//   <name>_hero.png   portrait art (heroes) as OnboardingHero shows it: phone-sized
-//                     frame in the theme's window colour with the same fade/scrim
-//   <name>_screen.png full-page backgrounds (taller than 2:1) on a phone frame with
-//                     a stand-in status circle in the middle
-//   contact_sheet.png every raw illustration side by side
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -77,8 +63,6 @@ void main() {
 
       thumbs.add(raw);
       if (artSize.height > 2 * artSize.width) {
-        // Full-page backgrounds (e.g. sent_slot): cover a phone frame with a
-        // stand-in for the centred status circle, to check the middle stays calm.
         final bg = _record(_phone, (c) {
           c.drawRect(Offset.zero & _phone, Paint()..color = window);
           final s = _phone.height / artSize.height;
@@ -90,13 +74,11 @@ void main() {
           c.drawCircle(
             _phone.center(Offset.zero),
             84,
-            // The sending screen's status circle (same in both themes).
             Paint()..color = const Color(0xFF00736C),
           );
         });
         await _writePng(bg, '${out.path}/${name}_screen.png');
       } else if (artSize.height > artSize.width) {
-        // Same stops as OnboardingHero in lib/src/features/onboarding/onboarding_art.dart.
         final hero = _record(_phone, (c) {
           c.drawRect(Offset.zero & _phone, Paint()..color = window);
           drawArt(c);
@@ -119,11 +101,9 @@ void main() {
         await _writePng(hero, '${out.path}/${name}_hero.png');
       }
       info.picture.dispose();
-      // ignore: avoid_print
-      print('${out.path}/$name.png');
+      stdout.writeln('${out.path}/$name.png');
     }
 
-    // A grid, four per row (each scene's dark and light side by side).
     const thumbW = 360.0, gap = 12.0, cols = 4;
     double h(ui.Image t) => thumbW * t.height / t.width;
     final rowHeights = <double>[

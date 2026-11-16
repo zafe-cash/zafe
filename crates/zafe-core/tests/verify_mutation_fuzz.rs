@@ -1,26 +1,17 @@
-//! Mutation fuzz (security review 2026-11-13, finding J): mutate every byte of an honest
-//! proposal PCZT and look for a mutation that still passes member verification but signs a
-//! different transaction (a different sighash) or reports different facts.
-
 use orchard::keys::Scope;
 use pczt::Pczt;
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::verify::{verify_pczt, Expectations, Payment};
 use zcash_protocol::memo::{Memo, MemoBytes};
 
-mod common;
+pub mod common;
 use common::*;
 
-/// The bundle-level fields (flags, value sum, anchor, proof, bsk) sit at the end: the fast
-/// run covers them. On 4a4fe29 a changed Ironwood `value_sum` (amount or sign) or `flags`
-/// (spends off) still verifies, with the same fee shown, but a different sighash: members
-/// sign a transaction that can't be mined.
 #[test]
 fn bundle_field_mutations_never_verify_to_another_tx() {
     mutate(true);
 }
 
-/// Every byte (slow: run by hand with --ignored).
 #[test]
 #[ignore]
 fn single_byte_mutations_never_verify_to_another_tx() {

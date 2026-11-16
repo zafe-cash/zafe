@@ -1,15 +1,3 @@
-//! Vault key generation: FROST DKG plus agreement on the vault secret `sk` (spec §7).
-//!
-//! This module is transport-agnostic. Each member drives its own state through
-//! [`Round1`] → [`Round2`] → [`KeygenOutput`], and the caller is responsible for:
-//!
-//! - broadcasting round-1 packages and comparing [`round1_echo`] hashes across members
-//!   (any mismatch means the relay showed members different packages: abort);
-//! - sealing each round-2 package and each `sk` contribution to its recipient;
-//! - collecting every member's signature over the final vault descriptor.
-//!
-//! The group key is normalized to even Y by `reddsa`'s `post_dkg` hook, as ZIP 2005 requires.
-
 use std::collections::BTreeMap;
 
 use rand_core::{CryptoRng, RngCore};
@@ -22,7 +10,6 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::keys::{KeyError, VaultKeys, VaultSecret};
 
-/// Largest vault size supported in v1 (spec §2.1, D1).
 pub const MAX_MEMBERS: u16 = 15;
 
 const PERSONAL_ECHO: &[u8; 16] = b"Zafe_DKG_R1Echo_";
@@ -52,13 +39,10 @@ pub enum KeygenError {
     Keys(#[from] KeyError),
 }
 
-/// Parameters every member must agree on before starting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeygenParams {
     pub vault_id: VaultId,
-    /// Threshold `t`.
     pub min_signers: u16,
-    /// Number of members `n`.
     pub max_signers: u16,
 }
 
@@ -78,8 +62,6 @@ impl KeygenParams {
     }
 }
 
-/// Derives a member's FROST identifier from their identity signing key and the vault id,
-/// binding the share to the identity (spec §5.1).
 pub fn member_identifier(
     identity_pk: &[u8],
     vault_id: &VaultId,
@@ -92,7 +74,6 @@ pub fn member_identifier(
     Ok(Identifier::derive(&input)?)
 }
 
-/// State after DKG part 1. `package` must be broadcast to all other members.
 pub struct Round1 {
     params: KeygenParams,
     identifier: Identifier,
@@ -124,14 +105,10 @@ impl Round1 {
         self.identifier
     }
 
-    /// This member's round-1 secret, to keep while a ceremony is paused (it is this
-    /// member's whole contribution to the group key: store it encrypted, never send it).
     pub fn secret_bytes(&self) -> Result<Vec<u8>, KeygenError> {
         Ok(self.secret.serialize()?)
     }
 
-    /// A round 1 saved with [`Round1::secret_bytes`] and its package. Part 2 is
-    /// deterministic, so a resumed round 1 sends the same round-2 packages again.
     pub fn restore(
         params: KeygenParams,
         identifier: Identifier,
@@ -150,8 +127,6 @@ impl Round1 {
         &self.package
     }
 
-    /// Runs DKG part 2 on the round-1 packages received from the *other* members.
-    /// Returns the next state and the round-2 packages to seal to each recipient.
     pub fn advance(
         self,
         received: BTreeMap<Identifier, dkg::round1::Package>,
@@ -176,24 +151,19 @@ impl Round1 {
     }
 }
 
-/// State after DKG part 2.
 pub struct Round2 {
     params: KeygenParams,
     identifier: Identifier,
     secret: dkg::round2::SecretPackage,
-    /// Round-1 packages from every member, including this one.
     all_round1: BTreeMap<Identifier, dkg::round1::Package>,
     echo: [u8; 32],
 }
 
 impl Round2 {
-    /// This member's echo hash over all round-1 packages. Broadcast it and abort unless
-    /// every member reports the same value.
     pub fn echo(&self) -> [u8; 32] {
         self.echo
     }
 
-    /// Runs DKG part 3 on the round-2 packages received from the other members.
     pub fn finish(
         self,
         received: BTreeMap<Identifier, dkg::round2::Package>,
@@ -216,7 +186,6 @@ impl Round2 {
     }
 }
 
-/// FROST key material after the DKG, before `sk` agreement.
 pub struct DkgResult {
     params: KeygenParams,
     key_package: KeyPackage,
@@ -233,8 +202,6 @@ impl DkgResult {
         &self.public_key_package
     }
 
-    /// Combines every member's `sk` contribution (including this member's own) into the
-    /// vault secret and derives the vault keys.
     pub fn finish(
         self,
         contributions: &BTreeMap<Identifier, SkContribution>,
@@ -260,7 +227,6 @@ impl DkgResult {
     }
 }
 
-/// Everything a member holds after vault creation.
 pub struct KeygenOutput {
     pub key_package: KeyPackage,
     pub public_key_package: PublicKeyPackage,
@@ -269,7 +235,6 @@ pub struct KeygenOutput {
     pub transcript_hash: [u8; 32],
 }
 
-/// One member's random contribution to `sk`. Sealed to every other member.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SkContribution([u8; 32]);
 
@@ -288,9 +253,6 @@ impl SkContribution {
         &self.0
     }
 
-    /// `BLAKE2b-256("Zafe_SkCommit___", vault_id || member sig_pk || r)`: published in DKG
-    /// round 1, before anyone reveals a contribution, so no member can pick its `r` after
-    /// seeing the others' (which would let the last one grind `sk`).
     pub fn commitment(&self, vault_id: &VaultId, member: &[u8; 32]) -> [u8; 32] {
         let mut state = blake2b_256(PERSONAL_SK_COMMIT);
         state.update(vault_id);
@@ -300,7 +262,6 @@ impl SkContribution {
     }
 }
 
-/// Checks a revealed `sk` contribution against the commitment `member` published in round 1.
 pub fn check_contribution(
     vault_id: &VaultId,
     member: &[u8; 32],
@@ -314,9 +275,6 @@ pub fn check_contribution(
     }
 }
 
-/// The round-2 echo every member compares: the round-1 echo extended with every member's
-/// `sk` commitment (by FROST identifier), so a member who sent different commitments to
-/// different members is caught like a different round-1 package.
 pub fn echo_with_commitments(
     round1_echo: &[u8; 32],
     commitments: &BTreeMap<Identifier, [u8; 32]>,
@@ -332,8 +290,6 @@ pub fn echo_with_commitments(
     finalize_32(state)
 }
 
-/// `sk = BLAKE2b-256("Zafe_VaultSecret", vault_id || transcript || r_1 || … || r_n)`,
-/// contributions ordered by FROST identifier (spec §7.4).
 pub fn combine_vault_secret(
     vault_id: &VaultId,
     transcript_hash: &[u8; 32],
@@ -350,8 +306,6 @@ pub fn combine_vault_secret(
     VaultSecret::from_bytes(out)
 }
 
-/// Hash of every member's round-1 package (including this member's own), ordered by
-/// identifier. All members must agree on it (the broadcast-consistency check, spec §7.2).
 pub fn round1_echo(
     params: &KeygenParams,
     all_round1: &BTreeMap<Identifier, dkg::round1::Package>,
@@ -361,7 +315,6 @@ pub fn round1_echo(
     Ok(finalize_32(state))
 }
 
-/// Binds the vault id, parameters, all round-1 packages and the resulting group key.
 fn transcript_hash(
     params: &KeygenParams,
     all_round1: &BTreeMap<Identifier, dkg::round1::Package>,
@@ -392,7 +345,6 @@ fn hash_params_and_round1(
     Ok(())
 }
 
-/// `I2LEOSP_256(ak)`: the 32-byte encoding of the group verifying key.
 pub fn group_key_bytes(public_key_package: &PublicKeyPackage) -> Result<[u8; 32], KeygenError> {
     let bytes = public_key_package.verifying_key().serialize()?;
     bytes

@@ -29,16 +29,11 @@ import '../../providers/vault_provider.dart';
 import '../../providers/vault_relay.dart';
 import '../../rust/api/repair.dart' as rust;
 
-/// A co-signer approves moving a lost signer's seat to their new phone (spec §10.1):
-/// pick the signer, paste the code from their new phone, compare the safety words with
-/// them (both phones take part in the check through the relay), approve.
 class ReplaceSignerScreen extends ConsumerStatefulWidget {
   const ReplaceSignerScreen({super.key, this.signer, this.code});
 
-  /// The signer who lost their phone (key hex), if already known.
   final String? signer;
 
-  /// The new phone's recovery code, if already known (approving a pending move).
   final String? code;
 
   @override
@@ -51,7 +46,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
   final _codeFocus = FocusNode();
   String? _signer;
 
-  /// The safety check with the new phone: polled while a valid code is entered.
   Timer? _poll;
   String? _checkedCode;
   String? _words;
@@ -77,8 +71,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
 
   bool _checking = false;
 
-  /// Runs the next step of the safety check for the code entered now. A new code starts
-  /// over.
   Future<void> _checkWords() async {
     final code = _code.text.trim();
     if (code != _checkedCode) {
@@ -137,7 +129,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
     )) {
       throw const ActionCancelled();
     }
-    // The seat-move card on the Signers tab shows how far the move got.
     await ref
         .read(proposalsProvider.notifier)
         .approveSeatMove(signer, _code.text.trim(), _words!);
@@ -157,7 +148,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
     final who = _signer == null
         ? 'them'
         : memberLabel(_signer!, me: me, names: names);
-    // Asked again after the old phone kept this seat: the human check comes first.
     final keptOn = _signer == null
         ? null
         : dayOf(ref.watch(proposalsProvider).seatKeeps[_signer!]);
@@ -296,7 +286,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
             ),
           ),
         ],
-        // The new phone finds the vault's relay and mailbox from this link.
         if (seatLink case final link? when _words == null) ...[
           const SizedBox(height: AppSpacing.md),
           SeatLinkCard(
@@ -332,8 +321,6 @@ class _ReplaceSignerScreenState extends ConsumerState<ReplaceSignerScreen> {
   }
 }
 
-/// The safety words this phone and the new phone both show, to compare with the signer
-/// before approving. `words` is `null` while the new phone hasn't taken part.
 class SafetyWordsCard extends StatelessWidget {
   const SafetyWordsCard({
     super.key,
@@ -348,7 +335,6 @@ class SafetyWordsCard extends StatelessWidget {
   final String? words;
   final String who;
 
-  /// This phone's key: the new phone labels these words with it.
   final String? myKeyHex;
   final String? error;
   final bool confirmed;
@@ -411,8 +397,6 @@ class SafetyWordsCard extends StatelessWidget {
   }
 }
 
-/// The co-signer's vault link for the new phone (relay and mailbox, not secret): shared
-/// or shown as a QR code.
 class SeatLinkCard extends StatelessWidget {
   const SeatLinkCard({
     super.key,
@@ -471,7 +455,6 @@ class SeatLinkCard extends StatelessWidget {
   }
 }
 
-/// The vault link as a QR code, for the new phone to scan.
 Future<void> showSeatLinkQr(BuildContext context, String link) =>
     showAppMobileSheet<void>(
       context: context,

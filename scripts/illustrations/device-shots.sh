@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Screenshots the onboarding illustrations in the real app on an Android emulator
-# (light and dark). WIPES the app's data on the device (pm clear) so onboarding shows.
-#
-# Usage: scripts/illustrations/device-shots.sh [out_dir] [--no-build]
-# Needs: a running x86_64 emulator (adb devices), agent-device on PATH, ~/android/env.sh.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -17,7 +12,7 @@ if [[ "${2:-}" != "--no-build" ]]; then
   adb install -r "$root/app/build/app/outputs/flutter-apk/app-debug.apk"
 fi
 
-shoot() { # theme
+shoot() {
   local theme=$1
   adb shell cmd uimode night "$([[ $theme == dark ]] && echo yes || echo no)" >/dev/null
   adb shell pm clear "$pkg" >/dev/null
@@ -30,8 +25,6 @@ shoot() { # theme
   agent-device wait text "Vault name" >/dev/null
   sleep 1
   agent-device screenshot "$out/create_$theme.png"
-  # Relaunch instead of pressing back: back can dismiss only the keyboard, or leave the
-  # app entirely (it once landed in another app), and a plain reopen resumes the screen.
   adb shell am force-stop "$pkg"
   agent-device close >/dev/null 2>&1 || true
   agent-device open "$pkg" --foreground >/dev/null
@@ -46,6 +39,4 @@ shoot() { # theme
 shoot light
 shoot dark
 adb shell cmd uimode night no >/dev/null
-# The key_shards hero shows on the "Creating your vault keys" screen, which needs a live
-# DKG with other members; check it with scripts/illustrations/preview.sh instead.
 echo "Screenshots in $out"

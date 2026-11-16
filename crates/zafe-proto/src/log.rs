@@ -1,10 +1,3 @@
-//! The vault log (spec §6.3): an append-only, hash-chained, member-signed and encrypted
-//! record of vault events. Event contents are opaque bytes at this layer.
-//!
-//! Each entry commits to its index and the previous entry's hash, and is signed by its
-//! author. The relay can only append an entry that extends its current head, and every
-//! member re-checks the chain, so a relay that forks, reorders or drops entries is caught.
-
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     XChaCha20Poly1305, XNonce,
@@ -23,7 +16,6 @@ use crate::{
 const PERSONAL_ENTRY_HASH: &[u8; 16] = b"Zafe_LogEntryHsh";
 const SIGNATURE_DOMAIN: &[u8] = b"Zafe log entry v1";
 
-/// Symmetric key shared by current members; rotated on every membership change.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct LogKey {
     pub epoch: u32,
@@ -46,10 +38,8 @@ impl LogKey {
     }
 }
 
-/// Everything in an entry except the author's signature.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntryHeader {
-    /// [`version::LOG_ENTRY`]; signed and part of the AEAD associated data.
     pub version: u16,
     pub mailbox: MailboxId,
     pub index: u64,
@@ -61,12 +51,10 @@ pub struct EntryHeader {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogEntry {
     pub header: EntryHeader,
-    /// `nonce (24 bytes) || XChaCha20-Poly1305 ciphertext`, AAD = encoded header.
     pub ciphertext: Vec<u8>,
     pub signature: Vec<u8>,
 }
 
-/// The `prev_hash` of the first entry.
 pub const GENESIS_PREV_HASH: [u8; 32] = [0; 32];
 
 impl LogEntry {
@@ -109,13 +97,10 @@ impl LogEntry {
         })
     }
 
-    /// `version (u16) || postcard(entry)`; the tag equals `header.version`. This is what
-    /// the relay stores and serves.
     pub fn to_bytes(&self) -> Result<Vec<u8>, ProtoError> {
         Ok(version::frame(Format::LogEntry, &encode(self)?))
     }
 
-    /// Rejects unknown versions with [`ProtoError::UnsupportedVersion`] before parsing.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtoError> {
         let entry: Self = postcard::from_bytes(version::unframe(Format::LogEntry, bytes)?)
             .map_err(|_| ProtoError::Encoding)?;
@@ -152,7 +137,6 @@ impl LogEntry {
             .map_err(|_| ProtoError::Crypto)
     }
 
-    /// The hash the next entry must reference.
     pub fn hash(&self) -> Result<[u8; 32], ProtoError> {
         let hash = blake2b_simd::Params::new()
             .hash_length(32)
@@ -185,7 +169,6 @@ pub enum ChainError {
     Invalid { index: u64, source: ProtoError },
 }
 
-/// A verified, hash-chained view of a vault log (members and relay both keep one).
 #[derive(Clone, Debug)]
 pub struct Chain {
     mailbox: MailboxId,
@@ -222,7 +205,6 @@ impl Chain {
         &self.entries
     }
 
-    /// Appends an entry if it extends the head and is signed by one of `members`.
     pub fn append(
         &mut self,
         entry: LogEntry,

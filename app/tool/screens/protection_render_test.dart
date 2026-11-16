@@ -1,11 +1,3 @@
-// Renders the "How it's protected" page (2 of 3, and 3 of 3) and the Signers tab's backup
-// health (all, some, too few backed up) in both themes to PNGs for review without a device.
-// Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/protection_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): protection_<rule>_<theme>.png,
-// backups_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -43,7 +35,6 @@ const _cara =
     'c2d4e6f8a0b1c3d5e7f9a1b3c5d7e9f1a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2';
 const _dev = '9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b';
 
-/// The Signers tab's cards for a 2-of-4 vault where `backedUp` signers have a backup.
 Widget _backups(Set<String> backedUp) {
   const members = [_me, _bob, _cara, _dev];
   return Column(
@@ -53,7 +44,6 @@ Widget _backups(Set<String> backedUp) {
         signers: members.length,
         threshold: 2,
         backedUp: members.where(backedUp.contains).length,
-        // This phone ("You") has no backup: the card offers one.
         onBackUp: backedUp.contains(_me) ? null : () {},
       ),
       const SizedBox(height: AppSpacing.md),
@@ -136,8 +126,7 @@ void main() {
         });
         final path = '${out.path}/${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

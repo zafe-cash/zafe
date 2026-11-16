@@ -37,20 +37,15 @@ import 'recipients_csv.dart';
 
 enum _Step { recipient, amount, review }
 
-/// Payments to propose again (an expired proposal), or from a `zcash:` payment link:
-/// opens the review step prefilled, or the amount step when the link left it out.
 class SendPrefill {
   const SendPrefill({required this.payments, this.fromLink = false});
   final List<rust.PaymentInput> payments;
 
-  /// From a payment link (the review card says "payment request").
   final bool fromLink;
 }
 
-/// Most recipients in one proposal (spec: batch payments, 1..50).
 const kMaxRecipients = 50;
 
-/// Plain decimal ZEC for an amount field ("1.5"), the inverse of `parseZec`.
 String zecDecimal(BigInt zat) {
   final whole = zat ~/ BigInt.from(100000000);
   final frac = (zat % BigInt.from(100000000))
@@ -60,12 +55,9 @@ String zecDecimal(BigInt zat) {
   return frac.isEmpty ? '$whole' : '$whole.$frac';
 }
 
-/// New payment: a three-step send wizard (recipient, amount, review). The last step
-/// logs a proposal for the other signers instead of sending.
 class SendScreen extends ConsumerStatefulWidget {
   const SendScreen({super.key, this.prefill});
 
-  /// Starts on the review step with these details (propose again).
   final SendPrefill? prefill;
 
   @override
@@ -82,7 +74,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   rust.AddressCheck? _check;
   bool _busy = false;
 
-  /// Recipients already added to this proposal; the fields hold the one being edited.
   final List<rust.PaymentInput> _added = [];
 
   @override
@@ -111,16 +102,12 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     super.dispose();
   }
 
-  /// Field length at the last change, to tell a paste (many characters at once) from
-  /// typing.
   int _lastLength = 0;
 
   void _validateAddress() {
     final text = _address.text.trim();
     final pasted = _address.text.length - _lastLength > 1;
     _lastLength = _address.text.length;
-    // A payment link pasted into the field (keyboard paste skips `_paste`). Typed links
-    // aren't applied as they grow: `zcash:<address>` parses before `?amount=` is typed.
     if (pasted && text.toLowerCase().startsWith('zcash:')) {
       final request = rust.parsePaymentRequest(
         networkName: kZafeNetwork,
@@ -155,8 +142,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     if (request != null && mounted) _apply(request);
   }
 
-  /// Fills the draft from a scanned or pasted request: one recipient goes on to the
-  /// amount (prefilled when the request names one); several become a batch to review.
   void _apply(rust.ScannedRequest request) {
     final payments = request.payments;
     final room = kMaxRecipients - _added.length;
@@ -186,20 +171,17 @@ class _SendScreenState extends ConsumerState<SendScreen> {
 
   BigInt? get _amountZat => rust.parseZec(text: _amount.text);
 
-  /// The payment being edited.
   rust.PaymentInput get _current => rust.PaymentInput(
     address: _address.text.trim(),
     amountZat: _amountZat ?? BigInt.zero,
     memo: _memo,
   );
 
-  /// Every payment of the proposal, in order.
   List<rust.PaymentInput> get _payments => [..._added, _current];
 
   BigInt get _addedTotal =>
       _added.fold(BigInt.zero, (sum, p) => sum + p.amountZat);
 
-  /// Puts `p` in the fields.
   void _edit(rust.PaymentInput p) {
     _address.text = p.address;
     _amount.text = p.amountZat == BigInt.zero ? '' : zecDecimal(p.amountZat);
@@ -207,7 +189,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     _check = rust.checkAddress(networkName: kZafeNetwork, address: p.address);
   }
 
-  /// Parks the current payment and starts a new recipient.
   void _addRecipient() {
     setState(() {
       _added.add(_current);
@@ -219,7 +200,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     });
   }
 
-  /// Drops payment `i` of [_payments] (not the last remaining one).
   void _removeRecipient(int i) {
     setState(() {
       if (i < _added.length) {
@@ -230,9 +210,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     });
   }
 
-  /// Adds recipients from a CSV file (address,amount[,memo]) to the batch. On the review
-  /// step the payment being edited stays; on the recipient step the file replaces it.
-  /// Nothing is added unless every row is valid.
   Future<void> _importCsv() async {
     List<int>? bytes;
     try {
@@ -279,13 +256,11 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       _edit(all.last);
       _step = _Step.review;
     });
-    // The review step now lists them: that is the confirmation.
   }
 
   BigInt get _spendable =>
       ref.read(vaultProvider).balance?.spendableZat ?? BigInt.zero;
 
-  /// Received money and the vault's own change that are not spendable yet.
   BigInt get _confirming {
     final b = ref.read(vaultProvider).balance;
     return b == null ? BigInt.zero : b.incomingPendingZat + b.changePendingZat;
@@ -300,7 +275,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   void _back() {
     switch (_step) {
       case _Step.recipient when _added.isNotEmpty:
-        // Abandon the new recipient: back to the review of the ones already added.
         setState(() {
           _edit(_added.removeLast());
           _step = _Step.review;
@@ -314,15 +288,11 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     }
   }
 
-  /// Paying the vault's own address would only shuffle its notes and cost a fee.
   bool _isOwn(String address) {
     final own = ref.read(vaultProvider).summary?.address;
     return own != null && own == address.trim();
   }
 
-  /// "Propose payment": one unlock, then the proposal and this member's approval of it
-  /// (as in Safe, whoever creates a payment signs it); its page opens on success.
-  /// Failures show under the button.
   Future<void> _propose() async {
     if (_payments.any((p) => _isOwn(p.address))) {
       throw const UserFacingError(
@@ -338,20 +308,10 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     }
     setState(() => _busy = true);
     try {
-      // Under the same unlock, in one call. If the approval fails (offline a moment
-      // later), the payment stays open and waits for this member's approval like any
-      // other. The returned list already shows this member's approval, so the payment's
-      // page opens right away without the Approve/Decline request flashing first.
       final id = await ref
           .read(proposalsProvider.notifier)
-          .proposeAndApprove(
-            payments: _payments,
-            // Always: the last approval sends it (no one has to come back to tap "Send").
-            autoSend: true,
-          );
+          .proposeAndApprove(payments: _payments, autoSend: true);
       if (!mounted) return;
-      // The payment's page takes this screen's place (Back goes to Home): going Home
-      // first and pushing it showed Home for a moment in between.
       context.pushReplacement('/proposal/$id');
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -361,8 +321,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    // Rebuild when the wallet's spendable balance changes (a sync lands while this screen
-    // is open): `_spendable` reads it with `ref.read`.
     ref.watch(
       vaultProvider.select(
         (v) => (
@@ -398,8 +356,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       ),
     );
   }
-
-  // --- Step 1 --------------------------------------------------------------------------
 
   Widget _recipientStep() {
     final colors = context.colors;
@@ -482,8 +438,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       ],
     );
   }
-
-  // --- Step 2 --------------------------------------------------------------------------
 
   Widget _amountStep() {
     final colors = context.colors;
@@ -644,9 +598,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     if (result != null) setState(() => _memo = result);
   }
 
-  // --- Step 3 --------------------------------------------------------------------------
-
-  /// The exact fee for the payments on review, recomputed when they change.
   Future<BigInt>? _fee;
   String? _feeFor;
 
@@ -762,7 +713,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             ],
           ),
         ),
-        // Proposing would fail the same way (e.g. not enough funds): say so now.
         FutureBuilder<BigInt>(
           future: fee,
           builder: (context, snap) => snap.hasError
@@ -799,8 +749,6 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     );
   }
 }
-
-// --- Pieces ------------------------------------------------------------------------------
 
 class _Cta extends StatelessWidget {
   const _Cta({required this.label, required this.onPressed});
@@ -888,7 +836,6 @@ class _AddressRow extends StatelessWidget {
   }
 }
 
-/// Why a recipients file couldn't be imported, row by row.
 class _CsvErrorsSheet extends StatelessWidget {
   const _CsvErrorsSheet({required this.errors});
   final List<String> errors;
@@ -897,7 +844,6 @@ class _CsvErrorsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return SingleChildScrollView(
-      // Scrolls once the sheet runs out of height (a short window).
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
         child: Column(
@@ -966,7 +912,6 @@ class _MemoSheetState extends State<_MemoSheet> {
     final len = rust.memoLength(memo: _text.text);
     final tooLong = len > 512;
     return SingleChildScrollView(
-      // Scrolls once the sheet runs out of height (a short window).
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           16,

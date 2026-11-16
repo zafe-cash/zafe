@@ -1,5 +1,3 @@
-//! Batch 4 review: one member must not be able to shut another member's inbox for everyone.
-
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -73,12 +71,6 @@ async fn send(app: &Router, from: &Identity, to: &Identity, seq: u64, kind: Kind
     signed(app, "/v1/envelope/send", from, PostEnvelope { envelope }).await
 }
 
-/// Member 0 fills member 1's inbox with envelopes of a kind member 1's phone never acks
-/// (it acks only what it handles: `node::respond` skips other kinds, and move notices are
-/// never acked), so they stay until pruned, 30 days. Then member 2, the leader, can't send
-/// member 1 a signing request: every send to member 1 gets 507 for a month. The same works
-/// on a seat move's pending key before the helpers' repair parts arrive. The cap bounds
-/// each (sender, recipient) pair, not the inbox for every sender.
 #[tokio::test]
 async fn one_member_cant_fill_another_members_inbox_for_everyone() {
     let cap = 8;

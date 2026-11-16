@@ -1,9 +1,3 @@
-//! Changing the threshold without changing the key (spec §10.4.4): resharing in the style
-//! of Desmedt-Jajodia / GRR98, the same scheme as Human Network's Algorithm 4. Not in
-//! `frost-core` (its refresh keeps `min_signers`), so this test builds the packages with
-//! the `internals` feature to show it works on the redpallas ciphersuite Zafe uses. It is
-//! a reference for the spec, not the protocol Zafe runs.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use frost_core::{
@@ -62,15 +56,11 @@ fn keygen(n: u16, t: u16) -> (Keys, PublicKeyPackage<C>) {
     (keys, public.unwrap())
 }
 
-/// What one helper sends: Feldman commitments to its new polynomial (broadcast) and one
-/// evaluation per new member (sealed to that member).
 struct Deal {
     commitments: Vec<Element>,
     shares: BTreeMap<Identifier<C>, Scalar>,
 }
 
-/// Helper `h` (one of at least the old t) deals `lambda_h * share_h` on a random polynomial
-/// of degree `new_t - 1`.
 fn deal(
     old: &KeyPackage<C>,
     helpers: &BTreeSet<Identifier<C>>,
@@ -107,17 +97,11 @@ fn eval_commitments(commitments: &[Element], x: Scalar) -> Element {
 
 #[derive(Debug, PartialEq)]
 enum ReshareError {
-    /// A helper's share doesn't match its own commitments.
     BadShare(Identifier<C>),
-    /// A helper's constant term isn't its weighted old verifying share: it dealt
-    /// something other than its real share.
     WrongSecret(Identifier<C>),
-    /// The constant terms don't add up to the group key.
     WrongKey,
 }
 
-/// Every new member checks every deal against the *old* public key package, then sums its
-/// evaluations. Returns the new key packages and public key package.
 fn reshare(
     deals: &BTreeMap<Identifier<C>, Deal>,
     old_public: &PublicKeyPackage<C>,
@@ -191,8 +175,6 @@ fn signs(keys: &Keys, signers: &[u16], public: &PublicKeyPackage<C>) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether these shares interpolate to the group key, ignoring `min_signers`: the real
-/// threshold, not the software check.
 fn recovers_key(keys: &Keys, who: &[u16], vk: &VerifyingKey<C>) -> bool {
     let set: BTreeSet<_> = who.iter().map(|w| id(*w)).collect();
     let secret = set.iter().fold(F::zero(), |acc, w| {
@@ -208,7 +190,6 @@ fn raise_then_lower_the_threshold_keeps_the_key() {
     let vk = *old_public.verifying_key();
     assert!(old_public.has_even_y());
 
-    // 2-of-3 -> 3-of-4: two old members deal, four new members receive.
     let (new, new_public) = reshare(
         &deals(&old, &[1, 2], &[1, 2, 3, 4], 3),
         &old_public,
@@ -224,12 +205,9 @@ fn raise_then_lower_the_threshold_keeps_the_key() {
     assert!(!recovers_key(&new, &[1, 4], &vk));
     assert!(!recovers_key(&new, &[1, 2], &vk));
 
-    // Old shares are still shares of the same key: whoever kept two can still sign at the
-    // old threshold. Nothing in the protocol can prevent this (spec §10.4.4).
     assert!(recovers_key(&old, &[1, 3], &vk));
     assert!(signs(&old, &[1, 3], &old_public));
 
-    // 3-of-4 -> 2-of-3 without member 4: three members of the new set deal.
     let (low, low_public) = reshare(
         &deals(&new, &[2, 3, 4], &[1, 2, 3], 2),
         &new_public,
@@ -241,7 +219,6 @@ fn raise_then_lower_the_threshold_keeps_the_key() {
     assert!(signs(&low, &[1, 3], &low_public));
     assert!(signs(&low, &[2, 3], &low_public));
 
-    // Shares from different rounds don't combine.
     let mixed: Keys = [(id(1), new[&id(1)].clone()), (id(3), low[&id(3)].clone())].into();
     assert!(!recovers_key(&mixed, &[1, 3], &vk));
 }
@@ -249,8 +226,6 @@ fn raise_then_lower_the_threshold_keeps_the_key() {
 #[test]
 fn fewer_helpers_than_the_old_threshold_cannot_reshare() {
     let (old, old_public) = keygen(4, 3);
-    // Two of a 3-of-4 group try to deal a new 2-of-2: their weighted shares don't add up
-    // to the key, so every receiver rejects it.
     let result = reshare(&deals(&old, &[1, 2], &[1, 2], 2), &old_public, &[1, 2], 2);
     assert!(matches!(
         result,
@@ -262,7 +237,6 @@ fn fewer_helpers_than_the_old_threshold_cannot_reshare() {
 fn a_dishonest_helper_is_caught() {
     let (old, old_public) = keygen(3, 2);
 
-    // Deals a random secret with honest-looking commitments: caught by its constant term.
     let mut d = deals(&old, &[1, 2], &[1, 2, 3], 2);
     let fake = KeyPackage::new(
         id(2),
@@ -278,7 +252,6 @@ fn a_dishonest_helper_is_caught() {
         Some(ReshareError::WrongSecret(id(2)))
     );
 
-    // Sends one member a share off its own polynomial: caught by the commitments.
     let mut d = deals(&old, &[1, 2], &[1, 2, 3], 2);
     let s = d.get_mut(&id(1)).unwrap().shares.get_mut(&id(3)).unwrap();
     *s += F::one();

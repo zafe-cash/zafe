@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""Independent check of Zafe's ZIP 2005 (use_qsk = true) key derivation vectors.
-
-Recomputes nk, qsk, qk and rivk_ext from (sk, ak) using only the Python standard
-library (hashlib BLAKE2b, plus a minimal BLAKE3 below), then checks them and the
-96-byte FVK encoding against crates/zafe-core/test-vectors/zip2005_use_qsk.json.
-
-This is deliberately separate from the Rust code under test.
-"""
-
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-# Pallas base field and scalar field moduli (Zcash protocol spec § 5.4.9.6).
 P = 0x40000000000000000000000000000000224698FC094CF91B992D30ED00000001
 Q = 0x40000000000000000000000000000000224698FC0994A8DD8C46EB2100000001
 
@@ -35,8 +25,6 @@ def to_scalar(b: bytes) -> int:
 def i2leosp256(x: int) -> bytes:
     return x.to_bytes(32, "little")
 
-
-# --- Minimal BLAKE3 (single-chunk inputs only, which is all H^qk needs) ---------------
 
 _IV = [
     0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
@@ -104,10 +92,7 @@ def blake3_derive_key(context: str, material: bytes) -> bytes:
     return _hash_single_chunk(words, material, DERIVE_KEY_MATERIAL)
 
 
-# --------------------------------------------------------------------------------------
-
 def main() -> int:
-    # Official BLAKE3 test vector: hash of the empty input.
     assert blake3_hash(b"").hex() == (
         "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
     ), "BLAKE3 self-test failed"

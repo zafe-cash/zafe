@@ -79,7 +79,6 @@ void main() {
       () async {
         final app = CrashLog.forDir(dir.path, isBackground: false);
         final bg = CrashLog.forDir(dir.path, isBackground: true);
-        // Interleaved, concurrent appends from both "isolates".
         await Future.wait([
           for (var i = 0; i < 6; i++)
             app.record('flutter', StateError('app$i')),

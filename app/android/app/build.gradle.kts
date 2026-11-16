@@ -3,22 +3,14 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Release signing: android/key.properties (storeFile, storePassword, keyAlias,
-// keyPassword; gitignored), written by the release workflow from repository secrets.
-// Without it, release builds are signed with the debug key (local testing only: such an
-// APK can't update one signed with the real key).
 val keyProperties = Properties().apply {
     val file = rootProject.file("key.properties")
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
-// Invite App Links: the host comes from `--dart-define=ZAFE_LINK_HOST=<host>` (Flutter
-// passes dart-defines to Gradle base64-encoded, comma-separated). Without one the https
-// intent filter points at a reserved `.invalid` host, so it can never match a real link.
 val dartDefines: Map<String, String> =
     (project.findProperty("dart-defines") as String?)
         ?.split(",")
@@ -36,9 +28,6 @@ val zafeLinkHost: String = dartDefines["ZAFE_LINK_HOST"].orEmpty().lowercase().a
     }
 }
 
-// Testnet builds (`--dart-define=ZAFE_NETWORK=test`) are a separate app, "Zafe Testnet"
-// (`xyz.zafe.zafe.testnet`), so it installs next to the mainnet app and can never update
-// it or share its data. Mainnet and regtest (development) builds are `xyz.zafe.zafe`.
 val zafeTestnet: Boolean = dartDefines["ZAFE_NETWORK"] in setOf("test", "testnet")
 
 android {
@@ -47,7 +36,6 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // flutter_local_notifications needs java.time on older Android.
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -57,7 +45,6 @@ android {
     defaultConfig {
         applicationId = if (zafeTestnet) "xyz.zafe.zafe.testnet" else "xyz.zafe.zafe"
         manifestPlaceholders["zafeAppLabel"] = if (zafeTestnet) "Zafe Testnet" else "Zafe"
-        // Invite links (zafe://join): the testnet app has its own scheme so both can be installed.
         manifestPlaceholders["zafeScheme"] = if (zafeTestnet) "zafe-testnet" else "zafe"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
@@ -85,10 +72,6 @@ android {
     }
 }
 
-// Release builds ship arm64 only: the Rust core (librust_lib_zafe.so) is built for arm64
-// alone, while plugins (ML Kit) bring armeabi-v7a/x86/x86_64 libraries too. An App Bundle
-// with those would install on such phones and crash at start; without them Play offers
-// the app to arm64 devices only. Debug builds keep everything (the x86_64 emulator).
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         variant.packaging.jniLibs.excludes.addAll(
@@ -109,14 +92,9 @@ kotlin {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
-    // AppCompat window themes (res/values*/styles.xml): local_auth's biometric prompt
-    // crashes on Android 8 and below under a platform theme.
     implementation("androidx.appcompat:appcompat:1.7.0")
 }
 
-// Push notifications (FCM) are enabled by dropping the Firebase project's
-// google-services.json into android/app/. Without it the app still builds and relies on
-// periodic background checks (docs/tracker.md, "Push").
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }

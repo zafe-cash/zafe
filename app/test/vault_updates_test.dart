@@ -91,7 +91,6 @@ void main() {
       named({}, proposal('p1'), hide: true).single.body,
       'Alice (aa) proposed a payment.',
     );
-    // Unnamed proposer: no mention.
     expect(
       named({}, proposal('p1', author: 'cc')).single.body,
       '1.5 TAZ to uregtes .... 3456789',
@@ -308,7 +307,6 @@ void main() {
         expect(fresh.single.proposalId, startsWith(kKeepSeatPrefix));
         final seen = snapshotOf(const [], pendingSeatMoves: [pending()]);
         expect(keeps(seen), isEmpty);
-        // Other members aren't asked; nor is the old phone once it can't keep the seat.
         expect(keeps(const {}, me: 'bb'), isEmpty);
         expect(keeps(const {}, canKeep: false), isEmpty);
       },

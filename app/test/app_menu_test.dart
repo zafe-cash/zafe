@@ -6,7 +6,6 @@ import 'package:zafe/src/core/widgets/app_menu.dart';
 
 const _margin = 16.0;
 
-/// Opens an [AppMenu] whose 40x40 anchor sits at [anchorAt] on a [screen]-sized phone.
 Future<List<String>> _open(
   WidgetTester tester, {
   Size screen = const Size(360, 640),
@@ -65,7 +64,6 @@ Future<List<String>> _open(
 Rect _anchor(WidgetTester tester) =>
     tester.getRect(find.byKey(const Key('anchor')));
 
-/// The menu's items, top to bottom: their union is the menu less its padding.
 Rect _items(WidgetTester tester) => tester
     .widgetList<MenuItemButton>(find.byType(MenuItemButton))
     .map((w) => tester.getRect(find.byWidget(w)))
@@ -78,8 +76,6 @@ void main() {
     await _open(tester);
     final anchor = _anchor(tester);
     final menu = _items(tester);
-    // MenuAnchor started it at the anchor and pushed it against the screen edge.
-    // The items sit inside the panel's 1 px border.
     expect(menu.right, moreOrLessEquals(anchor.right - 1));
     expect(menu.top, greaterThan(anchor.bottom));
     expect(menu.top - anchor.bottom, lessThan(16));
@@ -98,13 +94,12 @@ void main() {
         screen: screen,
         anchorAt: Offset(screen.width - 72, 80),
         textScale: 2,
-        // Wider than a small phone in the test font: it wraps instead.
         labels: const ['Rename', 'Remove from this phone'],
       );
       final menu = _items(tester);
       expect(menu.left, greaterThanOrEqualTo(_margin));
       expect(menu.right, lessThanOrEqualTo(screen.width - _margin));
-      expect(tester.takeException(), isNull); // no overflow
+      expect(tester.takeException(), isNull);
     });
   }
 
@@ -178,15 +173,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Rename'), findsOneWidget);
 
-    await tester.binding.handlePopRoute(); // Android Back
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Rename'), findsNothing);
-    expect(
-      find.byKey(const Key('anchor')),
-      findsOneWidget,
-    ); // still on the page
+    expect(find.byKey(const Key('anchor')), findsOneWidget);
 
-    await tester.binding.handlePopRoute(); // now Back leaves
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('anchor')), findsNothing);
   });

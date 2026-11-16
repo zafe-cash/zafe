@@ -1,14 +1,3 @@
-// Renders the app icon and splash SVGs (from scripts/brand/brand.py, in
-// tool/brand/svg/) with flutter_svg into the Android and iOS resources, plus a
-// preview sheet. Not part of `flutter test`; run scripts/brand/icons.sh.
-//
-// Output:
-//   android/app/src/main/res/mipmap-*/ic_launcher{,_foreground,_monochrome}.png
-//   (the adaptive background is the colour @color/zafe_icon_tile)
-//   android/app/src/main/res/drawable{,-night}-*/splash_{icon,mark}.png
-//   ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png
-//   ios/Runner/Assets.xcassets/LaunchImage.imageset/*.png
-//   build/brand_preview/brand_sheet.png
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -28,7 +17,6 @@ const _densities = {
 
 final _pictures = <String, PictureInfo>{};
 
-/// @color/zafe_icon_tile (scripts/brand/brand.py TILE).
 const _tile = Color(0xFF004A46);
 
 Future<PictureInfo> _load(String name) async =>
@@ -87,12 +75,21 @@ void main() {
     }
 
     const iosIcons = {
-      '20x20@1x': 20, '20x20@2x': 40, '20x20@3x': 60, //
-      '29x29@1x': 29, '29x29@2x': 58, '29x29@3x': 87,
-      '40x40@1x': 40, '40x40@2x': 80, '40x40@3x': 120,
-      '60x60@2x': 120, '60x60@3x': 180,
-      '76x76@1x': 76, '76x76@2x': 152,
-      '83.5x83.5@2x': 167, '1024x1024@1x': 1024,
+      '20x20@1x': 20,
+      '20x20@2x': 40,
+      '20x20@3x': 60,
+      '29x29@1x': 29,
+      '29x29@2x': 58,
+      '29x29@3x': 87,
+      '40x40@1x': 40,
+      '40x40@2x': 80,
+      '40x40@3x': 120,
+      '60x60@2x': 120,
+      '60x60@3x': 180,
+      '76x76@1x': 76,
+      '76x76@2x': 152,
+      '83.5x83.5@2x': 167,
+      '1024x1024@1x': 1024,
     };
     for (final MapEntry(key: name, value: px) in iosIcons.entries) {
       await _emit('icon', px, '$_ios/AppIcon.appiconset/Icon-App-$name.png');
@@ -111,13 +108,10 @@ void main() {
     }
 
     await _write(await _sheet(), 'build/brand_preview/brand_sheet.png');
-    // ignore: avoid_print
-    print('Preview: build/brand_preview/brand_sheet.png');
+    stdout.writeln('Preview: build/brand_preview/brand_sheet.png');
   });
 }
 
-/// Icon in the common launcher masks, the themed (monochrome) icon, small sizes,
-/// and both splash screens.
 Future<ui.Image> _sheet() async {
   const w = 1800.0, h = 1500.0;
   final recorder = ui.PictureRecorder();
@@ -129,7 +123,6 @@ Future<ui.Image> _sheet() async {
 
   Future<void> adaptive(Offset o, double size, Path Function(Rect) mask) async {
     final rect = o & Size(size, size);
-    // The launcher shows the middle 72/108 of the adaptive layers.
     final full = size * 108 / 72;
     final layers = rect.inflate((full - size) / 2);
     c.save();
@@ -157,7 +150,6 @@ Future<ui.Image> _sheet() async {
   await adaptive(const Offset(400, 40), 320, squircle);
   await adaptive(const Offset(760, 40), 320, square);
 
-  // Themed icon (Android 13+): the launcher tints the monochrome layer.
   final themed = const Offset(1120, 40) & const Size(320, 320);
   c.drawOval(themed, Paint()..color = const Color(0xFFCFE3E1));
   final mono = await _render('adaptive_monochrome', 480);
@@ -172,7 +164,6 @@ Future<ui.Image> _sheet() async {
       ),
   );
 
-  // iOS full icon and small sizes.
   final ios = await _render('icon', 320);
   c.save();
   c.clipRRect(
@@ -195,7 +186,6 @@ Future<ui.Image> _sheet() async {
     x += s + 30;
   }
 
-  // Splash screens (phone frames scaled to 0.4 of 1080 x 2400 px at 3x).
   for (final (i, theme, bg) in [
     (0, 'dark', const Color(0xFF080B0B)),
     (1, 'light', const Color(0xFFF1F5F5)),

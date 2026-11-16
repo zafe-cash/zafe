@@ -1,6 +1,5 @@
 import 'package:flutter/painting.dart';
 
-/// macOS utility colors from the Desktop color-token export.
 class AppMacosUtilityColors {
   const AppMacosUtilityColors({
     required this.window,
@@ -24,8 +23,6 @@ class AppMacosUtilityColors {
     navPanel: Color(0x4D1A1A1A),
     font: Color(0xCCFFFFFF),
     thinBorder: Color(0x3B1A1A1A),
-    // The glass panel's inner ring is a white highlight in both Figma
-    // modes (inner shadow #FFFFFF @ 15%), not a dark outline.
     innerBorder: Color(0x26FFFFFF),
   );
 

@@ -1,7 +1,3 @@
-//! The client side of labelled mailboxes, `/v1/push/forget`, `GET /v1/info` and private
-//! relays' create tokens (`docs/relay-move.md` §4.6, §6), against a real relay and against
-//! one older than these routes.
-
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::relay_client::{RelayClient, RelayClientError};
 use zafe_proto::{
@@ -23,8 +19,6 @@ async fn serve(router: axum::Router) -> String {
     format!("http://{addr}")
 }
 
-/// A relay from before these routes: it answers 404 with no body for them (axum's
-/// fallback, as the hosted relay did).
 async fn older_relay() -> String {
     serve(axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }))).await
 }
@@ -65,8 +59,6 @@ async fn labelled_appends_reads_and_push_forget() {
     )
     .unwrap();
 
-    // The creator writes entry 0; another member posts the author's later entry
-    // (catching up).
     for (i, (who, e)) in [(&ids[0], &first), (&ids[1], &second)]
         .into_iter()
         .enumerate()
@@ -82,7 +74,6 @@ async fn labelled_appends_reads_and_push_forget() {
     );
     let log = client.read_log(&ids[2], LABEL, 0).await.unwrap();
     assert_eq!(log, vec![first.clone(), second]);
-    // A label this relay doesn't have is a missing mailbox, not an old relay.
     match client.append_log_to(&ids[1], [9; 16], &first).await {
         Err(RelayClientError::Status { status: 404, body }) => {
             assert_eq!(body, "unknown mailbox")
@@ -149,7 +140,6 @@ async fn a_private_relay_takes_its_create_token() {
 
     let client = RelayClient::new(base).with_create_token(Some("s3cret"));
     open_mailbox(&client, LABEL, &ids).await;
-    // A restore creates a mailbox too.
     let mut rng = StdRng::seed_from_u64(6);
     let key = LogKey::generate(0, &mut rng);
     let entry = LogEntry::create(&ids[0], &key, VAULT, 0, [0; 32], b"a", &mut rng).unwrap();
@@ -167,7 +157,6 @@ async fn a_private_relay_takes_its_create_token() {
         Err(RelayClientError::CreateTokenRefused)
     ));
     assert!(client.reseed(&ids[0], reseed).await.unwrap().open);
-    // Without the token, everything but creating still works.
     assert_eq!(
         without.read_log(&ids[1], [7; 16], 0).await.unwrap(),
         vec![entry]

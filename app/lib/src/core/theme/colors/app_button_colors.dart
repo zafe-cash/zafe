@@ -2,10 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Button colors grouped by variant.
-///
-/// Each variant owns its own sub-palette so widgets reference them as
-/// `button.primary.bg`, `button.ghost.bgHover`, etc.
 class AppButtonColors {
   const AppButtonColors({
     required this.primary,
@@ -59,8 +55,6 @@ class AppPrimaryButtonColors {
   final Color label;
   final Color labelHover;
 
-  // Zafe (Verdigris): a light teal fill with a deep teal label in dark mode, a deep
-  // teal fill with a white label in light mode (docs/brand.md §3).
   static const dark = AppPrimaryButtonColors(
     bg: BrandPrimitives.p400Dark,
     bgHover: BrandPrimitives.p500Dark,
@@ -79,9 +73,7 @@ class AppPrimaryButtonColors {
     border: Primitives.p900Alpha10Light,
     borderHover: Primitives.p900Alpha10Light,
     borderPressed: Primitives.p900Alpha10Light,
-    // theme-pair: the fill flips (light teal / deep teal), so the label does too.
     label: Primitives.p0Light,
-    // theme-pair: as label.
     labelHover: Primitives.p0Light,
   );
 }
@@ -122,8 +114,6 @@ class AppGhostButtonColors {
     required this.label,
   });
 
-  // Transparent-looking base; the concrete token equals ground so the fill
-  // reads as "no fill" against Scaffold.
   final Color bg;
   final Color bgHover;
   final Color border;
@@ -131,9 +121,6 @@ class AppGhostButtonColors {
 
   static const dark = AppGhostButtonColors(
     bg: Primitives.p0Dark,
-    // p100Dark equals the raised/modal surface (#232828), which made the
-    // hover fill invisible on modal panels — one step up stays visible on
-    // both ground and raised surfaces.
     bgHover: Primitives.p150Dark,
     border: Primitives.p300Dark,
     label: Primitives.p700Dark,

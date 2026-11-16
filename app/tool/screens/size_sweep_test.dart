@@ -1,14 +1,3 @@
-// Renders screens and sheets on small to large phones, tablets, foldables (inner and
-// cover screens, a hinge, a half-opened fold), split-screen and landscape windows, at
-// larger system text sizes, laid out as the app does (pages in `AppColumn`). Fails on any
-// layout overflow (Flutter reports it as an error), a button that can't be scrolled into
-// view, text or a button across a hinge, or a button on the hero art. Writes a few renders
-// per size to look at (and every failing one). Not part of `flutter test`; run it
-// explicitly (from app/):
-//
-//   flutter test tool/screens/size_sweep_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): sweep_<case>_<size>_x<scale>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -76,7 +65,6 @@ const _code =
     'zafe-recover-v1:2c9f04d1a7e8b3c56d0f1e2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f'
     '8a9b0c1d2e3f405162738495a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091';
 
-/// (name, page title or null for a sheet, content)
 final _cases = <(String, String?, Widget)>[
   (
     'setup_words',
@@ -319,16 +307,11 @@ final _cases = <(String, String?, Widget)>[
     ),
   ),
   ('sheet_primer', null, const NotificationPrimerSheet()),
-  // The relay picker, the vault's relay in Settings, Create > Relay, the join line,
-  // the seat-recovery vault link and Home during an outage.
   ...relayCases(),
-  // Moving the vault to another relay: the vault relay sheet, outage sheet, Home cards,
-  // Activity row, picker.
   ...relayMoveCases(),
   (
     'backup_words',
     null,
-    // In ZafeScreen's ListView, as in the app: tall with large text, so it scrolls.
     ListView(
       padding: const EdgeInsets.all(16),
       children: const [
@@ -339,8 +322,13 @@ final _cases = <(String, String?, Widget)>[
             'disorder',
             'electric',
             'february',
-            'general', //
-            'happy', 'industry', 'journey', 'kangaroo', 'language', 'mushroom',
+            'general',
+            'happy',
+            'industry',
+            'journey',
+            'kangaroo',
+            'language',
+            'mushroom',
           ],
         ),
       ],
@@ -348,8 +336,6 @@ final _cases = <(String, String?, Widget)>[
   ),
 ];
 
-/// Whole screens, laid out as the router does: in an `AppColumn`, except Welcome, which
-/// handles wide windows itself. `art`: the screen has hero art no button may sit on.
 final _screens = <(String, Widget, {bool column, bool art})>[
   ('welcome', const WelcomeScreen(), column: false, art: true),
   (
@@ -375,13 +361,10 @@ final _screens = <(String, Widget, {bool column, bool art})>[
     column: true,
     art: false,
   ),
-  // Over the router, in its own column.
   ('lock', const LockScreen(onUnlock: _noop), column: false, art: false),
   ('tabs', const _Tabs(), column: true, art: false),
-  // The relay move pages with their pinned buttons.
   for (final (name, screen) in relayMoveScreens())
     ('move_$name', screen, column: true, art: false),
-  // A pushed page with its pinned actions (they scroll with it in a short window).
   (
     'page_actions',
     const ZafeScreen(
@@ -416,7 +399,6 @@ final _screens = <(String, Widget, {bool column, bool art})>[
   ),
 ];
 
-/// Home under the floating tab bar, as `VaultShell` shows it.
 class _Tabs extends StatelessWidget {
   const _Tabs();
 
@@ -467,7 +449,6 @@ class _Tabs extends StatelessWidget {
   );
 }
 
-/// A hinge (Surface Duo: two 540 wide screens, 34 between them) and a half-opened fold.
 const _duoHinge = ui.DisplayFeature(
   bounds: Rect.fromLTWH(540, 0, 34, 720),
   type: ui.DisplayFeatureType.hinge,
@@ -484,35 +465,26 @@ const _tabletopFold = ui.DisplayFeature(
   state: ui.DisplayFeatureState.postureHalfOpened,
 );
 
-/// Logical sizes (width x height), the text scales tried on each, and display features.
-/// Device sizes are approximate classes, not exact models.
 const _sizes = <(String, Size, List<double>, List<ui.DisplayFeature>)>[
-  // Phones (and a foldable's cover screen / a flip phone's main screen, portrait).
   ('320x568', Size(320, 568), [1.0, 1.3, 2.0], []),
   ('360x640', Size(360, 640), [1.0, 1.3, 2.0], []),
   ('390x844', Size(390, 844), [1.0, 1.3], []),
   ('412x915', Size(412, 915), [1.0, 1.3], []),
   ('fold_cover_344x882', Size(344, 882), [1.0, 2.0], []),
-  // Flip phones' cover screens: tiny, nearly square.
   ('flip_cover_360x380', Size(360, 380), [1.0, 1.3, 2.0], []),
   ('flip_cover_300x330', Size(300, 330), [1.0, 1.3], []),
-  // Tablets, both ways, and split-screen halves.
   ('tablet_800x1280', Size(800, 1280), [1.0, 2.0], []),
   ('tablet_1280x800', Size(1280, 800), [1.0, 2.0], []),
   ('split_640x800', Size(640, 800), [1.0, 2.0], []),
   ('split_800x620', Size(800, 620), [1.0, 2.0], []),
-  // Book-style foldables' inner screens, both ways, and half of one in landscape.
   ('fold_inner_840x900', Size(840, 900), [1.0, 2.0], []),
   ('fold_inner_626x890', Size(626, 890), [1.0, 2.0], []),
   ('fold_inner_890x626', Size(890, 626), [1.0, 2.0], []),
   ('fold_split_445x626', Size(445, 626), [1.0, 2.0], []),
-  // A short, wide outer screen (rotates only if the display is large).
   ('outer_466x678', Size(466, 678), [1.0, 1.3, 2.0], []),
   ('outer_678x466', Size(678, 466), [1.0, 2.0], []),
-  // Landscape phone-sized windows (split screen, freeform, a large-screen phone).
   ('landscape_640x360', Size(640, 360), [1.0, 2.0], []),
   ('landscape_915x412', Size(915, 412), [1.0, 1.3], []),
-  // Hinged and half-opened.
   ('duo_hinge_1114x720', Size(1114, 720), [1.0, 2.0], [_duoHinge]),
   ('fold_book_840x900', Size(840, 900), [1.0], [_bookFold]),
   ('fold_tabletop_840x900', Size(840, 900), [1.0], [_tabletopFold]),
@@ -545,7 +517,6 @@ void main() {
 
     for (final (sizeName, size, scales, features) in _sizes) {
       tester.view.physicalSize = size * 2;
-      // Logical pixels (the engine divides by the pixel ratio before the view has them).
       tester.view.displayFeatures = features;
       final phone = !sizeName.contains('_');
       for (final scale in scales) {
@@ -557,8 +528,6 @@ void main() {
                 child: title == null
                     ? Scaffold(
                         backgroundColor: Colors.black54,
-                        // As the sheet sits on a phone: the screen's height and no
-                        // scrolling but its own.
                         body: Align(
                           alignment: Alignment.bottomCenter,
                           child: body,
@@ -604,7 +573,6 @@ void main() {
           );
           await tester.pump(const Duration(milliseconds: 100));
           if (art) {
-            // The art's SVG layers load asynchronously.
             await tester.runAsync(
               () => Future<void>.delayed(const Duration(milliseconds: 50)),
             );
@@ -613,8 +581,6 @@ void main() {
           final where = '$name $sizeName x$scale';
           final checks = <String>[];
           final window = Offset.zero & size;
-          // Every button can be scrolled fully into view, never sits on the hero art
-          // (scrolled to the top and to the end), and nothing crosses a hinge.
           final seen = <Element>{};
           for (final end in [false, true]) {
             if (end) {
@@ -635,7 +601,6 @@ void main() {
                   window.contains(r.bottomRight)) {
                 seen.add(button);
               }
-              // The art fades into the window colour from 74% of its height.
               if (art &&
                   hero != null &&
                   r.overlaps(
@@ -664,7 +629,6 @@ void main() {
                 final box = p.renderObject! as RenderBox;
                 if (!box.hasSize || box.size.isEmpty) continue;
                 var r = box.localToGlobal(Offset.zero) & box.size;
-                // What a scroll view clips off isn't on screen.
                 for (RenderObject? o = box.parent; o != null; o = o.parent) {
                   if (o is RenderBox && o is RenderAbstractViewport) {
                     r = r.intersect(o.localToGlobal(Offset.zero) & o.size);
@@ -706,7 +670,6 @@ void main() {
               (sizeName == '360x640' && scale == 1.3) ||
               (!phone && scale == 1.0);
           if (keep || errors.isNotEmpty || checks.isNotEmpty) {
-            // Back to the top for the picture.
             for (final s in tester.stateList<ScrollableState>(
               find.byType(Scrollable),
             )) {
@@ -733,7 +696,6 @@ void main() {
       }
     }
     await tester.pumpWidget(const SizedBox());
-    // The whole list (the test's failure message elides long ones).
     File(
       '${out.path}/sweep_problems.txt',
     ).writeAsStringSync(problems.join('\n'));

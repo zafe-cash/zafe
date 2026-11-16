@@ -3,7 +3,7 @@ import 'package:zafe/src/providers/zec_price_provider.dart';
 
 void main() {
   test('dollars with thousands separators and cents', () {
-    final zat = BigInt.from(4237485000); // 42.37485 ZEC
+    final zat = BigInt.from(4237485000);
     expect(fiatText(zat, 133.77), r'$5,668.48');
     expect(fiatText(BigInt.zero, 133.77), r'$0.00');
     expect(
@@ -19,7 +19,6 @@ void main() {
     expect(price.usd, 41.5);
     expect(price.freshAt(at.add(const Duration(minutes: 59))), isTrue);
     expect(price.freshAt(at.add(const Duration(hours: 1))), isFalse);
-    // A clock that went backwards doesn't make an old price look fresh.
     expect(price.freshAt(at.subtract(const Duration(minutes: 1))), isFalse);
   });
 
@@ -37,6 +36,6 @@ void main() {
   });
 
   test('dollars only on mainnet builds', () {
-    expect(kShowsFiat, isFalse); // tests build for regtest
+    expect(kShowsFiat, isFalse);
   });
 }

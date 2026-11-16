@@ -9,14 +9,12 @@ import 'endpoints_provider.dart';
 
 enum ServerCheck { checking, ok, unavailable, wrongNetwork }
 
-/// What a lightwalletd server answered to an info call.
 class ServerProbe {
   const ServerProbe(this.check, [this.latency]);
   static const checking = ServerProbe(ServerCheck.checking);
 
   final ServerCheck check;
 
-  /// Round trip of the info call, when it answered.
   final Duration? latency;
 
   String get label => switch (check) {
@@ -27,8 +25,6 @@ class ServerProbe {
   };
 }
 
-/// Asks lightwalletd at `url` for its info (network and tip) and times it. Goes through
-/// Tor when "Use Tor" is on, like every other request.
 Future<ServerProbe> probeLightwalletd(String url) async {
   final watch = Stopwatch()..start();
   try {
@@ -47,7 +43,6 @@ Future<ServerProbe> probeLightwalletd(String url) async {
   }
 }
 
-/// An automatic move from one listed Zcash server to another.
 class ServerSwitch {
   const ServerSwitch({required this.from, required this.to});
   final LightwalletdPreset from;
@@ -57,10 +52,6 @@ class ServerSwitch {
       '${from.label} wasn\'t answering. Switched to ${to.label}.';
 }
 
-/// Moves sync to another listed lightwalletd server when the chosen one fails, and keeps
-/// the last move for the app to announce. Only between presets: a custom server is the
-/// user's choice and is never left. At most one attempt per [_cooldown], so a phone that
-/// is merely offline doesn't walk the list on every poll.
 class ServerFailoverNotifier extends Notifier<ServerSwitch?> {
   static const _cooldown = Duration(minutes: 5);
   DateTime? _lastAttempt;
@@ -68,7 +59,6 @@ class ServerFailoverNotifier extends Notifier<ServerSwitch?> {
   @override
   ServerSwitch? build() => null;
 
-  /// The sync failures a different server can fix.
   static bool serverProblem(SyncFailure failure) =>
       failure.endpoint == SyncEndpoint.lightwalletd &&
       switch (failure.kind) {
@@ -79,8 +69,6 @@ class ServerFailoverNotifier extends Notifier<ServerSwitch?> {
         _ => false,
       };
 
-  /// After a failed sync: tries the other presets in order and switches to the first that
-  /// answers on this network. Returns true when it switched (sync should run again).
   Future<bool> afterSyncFailure(Object error) async {
     final failure = classifySyncFailure(error);
     if (!serverProblem(failure)) return false;
@@ -94,7 +82,6 @@ class ServerFailoverNotifier extends Notifier<ServerSwitch?> {
     for (final preset in lightwalletdFallbacks(fromUrl)) {
       final probe = await probeLightwalletd(preset.url);
       if (probe.check != ServerCheck.ok) continue;
-      // The user may have picked another server meanwhile.
       if (ref.read(endpointsProvider).lightwalletdUrl != fromUrl) return false;
       await ref
           .read(endpointsProvider.notifier)

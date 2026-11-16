@@ -13,9 +13,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `watch_vault_with`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
-/// Watches the vault for activity until `stop_vault_watch(watch_id)` or a watch with a
-/// higher `watch_id` starts. Returns at once; events arrive on the stream, failures
-/// included (they are events, not errors). The stream closes when the watch ends.
 Stream<VaultActivity> watchVault({
   required String relayUrl,
   required List<int> seeds,
@@ -28,17 +25,11 @@ Stream<VaultActivity> watchVault({
   watchId: watchId,
 );
 
-/// Stops the watch `watch_id` and any older one (also one whose start hasn't arrived
-/// yet).
 void stopVaultWatch({required PlatformInt64 watchId}) =>
     RustLib.instance.api.crateApiWatchStopVaultWatch(watchId: watchId);
 
 class VaultActivity {
   final VaultActivityKind kind;
-
-  /// Something was delivered to this member (or may have been, on `Connected`): the
-  /// app answers signing requests only then, or after a minute (each answer reads the
-  /// inbox, ~2 s over Tor).
   final bool inbox;
   final ZafeError? error;
   final int retryInSecs;
@@ -65,18 +56,4 @@ class VaultActivity {
           retryInSecs == other.retryInSecs;
 }
 
-enum VaultActivityKind {
-  /// The watch reaches the relay (first time, or again after failures): activity will
-  /// be reported as it happens.
-  connected,
-
-  /// The vault log grew or something was delivered to this member: refresh.
-  activity,
-
-  /// The relay has no long polls (older relay): the watch has ended; keep polling.
-  unsupported,
-
-  /// An attempt failed (`error`); the watch retries in `retry_in_secs`. When
-  /// `retry_in_secs` is 0 the watch has ended (e.g. a version mismatch or bad input).
-  failed,
-}
+enum VaultActivityKind { connected, activity, unsupported, failed }

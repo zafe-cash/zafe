@@ -2,20 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Icon color hierarchy retained from the OLDSemantic icon tokens.
-///
-/// * [accent] — Active, selected, primary icons.
-/// * [regular] — Standard UI icons. (Named `regular` instead of `default`
-///   because `default` is a reserved word in Dart.)
-/// * [muted] — Inactive, decorative icons. Theme-invariant.
-/// * [disabled] — Icons on disabled controls.
-/// * [inverse] — Icons on inverted surfaces.
-/// * [onPrimary] — Icons placed inside a primary button.
-/// * [warning] — Caution icons (orange warning ladder).
-/// * [destructive] — Destructive-state icons.
-/// * [destructiveLight] — Softer destructive icon for secondary error affordances.
-/// * [value] — Money received and success: Zcash gold, the value colour.
-/// * [brand] — Brand-colored icons.
 class AppIconColors {
   const AppIconColors({
     required this.accent,

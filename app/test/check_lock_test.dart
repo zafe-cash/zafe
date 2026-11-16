@@ -17,7 +17,6 @@ void main() {
       if (runs.length == 1) await first.future;
     });
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    // Two pushes while the first check runs: one repeat, not two, and no lost news.
     await CheckLock(dir).run('a', (_) async => runs.add('second'));
     await CheckLock(dir).run('a', (_) async => runs.add('third'));
     first.complete();

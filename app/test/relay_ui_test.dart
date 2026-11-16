@@ -123,7 +123,6 @@ void main() {
   });
 
   group('picker', () {
-    // Opens the picker on `current` (a relay the vault is on) and records what it pops.
     Future<List<RelayChoice?>> open(WidgetTester tester, String current) async {
       final popped = <RelayChoice?>[];
       await tester.pumpWidget(

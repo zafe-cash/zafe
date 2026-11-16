@@ -13,10 +13,6 @@ import '../../theme/app_theme.dart';
 import '../app_icon.dart';
 import '../app_tappable.dart';
 
-// Detail vocabulary shared by the payment review and proposal screens: the payment
-// card, detail rows, signer tiles/rows and the approval dots.
-
-/// 40px ZEC coin (fixed Zcash yellow).
 class ZecCoin extends StatelessWidget {
   const ZecCoin({super.key});
 
@@ -37,9 +33,6 @@ class ZecCoin extends StatelessWidget {
   );
 }
 
-/// The payment at the top of the review and proposal screens: the Zcash mark and a label,
-/// the amount in large type on the plain vault card (`colors.vaultCard`, like Home's
-/// balance card), and the recipient (shielded address, compact) with "Full address".
 class PaymentCard extends StatelessWidget {
   const PaymentCard({
     super.key,
@@ -52,17 +45,14 @@ class PaymentCard extends StatelessWidget {
     this.strikethrough = false,
   });
 
-  /// Amount without the ticker ("1.5").
   final String amountText;
 
-  /// First recipient's address; null for money the vault received (no recipient box).
   final String? address;
   final VoidCallback? onFullAddress;
   final String label;
   final int recipients;
   final bool hidden;
 
-  /// Rejected or cancelled payments.
   final bool strikethrough;
 
   @override
@@ -73,7 +63,6 @@ class PaymentCard extends StatelessWidget {
         ? TextDecoration.lineThrough
         : TextDecoration.none;
     return Container(
-      // Plain, like every other card (and Home's balance card).
       decoration: BoxDecoration(
         color: card.background,
         borderRadius: BorderRadius.circular(AppRadii.large),
@@ -108,8 +97,6 @@ class PaymentCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.s),
-                // Shrinks to fit rather than cut the ticker on narrow phones with
-                // large system text.
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
@@ -139,9 +126,6 @@ class PaymentCard extends StatelessWidget {
                     maxLines: 1,
                   ),
                 ),
-                // One recipient: its address and "Full address". Several: the
-                // recipients list under the card shows each one (here the first one's
-                // address and a "Full address" read as the only recipient).
                 if (address != null && recipients == 1) ...[
                   const SizedBox(height: AppSpacing.md),
                   _Recipient(
@@ -233,8 +217,6 @@ class _Recipient extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.small),
         border: Border.all(color: card.insetBorder),
       ),
-      // Zafe: at large system text the button goes under the address (side by side
-      // they squeezed each other to a few letters).
       child: MediaQuery.textScalerOf(context).scale(10) >= 15
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -267,7 +249,6 @@ class DetailRow extends StatelessWidget {
   final String value;
   final Widget? trailing;
 
-  /// Adds a help icon after the label that calls this (e.g. to open an explanation).
   final VoidCallback? onHelp;
 
   @override
@@ -287,8 +268,6 @@ class DetailRow extends StatelessWidget {
               child: AppIcon(AppIcons.help, size: 16, color: colors.icon.muted),
             ),
           );
-    // Zafe: at large system text (1.5x and up) label and value don't fit side by side:
-    // the value goes under the label.
     if (MediaQuery.textScalerOf(context).scale(10) >= 15) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,14 +299,9 @@ class DetailRow extends StatelessWidget {
     }
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 32),
-      // Zafe: label (up to 2/5) and value (up to 3/5) each wrap only when they don't
-      // fit, label left and value right, so a short value never breaks mid-word next
-      // to a long label on a narrow phone.
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // The label and its help icon stay together on the left (as the value and
-          // its icon do on the right).
           Flexible(
             flex: 2,
             child: Row(
@@ -345,8 +319,6 @@ class DetailRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          // The value and its icon sit together at the right edge (spread apart by
-          // spaceBetween, a value with an icon floated mid-row).
           Flexible(
             flex: 3,
             child: Row(
@@ -376,8 +348,6 @@ class DetailRow extends StatelessWidget {
   }
 }
 
-/// A transaction id: tap opens it in the block explorer (ZecBlock), long-press copies
-/// it. Where there is no explorer (regtest) or nothing can open it, a tap copies.
 class TxIdRow extends StatefulWidget {
   const TxIdRow({super.key, required this.txid});
   final String txid;
@@ -386,8 +356,6 @@ class TxIdRow extends StatefulWidget {
   State<TxIdRow> createState() => _TxIdRowState();
 }
 
-/// Tap opens the explorer (copies where there is none); long press copies. A copy
-/// turns the icon into a check for a moment, no toast.
 class _TxIdRowState extends State<TxIdRow> {
   bool _copied = false;
 
@@ -452,9 +420,6 @@ class DetailDivider extends StatelessWidget {
   );
 }
 
-/// A member's tile: a rounded square with a mirrored 5 x 5 pattern and a hue both
-/// derived from the member key, so the same signer looks the same on every device.
-/// [me] adds a brand outline.
 class SignerTile extends StatelessWidget {
   const SignerTile({
     super.key,
@@ -503,7 +468,6 @@ class _SignerSeed {
   const _SignerSeed(this.hue, this.cells);
   final double hue;
 
-  /// 15 bits: 5 rows x 3 columns (mirrored to 5 columns).
   final int cells;
 
   static _SignerSeed of(String keyHex) {
@@ -514,7 +478,6 @@ class _SignerSeed {
       bytes.add(b);
     }
     if (bytes.length < 4) {
-      // Not a hex key: fall back to a stable string hash.
       var h = 0x811C9DC5;
       for (final c in keyHex.codeUnits) {
         h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF;
@@ -525,7 +488,6 @@ class _SignerSeed {
     }
     final hue = (((bytes[0] << 8) | bytes[1]) % 360).toDouble();
     var cells = ((bytes[2] << 8) | bytes[3]) & 0x7FFF;
-    // Keep the tile from looking empty or solid.
     final filled = _popCount(cells);
     if (filled < 5) cells |= 0x4A52;
     if (filled > 11) cells &= 0x5AD5;
@@ -578,8 +540,6 @@ class _SignerPatternPainter extends CustomPainter {
       old.cells != cells || old.color != color;
 }
 
-/// A signer: tile, name ("You", the local name, or the short key; with a name the short
-/// key shows below) and an optional trailing tag. Tappable when [onTap] is set.
 class SignerRow extends StatelessWidget {
   const SignerRow({
     super.key,
@@ -591,10 +551,8 @@ class SignerRow extends StatelessWidget {
   });
   final String keyHex;
 
-  /// This device's key (for "You"), if known.
   final String? me;
 
-  /// The name to show: this device's label for the signer, else the name they shared.
   final String? name;
   final Widget? trailing;
   final VoidCallback? onTap;
@@ -605,7 +563,6 @@ class SignerRow extends StatelessWidget {
     final isMe = keyHex == me;
     final hasName = name?.isNotEmpty ?? false;
     final named = isMe || hasName;
-    // The short key shows under a name, so a name a member gave itself needs none here.
     final title = isMe
         ? (hasName ? 'You · $name' : 'You')
         : (hasName ? name! : shortKey(keyHex));
@@ -660,9 +617,6 @@ class SignerRow extends StatelessWidget {
 
 enum SignerMark { approved, rejected, waiting }
 
-/// One dot per signer, approvals first (brand), then open seats (outline), then
-/// rejections (muted, crossed). A short bar after the [threshold]-th dot marks how
-/// many approvals the payment needs.
 class ApprovalDots extends StatelessWidget {
   const ApprovalDots({
     super.key,
@@ -760,7 +714,6 @@ class _Dot extends StatelessWidget {
   }
 }
 
-/// Quiet vote status at the end of signer rows (icon + text).
 class SignerTag extends StatelessWidget {
   const SignerTag({
     super.key,
@@ -773,7 +726,6 @@ class SignerTag extends StatelessWidget {
   final String label;
   final Color color;
 
-  /// Only for states that need attention; otherwise the tag is plain text.
   final Color? background;
   final String? icon;
   final Color? iconColor;

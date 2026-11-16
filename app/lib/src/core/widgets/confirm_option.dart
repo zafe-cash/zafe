@@ -4,7 +4,6 @@ import '../theme/app_theme.dart';
 import 'app_icon.dart';
 import 'app_tappable.dart';
 
-/// A tappable row the user ticks to confirm they checked something (safety words).
 class ConfirmOption extends StatelessWidget {
   const ConfirmOption({
     super.key,

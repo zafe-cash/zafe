@@ -2,14 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// The sync status in the top nav: green when in sync, orange when something failed.
-///
-/// * [text], [glow] — "Synced" and the status indicator's glow: a muted green (status,
-///   not money: gold is the value colour; teal means tappable). Chosen 2026-10-27.
-/// * [textError], [glowError] — A failure ("Can't reach server"): the warning orange,
-///   text and glow alike, so the whole status changes colour.
-/// * [torText], [torGlow] — The same two while "Use Tor" is on: Tor's purple, so the
-///   status line shows at a glance that traffic goes through Tor.
 class AppSyncColors {
   const AppSyncColors({
     required this.text,

@@ -1,6 +1,3 @@
-// Renders every vault emblem motif in every palette to
-// build/screen_preview/vault_emblems.png:
-//   flutter test tool/screens/emblem_render_test.dart
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -11,7 +8,6 @@ import 'package:zafe/src/features/vaults/vault_emblem.dart';
 
 void main() {
   testWidgets('render vault emblems', (tester) async {
-    // Find ids that land on each motif, then show each in several palettes.
     final byMotif = <int, List<String>>{};
     for (var i = 0; byMotif.values.fold(0, (n, l) => n + l.length) < 48; i++) {
       final id = i.toRadixString(16).padLeft(32, '0');

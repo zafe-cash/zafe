@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
-# M0 acceptance test: three separate `zafe` processes (members A, B, C) create a 2-of-3
-# vault through the relay, the vault is funded on a local Ironwood regtest chain, A
-# proposes a payment, B and C verify, approve and sign, and A broadcasts it.
-#
-# Needs Docker and `ths` (see infra/regtest/up.sh). Run from the repository root: scripts/m0-e2e.sh
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/zafe-m0.XXXXXX")
 RELAY_PORT=${ZAFE_M0_RELAY_PORT:-48787}
-# ths moves every port by the offset: lightwalletd on 39267.
 export ZAFE_REGTEST_NAME=zafe-m0 ZAFE_REGTEST_PORT_OFFSET=30200
 export ZAFE_RELAY="http://127.0.0.1:$RELAY_PORT" ZAFE_LIGHTWALLETD="http://127.0.0.1:$((9067 + ZAFE_REGTEST_PORT_OFFSET))"
 
@@ -27,7 +21,7 @@ trap cleanup EXIT
 step() { printf '\n== %s\n' "$*"; }
 member() { local who=$1; shift; "$ZAFE" --home "$WORK/$who" "$@"; }
 mine() { "${THS:-ths}" --name "$ZAFE_REGTEST_NAME" mine "$1" >/dev/null; }
-wait_lwd() {  # wait until lightwalletd serves height $1
+wait_lwd() {
   for _ in $(seq 120); do
     h=$(member A sync 2>/dev/null | awk '{print $2}') || true
     [[ "${h:-0}" -ge "$1" ]] && return 0
@@ -39,7 +33,7 @@ wait_lwd() {  # wait until lightwalletd serves height $1
 step "relay"
 ZAFE_RELAY_LISTEN="127.0.0.1:$RELAY_PORT" ZAFE_RELAY_DB="$WORK/relay.sqlite" "$ROOT/target/debug/zafe-relay" &
 RELAY_PID=$!
-for _ in $(seq 50); do  # wait until the relay accepts connections
+for _ in $(seq 50); do
   (exec 3<>"/dev/tcp/127.0.0.1/$RELAY_PORT") 2>/dev/null && break
   sleep 0.2
 done
@@ -54,7 +48,6 @@ member C vault join "$INVITE"
 member A vault seal
 
 step "everyone compares the safety words (commit, then reveal: all three at once)"
-# Wait for these three only: a bare `wait` would also wait for the relay.
 pids=()
 for who in A B C; do member "$who" vault members --wait > "$WORK/m$who" & pids+=($!); done
 for pid in "${pids[@]}"; do wait "$pid"; done
@@ -96,9 +89,6 @@ member B approve "$PROPOSAL"
 member C approve "$PROPOSAL"
 member A proposals
 
-# Keygen published every member's commitment pool, so the approvals above already carry
-# the signature shares (one tap); anyone can aggregate and broadcast. The interactive
-# request/respond/finalize path is covered by `bridge_e2e`.
 step "A aggregates the approvals, proves and broadcasts"
 member A send "$PROPOSAL"
 mine 2

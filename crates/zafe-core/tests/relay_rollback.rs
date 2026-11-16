@@ -1,9 +1,3 @@
-//! A relay that lost or rewound the vault log is refused, and a member can restore it from
-//! the copy of the log kept on the device (spec §6.3, §14).
-//!
-//! The "old relay" is a second relay started from a snapshot of the first one's database
-//! taken earlier (a restored backup); "wiped" is an empty relay.
-
 use std::{path::Path, time::Duration};
 
 use rand::{rngs::StdRng, SeedableRng};
@@ -28,7 +22,6 @@ async fn serve(relay: Relay) -> String {
     format!("http://{addr}")
 }
 
-/// A copy of the live database as of now (what restoring last night's backup gives).
 fn snapshot(db: &Path, to: &Path) {
     let conn = rusqlite::Connection::open(db).unwrap();
     conn.execute("VACUUM INTO ?1", [to.to_str().unwrap()])
@@ -40,7 +33,6 @@ struct Vault {
     material: Vec<VaultMaterial>,
 }
 
-/// Three members make a 2-of-3 vault on `relay`.
 async fn make_vault(relay: &RelayClient) -> Vault {
     let mut rng = StdRng::seed_from_u64(70);
     let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(&mut rng)).collect();
@@ -129,7 +121,6 @@ async fn make_vault(relay: &RelayClient) -> Vault {
 
 struct World {
     dir: tempfile::TempDir,
-    /// The relay members use, on a database file.
     url: String,
     vault: Vault,
 }
@@ -139,7 +130,6 @@ impl World {
         self.dir.path().join("relay.db")
     }
 
-    /// Member `i`'s view of the relay at `url`, with its own saved copy of the log.
     fn client(&self, i: usize, url: &str) -> RelayClient {
         let cache = LogCache::in_dir(self.dir.path().join(format!("copy-{i}")));
         RelayClient::new(url).with_log_cache(Some(cache))
@@ -173,7 +163,6 @@ async fn len(w: &World, i: usize, url: &str) -> Result<u64, NodeError> {
         .map(|(chain, _)| chain.len())
 }
 
-/// A relay started from a snapshot of the live one, as the member at `url` left it.
 async fn rewound(w: &World, tag: &str) -> String {
     let snap = w.dir.path().join(format!("{tag}.db"));
     snapshot(&w.db(), &snap);
@@ -183,22 +172,17 @@ async fn rewound(w: &World, tag: &str) -> String {
 #[tokio::test]
 async fn a_relay_serving_an_older_log_is_refused() {
     let w = world().await;
-    // Member 0 has seen the log as it is now.
     let before = len(&w, 0, &w.url).await.unwrap();
-    // A backup of the relay is taken, then the vault moves on.
     let old = rewound(&w, "old").await;
     name(&w, 1, &w.url, "Bob").await;
     name(&w, 2, &w.url, "Carol").await;
     assert_eq!(len(&w, 0, &w.url).await.unwrap(), before + 2);
 
-    // The relay comes back from the backup: two entries are gone.
     let err = len(&w, 0, &old).await.unwrap_err();
     assert!(
         matches!(err, NodeError::RelayRolledBack { local_len } if local_len == before + 2),
         "{err:?}"
     );
-    // A device with no copy of the log (a new install) can't tell either: it trusts what
-    // it is served the first time.
     let fresh = RelayClient::new(&old).with_log_cache(None);
     let (chain, _) = load_state(&fresh, &w.vault.ids[2], &w.vault.material[2])
         .await
@@ -213,7 +197,6 @@ async fn a_relay_serving_another_history_is_refused() {
     name(&w, 1, &w.url, "Bob").await;
     name(&w, 2, &w.url, "Carol").await;
     let total = len(&w, 0, &w.url).await.unwrap();
-    // On the restored relay the vault went on differently: two other entries.
     let bare = RelayClient::new(&old).with_log_cache(None);
     let mut rng = StdRng::seed_from_u64(5);
     for (i, text) in [(0, "Zed"), (1, "Yan")] {
@@ -233,7 +216,6 @@ async fn a_wiped_relay_is_reported_and_restored_from_a_members_copy() {
     let w = world().await;
     name(&w, 1, &w.url, "Bob").await;
     let total = len(&w, 0, &w.url).await.unwrap();
-    // Members 0 and 1 hold the log; member 2 has never loaded it on this device.
     assert_eq!(len(&w, 1, &w.url).await.unwrap(), total);
 
     let wiped = serve(Relay::new()).await;
@@ -242,10 +224,8 @@ async fn a_wiped_relay_is_reported_and_restored_from_a_members_copy() {
         matches!(err, NodeError::RelayLostVault { local_len } if local_len == total),
         "{err:?}"
     );
-    // A device with no copy gets the plain "unknown vault" error from the relay.
     assert!(len(&w, 2, &wiped).await.is_err());
 
-    // Member 0 restores the relay from its copy.
     let relay = w.client(0, &wiped);
     let out = reseed_relay(
         &relay,
@@ -257,13 +237,11 @@ async fn a_wiped_relay_is_reported_and_restored_from_a_members_copy() {
     .unwrap();
     assert_eq!(out, Reseeded::Restored { entries: total });
 
-    // Everyone reads the same log from it, and keeps appending.
     for i in 0..3 {
         assert_eq!(len(&w, i, &wiped).await.unwrap(), total, "member {i}");
     }
     name(&w, 2, &wiped, "Carol").await;
     assert_eq!(len(&w, 0, &wiped).await.unwrap(), total + 1);
-    // Another member's attempt finds it already restored.
     let again = reseed_relay(
         &w.client(1, &wiped),
         &w.vault.ids[1],
@@ -306,7 +284,6 @@ async fn restoring_never_overwrites_another_history() {
     let other = rewound(&w, "other").await;
     name(&w, 1, &w.url, "Bob").await;
     assert!(len(&w, 0, &w.url).await.is_ok());
-    // The other relay's next entry differs from the live one's.
     let bare = RelayClient::new(&other).with_log_cache(None);
     let mut rng = StdRng::seed_from_u64(6);
     set_name(
@@ -325,7 +302,6 @@ async fn restoring_never_overwrites_another_history() {
         &w.vault.material[0].log_key(),
     )
     .await;
-    // Same length as the copy but another entry at the end: a fork, not a restore.
     assert!(matches!(err, Err(NodeError::RelayForked { .. })), "{err:?}");
 }
 
@@ -358,13 +334,11 @@ async fn a_restore_in_progress_cannot_be_joined_or_continued_by_others() {
         finish,
         timestamp: 0,
     };
-    // The first entry only: not open yet.
     let a = relay
         .reseed(&w.vault.ids[0], request(0, false))
         .await
         .unwrap();
     assert_eq!((a.len, a.open, a.restored), (1, false, true));
-    // Another member can't push entries into it (it isn't theirs), nor can anyone read it.
     assert!(w
         .client(1, &wiped)
         .reseed(&w.vault.ids[1], request(1, false))
@@ -375,13 +349,11 @@ async fn a_restore_in_progress_cannot_be_joined_or_continued_by_others() {
         .read_log(&w.vault.ids[1], request(0, false).mailbox, 0)
         .await
         .is_ok());
-    // A repeated request reports where the log is instead of failing or duplicating.
     let b = relay
         .reseed(&w.vault.ids[0], request(0, false))
         .await
         .unwrap();
     assert_eq!(b.len, 1);
-    // Entries that skip ahead or don't chain are refused.
     assert!(relay
         .reseed(
             &w.vault.ids[0],
@@ -392,7 +364,6 @@ async fn a_restore_in_progress_cannot_be_joined_or_continued_by_others() {
         )
         .await
         .is_err());
-    // Not open: ordinary appends are refused until it is finished.
     let mut rng = StdRng::seed_from_u64(9);
     assert!(set_name(
         &w.client(0, &wiped),
@@ -405,8 +376,6 @@ async fn a_restore_in_progress_cannot_be_joined_or_continued_by_others() {
     .is_err());
 }
 
-/// A mailbox the creator is still setting up (invite out, members joining) is not a
-/// restore target: reseeding can't be used to push a log into it or to seal it.
 #[tokio::test]
 async fn a_mailbox_still_being_set_up_is_not_reseeded() {
     use zafe_proto::relay::Reseed;
@@ -429,8 +398,6 @@ async fn a_mailbox_still_being_set_up_is_not_reseeded() {
     assert!(relay.reseed(&ids[0], request).await.is_err());
 }
 
-/// A member restoring a wiped relay chooses its members and threshold; the relay can't read
-/// the log to check them, so the other members do (spec §6.3).
 #[tokio::test]
 async fn a_relay_restored_with_other_members_or_threshold_is_refused() {
     use zafe_proto::relay::Reseed;
@@ -480,7 +447,6 @@ async fn a_relay_restored_with_other_members_or_threshold_is_refused() {
                 },
             )
             .await;
-        // A relay may refuse a list that omits its own signer; the others get through.
         if answer.is_err() {
             continue;
         }
@@ -493,7 +459,6 @@ async fn a_relay_restored_with_other_members_or_threshold_is_refused() {
     }
     assert!(checked >= 2, "the relay accepted too few of the attacks");
 
-    // An honest restore still passes the check.
     let url = serve(Relay::new()).await;
     reseed_relay(
         &w.client(2, &url),
@@ -506,7 +471,6 @@ async fn a_relay_restored_with_other_members_or_threshold_is_refused() {
     assert_eq!(len(&w, 0, &url).await.unwrap(), total);
 }
 
-/// After `RelayForked` the minority device can choose to follow the relay.
 #[tokio::test]
 async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
     let w = world().await;
@@ -514,7 +478,6 @@ async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
     name(&w, 1, &w.url, "Bob").await;
     name(&w, 2, &w.url, "Carol").await;
     let total = len(&w, 0, &w.url).await.unwrap();
-    // Two other entries on the relay the device is about to meet.
     let bare = RelayClient::new(&old).with_log_cache(None);
     let mut rng = StdRng::seed_from_u64(5);
     for (i, text) in [(0, "Zed"), (1, "Yan")] {
@@ -529,7 +492,6 @@ async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
         Err(NodeError::RelayForked { .. })
     ));
 
-    // Not a fork: nothing is discarded.
     let refused = follow_relay(&w.client(0, &w.url), &w.vault.ids[0], ids, &key).await;
     assert!(
         matches!(refused, Err(NodeError::Protocol(_))),
@@ -546,15 +508,12 @@ async fn a_forked_device_can_discard_its_copy_and_follow_the_relay() {
     );
     assert_eq!(out.entries, total);
     assert_eq!(len(&w, 0, &old).await.unwrap(), total);
-    // The copy now follows that relay: the first relay is the one that looks forked.
     assert!(matches!(
         len(&w, 0, &w.url).await,
         Err(NodeError::RelayForked { .. })
     ));
 }
 
-/// A device copy that no longer verifies is reported, not silently replaced by whatever
-/// the relay serves; following the relay then replaces it (audit L9).
 #[tokio::test]
 async fn a_copy_that_does_not_verify_is_an_error_until_the_member_follows_the_relay() {
     let w = world().await;
@@ -564,7 +523,6 @@ async fn a_copy_that_does_not_verify_is_an_error_until_the_member_follows_the_re
     let ids = w.vault.material[0].ids();
     let key = w.vault.material[0].log_key();
 
-    // Damage the last saved entry (it still parses, but its signature no longer holds).
     let cache = LogCache::in_dir(w.dir.path().join("copy-0"));
     let mut saved = cache.read(&mailbox).unwrap();
     saved.last_mut().unwrap().ciphertext[30] ^= 1;
@@ -582,10 +540,6 @@ async fn a_copy_that_does_not_verify_is_an_error_until_the_member_follows_the_re
     assert_eq!(len(&w, 0, &w.url).await.unwrap(), total);
 }
 
-// --- Labelled vaults and anchors (docs/relay-move.md §4.6, §6, §8 K-L) -------------------
-
-/// A new vault's relay mailbox is a random label, not its vault id: everything addressed
-/// to the relay uses the label, while the log entries carry the vault id.
 #[tokio::test]
 async fn a_new_vault_lives_under_a_label() {
     let w = world().await;
@@ -598,8 +552,6 @@ async fn a_new_vault_lives_under_a_label() {
         .entries()
         .iter()
         .all(|e| e.header.mailbox == m.descriptor.vault_id));
-    // Nothing is filed under the vault id: knowing it (it's in every invite) gives no
-    // mailbox to read, and none that can be squatted on the next relay.
     let by_id = relay
         .read_log(&w.vault.ids[0], m.descriptor.vault_id, 0)
         .await;
@@ -610,14 +562,11 @@ async fn a_new_vault_lives_under_a_label() {
         ),
         "{by_id:?}"
     );
-    // Every member's material agrees on both ids.
     for other in &w.vault.material[1..] {
         assert_eq!(other.ids(), m.ids());
     }
 }
 
-/// A backup carries the vault's log copy. The restored phone installs it before its first
-/// load, so a relay rolled back to before the backup is refused instead of trusted.
 #[tokio::test]
 async fn a_restored_backup_refuses_a_relay_with_a_shorter_history() {
     use zafe_core::backup::{self, Contents, KdfParams};
@@ -626,7 +575,6 @@ async fn a_restored_backup_refuses_a_relay_with_a_shorter_history() {
     name(&w, 1, &w.url, "Bob").await;
     let total = len(&w, 2, &w.url).await.unwrap();
 
-    // Member 2 makes a backup with its copy of the log.
     let log: Vec<Vec<u8>> = w
         .client(2, &w.url)
         .log_cache()
@@ -654,7 +602,6 @@ async fn a_restored_backup_refuses_a_relay_with_a_shorter_history() {
     )
     .unwrap();
 
-    // A new phone restores it: the copy is installed first.
     let contents = backup::decrypt(&bytes, pass).unwrap();
     let material = contents.validate().unwrap();
     assert_eq!(material.ids(), w.vault.material[2].ids());
@@ -671,13 +618,11 @@ async fn a_restored_backup_refuses_a_relay_with_a_shorter_history() {
         matches!(err, NodeError::RelayRolledBack { local_len } if local_len == total),
         "{err:?}"
     );
-    // The live relay holds the backup's history: it loads.
     let (chain, _) = load_state(&restored(&w.url), &w.vault.ids[2], &material)
         .await
         .unwrap();
     assert_eq!(chain.len(), total);
 
-    // A log copy that doesn't verify is refused, and nothing is installed.
     let other = LogCache::in_dir(w.dir.path().join("restored-bad"));
     let mut bad = contents.log.clone();
     let last = bad.last_mut().unwrap();
@@ -690,8 +635,6 @@ async fn a_restored_backup_refuses_a_relay_with_a_shorter_history() {
         .is_empty());
 }
 
-/// With the relay down, the unapproved-spend alert runs on this phone's log copy and says
-/// from when; the relay status records since when the relay can't be reached.
 #[tokio::test]
 async fn the_spend_alert_falls_back_to_the_log_copy_when_the_relay_is_down() {
     let w = world().await;
@@ -706,7 +649,6 @@ async fn the_spend_alert_falls_back_to_the_log_copy_when_the_relay_is_down() {
     assert!(reached.last_reached.is_some());
     assert!(reached.unreachable_since.is_none());
 
-    // The vault's relay stops answering (port 9: nothing listens).
     let mut down = w.vault.material[0].clone();
     down.relay.url = Some("http://127.0.0.1:9".into());
     let relay =
@@ -727,15 +669,12 @@ async fn the_spend_alert_falls_back_to_the_log_copy_when_the_relay_is_down() {
     assert_eq!(state.proposals.len(), expected.proposals.len());
     assert!(zafe_core::spend_watch::unapproved_spends(&state, &[]).is_empty());
 
-    // Reached again: the outage is over.
     load_state(&live, &w.vault.ids[0], &w.vault.material[0])
         .await
         .unwrap();
     assert!(cache.relay_status(&vault).unreachable_since.is_none());
 }
 
-/// A recovered seat is anchored by its helpers: each sigma carries the helper's log length
-/// and head, and a relay serving the new phone a shorter history is refused.
 #[tokio::test]
 async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
     use zafe_core::repair::{
@@ -800,7 +739,6 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
     }
     let total = len(&w, 1, &w.url).await.unwrap();
 
-    // A relay that lost the last entry but kept the sigmas (its mailbox is the label).
     let snap = w.dir.path().join("lost-entry.db");
     snapshot(&w.db(), &snap);
     {
@@ -823,13 +761,11 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
         matches!(err, NodeError::RelayRolledBack { local_len } if local_len == total),
         "{err:?}"
     );
-    // Nothing was saved as that phone's anchor.
     assert!(LogCache::in_dir(w.dir.path().join("new-phone-a"))
         .read(&w.vault.material[1].descriptor.vault_id)
         .unwrap()
         .is_empty());
 
-    // The live relay serves the whole history: recovered, and anchored there.
     let honest = new_phone(&w.url, "new-phone-b");
     let RecoveryStatus::Done { material, invite } = try_recover(&honest, &fresh, label, &confirmed)
         .await
@@ -850,8 +786,6 @@ async fn a_recovered_seat_refuses_a_relay_with_a_shorter_history() {
     );
 }
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
 fn member_dir(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -869,12 +803,10 @@ fn member_dir(
     ))
 }
 
-/// The key that seals one member's setup state (any fixed key per member will do).
 fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
     zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
 }
 
-/// One member's safety words for `invite`, polled from its setup state dir.
 async fn safety_words(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,

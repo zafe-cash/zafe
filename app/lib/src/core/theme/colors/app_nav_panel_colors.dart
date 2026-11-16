@@ -2,7 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Navigation-panel colors from the Figma `Semantic/Nav Panel` tokens.
 class AppNavPanelColors {
   const AppNavPanelColors({
     required this.badgeBg,

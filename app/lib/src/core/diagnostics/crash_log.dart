@@ -6,11 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../errors/zafe_error_copy.dart' show describeError;
 import 'scrub.dart';
 
-/// A small crash and error log kept **on this phone only**. Nothing here is sent anywhere:
-/// Settings > "Diagnostic report" shows it and the user decides whether to share it.
-///
-/// Entries are scrubbed (`scrubDiagnostics`) before they are written, and the file keeps
-/// only the latest [maxEntries] entries / [maxBytes] bytes.
 class CrashLog {
   CrashLog(
     this.file, {
@@ -20,9 +15,6 @@ class CrashLog {
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
-  /// The log of the app (`isBackground: false`) or of the background engine, both in
-  /// [dir] (`<support>/diagnostics`): each writes its own file and reads the other's, and
-  /// the Rust panic hook's `rust-panics.log` is part of the report.
   factory CrashLog.forDir(String dir, {required bool isBackground}) {
     final mine = File(
       '$dir/${isBackground ? 'crashes-bg.log' : 'crashes.log'}',
@@ -38,20 +30,14 @@ class CrashLog {
     );
   }
 
-  /// The log of this process, set by `main()` (null in tests and before startup).
   static CrashLog? instance;
 
-  /// Where this isolate appends. Each isolate (the app, the WorkManager/FCM background
-  /// engine) writes only its own file, so two isolates never race on one file.
   final File file;
 
-  /// The other isolates' files: read, merged by time and cleared, never written here.
   final List<File> peers;
 
-  /// One line per Rust panic (file:line only), written by the bridge's panic hook.
   final File? panicFile;
 
-  /// One line per slow Rust call (names and durations only), `timings.log`.
   final File? timingFile;
   final DateTime Function() _now;
 
@@ -62,10 +48,8 @@ class CrashLog {
 
   Future<void> _tail = Future.value();
 
-  /// Appends an entry. Never throws: a broken log must not turn into a second crash.
   Future<void> record(String source, Object error, [StackTrace? stack]) {
     final entry = _format(source, error, stack);
-    // One writer at a time, in order.
     return _tail = _tail.then((_) => _append(entry)).catchError((_) {});
   }
 
@@ -76,7 +60,6 @@ class CrashLog {
         .take(_maxStackLines);
     final body = [
       '${_now().toUtc().toIso8601String()} $source',
-      // Typed bridge errors carry free text from deep inside Rust; scrub like the rest.
       error.runtimeType.toString(),
       describeError(error),
       ...lines,
@@ -109,15 +92,12 @@ class CrashLog {
     }
   }
 
-  /// The entries of every isolate, oldest first (each starts with a UTC timestamp).
-  /// Empty when there are none or the files can't be read.
   Future<List<String>> read() async {
     await _tail;
     final all = [
       ...await _entries(),
       for (final p in peers) ...await _entries(p),
     ];
-    // Stable for equal stamps, so one isolate's order is kept.
     final indexed = all.indexed.toList()
       ..sort((a, b) {
         final c = a.$2.compareTo(b.$2);
@@ -126,7 +106,6 @@ class CrashLog {
     return [for (final e in indexed) e.$2];
   }
 
-  /// The Rust panic notes, scrubbed again here. Empty when there are none.
   Future<List<String>> readPanics() async {
     final f = panicFile;
     if (f == null) return <String>[];
@@ -140,7 +119,6 @@ class CrashLog {
     }
   }
 
-  /// The last slow-call notes (`<time> sync total=…ms lock=…ms open=…ms ...`).
   Future<List<String>> readTimings({int last = 40}) async {
     final f = timingFile;
     if (f == null) return <String>[];
@@ -161,12 +139,11 @@ class CrashLog {
       try {
         await f.delete();
       } on FileSystemException {
-        // Already gone.
+        if (await f.exists()) rethrow;
       }
     }
   }
 
-  /// What the user can share: a header with no identifiers, then the entries.
   Future<String> report({required String network}) async {
     final entries = await read();
     final panics = await readPanics();
@@ -204,7 +181,6 @@ class CrashLog {
     return line.length > 48 ? line.substring(0, 48) : line;
   }
 
-  /// Routes Flutter and uncaught async errors here, after whoever was installed before.
   void install() {
     final previousFlutter = FlutterError.onError;
     FlutterError.onError = (details) {

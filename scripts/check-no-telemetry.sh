@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Zafe sends no telemetry: no analytics, crash-reporting or tracking SDK may enter the
-# dependency files. Firebase Messaging (content-free push) is the one Firebase piece we
-# allow. A deliberate exception needs an edit here, reviewed with the privacy docs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -14,13 +11,11 @@ files=$(git ls-files 'app/pubspec.yaml' 'app/pubspec.lock' 'app/android/**/*.gra
 
 status=0
 for f in $files; do
-  # Whole package names, not substrings (unicode-segmentation is not "segment").
   if hits=$(grep -vE '^[[:space:]]*(#|//)' "$f" | grep -oE '[A-Za-z0-9_.@/:-]+' \
       | grep -Ei "^($banned)($|[-_./:])" | sort -u); then
     echo "telemetry dependency in $f:"; echo "$hits"; status=1
   fi
 done
-# Android manifest: no analytics/ads IDs or collection switches left on.
 if grep -rnEi 'firebase_analytics_collection|google_analytics|AD_ID|com\.google\.android\.gms\.ads' \
     app/android/app/src --include=AndroidManifest.xml 2>/dev/null; then status=1; fi
 [ $status -eq 0 ] && echo "no telemetry dependencies"

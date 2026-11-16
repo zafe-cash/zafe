@@ -3,15 +3,6 @@ import 'package:flutter/widgets.dart';
 import '../../theme/app_theme.dart';
 import '../app_icon.dart';
 
-/// Shared review-header vocabulary for the mobile transaction-status
-/// screens (post-send `MobileSendStatusScreen` and activity-tap
-/// `MobileTransactionStatusScreen`). These were duplicated verbatim in
-/// both screens; they are phase-independent presentation widgets, so they
-/// live here while each screen keeps its own phase-coupled detail card.
-
-/// One serif review row — Figma `_Reivew Info` (4265:59148): a 40px leading
-/// badge, the small grey label, the Headline-L serif value, and an optional
-/// bottom strip (pool tag / show-full-address / sub-address).
 class MobileReviewInfoRow extends StatelessWidget {
   const MobileReviewInfoRow({
     required this.label,
@@ -77,7 +68,6 @@ class MobileReviewInfoRow extends StatelessWidget {
   }
 }
 
-/// The 24px flow arrow centered under the 40px badge column.
 class MobileReviewFlowArrow extends StatelessWidget {
   const MobileReviewFlowArrow({super.key});
 
@@ -96,7 +86,6 @@ class MobileReviewFlowArrow extends StatelessWidget {
   }
 }
 
-/// The round ZEC coin — Figma `Asset Image` with the ZEC network logo.
 class MobileReviewZecBadge extends StatelessWidget {
   const MobileReviewZecBadge({super.key});
 
@@ -114,9 +103,6 @@ class MobileReviewZecBadge extends StatelessWidget {
   }
 }
 
-/// 40px circular badge on the neutral subtle-opacity fill — the generic
-/// wallet/counterparty leading slot. Circular (not a stadium/pill) to match
-/// the desktop receipt's `ReviewInfoIconCircle` and the 40px contact avatar.
 class MobileReviewIconBadge extends StatelessWidget {
   const MobileReviewIconBadge({required this.child, super.key});
 

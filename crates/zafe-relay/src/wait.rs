@@ -1,12 +1,3 @@
-//! Long polls (`POST /v1/wait`): a member's open app waits here and hears about vault
-//! activity at once instead of on its next poll.
-//!
-//! Each mailbox with someone waiting has a `tokio::sync::watch` counter that
-//! `log_append` and `post_envelope` bump after they commit. A waiter subscribes before
-//! it reads the database, so a write between that read and the wait still wakes it. The
-//! database mutex is never held while waiting. Concurrent waits are capped per signing
-//! key and in total, so waits can't exhaust the relay's connections.
-
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -15,12 +6,8 @@ use std::{
 use tokio::sync::watch;
 use zafe_proto::MailboxId;
 
-/// Concurrent waits per signing key (the app runs one; a restart may overlap an old one
-/// the relay hasn't noticed is gone yet).
 pub const DEFAULT_WAITS_PER_KEY: usize = 2;
-/// Concurrent waits on the whole relay.
 pub const DEFAULT_WAITS_TOTAL: usize = 4096;
-/// `Retry-After` for a wait refused by the caps.
 pub const WAIT_RETRY_SECS: u64 = 5;
 
 #[derive(Default)]
@@ -46,7 +33,6 @@ impl Waiters {
         }
     }
 
-    /// Wakes everyone waiting on `mailbox` (no-op when nobody is).
     pub(crate) fn signal(&self, mailbox: &MailboxId) {
         let mut map = self.mailboxes.lock().expect("lock");
         if let Some(tx) = map.get(mailbox) {
@@ -58,7 +44,6 @@ impl Waiters {
         }
     }
 
-    /// Starts listening for signals on `mailbox`.
     pub(crate) fn subscribe(self: &Arc<Self>, mailbox: MailboxId) -> Subscription {
         let rx = self
             .mailboxes
@@ -74,7 +59,6 @@ impl Waiters {
         }
     }
 
-    /// Takes a wait slot for `key`, or `None` when a cap is reached.
     pub(crate) fn acquire(self: &Arc<Self>, key: [u8; 32]) -> Option<Slot> {
         let mut slots = self.slots.lock().expect("lock");
         let mine = slots.per_key.get(&key).copied().unwrap_or(0);
@@ -95,7 +79,6 @@ impl Waiters {
     }
 }
 
-/// A subscription to a mailbox's signals; forgets the mailbox when its last one drops.
 pub(crate) struct Subscription {
     rx: Option<watch::Receiver<u64>>,
     waiters: Arc<Waiters>,
@@ -103,11 +86,8 @@ pub(crate) struct Subscription {
 }
 
 impl Subscription {
-    /// Returns after the next signal since the last call (or since subscribing).
     pub(crate) async fn changed(&mut self) {
         if let Some(rx) = &mut self.rx {
-            // The sender lives in the map while this receiver exists, so this only
-            // fails if the relay is shutting down; then there is nothing to wait for.
             if rx.changed().await.is_err() {
                 std::future::pending::<()>().await;
             }
@@ -128,8 +108,6 @@ impl Drop for Subscription {
     }
 }
 
-/// A held wait slot, given back on drop (also when the client disconnects and axum drops
-/// the handler).
 pub(crate) struct Slot {
     waiters: Arc<Waiters>,
     key: [u8; 32],

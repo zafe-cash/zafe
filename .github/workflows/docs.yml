@@ -1,7 +1,5 @@
 name: Docs
 
-# Markdown and docs pages only: CI skips these paths, so links and docs labels are checked
-# here (the site workflow checks the built site's links too).
 on:
   push:
     branches: [main]

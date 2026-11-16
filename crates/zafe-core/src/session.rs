@@ -1,28 +1,3 @@
-//! Asynchronous FROST signing sessions for a proposal (spec §9.4–§9.5).
-//!
-//! - **Approve** (member): verify the PCZT, generate one nonce pair per spend to sign,
-//!   store the secret nonces, and publish the commitments with the vote.
-//! - **Signing request** (leader): once at least t members have approved, choose t of
-//!   them and send one signing package per spend.
-//! - **Sign** (member): re-verify everything, check each package against the local
-//!   sighash and the member's own commitments, *delete* the nonces, then produce shares.
-//! - **Aggregate** (leader): verify every share (cheater detection), aggregate one
-//!   RedPallas signature per spend, and return them for injection into the PCZT.
-//!
-//! If a chosen member never answers, the leader picks another set of approvers whose
-//! commitments are still unused and sends a new request.
-//!
-//! **One-tap signing** (preprocessing): members pre-publish commitments to the vault log
-//! (`PoolStore` keeps the secret nonces). A new proposal fixes, from the log, the
-//! commitments of every signer group (t-subset), so an approving member can produce its
-//! shares immediately (`Member::sign_groups`), and any complete group can be aggregated
-//! without a request round. Security: Re-Randomized FROST (ePrint 2024/436) proves
-//! unforgeability with the message, signer set and randomizer chosen by the adversary
-//! after honest round-1 commitments (its game, Fig. 4), building on the preprocessing
-//! analysis of FROST (Bellare et al. 2022). What must hold: each commitment gets at most
-//! one round-2 response (nonces are taken, i.e. deleted, before signing) and the package
-//! (sighash, `alpha`, group) is fixed before a share is produced.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use orchard::keys::FullViewingKey;
@@ -75,8 +50,6 @@ pub enum SessionError {
     Storage(String),
 }
 
-/// `BLAKE2b-256("Zafe_PCZT_Hash__", serialized unsigned PCZT)`: binds votes and signing
-/// requests to one exact proposal transaction.
 pub fn pczt_hash(pczt: &Pczt) -> Result<[u8; 32], SessionError> {
     let bytes = pczt
         .clone()
@@ -89,14 +62,8 @@ pub fn pczt_hash(pczt: &Pczt) -> Result<[u8; 32], SessionError> {
     Ok(hash.as_bytes().try_into().expect("32 bytes"))
 }
 
-/// Where a member keeps secret nonces between approving and signing.
-///
-/// Implementations on devices MUST use this-device-only storage excluded from backups
-/// (spec §9.4). `take` must remove the nonces *before* returning them, and only one of
-/// two concurrent `take`s (two processes: the app and a background check) may get them.
 pub trait NonceStore {
     fn contains(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> bool;
-    /// The public commitments of the stored nonces, without consuming them.
     fn commitments(
         &self,
         proposal: &ProposalId,
@@ -109,36 +76,20 @@ pub trait NonceStore {
         nonces: Vec<SigningNonces>,
     ) -> Result<(), SessionError>;
     fn take(&mut self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> Option<Vec<SigningNonces>>;
-    /// Whether a `take` of these nonces was started and hasn't finished (another process is
-    /// signing with them now, or one crashed while doing so): they count as released.
     fn claimed(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> bool;
 
-    /// Keeps an encoded reply (signature shares) to the signing request with hash
-    /// `request_hash` until it is sent. Signing consumed the nonces, so if the send fails
-    /// these bytes are the only way to answer that request (audit L3).
     fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError>;
     fn kept_reply(&self, request_hash: &[u8; 32]) -> Option<Vec<u8>>;
     fn drop_reply(&mut self, request_hash: &[u8; 32]);
-    /// Every reply kept and not sent yet (a reject checks none is for its proposal).
     fn kept_replies(&self) -> Vec<Vec<u8>>;
 }
 
-/// Secret nonces for pre-published commitments, keyed by the serialized commitment.
-///
-/// Same rules as [`NonceStore`]: this-device-only, excluded from backups, and `take`
-/// deletes before returning.
 pub trait PoolStore {
     fn put(&mut self, commitment: &[u8], nonces: SigningNonces) -> Result<(), SessionError>;
     fn contains(&self, commitment: &[u8]) -> bool;
     fn take(&mut self, commitment: &[u8]) -> Option<SigningNonces>;
-    /// Deletes a nonce that will never be used (its proposal closed).
     fn forget(&mut self, commitment: &[u8]);
 
-    /// Keeps a one-tap vote (its encoded `VaultEvent`) until it is in the vault log.
-    /// Signing consumed the nonces, so if the append fails these bytes are the only way to
-    /// post the same shares again; without them the member could only approve
-    /// interactively, and its group could never complete. The shares are public once
-    /// logged, so this file holds nothing secret.
     fn keep_vote(
         &mut self,
         _proposal: &ProposalId,
@@ -147,15 +98,12 @@ pub trait PoolStore {
     ) -> Result<(), SessionError> {
         Ok(())
     }
-    /// The vote kept by [`PoolStore::keep_vote`], if any.
     fn kept_vote(&self, _proposal: &ProposalId, _pczt_hash: &[u8; 32]) -> Option<Vec<u8>> {
         None
     }
-    /// Deletes a kept vote (it is in the log, or its proposal closed).
     fn drop_vote(&mut self, _proposal: &ProposalId, _pczt_hash: &[u8; 32]) {}
 }
 
-/// In-memory pool store (tests).
 #[derive(Default)]
 pub struct MemoryPoolStore(
     BTreeMap<Vec<u8>, SigningNonces>,
@@ -193,9 +141,6 @@ impl PoolStore for MemoryPoolStore {
     }
 }
 
-/// Generates `count` fresh nonce pairs, stores the secret nonces in `pool`, and returns
-/// the serialized commitments to publish. Nonces are stored *before* publication, so a
-/// published commitment never lacks its nonce on this device.
 pub fn new_pool_commitments<R: RngCore + CryptoRng>(
     key_package: &KeyPackage,
     count: usize,
@@ -214,7 +159,6 @@ pub fn new_pool_commitments<R: RngCore + CryptoRng>(
     Ok(out)
 }
 
-/// The signing package for one spend of one signer group of a preprocessed proposal.
 pub fn group_package(
     commitments: &[Vec<u8>],
     group: &[Identifier],
@@ -235,7 +179,6 @@ pub fn group_package(
     Ok(signing::signing_package(map, sighash))
 }
 
-/// In-memory nonce store (tests and the CLI).
 #[derive(Default)]
 pub struct MemoryNonceStore(
     BTreeMap<(ProposalId, [u8; 32]), Vec<SigningNonces>>,
@@ -268,7 +211,7 @@ impl NonceStore for MemoryNonceStore {
         self.0.remove(&(*proposal, *pczt_hash))
     }
     fn claimed(&self, _: &ProposalId, _: &[u8; 32]) -> bool {
-        false // `take` is one step here
+        false
     }
     fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError> {
         self.1.insert(*request_hash, reply.to_vec());
@@ -285,8 +228,6 @@ impl NonceStore for MemoryNonceStore {
     }
 }
 
-/// What a member publishes with an Approve vote: one commitment per spend to sign,
-/// in `spends_to_sign` order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Approval {
     pub member: Identifier,
@@ -295,7 +236,6 @@ pub struct Approval {
     pub commitments: Vec<SigningCommitments>,
 }
 
-/// A member's context for one proposal.
 pub struct Member<'a> {
     pub identifier: Identifier,
     pub key_package: &'a KeyPackage,
@@ -303,8 +243,6 @@ pub struct Member<'a> {
 }
 
 impl Member<'_> {
-    /// Verifies the proposal and, if it passes, generates and stores nonces and returns
-    /// the approval to publish, plus the verified facts for display.
     pub fn approve<R: RngCore + CryptoRng>(
         &self,
         proposal: ProposalId,
@@ -335,9 +273,6 @@ impl Member<'_> {
         ))
     }
 
-    /// Round 2. Re-verifies the PCZT, checks every package, deletes the nonces, and
-    /// returns one share per spend. The nonces are gone even if signing then fails:
-    /// a nonce is never used twice.
     pub fn sign(
         &self,
         request: &SigningRequest,
@@ -362,8 +297,6 @@ impl Member<'_> {
             }
         }
 
-        // Check every package against our stored commitments *before* consuming the
-        // nonces, so a stale or forged request cannot destroy valid nonces.
         let ours = store
             .commitments(&request.proposal, &request.pczt_hash)
             .ok_or(SessionError::NoNonces)?;
@@ -379,10 +312,9 @@ impl Member<'_> {
             .take(&request.proposal, &request.pczt_hash)
             .ok_or(SessionError::NoNonces)?;
         if nonces.iter().map(|n| *n.commitments()).collect::<Vec<_>>() != ours {
-            return Err(SessionError::NoNonces); // store changed underneath us; nonces now gone
+            return Err(SessionError::NoNonces);
         }
 
-        // alpha comes from this member's own verification of the PCZT, never the request.
         let mut shares = Vec::with_capacity(spends.len());
         for ((package, nonce), spend) in request.packages.iter().zip(nonces).zip(spends) {
             shares.push(signing::sign(
@@ -396,20 +328,11 @@ impl Member<'_> {
     }
 }
 
-/// A signer group to sign: its index, its members' FROST identifiers (group order), and
-/// the commitments fixed for it, per spend then per member.
 pub type GroupPlan = (usize, Vec<Identifier>, Vec<Vec<Vec<u8>>>);
 
-/// This member's shares per signer group: `(group, one share per spend)`.
 pub type GroupSignatures = Vec<(usize, Vec<SignatureShare>)>;
 
 impl Member<'_> {
-    /// One-tap approval: verifies the proposal and signs every signer group this member is
-    /// in, returning `(group, shares per spend)`. `groups[g]` are the members' FROST
-    /// identifiers and `commitments[g][spend]` the commitments fixed for that group.
-    ///
-    /// Every assigned commitment is checked to be this member's and present in `pool`
-    /// before any nonce is consumed; then each nonce is taken (deleted) and used once.
     pub fn sign_groups(
         &self,
         pczt: &Pczt,
@@ -420,7 +343,6 @@ impl Member<'_> {
         let verified = verify_pczt(pczt, self.vault_fvk, expected)?;
         let spends = &verified.spends_to_sign;
 
-        // Build and check everything first.
         let mut planned = Vec::with_capacity(my_groups.len());
         for (group, ids, commitments) in my_groups {
             if commitments.len() != spends.len() {
@@ -449,7 +371,6 @@ impl Member<'_> {
             planned.push((*group, packages));
         }
 
-        // Then consume: each nonce is deleted before its share exists.
         let mut out = Vec::with_capacity(planned.len());
         for (group, packages) in planned {
             let mut shares = Vec::with_capacity(packages.len());
@@ -473,8 +394,6 @@ impl Member<'_> {
     }
 }
 
-/// Aggregates one signature per spend for a complete preprocessed signer group. Every
-/// share is verified; an invalid share yields a FROST error naming the culprit.
 pub fn aggregate_group(
     ids: &[Identifier],
     commitments: &[Vec<Vec<u8>>],
@@ -508,7 +427,6 @@ pub fn aggregate_group(
     Ok(signatures)
 }
 
-/// Sent by the leader to the chosen signers: one signing package per spend.
 #[derive(Clone, Debug)]
 pub struct SigningRequest {
     pub proposal: ProposalId,
@@ -517,7 +435,6 @@ pub struct SigningRequest {
     pub packages: Vec<SigningPackage>,
 }
 
-/// The leader's view of a proposal's signing session.
 pub struct Leader {
     proposal: ProposalId,
     pczt_hash: [u8; 32],
@@ -525,12 +442,10 @@ pub struct Leader {
     sighash: [u8; 32],
     spends: Vec<SpendToSign>,
     approvals: BTreeMap<Identifier, Vec<SigningCommitments>>,
-    /// Members whose commitments were already put in a request (not reusable).
     used: BTreeSet<Identifier>,
 }
 
 impl Leader {
-    /// Starts from the leader's own verification of the proposal PCZT.
     pub fn new(
         proposal: ProposalId,
         pczt: &Pczt,
@@ -548,9 +463,6 @@ impl Leader {
         })
     }
 
-    /// Records an approval, or fresh commitments from a member re-approving after a
-    /// failed round (their earlier nonces are gone). Ignores approvals for other PCZTs or
-    /// with the wrong shape.
     pub fn add_approval(&mut self, approval: Approval) -> bool {
         let valid = approval.proposal == self.proposal
             && approval.pczt_hash == self.pczt_hash
@@ -562,7 +474,6 @@ impl Leader {
         valid
     }
 
-    /// Approvers whose commitments have not been used in a request yet.
     pub fn available_signers(&self) -> Vec<Identifier> {
         self.approvals
             .keys()
@@ -571,8 +482,6 @@ impl Leader {
             .collect()
     }
 
-    /// Builds a signing request for exactly `threshold` approvers whose commitments are
-    /// unused. Marks their commitments as used.
     pub fn request(&mut self, signers: &[Identifier]) -> Result<SigningRequest, SessionError> {
         let signers: BTreeSet<Identifier> = signers.iter().copied().collect();
         if signers.len() != self.threshold {
@@ -605,17 +514,12 @@ impl Leader {
         })
     }
 
-    /// Makes `signers`' commitments available again after a request that never reached
-    /// them (a signer that got a request keeps its commitments used: answering it consumes
-    /// its nonces).
     pub fn release(&mut self, signers: &[Identifier]) {
         for id in signers {
             self.used.remove(id);
         }
     }
 
-    /// Aggregates one signature per spend. Every share is verified; an invalid share
-    /// yields a FROST error naming the culprit.
     pub fn aggregate(
         &self,
         request: &SigningRequest,
@@ -626,9 +530,6 @@ impl Leader {
     }
 }
 
-/// Verifies every share and aggregates one signature per spend for `request`. Shares must
-/// come from exactly the request's signers. On an invalid share, the FROST error names the
-/// culprit.
 pub fn aggregate_request(
     request: &SigningRequest,
     spends: &[SpendToSign],

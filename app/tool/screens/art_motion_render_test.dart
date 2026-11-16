@@ -1,10 +1,3 @@
-// Renders frames of the animated art (key shards drifting and joining; the Sent coins
-// leaving the slot) in both themes for review without a device. Not part of `flutter test`; run it from app/:
-//
-//   flutter test tool/screens/art_motion_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): key_shards_<theme>_<ms>.png,
-// sent_coins_<theme>_<ms>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -51,7 +44,6 @@ void main() {
       }
 
       await tester.pumpWidget(app(false));
-      // flutter_svg decodes off the test clock.
       for (var i = 0; i < 6; i++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 200)),
@@ -108,7 +100,6 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 16));
       }
-      // The stream while sending.
       for (final ms in [600, 1400, 2600]) {
         await tester.pump(const Duration(milliseconds: 400));
         await tester.pump(Duration(milliseconds: ms - 400));
@@ -149,7 +140,6 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 16));
     }
-    // The first push starts 0.7 s in.
     await tester.pump(const Duration(milliseconds: 700));
     var t = 0;
     for (final ms in [

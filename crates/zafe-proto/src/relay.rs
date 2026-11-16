@@ -1,10 +1,3 @@
-//! Relay API types (spec §6). Request and response bodies are postcard behind a
-//! [`version::RELAY_API`] tag (envelopes and log entries carry their own tags); every
-//! request is signed by a member identity, over the API version too. A relay answers a
-//! body tagged with a version it doesn't speak with HTTP 426 and
-//! [`UNSUPPORTED_VERSION_HEADER`] set to the version it supports. The relay never sees
-//! plaintext vault data.
-
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
@@ -17,14 +10,10 @@ use crate::{
 
 const SIGNATURE_DOMAIN: &[u8] = b"Zafe relay request v1";
 
-/// Response header of a 426 (Upgrade Required): the version of the rejected format that
-/// the relay supports.
 pub const UNSUPPORTED_VERSION_HEADER: &str = "zafe-supported-version";
 
-/// Read requests must be at most this old (and not from the future) when they arrive.
 pub const MAX_REQUEST_SKEW_SECS: u64 = 300;
 
-/// A request payload signed by `signer`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Signed<T> {
     pub payload: T,
@@ -42,8 +31,6 @@ impl<T: Serialize + DeserializeOwned> Signed<T> {
         })
     }
 
-    /// Checks the signature against the embedded signer. Callers must separately check
-    /// that the signer is allowed to make the request.
     pub fn verify(&self) -> Result<&T, ProtoError> {
         self.signer
             .verify(&signed_bytes(&self.payload)?, &self.signature)?;
@@ -66,62 +53,43 @@ fn signed_bytes<T: Serialize>(payload: &T) -> Result<Vec<u8>, ProtoError> {
     Ok(out)
 }
 
-/// Opens a mailbox for a vault being created. Signed by the creator.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateMailbox {
     pub mailbox: MailboxId,
-    /// BLAKE2b hash of the invite's join token. The token is shared by all invited members
-    /// and stops working when the creator seals membership.
     pub join_token_hash: [u8; 32],
-    /// The vault's member count `n` (creator included); joins beyond it are refused.
     pub max_members: u16,
 }
 
-/// Removes a joined member before sealing (e.g. a stranger with a leaked invite). Signed by
-/// the creator.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Remove {
     pub mailbox: MailboxId,
     pub member: [u8; 32],
 }
 
-/// Cancels a vault setup: deletes the mailbox, its members and anything stored for it, so
-/// the invite stops working. Signed by the creator, only before sealing (`POST
-/// /v1/mailbox/cancel`, a newer route: a relay without it answers 404 and the app just
-/// forgets the vault locally).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CancelSetup {
     pub mailbox: MailboxId,
 }
 
-/// How long an invite lets a new member join, in seconds, from when it was issued or
-/// last renewed. An invite is a bearer credential until the setup locks: this bounds a
-/// leaked one. Members already in the setup can always rejoin.
 pub const INVITE_TTL_SECS: u64 = 72 * 3600;
 
-/// Restarts an unlocked setup's invite clock ([`INVITE_TTL_SECS`]). Signed by the creator
-/// (`POST /v1/mailbox/renew`, a newer route: a relay without it answers 404, and its
-/// invites never expire).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenewInvite {
     pub mailbox: MailboxId,
 }
 
-/// Joins a mailbox using the invite's token. Signed by the joining member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Join {
     pub mailbox: MailboxId,
     pub join_token: [u8; 32],
 }
 
-/// Freezes membership to exactly `members` (their Ed25519 keys). Signed by the creator.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Seal {
     pub mailbox: MailboxId,
     pub members: Vec<[u8; 32]>,
 }
 
-/// Reads envelopes delivered to the signer after `after` (exclusive cursor).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxRead {
     pub mailbox: MailboxId,
@@ -129,15 +97,8 @@ pub struct InboxRead {
     pub timestamp: u64,
 }
 
-/// Most cursors one [`InboxAck`] may name.
 pub const MAX_ACK_CURSORS: usize = 256;
 
-/// Deletes envelopes the signer has handled (`POST /v1/inbox/ack`), by delivery cursor.
-/// Only the signer's own deliveries are touched; unknown cursors are ignored. Ranges are
-/// deliberately not supported: one inbox holds messages for different flows (a member's
-/// signing requests and, as leader, the shares it collects), and each flow acknowledges
-/// only what it finished. A relay without this endpoint answers 404; its deliveries
-/// expire after the retention period instead.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxAck {
     pub mailbox: MailboxId,
@@ -145,66 +106,37 @@ pub struct InboxAck {
     pub timestamp: u64,
 }
 
-/// How many deliveries an [`InboxAck`] deleted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxAckResponse {
     pub deleted: u64,
 }
 
-/// Most items one read returns (log entries, inbox envelopes). A log read that returns
-/// fewer has reached the end of the log, unless the byte budget cut it
-/// ([`page_may_continue`]), so a client needs no second read to learn that.
 pub const READ_PAGE: u64 = 500;
 
-/// Largest request body a relay accepts.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 
-/// Largest log entry or envelope a relay stores (`LogEntry::to_bytes`,
-/// `Envelope::to_bytes`). Below [`MAX_BODY_BYTES`] by room for the largest request that
-/// carries one stored item: a `/v1/mailbox/reseed` of that entry with `MAX_MEMBERS` (64)
-/// members (64 bytes each) and its signed wrapper. Equal limits let an append store an
-/// entry no restore or relay move could ever copy (413).
 pub const MAX_ENTRY_BYTES: usize = MAX_BODY_BYTES - 64 * 1024;
 
-/// The body of a 507 that refuses one recipient only: the sender's share of that
-/// member's inbox is full (count or bytes). Every other 507 (the vault's or the relay's
-/// storage, the sender's own total) refuses the write for every recipient.
 pub const RECIPIENT_FULL: &str = "this member's inbox is full for this sender";
 
-/// The body of a 507 for a vault log at its cap, or its author's half of it. The log is
-/// kept for good, so only a server with more room helps (a move copies the log).
 pub const LOG_FULL: &str = "this vault's history is full on this relay";
 
-/// The body of a 507 for a relay whose database is full (or nearly, for a young mailbox).
 pub const RELAY_FULL: &str = "this relay is full";
 
-/// A read stops adding items once the next one would take the page over this many bytes,
-/// measured by [`page_bytes`] (never the encoded response). A page always holds at least
-/// one item, so a page stays under `READ_BUDGET_BYTES + MAX_ENTRY_BYTES` and well under what
-/// a client reads (64 MiB), and reading always makes progress.
 pub const READ_BUDGET_BYTES: usize = 16 * 1024 * 1024;
 
-/// The size of a page for [`READ_BUDGET_BYTES`]: the sum of its items' byte lengths, as
-/// stored (log entries, envelopes). Relays and clients measure the same thing.
 pub fn page_bytes<'a>(items: impl IntoIterator<Item = &'a [u8]>) -> usize {
     items.into_iter().map(<[u8]>::len).sum()
 }
 
-/// Whether a relay may hold more after a page of `len` items and `bytes`
-/// ([`page_bytes`]): it was full, or the budget cut it (the item that didn't fit was
-/// smaller than [`MAX_BODY_BYTES`]: entries stored before [`MAX_ENTRY_BYTES`] was lowered
-/// may be larger than that). Honest pages never come near the budget.
 pub fn page_may_continue(len: usize, bytes: usize) -> bool {
     len as u64 >= READ_PAGE || bytes > READ_BUDGET_BYTES - MAX_BODY_BYTES
 }
 
-/// Whether a page of `len` items and `bytes` ([`page_bytes`]) has room for one more of
-/// `next` bytes: always for the first item, then only within [`READ_BUDGET_BYTES`].
 pub fn page_has_room(len: usize, bytes: usize, next: usize) -> bool {
     len == 0 || (len < READ_PAGE as usize && bytes + next <= READ_BUDGET_BYTES)
 }
 
-/// Reads log entries from index `from`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogRead {
     pub mailbox: MailboxId,
@@ -212,17 +144,12 @@ pub struct LogRead {
     pub timestamp: u64,
 }
 
-/// Lists the mailbox's current members.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MembersRead {
     pub mailbox: MailboxId,
     pub timestamp: u64,
 }
 
-/// Records the vault's approval threshold `t` on the relay, so that moving a lost member's
-/// seat to a new key ([`LabelledReplace`]) later needs `t` members' approvals. Signed by the
-/// creator, before sealing (`POST /v1/mailbox/threshold`, a newer route: a relay without it
-/// answers 404 and its vaults can't move seats).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetThreshold {
     pub mailbox: MailboxId,
@@ -231,9 +158,6 @@ pub struct SetThreshold {
 
 const REPLACE_DOMAIN: &[u8] = b"Zafe replace member v1";
 
-/// The approval format before seat moves became pending (vault event versions 4 to 11):
-/// a member's signature over moving the seat of `old` to `new`. Kept only so old vault
-/// logs still replay; new apps never sign it and relays no longer take it (spec §10.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplaceApproval {
     pub mailbox: MailboxId,
@@ -248,7 +172,6 @@ impl ReplaceApproval {
         Ok(out)
     }
 
-    /// Signs the old format (tests that build old logs only).
     pub fn sign(&self, identity: &Identity) -> Result<Vec<u8>, ProtoError> {
         Ok(identity.sign(&self.signing_bytes()?).to_vec())
     }
@@ -262,9 +185,6 @@ const SEAT_APPROVAL_DOMAIN: &[u8] = b"Zafe seat move approval v2";
 const SEAT_FINISH_DOMAIN: &[u8] = b"Zafe seat move finish v1";
 const SEAT_CANCEL_DOMAIN: &[u8] = b"Zafe seat move cancel v1";
 
-/// Identifies one seat move: `H(vault id, old, new, round)`, where `round` is how many
-/// times the seat's owner kept the seat (`VaultEvent::KeepSeat`) before this move. A move
-/// asked again after a keep is a different move, even to the same new key.
 pub fn seat_move_id(
     vault_id: &MailboxId,
     old: &[u8; 32],
@@ -289,11 +209,6 @@ fn domain_bytes<T: Serialize>(domain: &[u8], value: &T) -> Result<Vec<u8>, Proto
     Ok(out)
 }
 
-/// What a member signs to approve moving the seat of `old` (a member who lost their
-/// device) to the new key `new` (spec §10.1), in round `round` of that seat. The same
-/// signature goes into the vault log (every member checks it there) and to the relay
-/// ([`LabelledReplace`]). Signed over the vault id, not a relay label: the log carries it
-/// across relays. Vault event version 12 on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatMoveApproval {
     pub vault_id: MailboxId,
@@ -318,11 +233,6 @@ impl SeatMoveApproval {
     }
 }
 
-/// A seat move's finish, signed by a helper once its part is in the vault log and the log
-/// switched the seat (`VaultEvent::RepairHelped`). The relay takes the old key off the
-/// mailbox, and makes the new key a full member, only on the threshold of these from
-/// current members other than `old`. Relay-only, so it names the relay's label as well as
-/// the vault id: it can't be replayed to the vault's mailbox on another relay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatFinish {
     pub mailbox: MailboxId,
@@ -344,13 +254,6 @@ impl SeatFinish {
     }
 }
 
-/// The seat's owner keeps its seat: signed by `old`, one object for the log and the relay.
-/// The same signature is the `VaultEvent::KeepSeat` (any member may log it) and the relay's
-/// cancel (any member may post it): the relay takes the pending key `new` of that one move
-/// off (its finishes still count) and never takes that move id again. Only a first-round
-/// move (round 0) can be kept. Signed over the relay label it was made for as well as the vault
-/// id: the relay takes it only for that mailbox; the log keeps the label with it
-/// (`VaultEvent::KeepSeat`), so replay rebuilds the signed bytes after a relay move too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatCancel {
     pub mailbox: MailboxId,
@@ -358,7 +261,6 @@ pub struct SeatCancel {
     pub move_id: [u8; 32],
     pub old: [u8; 32],
     pub new: [u8; 32],
-    /// The old phone's clock, unix seconds (display only: "kept it on <date>").
     pub at: u64,
 }
 
@@ -374,8 +276,6 @@ impl SeatCancel {
     }
 }
 
-/// `POST /v1/seat/finish`: one member's [`SeatFinish`] (body tagged [`version::RELAY_API`];
-/// the signature is its own, so no request signature on top).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatFinishPost {
     pub finish: SeatFinish,
@@ -383,25 +283,18 @@ pub struct SeatFinishPost {
     pub signature: Vec<u8>,
 }
 
-/// `POST /v1/seat/cancel`: the old key's [`SeatCancel`], posted by anyone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeatCancelPost {
-    /// For this relay's mailbox `cancel.mailbox` (its vault id must be `cancel.vault_id`).
     pub cancel: SeatCancel,
-    /// `cancel.old`'s signature. Posted by any member (or the old key itself).
     pub signature: Vec<u8>,
 }
 
-/// A first-round seat move whose owner kept the seat ([`SeatCancel`]): the relay shows the
-/// signed cancel, so any member can log the `KeepSeat` it is.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CancelledSeat {
     pub cancel: SeatCancel,
     pub signature: Vec<u8>,
 }
 
-/// A seat move the relay holds as pending: `new` may read its inbox and receive
-/// deliveries, nothing else, until the move finishes ([`SeatFinish`]) or is cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingSeat {
     pub move_id: [u8; 32],
@@ -410,29 +303,14 @@ pub struct PendingSeat {
     pub round: u32,
 }
 
-/// Which value of a seat recovery's safety check a record holds. The new phone and each
-/// co-signer run their own check: announce, commit, challenge, reveal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RecoveryValueKind {
-    /// A co-signer opens its check with the new phone (signed by the co-signer; the value
-    /// is unused).
     Announce,
-    /// The new phone's commitment to its secret value for that co-signer (signed by the new
-    /// phone).
     Commit,
-    /// The co-signer's challenge, made from that commitment (signed by the co-signer).
     Challenge,
-    /// The new phone's secret value for that co-signer, sent once it challenged (signed by
-    /// the new phone).
     Reveal,
 }
 
-/// Leaves one value of the safety check between the new phone whose signing key is
-/// `subject` and the co-signer `cosigner` (`POST /v1/seat-check/put`, a newer route: an
-/// older relay answers 404). The new phone isn't a vault member yet, so this can't go
-/// through a mailbox. The relay keeps the signed bytes and serves them back; clients
-/// verify them. The co-signer signs `Announce` and `Challenge`, the new phone `Commit` and
-/// `Reveal`, and only for a co-signer that announced itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryPut {
     pub subject: [u8; 32],
@@ -442,48 +320,24 @@ pub struct RecoveryPut {
     pub timestamp: u64,
 }
 
-/// Reads every value left for `subject` (`POST /v1/seat-check/read`), signed by anyone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryRead {
     pub subject: [u8; 32],
     pub timestamp: u64,
 }
 
-/// The values left for a subject: each a `Signed<RecoveryPut>` as it was posted.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryValues {
     pub values: Vec<Vec<u8>>,
 }
 
-/// Approves a seat move on the relay (`POST /v1/mailbox/replace-labelled`): given
-/// approvals (signatures over `approval`) from at least the mailbox's threshold of current
-/// members other than `old`, the relay adds `approval.new` as a pending member
-/// ([`PendingSeat`]). `old` stays a member until the move finishes ([`SeatFinish`]).
-/// `mailbox` is this relay's label for the vault; `approval.vault_id` must be the vault id
-/// the relay stored from the mailbox's first entry. Signed by a current member.
-/// Repeating an approval the relay already holds succeeds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LabelledReplace {
     pub mailbox: MailboxId,
     pub approval: SeatMoveApproval,
-    /// `(approver sig_pk, signature)`.
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
 }
 
-/// Restores a vault on a relay that lost it (wiped database, or moving to another relay)
-/// from a member's saved copy of the log (`POST /v1/mailbox/reseed`; a newer route: a relay
-/// without it answers 404). Signed by one of `members`.
-///
-/// The first request creates the mailbox with `members` and `threshold` (the vault's
-/// membership as of the end of the log). Each request appends `entries` (as
-/// [`LogEntry::to_bytes`]) at log position `from`; the relay checks their index, mailbox
-/// and hash chain and each author's signature, but not that the authors are current
-/// members (seats move: earlier entries were signed by earlier keys; members verify
-/// authorship against the replayed membership as always). The last request sets `finish`,
-/// which opens the mailbox for normal use. Until then only the signer, who made the
-/// mailbox, can continue it, and it can't be joined (it has no join token). On a mailbox
-/// that is already open the request changes nothing and the answer says where its log is:
-/// catch up with ordinary appends instead.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reseed {
     pub mailbox: MailboxId,
@@ -492,27 +346,16 @@ pub struct Reseed {
     pub from: u64,
     pub entries: Vec<Vec<u8>>,
     pub finish: bool,
-    /// Unix seconds; refused when older than [`MAX_REQUEST_SKEW_SECS`], so a recorded
-    /// request can't be replayed to give a restored mailbox an outdated member list.
     pub timestamp: u64,
 }
 
-/// Where the relay's log for a [`Reseed`] stands after the request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReseedResponse {
-    /// Entries the relay holds now. Differs from `from + entries.len()` when `from` didn't
-    /// match (continue from `len`).
     pub len: u64,
-    /// The mailbox is open for normal use (it was, or this request finished it).
     pub open: bool,
-    /// This request built the mailbox (it created it or continued its restore); `false`
-    /// when the mailbox was already open before the request and nothing changed.
     pub restored: bool,
 }
 
-/// Lists the mailboxes the signer is a member of, or the key of a pending seat move in
-/// (`POST /v1/mailboxes`): a device that
-/// recovers a lost member's seat finds its vault once the seat has moved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MailboxesRead {
     pub timestamp: u64,
@@ -523,17 +366,8 @@ pub struct MailboxesResponse {
     pub mailboxes: Vec<MailboxId>,
 }
 
-/// The longest a relay holds a [`WaitRequest`] open; longer requests are cut to this. It
-/// stays below common proxy idle timeouts (Caddy, Fly.io), so a quiet wait ends with an
-/// answer rather than a dropped connection.
 pub const MAX_WAIT_SECS: u32 = 25;
 
-/// Long poll (`POST /v1/wait`): answers as soon as the vault log is longer than `log_len`
-/// or an envelope for the signer is delivered past cursor `inbox_after`, and otherwise
-/// after `max_wait_secs` (at most [`MAX_WAIT_SECS`]). Signed by a member. The answer says
-/// only where the log and the inbox are now; the client reads them as usual. A relay
-/// without this endpoint answers 404 (clients fall back to polling); an unknown mailbox
-/// gets 403 here, never 404, so the two can't be confused.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitRequest {
     pub mailbox: MailboxId,
@@ -543,18 +377,13 @@ pub struct WaitRequest {
     pub timestamp: u64,
 }
 
-/// Where the mailbox is when a [`WaitRequest`] returns.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitResponse {
-    /// Entries in the vault log.
     pub log_len: u64,
-    /// The newest delivery cursor for the signer (0: none stored).
     pub inbox_cursor: u64,
 }
 
 impl WaitResponse {
-    /// Whether this is news for a client that has `log_len` entries and read its inbox up
-    /// to `inbox_after`.
     pub fn is_news(&self, log_len: u64, inbox_after: u64) -> bool {
         self.log_len > log_len || self.inbox_cursor > inbox_after
     }
@@ -566,31 +395,21 @@ pub struct MembersResponse {
     pub sealed: bool,
 }
 
-/// What the relay holds about a mailbox (`POST /v1/mailbox/info`, body [`MembersRead`]; a
-/// newer route: a relay without it answers 404). Members compare it with the membership
-/// the replayed log ends with, so a relay seeded with other keys or another threshold
-/// (a malicious restorer) is noticed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MailboxInfo {
     pub members: Vec<IdentityPublic>,
     pub sealed: bool,
-    /// The approvals the relay wants to move a seat (0: unknown, seats can't move).
     pub threshold: u16,
-    /// Seat moves approved on the relay and not finished or cancelled yet.
     pub pending: Vec<PendingSeat>,
-    /// First-round seat moves their owner kept, with the signed cancel.
     pub cancelled: Vec<CancelledSeat>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxResponse {
-    /// `(cursor, Envelope::to_bytes)` in delivery order. Kept as bytes so one envelope in
-    /// a version this client can't read doesn't make the whole page unreadable.
     pub envelopes: Vec<(u64, Vec<u8>)>,
 }
 
 impl InboxResponse {
-    /// The envelopes this build can decode (others are dropped, like badly signed ones).
     pub fn decoded(&self) -> Vec<(u64, Envelope)> {
         self.envelopes
             .iter()
@@ -601,13 +420,10 @@ impl InboxResponse {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogResponse {
-    /// `LogEntry::to_bytes` of each entry, in index order.
     pub entries: Vec<Vec<u8>>,
 }
 
 impl LogResponse {
-    /// Decodes every entry. An entry in an unknown version stops here with
-    /// [`ProtoError::UnsupportedVersion`]: the chain can't be followed past it.
     pub fn decoded(&self) -> Result<Vec<LogEntry>, ProtoError> {
         self.entries
             .iter()
@@ -616,19 +432,12 @@ impl LogResponse {
     }
 }
 
-/// Result of a log append.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppendResult {
-    Appended {
-        index: u64,
-    },
-    /// The entry did not extend the head; fetch from `len` and retry.
-    Conflict {
-        len: u64,
-    },
+    Appended { index: u64 },
+    Conflict { len: u64 },
 }
 
-/// `BLAKE2b-256("Zafe_JoinToken__", token)`.
 pub fn join_token_hash(token: &[u8; 32]) -> [u8; 32] {
     blake2b_simd::Params::new()
         .hash_length(32)
@@ -639,22 +448,14 @@ pub fn join_token_hash(token: &[u8; 32]) -> [u8; 32] {
         .expect("32 bytes")
 }
 
-/// A relay API body: `version (u16) || postcard(value)`.
 pub fn encode_body<T: Serialize>(value: &T) -> Result<Vec<u8>, ProtoError> {
     Ok(version::encode(Format::RelayApi, value)?)
 }
 
-/// Decodes a relay API body, rejecting other API versions.
 pub fn decode_body<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ProtoError> {
     Ok(version::decode(Format::RelayApi, bytes)?)
 }
 
-/// Push notification platform for a member device.
-///
-/// `FcmFid` (appended 2026-10-22, so older values keep their postcard index): the target
-/// is a Firebase Installation ID, sent in FCM v1's `fid` field, from apps that register
-/// with `FirebaseMessaging.register()` (firebase_messaging 17; `token` is deprecated by
-/// FCM). A relay without the variant rejects it: update relays before such apps ship.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushPlatform {
     Apns,
@@ -672,8 +473,6 @@ impl PushPlatform {
     }
 }
 
-/// Registers (or replaces) this member's push token for a mailbox. Notifications carry no
-/// content, only "vault activity" (spec §6.1). Signed by the member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisterPush {
     pub mailbox: MailboxId,
@@ -681,27 +480,15 @@ pub struct RegisterPush {
     pub token: String,
 }
 
-/// Deletes the signer's push token for `mailbox` (`POST /v1/push/forget`, a newer route: an
-/// older relay answers 404). A phone sends it when its vault leaves this relay. Only the
-/// signer's own registration is touched; an unknown mailbox or no token is not an error,
-/// so this route never answers 404 itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForgetPush {
     pub mailbox: MailboxId,
     pub timestamp: u64,
 }
 
-/// Appends a log entry to the mailbox `mailbox` names on this relay (`POST
-/// /v1/log/append-labelled`; the only append route since relay API version 2, which retired
-/// the unsigned `/v1/log/append`). Signed by a member of that mailbox, who need not be the
-/// entry's author (catching a relay up copies other members' entries). The mailbox id is
-/// this relay's label for the vault and may differ from the vault id the entry carries
-/// (`EntryHeader::mailbox`); the relay keeps the vault id of the mailbox's first entry and
-/// refuses entries of any other vault. Answers [`AppendResult`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LabelledAppend {
     pub mailbox: MailboxId,
-    /// [`LogEntry::to_bytes`].
     pub entry: Vec<u8>,
     pub timestamp: u64,
 }
@@ -716,46 +503,26 @@ impl LabelledAppend {
     }
 }
 
-/// Delivers an envelope (`POST /v1/envelope/send`). Signed by the envelope's sender, so the
-/// body carries the relay API version like every other request; the envelope's own
-/// signature and sequence number are checked as before.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PostEnvelope {
-    /// [`Envelope::to_bytes`].
     pub envelope: Vec<u8>,
 }
 
-/// Request header carrying a private relay's create token (`ZAFE_RELAY_CREATE_TOKEN`), sent
-/// with `/v1/mailbox/create` and `/v1/mailbox/reseed`. A relay that needs one and didn't get
-/// the right one answers 401 with `www-authenticate:` [`CREATE_TOKEN_HEADER`].
 pub const CREATE_TOKEN_HEADER: &str = "zafe-create-token";
 
-/// The body of the relay's 409 when a seat already has [`MAX_PENDING_SEAT_MOVES`] moves
-/// pending: one seat's junk approvals never block another seat's real move.
 pub const TOO_MANY_SEAT_MOVES: &str = "too many open moves for this seat";
 
-/// Most seat moves the relay holds pending per seat (old key) of a mailbox.
 pub const MAX_PENDING_SEAT_MOVES: usize = 16;
 
-/// The body of the relay's 404 for a mailbox it doesn't hold. A 404 without it comes from a
-/// relay (or proxy) that doesn't have the route at all.
 pub const UNKNOWN_MAILBOX: &str = "unknown mailbox";
 
-/// What a relay says about itself (`GET /v1/info`, unauthenticated, a newer route: an older
-/// relay answers 404). Nothing in it is about any mailbox. JSON, not a tagged postcard body,
-/// so fields can be added without a [`version::RELAY_API`] bump: readers ignore unknown
-/// fields and default missing ones.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RelayInfo {
-    /// Versions of the formats the relay reads and writes.
     pub versions: RelayVersions,
     pub limits: RelayLimits,
-    /// Whether the relay sends push notifications (it has a push service key).
     pub push: bool,
-    /// Whether creating or restoring a mailbox needs a create token ([`CREATE_TOKEN_HEADER`]).
     pub create_token: bool,
-    /// When the relay deletes mailboxes on its own.
     pub expiry: RelayExpiry,
 }
 
@@ -768,7 +535,6 @@ pub struct RelayVersions {
 }
 
 impl RelayVersions {
-    /// The versions this build speaks.
     pub const fn current() -> Self {
         Self {
             relay_api: version::RELAY_API,
@@ -778,40 +544,25 @@ impl RelayVersions {
     }
 }
 
-/// A relay's limits. `None` is unlimited.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RelayLimits {
-    /// Largest request body (bytes).
     pub max_body_bytes: u64,
-    /// Largest log entry or envelope stored (bytes).
     pub max_entry_bytes: u64,
-    /// Most members one mailbox may have.
     pub max_members: u16,
-    /// Bytes of vault log one mailbox may keep.
     pub log_bytes: Option<u64>,
-    /// Bytes of undelivered envelopes one mailbox may keep.
     pub delivery_bytes: Option<u64>,
-    /// Undelivered envelopes one sender may leave one member in one mailbox.
     pub envelopes_per_pair: Option<u64>,
-    /// Bytes of undelivered envelopes one sender may leave one member in one mailbox.
     pub pair_bytes: Option<u64>,
-    /// Bytes of vault log one member may write in one mailbox (at least this share).
     pub author_log_bytes: Option<u64>,
-    /// Mailboxes one signing key may create.
     pub mailboxes_per_key: Option<u64>,
-    /// Requests per minute per signing key.
     pub requests_per_minute: Option<u32>,
-    /// Days an undelivered envelope is kept.
     pub delivery_retention_days: u32,
 }
 
-/// When a relay deletes a mailbox (and everything stored for it) on its own. `None`: never.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RelayExpiry {
-    /// Days without any member request.
     pub idle_days: Option<u32>,
-    /// Days after creation within which a member other than the creator must make a request.
     pub unused_days: Option<u32>,
 }

@@ -40,7 +40,6 @@ void main() {
       }
       expect(bad('http://relay.example.com', network: 'regtest'), isNotNull);
       expect(bad('http://192.168.1.5:8787', network: 'regtest'), isNotNull);
-      // https to a local server is fine anywhere.
       expect(ok('https://localhost:8443'), 'https://localhost:8443');
     });
   });

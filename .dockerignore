@@ -1,5 +1,3 @@
-# Docker build context for infra/relay/Dockerfile: only the Cargo workspace.
-# Every workspace member must be present for `cargo build --locked`, so app/rust stays in.
 *
 !Cargo.toml
 !Cargo.lock
@@ -9,7 +7,6 @@
 
 **/target
 app/rust/target
-# Secrets never enter the image.
 **/*.json.key
 **/fcm-service-account*.json
 **/google-services.json

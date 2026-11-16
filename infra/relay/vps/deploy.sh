@@ -1,14 +1,4 @@
 #!/bin/bash
-# Runs on the VPS as root, from /opt/zafe-relay, started by /usr/local/sbin/zafe-deploy
-# (the CI keys' forced command, which installs this directory's files from a commit on
-# main first; see bootstrap.sh). Switches one network's relay to an image pinned by digest, and rolls back
-# to the previous one if the new relay doesn't answer /health.
-#
-#   deploy.sh <testnet|mainnet> <image@sha256:...> <domain>     registry token (optional) on stdin
-#
-# .env keeps both networks' settings; a deploy changes only its own network's lines.
-# `deployed/<network>.json` records what runs and since when (the mainnet workflow checks
-# that the digest it promotes has been running on testnet long enough).
 set -euo pipefail
 
 network=${1:?usage: deploy.sh <testnet|mainnet> <image@sha256:...> <domain>}
@@ -27,8 +17,6 @@ esac
 relay=relay-$network
 backup=backup-$network
 
-# Pull first, so a registry problem fails the deploy before anything changes. The token
-# (CI's short-lived GITHUB_TOKEN) is only kept for the pull.
 token=$(cat || true)
 if [ -n "$token" ]; then
     printf '%s' "$token" | docker login ghcr.io -u deploy --password-stdin >/dev/null
@@ -36,8 +24,6 @@ if [ -n "$token" ]; then
 fi
 docker pull -q "$image"
 
-# The backup directory must be writable by the relay image's uid 10001 (a bind mount of a
-# missing directory would be created root-owned). Idempotent.
 docker run --rm -v /var/backups/zafe-relay:/b --entrypoint /bin/sh "$image" \
     -c "install -d -m700 -o 10001 -g 10001 /b/$network"
 
@@ -51,12 +37,10 @@ healthy() {
     return 1
 }
 
-# A backup from the running relay before its database meets a new version.
 if docker compose ps --status running --services 2>/dev/null | grep -qx "$backup"; then
     docker compose exec -T "$backup" /bin/sh /backup.sh once
 fi
 
-# Sets KEY=VALUE in .env, keeping every other line.
 setenv() {
     { grep -v "^$1=" .env 2>/dev/null || true; printf '%s=%s\n' "$1" "$2"; } >.env.new
     mv .env.new .env
@@ -69,9 +53,6 @@ if [ "$network" = mainnet ]; then
     setenv COMPOSE_PROFILES mainnet
 fi
 
-# Only this network's services (and the shared Caddy) are converged, so a testnet deploy
-# never recreates mainnet containers and mainnet's reviewer-gated deploy is the only
-# thing that does.
 if [ "$network" = mainnet ]; then
     services=(caddy relay-mainnet backup-mainnet litestream-mainnet)
 else
@@ -80,8 +61,6 @@ fi
 
 switch() {
     docker compose up -d --remove-orphans "${services[@]}" &&
-        # backup.sh, litestream.yml and the Caddyfile may change without the service
-        # definitions changing.
         docker compose restart "$backup" &&
         { [ "$network" != mainnet ] || docker compose restart litestream-mainnet; } &&
         docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile &&
@@ -103,6 +82,5 @@ fi
 mkdir -p deployed
 printf '{"image":"%s","domain":"%s","at":%s}\n' "$image" "$domain" "$(date -u +%s)" >"deployed/$network.json"
 
-# Keep a week of old images for manual rollbacks.
 docker image prune -af --filter until=168h >/dev/null
 echo "deployed $network $image"

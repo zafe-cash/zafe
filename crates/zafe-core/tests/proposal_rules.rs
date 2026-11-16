@@ -1,8 +1,3 @@
-//! What a member's phone does with proposals under the November 2026 review's rules
-//! ("Proposals"), over a real relay: a signing share leaves only for votes in the log, a
-//! reject never follows a released signature, a leader drops a signer whose share or
-//! commitments are bad, and an approval checks the cancelled payments that may still mine.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use orchard::keys::Scope;
@@ -28,7 +23,7 @@ use zafe_proto::{
 };
 use zcash_protocol::memo::MemoBytes;
 
-mod common;
+pub mod common;
 use common::{
     build_pczt, nu6_3_network, receive_ironwood_note,
     relay_vault::{vault, vault_on},
@@ -45,13 +40,11 @@ fn view() -> ChainView {
     }
 }
 
-/// A note of the vault, received at its external address `i`.
 fn note(m: &VaultMaterial, i: u32) -> orchard::Note {
     let fvk = m.vault_keys().unwrap().fvk().clone();
     receive_ironwood_note(&fvk, fvk.address_at(i, Scope::External), 1_000_000)
 }
 
-/// Logs (as `author`) a proposal spending `note` back to the vault's change address.
 async fn propose(
     relay: &RelayClient,
     author: &Identity,
@@ -91,7 +84,6 @@ async fn propose(
     [id; 16]
 }
 
-/// `member`'s approval on its phone (interactive: no pool), with `store` as its nonces.
 async fn approve_with(
     relay: &RelayClient,
     ids: &[Identity],
@@ -118,8 +110,6 @@ fn frost_id(m: &VaultMaterial) -> Identifier {
     *m.key_package().unwrap().identifier()
 }
 
-/// Sends `request` sealed from `leader` to `to`, as a leader's phone does (or a dishonest
-/// leader would).
 async fn send_request(
     relay: &RelayClient,
     leader: &Identity,
@@ -140,8 +130,6 @@ async fn send_request(
     relay.send(leader, &env).await.unwrap();
 }
 
-/// A request for `proposal` signed by the members whose commitments are `commitments`
-/// (one per spend), over the PCZT's sighash.
 fn request_for(
     state: &zafe_core::vault::VaultState,
     proposal: [u8; 16],
@@ -162,7 +150,6 @@ fn request_for(
     }
 }
 
-/// The member's interactive commitment for the proposal's one spend, as stored on its phone.
 fn stored(store: &impl NonceStore, state: &zafe_core::vault::VaultState, p: [u8; 16]) -> Vec<u8> {
     store
         .commitments(&p, &state.proposals[&p].pczt_hash)
@@ -171,10 +158,6 @@ fn stored(store: &impl NonceStore, state: &zafe_core::vault::VaultState, p: [u8;
         .unwrap()
 }
 
-/// Rule 5's precondition: a share leaves a phone only when the log holds its own approve
-/// vote with exactly those commitments, so a signature never exists without the proposal
-/// having reached Approved in every member's log. Here the vote's append failed after the
-/// nonces were stored, and a leader asks anyway. On 4b5ae0e the phone signed.
 #[tokio::test]
 async fn a_share_needs_its_vote_in_the_log() {
     let (relay, ids, ms, _) = vault(2, 3, false).await;
@@ -184,7 +167,6 @@ async fn a_share_needs_its_vote_in_the_log() {
         .await
         .unwrap();
 
-    // Member 1 approves on its phone, but its vote never reaches the log.
     let (_, state) = load_state(&relay, &ids[1], &ms[1]).await.unwrap();
     let pczt = pczt::Pczt::parse(&state.proposals[&p].pczt).unwrap();
     let key_package = ms[1].key_package().unwrap();
@@ -244,7 +226,6 @@ async fn a_share_needs_its_vote_in_the_log() {
         "the nonces are untouched"
     );
 
-    // Approving again posts those same commitments; then the request is answered.
     approve_with(&relay, &ids, &ms, 1, p, &mut store)
         .await
         .unwrap();
@@ -262,9 +243,6 @@ async fn a_share_needs_its_vote_in_the_log() {
     assert_eq!(report.answered, vec![p], "{:?}", report.skipped);
 }
 
-/// An interactive request may use only commitments members logged in a vote, never a
-/// pool commitment assigned to a one-tap group (members may now hold both, `VAULT_EVENT`
-/// 12). On 4b5ae0e a member checked only its own commitment and signed.
 #[tokio::test]
 async fn an_interactive_request_never_uses_a_pool_commitment() {
     let (relay, ids, ms, _) = vault(2, 3, true).await;
@@ -282,7 +260,6 @@ async fn an_interactive_request_never_uses_a_pool_commitment() {
     let g = pre.groups_of(&pk1)[0];
     let pool_commitment = pre.commitment(g, 0, &pk1).unwrap().to_vec();
 
-    // Member 2 leads with member 1's pool commitment in member 0's request.
     let request = request_for(
         &state,
         p,
@@ -307,7 +284,6 @@ async fn an_interactive_request_never_uses_a_pool_commitment() {
     assert!(store.contains(&p, &state.proposals[&p].pczt_hash));
 }
 
-/// A member's nonce files, in a fresh directory.
 fn file_store(tag: &str, m: &VaultMaterial) -> (FileNonceStore, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("zafe-rules-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -325,9 +301,6 @@ async fn rejections(relay: &RelayClient, id: &Identity, m: &VaultMaterial, p: [u
     state.proposals[&p].rejections.len()
 }
 
-/// Finding G: a phone that released its signature never logs a reject (the others would
-/// read "no signature"); it may still reject an approval whose nonces it holds, and the
-/// reject destroys them first. On 4b5ae0e every one of these rejects was logged.
 #[tokio::test]
 async fn a_released_signature_is_never_rejected() {
     let (relay, ids, ms, _) = vault(2, 3, false).await;
@@ -344,8 +317,6 @@ async fn a_released_signature_is_never_rejected() {
         .await
         .unwrap();
 
-    // Member 1 answered a signing request: its reply is out (nothing of it is left on
-    // the phone but the logged approval whose nonces are gone).
     let silent = SilentSigners::at(
         std::env::temp_dir().join(format!("zafe-rules-{}-reject.silent", std::process::id())),
     );
@@ -380,9 +351,6 @@ async fn a_released_signature_is_never_rejected() {
     assert!(matches!(err, NodeError::AlreadySigned), "{err:?}");
     assert_eq!(rejections(&relay, &ids[1], &ms[1], p).await, 0);
 
-    // Member 2: a background respond on its phone is signing with an earlier set of its
-    // nonces (claimed: renamed) while a re-approval wrote fresh ones. The reject takes the
-    // fresh ones, then sees the claim, and logs nothing.
     approve_with(&relay, &ids, &ms, 2, p, &mut s2)
         .await
         .unwrap();
@@ -401,8 +369,6 @@ async fn a_released_signature_is_never_rejected() {
         "the reject destroyed the fresh nonces first"
     );
 
-    // Member 0 approved but signed nothing yet (the leader signs its part when it sends):
-    // its reject is logged, and the nonces are gone first, so no share can follow it.
     reject(&relay, &ids[0], &ms[0], p, &mut s0, &no_pool, &mut rng)
         .await
         .unwrap();
@@ -410,7 +376,6 @@ async fn a_released_signature_is_never_rejected() {
     assert!(!s0.contains(&p, &hash) && !s0.claimed(&p, &hash));
 }
 
-/// A one-tap vote with shares is final for a reject too, and says so plainly.
 #[tokio::test]
 async fn a_one_tap_signer_does_not_reject() {
     let (relay, ids, ms, mut pools) = vault(2, 3, true).await;
@@ -444,7 +409,6 @@ async fn a_one_tap_signer_does_not_reject() {
     assert!(matches!(err, NodeError::AlreadySigned), "{err:?}");
 }
 
-/// The leader's reply format (`node::SharesMsg`), for a dishonest signer's reply.
 #[derive(Serialize)]
 struct SharesMsg {
     proposal: [u8; 16],
@@ -452,9 +416,6 @@ struct SharesMsg {
     shares: Vec<Vec<u8>>,
 }
 
-/// A leader that gets a share that doesn't verify stops the round with the culprit named
-/// and asks it last next time; an approver whose logged commitments are unusable is left
-/// out and asked last too. On 4b5ae0e the bad share was a protocol error naming nobody.
 #[tokio::test]
 async fn a_leader_drops_a_signer_with_a_bad_share() {
     let (relay, ids, ms, _) = vault(2, 3, false).await;
@@ -467,7 +428,6 @@ async fn a_leader_drops_a_signer_with_a_bad_share() {
     approve_with(&relay, &ids, &ms, 1, p, &mut MemoryNonceStore::default())
         .await
         .unwrap();
-    // Member 2's vote carries commitments no signing package can use.
     let (mut chain, mut state) = load_state(&relay, &ids[2], &ms[2]).await.unwrap();
     let junk = VaultEvent::Vote {
         proposal: p,
@@ -510,7 +470,6 @@ async fn a_leader_drops_a_signer_with_a_bad_share() {
         BTreeSet::from([frost_id(&ms[0]), frost_id(&ms[1])])
     );
 
-    // Member 1 replies with a share that doesn't verify.
     let mut one = [0u8; 32];
     one[0] = 1;
     let reply = version::encode(
@@ -544,7 +503,6 @@ async fn a_leader_drops_a_signer_with_a_bad_share() {
     )
     .await
     .unwrap();
-    // Never connects: the round fails before anything is broadcast.
     let mut lightwalletd = zafe_core::wallet::Client::new(
         tonic::transport::Channel::from_static("http://127.0.0.1:9").connect_lazy(),
     );
@@ -567,8 +525,6 @@ async fn a_leader_drops_a_signer_with_a_bad_share() {
     }
 }
 
-/// Approving checks the cancelled payments that may still mine (`check_vote`): a new
-/// payment that doesn't spend one of their notes is refused on every member's phone.
 #[tokio::test]
 async fn approving_respends_a_cancelled_signed_payment() {
     let (relay, ids, ms, _) = vault(2, 3, false).await;
@@ -609,10 +565,6 @@ async fn approving_respends_a_cancelled_signed_payment() {
     .unwrap();
 }
 
-/// A restored phone has no nonces (backups carry none): for a proposal that never reached
-/// Approved nobody can have signed, so its reject goes through; once Approved, its logged
-/// approval's nonces may have signed, so it doesn't. In the first batch-3 draft both were
-/// refused.
 #[tokio::test]
 async fn a_restored_phone_rejects_what_nobody_signed() {
     let (relay, ids, ms, _) = vault(2, 3, false).await;
@@ -644,7 +596,6 @@ async fn a_restored_phone_rejects_what_nobody_signed() {
     .await
     .unwrap();
 
-    // Member 1's phone is restored: a fresh, empty nonce directory.
     let (mut restored, _) = file_store("restored", &ms[1]);
     reject(
         &relay,
@@ -673,13 +624,6 @@ async fn a_restored_phone_rejects_what_nobody_signed() {
     assert_eq!(rejections(&relay, &ids[1], &ms[1], approved).await, 0);
 }
 
-/// Why one member's logged shares make a proposal possibly signed (rule 5), even though
-/// the log never reaches Approved: a one-tap group's signature is plain FROST arithmetic,
-/// not a log event. Member 1 (honest) approves one-tap: its shares for every group it is
-/// in go into the log. Member 2 (dishonest, one of fewer than t) holds the nonces of its
-/// own pool commitments for the shared group, computes its share on its own phone and
-/// never logs it. Those two shares aggregate into valid spend signatures: the transaction
-/// is signed while every honest member's log shows one approval, status Open.
 #[tokio::test]
 async fn one_logged_share_vote_and_an_unlogged_one_sign() {
     use zafe_core::session::{aggregate_group, Member};
@@ -710,7 +654,6 @@ async fn one_logged_share_vote_and_an_unlogged_one_sign() {
         "rule 5 must see this one as possibly signed"
     );
 
-    // A group with members 1 and 2.
     let pre = prop.preprocessed.as_ref().unwrap();
     let (pk1, pk2) = (ids[1].public().sig_pk, ids[2].public().sig_pk);
     let g = (0..pre.subsets.len())
@@ -729,7 +672,6 @@ async fn one_logged_share_vote_and_an_unlogged_one_sign() {
     )
     .unwrap();
 
-    // Member 2 signs off the log with its own pool nonces.
     let kp2 = ms[2].key_package().unwrap();
     let keys2 = ms[2].vault_keys().unwrap();
     let dishonest = Member {
@@ -742,7 +684,6 @@ async fn one_logged_share_vote_and_an_unlogged_one_sign() {
         .sign_groups(&pczt, &expected, &plan, &mut pools[2])
         .unwrap();
 
-    // Member 1's logged shares for that group, plus member 2's.
     let logged = prop.shares[&pk1]
         .iter()
         .find(|s| usize::from(s.group) == g)
@@ -765,17 +706,11 @@ async fn one_logged_share_vote_and_an_unlogged_one_sign() {
         &ms[2].public_key_package().unwrap(),
     )
     .unwrap();
-    // Every spend signature verifies against its rk: the transaction is signed.
     tx::apply_signatures(pczt, &signatures).unwrap();
 }
 
-/// A signer the relay won't deliver to (507: the leader's share of its inbox is full)
-/// doesn't abort the round for everyone: the leader skips it, asks it last from now on,
-/// still sends the others theirs and keeps the request (security review 2026-11, NEW 6).
-/// On 37ac433 `request_signatures` returned the relay's error.
 #[tokio::test]
 async fn a_leader_skips_a_signer_the_relay_wont_deliver_to() {
-    // Each sender may leave each recipient 100 envelopes.
     let relay = zafe_relay::Relay::new().with_quotas(zafe_relay::quota::Quotas {
         envelopes_per_pair: Some(100),
         ..zafe_relay::quota::Quotas::none()
@@ -794,8 +729,6 @@ async fn a_leader_skips_a_signer_the_relay_wont_deliver_to() {
         .await
         .unwrap();
     }
-    // The leader (member 0) signs itself and would ask the lower id of 1 and 2; its share
-    // of that member's inbox is full (never acked).
     let (full, other) = if frost_id(&ms[1]) < frost_id(&ms[2]) {
         (1, 2)
     } else {
@@ -829,7 +762,6 @@ async fn a_leader_skips_a_signer_the_relay_wont_deliver_to() {
         std::env::temp_dir().join(format!("zafe-rules-{}-full.silent", std::process::id()));
     let _ = std::fs::remove_file(&silent_path);
     let silent = SilentSigners::at(&silent_path);
-    // The round goes to signers it can reach: never one that can't complete.
     let sent = request_signatures(
         &relay,
         &ids[0],
@@ -867,9 +799,6 @@ async fn a_leader_skips_a_signer_the_relay_wont_deliver_to() {
         1,
         "one request, for the round that can complete"
     );
-    // Without the leader's commitments the only set left needs the unreachable signer: the
-    // round doesn't start, and the reachable one gets no request that can't complete (a
-    // signer the relay refused before is asked first).
     let short = request_signatures(
         &relay,
         &ids[0],

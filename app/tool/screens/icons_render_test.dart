@@ -1,12 +1,3 @@
-// Contact sheet of every AppIcons icon (Patina two-tone, docs/brand.md §4) in both
-// themes: idle at 20 and 28 px, active, in semantic colours, in activity tiles and
-// on buttons, as the screens use them. Screens that call Rust (settings, send,
-// receive, backup, scan) can't be pumped, so this is where their icons get checked.
-// Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/icons_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): icons_{dark,light}.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -251,7 +242,6 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           debugShowCheckedModeBanner: false,
-          // The app's Material theme: its IconTheme colours untinted icons.
           theme: theme == 'dark'
               ? buildMaterialDarkTheme()
               : buildMaterialLightTheme(),
@@ -276,8 +266,7 @@ void main() {
       });
       final path = '${out.path}/icons_$theme.png';
       File(path).writeAsBytesSync(bytes!);
-      // ignore: avoid_print
-      print(path);
+      stdout.writeln(path);
     }
   });
 }

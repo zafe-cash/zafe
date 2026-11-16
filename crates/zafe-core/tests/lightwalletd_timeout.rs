@@ -1,7 +1,3 @@
-//! A lightwalletd that accepts connections but never answers must make wallet calls fail,
-//! not hang: a hung sync holds the bridge's wallet lock and the app shows "Syncing..."
-//! forever (seen while the regtest lightwalletd was still starting).
-
 use std::time::{Duration, Instant};
 
 use tokio::net::TcpListener;
@@ -11,7 +7,6 @@ use zafe_core::wallet;
 async fn silent_lightwalletd_times_out() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    // Accept and keep every connection open without ever writing a byte.
     tokio::spawn(async move {
         let mut held = Vec::new();
         while let Ok((socket, _)) = listener.accept().await {

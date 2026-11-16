@@ -1,7 +1,3 @@
-// Invite landing page: https://<host>/join#<invite>. Reached only when Zafe isn't
-// installed (or App Links / Universal Links didn't take it). The invite is read from the
-// fragment, which browsers never send to the server, and never leaves this page except
-// through "Open in Zafe" and "Copy invite".
 'use strict';
 
 (function () {
@@ -20,14 +16,12 @@
     try {
       return decodeURIComponent(hash).trim();
     } catch (e) {
-      return null; // bad percent-encoding
+      return null;
     }
   }
 
-  // Tab-scoped, so coming back from the download page still has the invite, while the
-  // address bar (and so browser history and history sync) no longer shows it.
   function remember(invite) {
-    try { sessionStorage.setItem(KEY, invite); } catch (e) { /* private mode */ }
+    try { sessionStorage.setItem(KEY, invite); } catch (e) { }
   }
 
   function remembered() {
@@ -47,7 +41,6 @@
     return;
   }
 
-  // The same form the app shares when it has no link host (invite_link.dart).
   var value = URL_SAFE.test(invite) ? invite : encodeURIComponent(invite);
   document.getElementById('open').href = 'zafe://join?invite=' + value;
 

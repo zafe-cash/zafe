@@ -1,5 +1,3 @@
-//! Relays own their data (`docs/relay-move.md` §6): mailboxes nobody uses expire.
-
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -23,7 +21,6 @@ use zafe_proto::{
 use zafe_relay::{expiry::Expiry, quota::Quotas, Relay};
 
 const DAY: u64 = 86_400;
-/// Midnight, so `T0 + n * DAY` is day n.
 const T0: u64 = 20_700 * DAY;
 const LABEL: MailboxId = [2; 16];
 const VAULT: MailboxId = [1; 16];
@@ -66,7 +63,6 @@ struct World {
 }
 
 impl World {
-    /// A relay on a file (so tests can look inside), with the hosted expiry rules.
     fn new(name: &str, quotas: Quotas) -> Self {
         let dir = std::env::temp_dir().join(format!("zafe-expiry-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -104,7 +100,6 @@ impl World {
         self.now.load(Ordering::SeqCst)
     }
 
-    /// Member `who` reads the log of `mailbox`.
     async fn read(&self, who: usize, mailbox: MailboxId) -> StatusCode {
         let read = LogRead {
             mailbox,
@@ -114,7 +109,6 @@ impl World {
         signed(&self.app, "/v1/log/read", &self.ids[who], read).await
     }
 
-    /// Member 0 restores a two-entry vault log under `label` (every member listed).
     async fn reseed(&mut self, label: MailboxId) -> StatusCode {
         let key = LogKey::generate(0, &mut self.rng);
         let first =
@@ -134,8 +128,6 @@ impl World {
         signed(&self.app, "/v1/mailbox/reseed", &self.ids[0], reseed).await
     }
 
-    /// A vault set up the usual way under `mailbox`: created, joined, sealed, one log
-    /// entry, one envelope, a push token. Every table has rows for it.
     async fn vault(&mut self, mailbox: MailboxId) {
         let create = CreateMailbox {
             mailbox,
@@ -195,7 +187,6 @@ impl World {
         );
     }
 
-    /// Rows stored for `mailbox`, per table.
     fn rows(&self, mailbox: MailboxId) -> Vec<(&'static str, i64)> {
         let conn = rusqlite::Connection::open(&self.path).unwrap();
         let mut out = vec![(
@@ -233,7 +224,6 @@ impl Drop for World {
     }
 }
 
-/// Members who only read keep a restored vault: expiry counts requests, not appends.
 #[tokio::test]
 async fn a_quiet_restored_vault_survives() {
     let mut w = World::new("quiet", Quotas::none());
@@ -242,7 +232,6 @@ async fn a_quiet_restored_vault_survives() {
     assert_eq!(w.read(1, LABEL).await, StatusCode::OK);
     w.day(40);
     assert_eq!(w.relay.expire().unwrap(), 0);
-    // A year after the last member request it is idle.
     w.day(5 + 365);
     assert_eq!(w.relay.expire().unwrap(), 0);
     w.day(5 + 366);
@@ -255,8 +244,6 @@ async fn a_quiet_restored_vault_survives() {
     assert_eq!(w.read(1, LABEL).await, StatusCode::NOT_FOUND);
 }
 
-/// A restore (or a move) that no other member followed is deleted after 30 days, however
-/// often its maker looks at it, and stops counting against the maker's quota.
 #[tokio::test]
 async fn an_unused_reseed_expires() {
     let mut w = World::new(
@@ -287,7 +274,6 @@ async fn an_unused_reseed_expires() {
     assert_eq!(w.reseed([3; 16]).await, StatusCode::OK);
 }
 
-/// A setup nobody joined goes the same way, even if its creator keeps renewing the invite.
 #[tokio::test]
 async fn a_setup_nobody_joined_expires() {
     let w = World::new("setup", Quotas::none());
@@ -312,7 +298,6 @@ async fn a_setup_nobody_joined_expires() {
     assert_eq!(w.relay.expire().unwrap(), 1);
 }
 
-/// An idle vault is deleted with every row stored for it; another vault in use stays.
 #[tokio::test]
 async fn an_idle_vault_expires_from_every_table() {
     let mut w = World::new("idle", Quotas::none());
@@ -343,13 +328,10 @@ async fn an_idle_vault_expires_from_every_table() {
     );
 }
 
-/// Last-seen is written at most once per mailbox per day, so reads don't each add a write.
 #[tokio::test]
 async fn last_seen_is_written_once_a_day() {
     let mut w = World::new("once", Quotas::none());
     w.vault(LABEL).await;
-    // Another connection holds the write lock: a request that tried to write would wait for
-    // it and fail, one that only reads goes through.
     let observer = rusqlite::Connection::open(&w.path).unwrap();
     let last_seen = || -> i64 {
         observer
@@ -368,7 +350,6 @@ async fn last_seen_is_written_once_a_day() {
     observer.execute_batch("COMMIT").unwrap();
     assert_eq!(last_seen(), (T0 / DAY) as i64);
 
-    // The first request of a new day writes, the rest of the day doesn't.
     w.day(1);
     assert_eq!(w.read(1, LABEL).await, StatusCode::OK);
     assert_eq!(last_seen(), (T0 / DAY + 1) as i64);
@@ -379,7 +360,6 @@ async fn last_seen_is_written_once_a_day() {
     observer.execute_batch("COMMIT").unwrap();
 }
 
-/// Forgetting a push token is a phone leaving, not use: it doesn't keep a mailbox alive.
 #[tokio::test]
 async fn forgetting_a_push_token_does_not_count_as_use() {
     let mut w = World::new("forget", Quotas::none());

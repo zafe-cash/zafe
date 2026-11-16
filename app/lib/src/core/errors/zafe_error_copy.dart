@@ -1,9 +1,6 @@
 import '../../rust/api/error.dart';
 import '../config/network_config.dart';
 
-/// Friendly copy for errors from Rust. Switches on the typed `ZafeErrorKind` (no
-/// substring matching); `fallback` covers `other`.
-/// A failure the app explains itself (not from Rust): its text is shown as is.
 class UserFacingError implements Exception {
   const UserFacingError(this.message);
   final String message;
@@ -125,6 +122,5 @@ String _sentence(String message) {
   return s.endsWith('.') ? s : '$s.';
 }
 
-/// For logs: the generated `ZafeError` has no useful `toString`.
 String describeError(Object error) =>
     error is ZafeError ? '${error.kind.name}: ${error.message}' : '$error';

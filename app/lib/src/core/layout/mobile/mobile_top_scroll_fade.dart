@@ -2,15 +2,6 @@ import 'package:flutter/widgets.dart';
 
 import '../../theme/app_theme.dart';
 
-/// Soft top edge for tab-root scroll areas (VZR-74): a window-colored
-/// gradient overlay that dissolves content under the top nav instead of
-/// the scroll viewport's hard clip.
-///
-/// Scroll-aware — fully transparent at rest so resting content keeps its
-/// crisp edge, then grows across the first [AppSpacing.md] of scroll. The
-/// gradient samples a smoothstep curve rather than the default two-stop linear
-/// ramp, so the dissolve reads as a slow fade while the top edge remains fully
-/// window-colored.
 class MobileTopScrollFade extends StatefulWidget {
   const MobileTopScrollFade({
     required this.child,
@@ -18,10 +9,8 @@ class MobileTopScrollFade extends StatefulWidget {
     super.key,
   });
 
-  /// The scrollable content the fade overlays.
   final Widget child;
 
-  /// Maximum height of the fade band below the top edge.
   final double height;
 
   @override
@@ -33,8 +22,6 @@ class _MobileTopScrollFadeState extends State<MobileTopScrollFade> {
 
   static const _activationDistance = AppSpacing.md;
 
-  // Smoothstep 3t² − 2t³ sampled at fifteen points — an eased dissolve
-  // from a fully window-colored clip edge to transparent.
   static const _stops = [
     0.0,
     0.071,
@@ -76,7 +63,7 @@ class _MobileTopScrollFadeState extends State<MobileTopScrollFade> {
         .clamp(0.0, 1.0);
     final next = _smoothstep(progress);
     if (next != _progress) setState(() => _progress = next);
-    return false; // Observe only — let the notification bubble on.
+    return false;
   }
 
   static double _smoothstep(double value) => value * value * (3 - 2 * value);

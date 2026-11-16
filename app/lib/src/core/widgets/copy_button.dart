@@ -9,9 +9,6 @@ import '../theme/app_theme.dart';
 import 'app_button.dart';
 import 'app_icon.dart';
 
-/// Copies [text]; the button itself confirms (its icon turns into a check and the label
-/// reads "Copied" for a moment), with a light tap. [sensitive] for secrets: see
-/// [copySecret].
 class CopyButton extends StatefulWidget {
   const CopyButton({
     super.key,

@@ -1,11 +1,3 @@
-//! The Tor route policy is fail-closed: once Tor is on, the relay client and lightwalletd
-//! connections go through Tor or fail; they never connect directly, and direct
-//! connections already open are cut. The policy is process-wide, so these tests run in
-//! their own process (this file) and one at a time.
-//!
-//! The live test bootstraps real Tor and needs the internet:
-//! `cargo test -p zafe-core --test tor_policy -- --ignored --nocapture`.
-
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -23,10 +15,11 @@ use zafe_core::{
 };
 use zafe_proto::Identity;
 
-/// The policy is global: one test at a time, each leaving Tor off.
 static SERIAL: Mutex<()> = Mutex::new(());
 
-struct Serial(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+struct Serial {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
 
 impl Drop for Serial {
     fn drop(&mut self) {
@@ -37,7 +30,7 @@ impl Drop for Serial {
 fn serial() -> Serial {
     let guard = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     tor::disable();
-    Serial(guard)
+    Serial { _guard: guard }
 }
 
 async fn serve_relay() -> String {
@@ -48,7 +41,6 @@ async fn serve_relay() -> String {
     format!("http://{addr}")
 }
 
-/// A server that only counts the connections it gets.
 async fn counting_server() -> (String, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -64,8 +56,6 @@ async fn counting_server() -> (String, Arc<AtomicUsize>) {
     (format!("http://{addr}"), count)
 }
 
-/// A path Tor can't use as its data directory (a file), so a bootstrap fails at once
-/// without touching the network.
 fn unusable_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tor");
@@ -97,7 +87,6 @@ async fn tor_on_never_connects_directly() {
     tor::request();
     assert_eq!(tor::status(), TorStatus::Connecting);
 
-    // Requests made while Tor bootstraps wait; a failed bootstrap ends the wait at once.
     let waiting = tokio::spawn({
         let url = url.clone();
         async move { RelayClient::new(url).health().await }
@@ -120,7 +109,6 @@ async fn tor_on_never_connects_directly() {
         "waiters weren't woken"
     );
 
-    // Still failed: new requests fail at once, and nothing ever reached the server.
     let e = RelayClient::new(relay_url.clone())
         .health()
         .await
@@ -128,7 +116,6 @@ async fn tor_on_never_connects_directly() {
     assert_eq!(relay_failure(&e), Some(NetFailure::TorFailed));
     assert_eq!(connections.load(Ordering::SeqCst), 0);
 
-    // Off again: direct connections work.
     tor::disable();
     assert_eq!(tor::status(), TorStatus::Off);
     RelayClient::new(relay_url).health().await.unwrap();
@@ -158,7 +145,6 @@ async fn turning_tor_on_cuts_direct_connections() {
         .await
         .unwrap();
 
-    // A long poll held open over a direct connection...
     let polling = tokio::spawn({
         let (relay, ids) = (relay.clone(), ids.clone());
         async move {
@@ -168,7 +154,6 @@ async fn turning_tor_on_cuts_direct_connections() {
         }
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
-    // ...ends the moment Tor is turned on, instead of finishing directly.
     let started = Instant::now();
     tor::request();
     let e = polling.await.unwrap().unwrap_err();
@@ -180,22 +165,19 @@ async fn turning_tor_on_cuts_direct_connections() {
 async fn a_pooled_lightwalletd_channel_is_never_reused_once_tor_is_on() {
     let _serial = serial();
     let (url, connections) = counting_server().await;
-    // Direct: the second call reuses the first one's connection.
     wallet::connect_pooled(&url).await.unwrap();
     wallet::connect_pooled(&url).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await; // let the server count it
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(connections.load(Ordering::SeqCst), 1);
 
-    // Tor on (and failing here): the pooled channel is not handed out, nothing connects.
     tor::request();
     let (_dir, bad) = unusable_dir();
     assert!(tor::enable(&bad, Duration::from_secs(5)).await.is_err());
     let e = wallet::connect_pooled(&url).await.unwrap_err();
     assert_eq!(wallet_failure(&e), Some(NetFailure::TorFailed));
-    tokio::time::sleep(Duration::from_millis(300)).await; // let the server count it
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(connections.load(Ordering::SeqCst), 1);
 
-    // Off again: a fresh direct channel, not the revoked one.
     tor::disable();
     wallet::connect_pooled(&url).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -205,8 +187,6 @@ async fn a_pooled_lightwalletd_channel_is_never_reused_once_tor_is_on() {
 #[tokio::test]
 async fn a_lightwalletd_stream_is_cut_when_tor_is_turned_on() {
     let _serial = serial();
-    // A server that accepts and never answers: the call would wait for the request
-    // timeout (30 s) if the connection weren't cut.
     let (url, connections) = counting_server().await;
     let call = tokio::spawn(async move {
         let mut client = wallet::connect(&url).await?;
@@ -222,7 +202,6 @@ async fn a_lightwalletd_stream_is_cut_when_tor_is_turned_on() {
         .unwrap();
     assert!(result.is_err());
     assert!(started.elapsed() < Duration::from_secs(5));
-    // tonic may try to reconnect: our connector refuses once Tor was requested.
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(connections.load(Ordering::SeqCst), 1);
 }
@@ -235,8 +214,6 @@ async fn dormancy_can_be_set_before_tor_exists() {
     assert_eq!(tor::status(), TorStatus::Off);
 }
 
-/// Bootstraps real Tor into a temporary directory, then talks to the public testnet
-/// lightwalletd, an HTTPS site and the ZEC price through it.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs the internet and the Tor network"]
 async fn live_tor_reaches_lightwalletd_and_https() {
@@ -257,8 +234,6 @@ async fn live_tor_reaches_lightwalletd_and_https() {
     println!("testnet tip {tip} through Tor in {:?}", started.elapsed());
     assert!(tip > 4_000_000);
 
-    // Any HTTP answer proves the relay client's HTTPS-over-Tor path: this site isn't a
-    // relay, so `health` reports its status.
     let started = Instant::now();
     match RelayClient::new("https://www.torproject.org")
         .health()
@@ -270,7 +245,6 @@ async fn live_tor_reaches_lightwalletd_and_https() {
         other => panic!("expected an HTTP answer, got {other:?}"),
     }
 
-    // The price through Tor: several exchanges on the price circuit.
     let started = Instant::now();
     let usd = zafe_core::price::zec_usd()
         .await
@@ -278,10 +252,8 @@ async fn live_tor_reaches_lightwalletd_and_https() {
     println!("ZEC = ${usd} through Tor in {:?}", started.elapsed());
     assert!(usd > 1.0 && usd < 100_000.0);
 
-    // Dormant and awake again: a request still works.
     tor::set_dormant(true);
     tor::set_dormant(false);
-    // Enabling again is instant while connected.
     assert_eq!(
         tor::enable(dir.path(), Duration::from_secs(1))
             .await

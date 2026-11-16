@@ -11,17 +11,12 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`, `from`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `watch_mempool_with`
 
-/// A new watch id; any watch started with an earlier id stops within ~100 ms.
 int beginMempoolWatch() =>
     RustLib.instance.api.crateApiMempoolBeginMempoolWatch();
 
-/// Stops the running watch (if any) within ~100 ms.
 void stopMempoolWatch() =>
     RustLib.instance.api.crateApiMempoolStopMempoolWatch();
 
-/// Watches the mempool for the vault until `watch_id` is stale (see the module docs).
-/// Returns at once; the watch runs in the background and reports through `sink`, which
-/// closes when it ends. Failures arrive as events, never as an error.
 Stream<MempoolEvent> watchMempool({
   required int watchId,
   required String lightwalletdUrl,
@@ -38,8 +33,6 @@ Stream<MempoolEvent> watchMempool({
 
 class MempoolEvent {
   final MempoolStatus status;
-
-  /// Transaction id (hex, display order) for `Stored` / `StoreFailed`.
   final String? txid;
   final ZafeError? error;
   final int retryInSecs;
@@ -66,20 +59,4 @@ class MempoolEvent {
           retryInSecs == other.retryInSecs;
 }
 
-enum MempoolStatus {
-  /// Watching (after every (re)connect).
-  connected,
-
-  /// A vault transaction from the mempool was stored (`txid`): reload received payments.
-  stored,
-
-  /// Storing a vault transaction failed (`txid`, `error`); retried after the next block.
-  storeFailed,
-
-  /// lightwalletd could not be reached or the stream broke (`error`); retrying in
-  /// `retry_in_secs`.
-  disconnected,
-
-  /// The watch could not start (`error`: bad material or key); it has ended.
-  failed,
-}
+enum MempoolStatus { connected, stored, storeFailed, disconnected, failed }

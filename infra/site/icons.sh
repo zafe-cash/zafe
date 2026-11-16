@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Regenerates the site's raster icons (ImageMagick 6+) from the brand sources:
-#   public/favicon.ico            16/32/48, the rounded Seam tile (public/assets/zafe.svg)
-#   public/apple-touch-icon.png   180, full-bleed (iOS rounds it), from the app's iOS icon
-#   public/assets/icons/icon-{192,512}.png   rounded tile, manifest "any"
-#   public/assets/icons/maskable-512.png     full-bleed, manifest "maskable" (the mark
-#                                            sits inside the 80% safe circle)
-# The SVG favicon stays the main one; these are for /favicon.ico requests, Google's
-# favicon crawler, iOS home screens and the web manifest.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

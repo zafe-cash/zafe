@@ -5,8 +5,6 @@ import '../../theme/app_theme.dart';
 import '../app_button.dart';
 import '../full_address_viewer.dart';
 
-/// Full-address verification sheet — identity title on top, a continuous
-/// wrapping JetBrains Mono address, a primary Copy address action, and header close.
 Future<void> showMobileAddressVerifySheet(
   BuildContext context, {
   required String title,
@@ -26,8 +24,6 @@ Future<void> showMobileAddressVerifySheet(
   );
 }
 
-/// Sheet body extracted so Widgetbook / figma-compare can render the
-/// viewer without opening a route.
 class MobileAddressVerifySheet extends StatelessWidget {
   const MobileAddressVerifySheet({
     required this.title,

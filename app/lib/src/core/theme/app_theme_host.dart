@@ -7,8 +7,6 @@ import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
 
-/// Resolves the user's [ThemeMode] into the app design-system theme and keeps
-/// native platform chrome aligned with that resolved brightness.
 class AppThemeHost extends StatelessWidget {
   const AppThemeHost({required this.themeMode, required this.child, super.key});
 
@@ -119,13 +117,6 @@ class _NativeAppearanceSyncState extends State<_NativeAppearanceSync> {
   Widget build(BuildContext context) => widget.child;
 }
 
-/// Keeps the Android system bars transparent with icons that contrast with
-/// the app's theme. An [AnnotatedRegion] rather than a one-off
-/// `SystemChrome` call: `MaterialApp` sends `SystemUiOverlayStyle.dark` or
-/// `.light` on every build, whose black `systemNavigationBarColor` painted a
-/// black band behind the navigation bar on Android 14 and older (Android 15+
-/// ignores the colour). The region is read after each frame's build, so its
-/// style is the one sent.
 class _AndroidSystemBarsSync extends StatelessWidget {
   const _AndroidSystemBarsSync({required this.brightness, required this.child});
 
@@ -142,13 +133,6 @@ class _AndroidSystemBarsSync extends StatelessWidget {
   }
 }
 
-/// Overlay style for the resolved app theme brightness. The bars are
-/// transparent (`MainActivity` turns edge-to-edge on for every Android
-/// version), so the app's own background shows behind them, and contrast
-/// enforcement is off so the OS lays no scrim over them. The transparent
-/// navigation colour overrides `MaterialApp`'s black one; Flutter applies it
-/// below Android 15 only. `statusBarBrightness` is the iOS-side field and
-/// stays unset; this style only ever applies on Android.
 @visibleForTesting
 SystemUiOverlayStyle androidSystemBarsStyleFor(Brightness brightness) {
   final icons = brightness == Brightness.dark
@@ -187,9 +171,6 @@ abstract final class _MacOSWindowAppearance {
   }
 }
 
-/// Hands the theme setting to the OS. On Android 12+ this sets the app's own
-/// night mode, which the system splash screen uses on the next launch (it is
-/// drawn before Flutter starts, so it can't read our prefs).
 abstract final class _NativeAppearance {
   static const _channel = MethodChannel('xyz.zafe/window_appearance');
 

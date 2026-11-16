@@ -1,8 +1,3 @@
-# The scene's small printed and drawn details, as textures: the payment slip (its address is
-# what the magnifier enlarges), the three signers' portraits, the clock face, note scribbles
-# and the embossed wax seal. Drawn with ImageMagick in the app's fonts and the site palette,
-# so they're authored and reproducible.
-#   python3 tex.py <out dir>
 import os
 import subprocess
 import sys
@@ -13,7 +8,7 @@ MONO = os.path.join(FONTS, "JetBrainsMono-Medium.ttf")
 SANS = os.path.join(FONTS, "DMSans-Medium.ttf")
 HEAD = os.path.join(FONTS, "SpaceGrotesk-SemiBold.ttf")
 INK, MUTED, BRAND, GOLD = "#1E2B2A", "#5B6765", "#00736C", "#8A5E00"
-ADDRESS = ("u1k3v8m", "f6d8s0a")  # the card's recipient, shortened the same way
+ADDRESS = ("u1k3v8m", "f6d8s0a")
 
 
 def im(*args):
@@ -21,7 +16,6 @@ def im(*args):
 
 
 def slip(path):
-    """The top payment slip: what Maya proposed, printed. Transparent, ink only."""
     im("-size", "1024x700", "xc:none",
        "-font", SANS, "-pointsize", "30", "-fill", MUTED, "-annotate", "+70+92", "PAYMENT REQUEST",
        "-font", HEAD, "-pointsize", "120", "-fill", INK, "-annotate", "+64+238", "12.50",
@@ -38,7 +32,6 @@ def slip(path):
 
 
 def lens(path):
-    """What the magnifier shows: the slip's address line, 1.8x, centred on a square."""
     im("-size", "512x512", "xc:none",
        "-stroke", "#B9BFB8", "-strokewidth", "5", "-draw", "line -40,140 560,140", "-stroke", "none",
        "-font", SANS, "-pointsize", "54", "-fill", MUTED, "-annotate", "+0+262", "To",
@@ -48,7 +41,6 @@ def lens(path):
 
 
 def portrait(path, skin, hair, top, kind):
-    """One signer: shoulders, head and hair as flat shapes on a paper card."""
     back = {"bob": "path 'M 66,236 C 52,110 78,82 128,82 C 178,82 204,110 190,236 Z'"}.get(kind)
     fringe = {
         "bob": "path 'M 76,150 C 70,96 186,90 182,150 C 150,128 112,118 76,150 Z'",
@@ -68,7 +60,6 @@ def portrait(path, skin, hair, top, kind):
 
 
 def clock(path):
-    """A plain face with twelve ticks (the hands are geometry)."""
     draw = []
     import math
     for k in range(12):
@@ -81,7 +72,6 @@ def clock(path):
 
 
 def scribble(path, seed):
-    """Two or three handwritten-looking lines on a sticky note."""
     import random
     rnd = random.Random(seed)
     paths = []
@@ -98,7 +88,6 @@ def scribble(path, seed):
 
 
 def gauge(path):
-    """The pneumatic tube's pressure dial: ticks on a 240° arc, the top third in red."""
     import math
     draw = []
     for k in range(13):
@@ -113,7 +102,6 @@ def gauge(path):
 
 
 def words(path):
-    """A handwritten-style card with the four safety words: everyone's card is the same."""
     im("-size", "512x340", "xc:none",
        "-font", SANS, "-pointsize", "28", "-fill", MUTED, "-annotate", "+44+66", "SAFETY WORDS",
        "-font", HEAD, "-pointsize", "56", "-fill", INK, "-annotate", "+44+156", "orbit  velvet",
@@ -123,7 +111,6 @@ def words(path):
 
 
 def plate(path):
-    """The strongbox's lock plate: three keyholes, one per signer."""
     holes = []
     for x in (128, 256, 384):
         holes += ["-draw", f"circle {x},120 {x},142",
@@ -132,7 +119,6 @@ def plate(path):
 
 
 def seal(path):
-    """The pressed wax: a raised ring and a Z, lighter and darker than the wax."""
     im("-size", "512x512", "xc:none",
        "-fill", "none", "-stroke", "#3FA196", "-strokewidth", "20", "-draw", "circle 256,256 256,82",
        "-stroke", "#0B4C48", "-strokewidth", "8", "-draw", "circle 256,256 256,112",

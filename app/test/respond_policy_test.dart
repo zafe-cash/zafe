@@ -24,7 +24,7 @@ void main() {
   test('news during an answer and a failed answer are not lost', () {
     final policy = RespondPolicy()..live = true;
     expect(policy.take(at(0)), isTrue);
-    policy.inboxNews(); // arrives while answering
+    policy.inboxNews();
     expect(policy.take(at(1)), isTrue);
     policy.failed();
     expect(policy.take(at(2)), isTrue);

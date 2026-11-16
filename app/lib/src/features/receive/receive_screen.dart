@@ -29,7 +29,6 @@ class ReceiveScreen extends ConsumerWidget {
       children: [
         const SizedBox(height: AppSpacing.md),
         Center(
-          // 292 x 308, narrower only when the window is (a flip phone's cover screen).
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 292),
             child: AspectRatio(

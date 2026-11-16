@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Relay move end to end (docs/relay-move.md §4.2-4.5, §11): three `zafe` processes on a
-# 2-of-3 vault move it from relay 1 to relay 2. A payment approved by one member on relay 1
-# is finished on relay 2 after the switch, and a new payment goes through relay 2 alone.
-#
-# Needs Docker and `ths` (see infra/regtest/up.sh). Run from the repository root:
-# scripts/move-e2e.sh
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,7 +23,7 @@ trap cleanup EXIT
 step() { printf '\n== %s\n' "$*"; }
 member() { local who=$1; shift; "$ZAFE" --home "$WORK/$who" "$@"; }
 mine() { "${THS:-ths}" --name "$ZAFE_REGTEST_NAME" mine "$1" >/dev/null; }
-relay() {  # relay <port> <db>: start a relay, wait until it accepts connections
+relay() {
   ZAFE_RELAY_LISTEN="127.0.0.1:$1" ZAFE_RELAY_DB="$2" "$ROOT/target/debug/zafe-relay" >"$2.log" 2>&1 &
   local pid=$!
   for _ in $(seq 50); do
@@ -69,7 +63,6 @@ member C vault keygen --safety-number "$SN" > "$WORK/kC" &
 KC=$!
 wait "$KA" "$KB" "$KC"
 ADDR=$(member A vault show | sed -n 's/^address //p')
-# Every app announces itself (keygen did); a refresh makes each copy current.
 for who in A B C; do member "$who" proposals >/dev/null; done
 
 step "regtest chain; the faucet funds the vault"

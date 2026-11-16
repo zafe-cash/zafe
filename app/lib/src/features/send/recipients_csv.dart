@@ -1,31 +1,19 @@
 import '../../rust/api/proposals.dart' as rust;
 
-/// Longest memo in bytes (ZIP 302).
 const kMaxMemoBytes = 512;
 
-/// Most row errors listed; the rest are summed up in one line.
 const kMaxCsvErrors = 8;
 
-/// A recipients file read by [parseRecipientsCsv]: every payment, or why it can't be
-/// used. Nothing is imported while [errors] is non-empty.
 class RecipientsImport {
   const RecipientsImport({required this.payments, required this.errors});
 
   final List<rust.PaymentInput> payments;
 
-  /// One line per problem, starting with the row number ("Row 3: ...").
   final List<String> errors;
 
   bool get ok => errors.isEmpty && payments.isNotEmpty;
 }
 
-/// Reads batch recipients (grant payouts) from CSV text: `address,amount[,memo]` per row,
-/// an optional header row (first cell "address"), amounts in decimal ZEC ("1.5"). Quoted
-/// fields (RFC 4180) may hold commas, quotes and line breaks. Blank lines are skipped.
-///
-/// Row numbers are the file's line numbers, header included. `room` is how many more
-/// recipients fit in the proposal. The validators are the bridge's (`checkAddress` for
-/// the vault's network, `parseZec`, `memoLength`), passed in so this stays pure.
 RecipientsImport parseRecipientsCsv(
   String text, {
   required int room,
@@ -109,7 +97,6 @@ RecipientsImport parseRecipientsCsv(
 String _lower(String s) =>
     s.isEmpty ? s : '${s[0].toLowerCase()}${s.substring(1)}';
 
-/// RFC 4180 records with the line each starts on. Accepts `\n`, `\r\n` and a leading BOM.
 List<(int, List<String>)> _csvRows(String text) {
   if (text.startsWith('﻿')) text = text.substring(1);
   final rows = <(int, List<String>)>[];
@@ -118,7 +105,7 @@ List<(int, List<String>)> _csvRows(String text) {
   var line = 1;
   var start = 1;
   var quoted = false;
-  var any = false; // the current record has content (or a separator)
+  var any = false;
   void endCell() {
     cells.add(cell.toString());
     cell.clear();

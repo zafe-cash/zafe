@@ -19,7 +19,6 @@ import '../../providers/vault_provider.dart';
 import '../onboarding/onboarding_art.dart';
 import '../../rust/api/backup.dart' as rust;
 
-/// Restore a vault from a backup file or its text form (spec §12.3).
 class RestoreScreen extends ConsumerStatefulWidget {
   const RestoreScreen({super.key});
 
@@ -36,7 +35,6 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
   String? _fileName;
   bool _busy = false;
 
-  /// Why Paste filled nothing (an empty clipboard, or text that isn't a backup).
   String? _pasteProblem;
 
   @override
@@ -66,14 +64,10 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       _file = bytes;
       _fileName = picked.name;
       _text.clear();
-      // Next: the words.
       _passFocus.requestFocus();
     });
   }
 
-  /// Fills the field only with backup text: an empty clipboard (Zafe clears a copied
-  /// backup after 60 s) or something else on it says so instead of doing nothing, and
-  /// unknown clipboard text never lands in the field.
   Future<void> _pasteText() async {
     final pasted = await pastedBackupText();
     if (!mounted) return;
@@ -84,7 +78,6 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       _file = null;
       _fileName = null;
     });
-    // Next: the words.
     if (pasted.text != null) _passFocus.requestFocus();
   }
 
@@ -96,8 +89,6 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
       if (ref.read(vaultProvider).vaults.any((x) => x.id == v.vaultId)) {
         throw UserFacingError('"${v.name}" is already on this phone.');
       }
-      // The signer names saved with the backup (before the vault becomes active, so the
-      // names provider picks them up).
       final names = MemberNames.fromSigners(v.names);
       if (names.isNotEmpty) await MemberNames.write(v.vaultId, names);
       await notifier.addRestoredVault(
@@ -106,19 +97,13 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
         material: v.material,
         invite: v.invite,
       );
-      // A backup of this vault exists (it was just restored from one).
       await VaultSummaries.write(v.vaultId, backedUp: true);
-      // Home showing the vault is the confirmation.
       if (mounted) context.go('/home');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  /// Opens the backup with what was typed, exactly (a passphrase from before the
-  /// words were generated may care about case and spaces); if that fails and tidying
-  /// it changes something (spaces, line breaks, capitals around the 12 words), once
-  /// more tidied. The first error is the one shown.
   static Future<rust.ImportedVault> _open(List<int> data, String typed) async {
     try {
       return await rust.importVaultBackup(data: data, passphrase: typed);
@@ -154,8 +139,6 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
           onPressed: _busy ? null : _pickFile,
           child: Text(_fileName ?? 'Choose backup file'),
         ),
-        // A chosen file is the backup: no second way to give it (tap the file to
-        // choose another).
         if (_fileName == null) ...[
           const SizedBox(height: AppSpacing.s),
           Center(
@@ -222,8 +205,6 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
           secret: true,
           controller: _pass,
           focusNode: _passFocus,
-          // Backups made before the words were generated took a typed passphrase:
-          // it goes in the same field.
           hintText: 'The 12 words, or your passphrase',
           onChanged: (_) => setState(() {}),
         ),
@@ -232,12 +213,8 @@ class _RestoreScreenState extends ConsumerState<RestoreScreen> {
   }
 }
 
-/// The text form's prefix (`zafe_core::backup` `TEXT_PREFIX`, `zafe-backup-v1:`), without
-/// the version so a later format still reads as a backup here.
 const _backupTextPrefix = 'zafe-backup-v';
 
-/// What the restore screen's Paste found on the clipboard: backup [text], or the
-/// [problem] to show instead.
 typedef PastedBackup = ({String? text, String? problem});
 
 @visibleForTesting

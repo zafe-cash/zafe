@@ -27,7 +27,6 @@ void main() {
         ).kind,
         SyncFailureKind.relayUnreachable,
       );
-      // No endpoint in the error: the call's server decides.
       expect(
         classifySyncFailure(
           err(ZafeErrorKind.network),

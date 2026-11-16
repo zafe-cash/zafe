@@ -1,6 +1,3 @@
-// The home page's section loops, wide (1600x900) and tall (720x1280). Lengths follow the
-// cards: the request card's press and "Approved" (126 with its settle), the send card's
-// "Sent" (132), the keys card's "ready" (150); the quiet vault holds for 126.
 import type React from "react";
 import { Composition } from "remotion";
 import { Loop, type LoopProps } from "./Loop";

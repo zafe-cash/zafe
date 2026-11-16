@@ -50,9 +50,8 @@ void main() {
       ),
     );
     expect(find.text('Grants committee'), findsOneWidget);
-    expect(find.text('5'), findsWidgets); // the members stepper
-    expect(find.text('3'), findsWidgets); // the approvals stepper
-    // Read once: the screen clears it, so a later "New vault" starts empty.
+    expect(find.text('5'), findsWidgets);
+    expect(find.text('3'), findsWidgets);
     await tester.pump();
     expect(container.read(createPrefillProvider), isNull);
   });

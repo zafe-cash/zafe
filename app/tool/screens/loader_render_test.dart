@@ -1,6 +1,3 @@
-// Renders the loading arc at a few sizes, light and dark, at four moments of a turn.
-//   flutter test tool/screens/loader_render_test.dart
-// Output: build/screen_preview/loader.png
 import 'dart:io';
 import 'dart:ui' as ui;
 

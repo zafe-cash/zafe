@@ -1,5 +1,3 @@
-//! Money the vault received, read from the local wallet database (no network).
-
 use zafe_core::wallet::{VaultWallet, WalletError};
 
 use super::{
@@ -7,28 +5,16 @@ use super::{
     vault::{material, network, wallet_key, wallet_lock, wallet_path},
 };
 
-/// One incoming payment (a transaction that pays the vault and spends none of its notes).
 pub struct ReceivedInfo {
-    /// Transaction id (hex, display order).
     pub txid: String,
     pub amount_zat: u64,
-    /// 0 while unmined.
     pub mined_height: u32,
-    /// Unix seconds of the mining block; 0 when unknown (unmined, or block not scanned).
     pub block_time_secs: u32,
-    /// Blocks on top of (and including) the mining block at the wallet's synced height; 0
-    /// while unmined.
     pub confirmations: u32,
-    /// Text memos of the received outputs, joined by blank lines (empty if none).
     pub memo: String,
-    /// A mining reward (coinbase); spendable after 100 confirmations.
     pub is_coinbase: bool,
 }
 
-/// The vault's received payments, newest first. Reads the wallet database created by
-/// `sync_vault`; before the first sync there is none and the list is empty.
-/// A database this key can't open (from before encryption) also reads as empty until the
-/// next sync replaces it.
 pub fn list_received(
     db_dir: String,
     db_key: Vec<u8>,

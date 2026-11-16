@@ -10,15 +10,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `tor_error`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`, `from`
 
-/// Switches the route to Tor at once (no bootstrap yet): from now on nothing connects
-/// directly, and direct connections already open are closed. Does nothing if Tor is
-/// already on.
 void torRequest() => RustLib.instance.api.crateApiTorTorRequest();
 
-/// Turns Tor on and connects, giving up after `timeout_secs` (arti retries forever on a
-/// network that blocks Tor). Tor keeps its state (guards, directory cache) in `tor_dir`.
-/// Returns at once when Tor is already connected. On failure the route stays on Tor:
-/// requests keep failing (typed `TorFailed`) until it connects or is turned off.
 Future<TorState> torEnable({
   required String torDir,
   required int timeoutSecs,
@@ -27,26 +20,11 @@ Future<TorState> torEnable({
   timeoutSecs: timeoutSecs,
 );
 
-/// Switches back to direct connections.
 void torDisable() => RustLib.instance.api.crateApiTorTorDisable();
 
 TorState torState() => RustLib.instance.api.crateApiTorTorState();
 
-/// The app went to the background (`true`) or came back: a dormant Tor stops its idle
-/// traffic. A request wakes it by itself, so background checks need nothing.
 void torSetDormant({required bool dormant}) =>
     RustLib.instance.api.crateApiTorTorSetDormant(dormant: dormant);
 
-enum TorState {
-  /// Tor is off: connections are direct.
-  off,
-
-  /// Tor is on and connecting: nothing is sent until it is.
-  connecting,
-
-  /// Tor is on and connected.
-  connected,
-
-  /// Tor is on but couldn't connect: nothing is sent until it does.
-  failed,
-}
+enum TorState { off, connecting, connected, failed }

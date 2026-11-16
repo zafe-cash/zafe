@@ -36,12 +36,9 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   int _threshold = 2;
   bool _busy = false;
 
-  /// How long a proposal stays approvable (days); a small fixed menu, so vaults share a
-  /// few values on chain.
   int _expiryDays = 7;
   static const _expiryChoices = [1, 3, 7, 14];
 
-  /// More options: the vault's server (null: the default one) and its create token.
   bool _more = false;
   String? _relayUrl;
   String? _createToken;
@@ -54,7 +51,6 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
         if (mounted && _myName.text.isEmpty) _myName.text = n;
       }),
     );
-    // Back from "Cancel setup": the details the creator had typed.
     final prefill = ref.read(createPrefillProvider);
     if (prefill != null) {
       _name.text = prefill.name;
@@ -68,8 +64,6 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
       _more =
           _relayUrl != null &&
           _relayUrl != ref.read(endpointsProvider).relayUrl;
-      // Cleared after the first frame: Riverpod forbids changing a provider while the
-      // widget tree is building.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) ref.read(createPrefillProvider.notifier).set(null);
       });
@@ -266,7 +260,6 @@ class _CreateVaultScreenState extends ConsumerState<CreateVaultScreen> {
   }
 }
 
-/// Create > More options: the server everyone in the new vault will use.
 class CreateRelayRow extends StatelessWidget {
   const CreateRelayRow({super.key, required this.host, this.onTap});
 

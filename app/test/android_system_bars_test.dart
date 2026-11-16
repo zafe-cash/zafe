@@ -4,9 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/core/theme/app_theme_host.dart';
 
 void main() {
-  // MaterialApp sends SystemUiOverlayStyle.dark/.light on every build, with a
-  // black navigation bar colour that Android 14 and older paint behind the
-  // gesture bar. The app's own style has to be the one that reaches Android.
   testWidgets('the transparent nav bar style wins over MaterialApp\'s', (
     tester,
   ) async {

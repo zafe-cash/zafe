@@ -1,24 +1,4 @@
 #!/bin/bash
-# The only thing the CI deploy keys can run on the VPS. Installed by bootstrap.sh as
-# /usr/local/sbin/zafe-deploy (root:root, 0755); never replaced by a deploy.
-#
-# Each key is pinned in authorized_keys to
-#   restrict,command="sudo -n /usr/local/sbin/zafe-deploy <testnet|mainnet>"
-# of its own unix user (zafe-testnet / zafe-mainnet), and sudoers lets that user run
-# exactly that line. sshd puts what CI asked for in SSH_ORIGINAL_COMMAND; this script
-# parses it as a fixed grammar (never eval, never a shell string) and runs as root:
-#
-#   sync <40 hex commit>              install infra/relay/vps files of that commit
-#   secrets <fcm|litestream>          stdin: the env file (empty fcm = remove it)
-#   check <sha256:hex> <soak hours>   mainnet only: testnet runs this digest, soaked, healthy
-#   deploy <sha256:hex> <domain> [soak hours]   stdin: registry token; runs deploy.sh
-#
-# Why it is safe to run files as root: CI never sends files. `sync` downloads the commit
-# from GitHub itself and refuses any commit that is not on `main`, so the content comes
-# from the reviewed branch, not from whoever holds the key. A key can then only pick a
-# main commit and an image digest of ours, and only touch its own network: testnet's key
-# cannot write mainnet's secrets, domain or services, and mainnet's key cannot write
-# testnet's.
 set -euo pipefail
 umask 022
 
@@ -32,7 +12,6 @@ repo=zafe-cash/zafe
 image_repo=ghcr.io/zafe-cash/zafe-relay
 TESTNET_DOMAIN=testnet.relay.zafe.cash
 MAINNET_DOMAIN=relay.zafe.cash
-# shellcheck disable=SC1091
 [ -f /etc/zafe-deploy.conf ] && . /etc/zafe-deploy.conf
 if [ "$network" = testnet ]; then domain_ok=$TESTNET_DOMAIN; else domain_ok=$MAINNET_DOMAIN; fi
 
@@ -41,7 +20,6 @@ die() { echo "zafe-deploy: $*" >&2; exit 1; }
 exec 9>/var/lock/zafe-deploy.lock
 flock -w 600 9 || die "another deploy is running"
 
-# Fixed grammar: words of [A-Za-z0-9:._-] only.
 cmd=${SSH_ORIGINAL_COMMAND:-}
 [[ $cmd =~ ^[A-Za-z0-9:._\ -]{1,200}$ ]] || die "bad command"
 read -r -a words <<<"$cmd"
@@ -50,7 +28,7 @@ sha_re='^[0-9a-f]{40}$'
 digest_re='^sha256:[0-9a-f]{64}$'
 num_re='^[0-9]{1,4}$'
 
-soak_check() { # <digest> <hours>
+soak_check() {
     [[ $1 =~ $digest_re ]] || die "bad digest"
     [[ $2 =~ $num_re ]] || die "bad soak hours"
     local rec="$app/deployed/testnet.json" image at hours

@@ -1,177 +1,38 @@
-//! Format versions for everything Zafe encodes, on the wire and on disk.
-//!
-//! Every binary encoding starts with a little-endian `u16` version tag ([`encode`] /
-//! [`decode`], or [`frame`] / [`unframe`] for bytes that are not postcard). Decoding a tag
-//! other than the current one fails with [`UnsupportedVersion`] instead of misreading the
-//! bytes. Where a downgrade matters, the version is also inside what gets signed: the
-//! envelope and log-entry headers carry it, relay requests sign it, and the descriptor's
-//! `version` field is part of the hash every member signs.
-//!
-//! Bumping a format: change its constant below, keep a decoder for the old version where
-//! stored data must survive (match on [`split`] and migrate), and record the change in
-//! `AGENTS.md`. A format that has no older decoder simply rejects old data.
-
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Signed/sealed envelopes (`Header::version`), including their raw payloads (DKG echo
-/// hashes, round-2 packages, `sk` contributions, descriptor signatures, the log key).
 pub const ENVELOPE: u16 = 1;
-/// Vault log entries (`EntryHeader::version`; signed, and the AEAD associated data).
 pub const LOG_ENTRY: u16 = 1;
-/// Vault log events (the decrypted plaintext of a log entry).
-/// 2 (2026-10-01): members' display names (`VaultEvent::Name`); version 1 events still
-/// decode (their variants keep their postcard index).
-/// 3 (2026-10-01): backup attestations (`VaultEvent::BackupVerified`), appended the same way.
-/// 4 (2026-10-01): moving a lost member's seat (`VaultEvent::ReplaceApproval`), appended.
-/// 5 (2026-10-01): retrying a stalled key repair and marking it done (`RepairRetry`,
-/// `RepairDone`), appended.
-/// 6 (2026-10-07): no new variant. A proposal written with version 6 gets one-tap
-/// commitments for every signer group whose members all have pool commitments, instead
-/// of all-or-nothing. An older app skips such events (unsupported version) rather than
-/// computing another assignment; proposals written with versions 1-5 replay as before.
-/// 7 (2026-10-07): no new variant. A `Broadcast` written with version 7 must carry the
-/// txid the proposal's PCZT determines (the shielded sighash equals the v6 txid, which
-/// excludes signatures and proofs), else it is ignored. Version 1-6 broadcasts replay as
-/// before; an older app skips version 7 events.
-/// 8 (2026-10-12): `VaultEvent::PoolReset` (appended): the author retires its unassigned
-/// one-tap commitments, which a restore from a backup needs (a backup carries no nonces,
-/// so the old pool is dead). A reset is only valid in a version 8 event; an older app
-/// skips every version 8 event, so members must update together before anyone restores.
-/// 9 (2026-10-15): no new variant. Once a version 9 event is in the log, versions only go
-/// up: every later event is replayed under the rules of the highest version seen, so an
-/// author can't dodge a rule by tagging an event with an old version (security audit M3).
-/// A version 9 `Proposal` must carry a PCZT that parses and declare no more spends to sign
-/// than it has (audit L5: unusable proposals drained every one-tap pool). An older app
-/// skips version 9 events, so members update together; logs without one replay as before.
-/// 10 (2026-10-25): `VaultEvent::VaultMoved` (appended): the vault switched to another
-/// relay (`docs/relay-move.md` §4.4), valid only with m = max(t, n - t + 1) current
-/// members' arrivals for one move. Moving is offered only once every current member has
-/// written a version 10 event (`VaultState::member_versions`; each app announces itself
-/// once, `node::announce_version`).
-/// 11 (2026-11-13): no new variant. A version 11 `RepairRetry` restarts a key repair only
-/// once every helper it names logged the same list for the current attempt; versions 5-10
-/// restart at once. Restarting is offered only once every current member has written a
-/// version 11 event (as for moves).
-/// 12 (2026-11-13): seat moves wait for the owner (security review 2026-11, "Seat
-/// moves"). A version 12 `ReplaceApproval` signs the new approval format
-/// (`relay::SeatMoveApproval`, with the seat's round) and t of them make the move pending:
-/// the old key stays a member and the new key isn't one. `VaultEvent::RepairHelped`
-/// (appended): the seat switches once every helper of the current attempt logged it.
-/// `VaultEvent::KeepSeat` (appended): the old key voids a pending first-round move. A
-/// helper's seat switching restarts every other repair it helps with (new attempt). Gated
-/// by tag and floor like 6-11; relays speaking `RELAY_API` 2 serve only apps that write it.
 pub const VAULT_EVENT: u16 = 12;
-/// The vault descriptor (`VaultDescriptor::version`, covered by every member's signature).
 pub const DESCRIPTOR: u16 = 1;
-/// Relay API request and response bodies (signed into every request).
-/// 2 (2026-11-13): seat moves are pending until finished (`relay::SeatMoveApproval`,
-/// `SeatFinish`, `SeatCancel`; `MailboxInfo::pending`). Envelopes go through the signed
-/// `/v1/envelope/send` and appends through `/v1/log/append-labelled`; the unsigned
-/// `/v1/envelope` and `/v1/log/append` and the old `/v1/mailbox/replace` answer 426, so an
-/// older app gets "update Zafe" for everything. No version 1 body is read.
 pub const RELAY_API: u16 = 2;
-/// Invites (`zafe-invite-v<INVITE>:` text prefix). 2 (2026-10-15): same body; setups
-/// compare commit-then-reveal safety words (`zafe_core::sas`) instead of a 12-digit hash
-/// of the member keys, so an older app must not join (it would show a number nobody else
-/// has): it reports "update Zafe" for a version 2 invite.
-/// 3 (2026-10-25): carries the vault's relay URL and its mailbox label there (a random id
-/// separate from the vault id; `docs/relay-move.md` §4.6). Version 2 still decodes, as
-/// label = vault id on the joiner's default relay.
 pub const INVITE: u16 = 3;
-/// A member's identity seeds as stored on a device and in backups.
 pub const IDENTITY_SEEDS: u16 = 1;
-/// A member's vault material (key package, vault secret, descriptor, log key).
-/// 2 (2026-10-25): adds the vault's relay (`node::VaultRelay`: URL, mailbox label, create
-/// token). Version 1 still decodes, as label = vault id on the app-wide relay.
 pub const VAULT_MATERIAL: u16 = 2;
-/// DKG round-1 envelope payload.
-/// 2 (2026-09-30): the creator's message also carries the proposal expiry window.
-/// 3 (2026-10-01): every member's message carries a commitment to its `sk` contribution.
 pub const DKG_ROUND1: u16 = 3;
-/// Signing request (envelope payload, and the leader's `<id>.req` file).
 pub const SIGNING_REQUEST: u16 = 1;
-/// Signature shares answering a signing request (envelope payload).
 pub const SIGNATURE_SHARES: u16 = 1;
-/// Interactive-signing nonce files (`FileNonceStore`). 2 (2026-10-15): encrypted with the
-/// member's `NonceKey`; version 1 (plaintext) files are still read.
 pub const NONCES: u16 = 2;
-/// Pre-published pool nonce files (`FilePoolStore`). 2 (2026-10-15): encrypted, like
-/// `NONCES`; version 1 files are still read.
 pub const POOL_NONCE: u16 = 2;
-/// The leader's own signature shares kept until broadcast (`<id>.own`).
 pub const OWN_SHARES: u16 = 1;
-/// The leader's set of commitment sets already used in requests (`used_commitments.bin`).
 pub const USED_COMMITMENTS: u16 = 1;
-/// Signers a leader saw leave a round unanswered (`silent.bin`, a preference only:
-/// unreadable counts as empty).
 pub const SILENT_SIGNERS: u16 = 1;
-/// A member's key-generation state between steps (`keygen.state`: round-1 secret, `sk`
-/// contribution, log key, what was sent), so a setup can pause and resume (2026-10-16).
 pub const KEYGEN_STATE: u16 = 1;
-/// What a member revealed its setup safety value against (`safety.pin`: the sealed member
-/// list and every other member's commitment), written before the value leaves the phone
-/// and deleted with the key-generation state (2026-11-13).
 pub const SAFETY_PIN: u16 = 1;
-/// A member's random safety value for one setup attempt (`safety.secret`), written before
-/// its commitment is sent and deleted with the key-generation state (2026-11-13).
 pub const SAFETY_SECRET: u16 = 1;
-/// What a recovering phone revealed its safety value for one co-signer against (that
-/// co-signer's commitment and challenge), written before the value leaves the phone
-/// (2026-11-13).
 pub const RECOVERY_PIN: u16 = 1;
-/// When this phone first saw a seat move reach its threshold of approvals
-/// (`repair::help_repairs`, `<move id>.seen` in the repair directory, sealed): a helper
-/// waits from then before its part can complete the move (2026-11-13).
 pub const SEAT_MOVE_SEEN: u16 = 1;
-/// This device's copy of a vault's log (`log_cache::LogCache`, `<mailbox>.log`).
 pub const LOG_CACHE: u16 = 1;
-/// Encrypted vault backups (`ZAFEBAK`; the tag is a single byte there). 2 added signer
-/// names (2026-09-30); version 1 still decrypts and is migrated. 3 (2026-10-25): carries
-/// the vault's log copy (`log_cache`), installed before the restored phone's first relay
-/// load; the material inside holds the relay URL, label and create token. 1 and 2 still
-/// restore (no log copy: the first load is trusted, as before).
 pub const BACKUP: u16 = 3;
-/// The relay's SQLite schema (`PRAGMA user_version`). 2: storage quota counters on
-/// `mailboxes` (migrated from 1 at startup). 3: `mailboxes.threshold` for moving a lost
-/// member's seat (migrated from 1 and 2). 4 (2026-10-25): `mailboxes.vault_id` (a mailbox id
-/// is a label that may differ from the vault id its entries carry), `last_seen_day`,
-/// `created_day` and `shared` for expiry (migrated from 1-3; existing rows get
-/// `vault_id = id`, today as last seen, and count as shared). 5 (2026-11-13): seat-recovery
-/// values keyed per (new phone, co-signer) (`recovery_values` is dropped and made again).
-/// 6 (2026-11-13): pending seat moves and their finishes (`seat_moves`, `seat_finishes`,
-/// new tables; nothing to migrate). 7 (2026-11-14): each delivery keeps its sender
-/// (`deliveries.sender`, read from the stored envelopes), per (mailbox, recipient, sender)
-/// counters (`inbox_counts`) and an index on delivery age (`deliveries_by_age`).
 pub const RELAY_DB: u16 = 7;
-/// Share repair envelope payloads (RTS deltas and sigmas) and a helper's saved deltas.
-/// 2 (2026-10-01): both carry the repair attempt. 3 (2026-10-25): a sigma also carries the
-/// helper's log anchor (length and head hash), which the recovering phone's first load
-/// must match or extend, and the relay's create token. Version 2 still decodes (a sigma
-/// without an anchor).
 pub const REPAIR: u16 = 3;
-/// A recovering device's request to take over a lost member's seat (`zafe-recover-v1:`).
 pub const RECOVERY_REQUEST: u16 = 1;
-/// The log key the creator seals to each member at setup (`Kind::LogKey` payload), with
-/// the relay's create token (2026-10-25). Before it the payload was untagged: epoch (u32
-/// LE, always 0 at setup) || key, 36 bytes; those still read.
 pub const LOG_KEY_MESSAGE: u16 = 1;
-/// Where a vault is, from a co-signer to a recovering phone (`zafe-seat-v1:`): the relay
-/// URL and mailbox label (2026-10-25).
 pub const SEAT_LINK: u16 = 1;
-/// When this phone last reached a vault's relay (`relay_status`, `<vault id>.status` next
-/// to the log copy; a display hint, unreadable counts as unknown).
 pub const RELAY_STATUS: u16 = 1;
-/// Messages of a relay move (`moves::MoveMessage`: arrivals, move notices, cancels; the
-/// payload of `Kind::Arrival`, `Kind::MoveNotice`, `Kind::MoveCancelled`), 2026-10-25.
 pub const MOVE_MESSAGE: u16 = 1;
-/// This phone's part in a relay move (`moves::MoveState`, `<vault id>.move` next to the
-/// log copy, encrypted), 2026-10-25.
 pub const MOVE_STATE: u16 = 1;
-/// The move link's fragment (`https://zafe.cash/move#<hex>`: vault id, relay URL, label,
-/// move id), 2026-10-25.
 pub const MOVE_LINK: u16 = 1;
 
-/// Each versioned format. [`Format::current`] is the version this build writes and reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Format {
     Envelope,
@@ -290,7 +151,6 @@ impl core::fmt::Display for Format {
     }
 }
 
-/// Data (or a peer) uses a version of `format` this build does not read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
     "{format} version {found} is not supported (this version of Zafe reads version {supported})"
@@ -302,7 +162,6 @@ pub struct UnsupportedVersion {
 }
 
 impl UnsupportedVersion {
-    /// The data comes from a newer version of Zafe: updating the app fixes it.
     pub fn is_newer(&self) -> bool {
         self.found > self.supported
     }
@@ -316,7 +175,6 @@ pub enum DecodeError {
     Malformed(Format),
 }
 
-/// Checks a version read from a signed header or field.
 pub fn check(format: Format, found: u16) -> Result<(), UnsupportedVersion> {
     let supported = format.current();
     if found == supported {
@@ -330,7 +188,6 @@ pub fn check(format: Format, found: u16) -> Result<(), UnsupportedVersion> {
     }
 }
 
-/// Splits the version tag off `bytes` without checking it (for migrations).
 pub fn split(format: Format, bytes: &[u8]) -> Result<(u16, &[u8]), DecodeError> {
     match bytes {
         [lo, hi, rest @ ..] => Ok((u16::from_le_bytes([*lo, *hi]), rest)),
@@ -338,7 +195,6 @@ pub fn split(format: Format, bytes: &[u8]) -> Result<(u16, &[u8]), DecodeError> 
     }
 }
 
-/// `version (u16 LE) || body` with the current version of `format`.
 pub fn frame(format: Format, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(2 + body.len());
     out.extend_from_slice(&format.current().to_le_bytes());
@@ -346,20 +202,17 @@ pub fn frame(format: Format, body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The body of a [`frame`]d value, if its version is the current one.
 pub fn unframe(format: Format, bytes: &[u8]) -> Result<&[u8], DecodeError> {
     let (version, body) = split(format, bytes)?;
     check(format, version)?;
     Ok(body)
 }
 
-/// Postcard-encodes `value` behind the current version tag of `format`.
 pub fn encode<T: Serialize + ?Sized>(format: Format, value: &T) -> Result<Vec<u8>, DecodeError> {
     let body = postcard::to_allocvec(value).map_err(|_| DecodeError::Malformed(format))?;
     Ok(frame(format, &body))
 }
 
-/// Decodes an [`encode`]d value, rejecting any version but the current one.
 pub fn decode<T: DeserializeOwned>(format: Format, bytes: &[u8]) -> Result<T, DecodeError> {
     postcard::from_bytes(unframe(format, bytes)?).map_err(|_| DecodeError::Malformed(format))
 }

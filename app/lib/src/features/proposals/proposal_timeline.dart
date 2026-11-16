@@ -12,7 +12,6 @@ import 'proposal_status.dart';
 
 enum StepState { done, current, failed }
 
-/// One line of a payment's history.
 class TimelineStep {
   const TimelineStep(this.state, this.title, [this.detail]);
   final StepState state;
@@ -20,9 +19,6 @@ class TimelineStep {
   final String? detail;
 }
 
-/// What happened to a payment, oldest first, ending with where it stands now (who it
-/// waits for, ready, sending, sent, or why it won't be). Votes carry no time, so only
-/// the proposal does.
 List<TimelineStep> timelineSteps(
   rust.ProposalInfo p, {
   required List<String> members,
@@ -51,7 +47,6 @@ List<TimelineStep> timelineSteps(
   }
   switch (p.stage) {
     case rust.ProposalStage.sent when p.sentAnyway:
-      // Signed, then cancelled or declined, and someone sent the signed transaction.
       final declined = p.rejections.length >= p.rejectionThreshold;
       steps.add(
         TimelineStep(
@@ -76,7 +71,6 @@ List<TimelineStep> timelineSteps(
         for (final m in members)
           if (!p.approvals.contains(m) && !p.rejections.contains(m)) m,
       ];
-      // Only this member can complete it: say so plainly.
       if (need == 1 && open.length == 1 && open.single == me) {
         steps.add(const TimelineStep(StepState.current, 'Waiting for you'));
         break;
@@ -95,13 +89,10 @@ List<TimelineStep> timelineSteps(
   return steps;
 }
 
-/// "Bob", "Bob or Carol", "Bob, Carol or Dan".
 String _either(List<String> names) => names.length == 1
     ? names.single
     : '${names.sublist(0, names.length - 1).join(', ')} or ${names.last}';
 
-/// The history as a vertical line of steps: a filled node for what's done, a ring
-/// (or a spinner while sending) for where it stands, a cross for a decline or an end.
 class ProposalTimeline extends StatelessWidget {
   const ProposalTimeline({super.key, required this.steps});
   final List<TimelineStep> steps;
@@ -155,7 +146,6 @@ class ProposalTimeline extends StatelessWidget {
     );
     return MobileSurfaceCard(
       cornerRadius: AppRadii.large,
-      // A vote that arrives while the page is open grows in as a new step.
       child: AnimatedKeyedColumn(
         children: [
           for (var i = 0; i < steps.length; i++)

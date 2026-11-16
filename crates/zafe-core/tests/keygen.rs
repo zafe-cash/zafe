@@ -1,6 +1,3 @@
-//! In-process simulation of vault creation (spec §7.2) and a re-randomized FROST
-//! signature checked the way Orchard checks spend authorization.
-
 use std::collections::BTreeMap;
 
 use ff::Field;
@@ -9,14 +6,13 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use reddsa::frost::redpallas::{
     self,
     rerandomized::{RandomizedParams, Randomizer},
-    PallasBlake2b512,
 };
 use zafe_core::keygen::{
     check_contribution, combine_vault_secret, echo_with_commitments, round1_echo, KeygenError,
     KeygenParams, Round1, SkContribution,
 };
 
-mod common;
+pub mod common;
 use common::{identifiers, params, run_keygen};
 
 #[test]
@@ -38,7 +34,6 @@ fn members_agree_on_vault_keys() {
             assert_eq!(out.public_key_package, first.public_key_package);
             assert_eq!(*out.key_package.min_signers(), t);
         }
-        // Shares are distinct.
         let shares: std::collections::BTreeSet<_> = outputs
             .iter()
             .map(|(_, o)| o.key_package.signing_share().serialize())
@@ -54,12 +49,11 @@ fn rerandomized_signature_verifies_as_orchard_spend_auth() {
     let pubkeys = outputs[0].1.public_key_package.clone();
     let ak = *outputs[0].1.vault_keys.ak();
 
-    // As in a PCZT: alpha is fixed by the transaction builder before round 1.
     let alpha = pallas::Scalar::random(&mut rng);
     let mut sighash = [0u8; 32];
     rng.fill_bytes(&mut sighash);
 
-    let signers = &outputs[..2]; // any t of n
+    let signers = &outputs[..2];
     let mut nonces = BTreeMap::new();
     let mut commitments = BTreeMap::new();
     for (id, out) in signers {
@@ -72,12 +66,11 @@ fn rerandomized_signature_verifies_as_orchard_spend_auth() {
 
     let mut shares = BTreeMap::new();
     for (id, out) in signers {
-        #[allow(deprecated)] // the only public API taking an external randomizer (frost#1094)
-        let share = frost_rerandomized::sign::<PallasBlake2b512>(
+        let share = zafe_core::signing::sign(
             &signing_package,
-            &nonces[id],
+            nonces[id].clone(),
             &out.key_package,
-            randomizer,
+            alpha,
         )
         .unwrap();
         shares.insert(*id, share);
@@ -86,7 +79,6 @@ fn rerandomized_signature_verifies_as_orchard_spend_auth() {
     let signature =
         redpallas::rerandomized::aggregate(&signing_package, &shares, &pubkeys, &params).unwrap();
 
-    // Orchard's check: rk = ak.randomize(alpha); RedPallas SpendAuth verify(sighash).
     let sig_bytes: [u8; 64] = signature.serialize().unwrap().try_into().unwrap();
     let rk = reddsa::VerificationKey::<reddsa::orchard::SpendAuth>::try_from(ak)
         .unwrap()
@@ -94,7 +86,6 @@ fn rerandomized_signature_verifies_as_orchard_spend_auth() {
     rk.verify(&sighash, &reddsa::Signature::from(sig_bytes))
         .expect("aggregate signature must verify under rk");
 
-    // A different alpha must not verify.
     let wrong_rk = reddsa::VerificationKey::<reddsa::orchard::SpendAuth>::try_from(ak)
         .unwrap()
         .randomize(&pallas::Scalar::random(&mut rng));
@@ -117,7 +108,6 @@ fn equivocating_relay_is_detected_by_echo() {
         .map(|r| (r.identifier(), r.package().clone()))
         .collect();
 
-    // The relay swaps member 0's package for a forged one when delivering to member 2.
     let forged = Round1::start(params, ids[0], &mut rng).unwrap();
     let mut seen_by_2 = honest.clone();
     seen_by_2.insert(ids[0], forged.package().clone());
@@ -128,9 +118,6 @@ fn equivocating_relay_is_detected_by_echo() {
     );
 }
 
-/// A member commits to its `sk` contribution in round 1: the commitment binds the
-/// contribution, the vault and the member, and members compare all commitments in the
-/// echo, so no member can choose its contribution after seeing the others'.
 #[test]
 fn sk_contributions_are_committed_first() {
     let mut rng = StdRng::seed_from_u64(13);
@@ -150,7 +137,6 @@ fn sk_contributions_are_committed_first() {
     assert_ne!(c, a.commitment(&[9; 16], &member), "another vault");
     assert_ne!(c, a.commitment(&vault, &[9; 32]), "another member");
 
-    // A member that shows different commitments to different members breaks the echo.
     let echo = [7u8; 32];
     let honest = BTreeMap::from([(ids[0], c), (ids[1], [3; 32]), (ids[2], [4; 32])]);
     let mut equivocated = honest.clone();
@@ -166,9 +152,6 @@ fn sk_contributions_are_committed_first() {
     );
 }
 
-/// The last member sees everyone else's contribution, then tries a different one of its
-/// own (to steer `sk`): the others reject it, because it no longer matches the commitment
-/// it published in round 1.
 #[test]
 fn a_contribution_changed_after_seeing_the_others_is_rejected() {
     let mut rng = StdRng::seed_from_u64(14);
@@ -183,11 +166,9 @@ fn a_contribution_changed_after_seeing_the_others_is_rejected() {
         .zip(&members)
         .map(|(c, m)| c.commitment(&vault, m))
         .collect();
-    // Honest reveals pass.
     for i in 0..3 {
         check_contribution(&vault, &members[i], &commitments[i], &contributions[i]).unwrap();
     }
-    // Member 2 grinds: it tries contributions until `sk` starts with a byte it likes.
     let others = |last: SkContribution| {
         BTreeMap::from([
             (ids[0], contributions[0].clone()),
@@ -203,7 +184,6 @@ fn a_contribution_changed_after_seeing_the_others_is_rejected() {
         check_contribution(&vault, &members[2], &commitments[2], &ground),
         Err(KeygenError::ContributionMismatch)
     ));
-    // Nor can it reuse another member's commitment for itself.
     assert!(check_contribution(&vault, &members[2], &commitments[0], &contributions[0]).is_err());
 }
 
@@ -236,7 +216,6 @@ fn rejects_bad_inputs() {
 
     let mut it = r1.into_iter();
     let first = it.next().unwrap();
-    // Includes own package → rejected.
     assert!(matches!(
         first.advance(all.clone()),
         Err(KeygenError::OwnPackageReceived)

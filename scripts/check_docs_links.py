@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""Checks that every website link the app keeps in docs_links.dart still resolves.
-
-    infra/site/build.sh && python3 scripts/check_docs_links.py
-
-Reads the string constants in app/lib/src/core/config/docs_links.dart (following `$kName`
-interpolations), takes each `https://zafe.cash/...` URL and checks that the built site
-(infra/site/dist) has the page (build.format 'file': /docs/x -> docs/x.html), or that
-infra/site/public/_redirects sends it to a page that exists. A `#fragment` must be an id
-on that page. Also checks that each redirect's target exists, since shipped builds still
-use the old paths (/relay). Exits 1 on the first list of failures.
-"""
-
 import os
 import re
 import sys
@@ -23,7 +11,6 @@ HOST = "https://zafe.cash"
 
 
 def constants(source):
-    """`const kName = '...';` values, with `$kOther` / `${kOther}` filled in."""
     raw = dict(re.findall(r"const\s+(k\w+)\s*=\s*'([^']*)'\s*;", source))
     def resolve(value, seen=()):
         def sub(m):
@@ -46,7 +33,6 @@ def redirects():
 
 
 def page_file(path):
-    """The built file serving `path`, or None."""
     path = path.rstrip("/") or "/"
     rel = path.lstrip("/")
     candidates = ["index.html"] if path == "/" else [f"{rel}.html", os.path.join(rel, "index.html"), rel]

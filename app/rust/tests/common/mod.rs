@@ -1,5 +1,3 @@
-//! Setup helpers shared by the bridge tests.
-
 use std::time::Duration;
 
 use rust_lib_zafe::api::vault;
@@ -10,17 +8,12 @@ use zafe_core::{
 };
 use zafe_proto::{Identity, IdentitySeeds};
 
-/// A member taking part in a setup: through the bridge (as the app does: its one-tap pool
-/// is published at the end) or through `zafe_core` directly (no pool).
 pub struct Setup {
     pub seeds: Vec<u8>,
     pub state_dir: String,
     pub bridge: bool,
 }
 
-/// Steps every member once a round until all show the safety words (each step sends that
-/// member's commitment, then its value; the creator's first step locks membership), and
-/// returns them.
 pub fn safety_words(relay: &str, lwd: &str, members: &[Setup], invite: &str) -> String {
     for _ in 0..300 {
         let words: Vec<Option<String>> = members
@@ -63,9 +56,6 @@ fn step(
     .unwrap()
 }
 
-/// Key generation the way the app runs it: one step per member per round, nobody waiting
-/// for anyone (each step only does what the messages so far allow). Returns each
-/// member's vault material, in order.
 pub fn keygen(
     relay: &str,
     lwd: &str,

@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""Patina two-tone icons (docs/brand.md §4) from Phosphor Icons (MIT).
-
-For each AppIcons name in MAP, writes into app/assets/icons/patina/:
-  <name>.svg         idle: Phosphor duotone. The outline is black (#000000) and
-                     thickened from 16 to 18 units (1.7 px at 24 px) with a round
-                     stroke; the duotone layer is magenta (#FF00FF). AppIcon's
-                     colour mapper swaps black for the icon colour and magenta for
-                     the brand accent at ~38%.
-  <name>_active.svg  active: Phosphor fill, black, drawn solid in the accent.
-and copies Phosphor's licence to app/assets/icons/licenses/Phosphor-MIT.txt.
-
-Usage: scripts/brand/patina_icons.py [path/to/phosphor-core/package]
-Without a path it runs `npm pack @phosphor-icons/core@2.1.1` in a temp dir.
-
-Keep MAP in sync with `AppIcons` in app/lib/src/core/widgets/app_icon.dart.
-"""
 import pathlib
 import re
 import shutil
@@ -28,8 +12,6 @@ OUT = ROOT / "app/assets/icons/patina"
 LICENSES = ROOT / "app/assets/icons/licenses"
 VERSION = "2.1.1"
 
-# AppIcons name -> Phosphor icon. Every AppIcons name except the marks
-# (zcash_currency) and the code-drawn loader.
 MAP = {
     "add_new": "plus-circle",
     "arrow_down": "arrow-down",
@@ -84,10 +66,6 @@ MAP = {
     "warning_circle": "warning-circle",
 }
 
-# Line icons: Phosphor's duotone for these is a different drawing (a closed triangle for
-# the carets) or adds a backdrop (a square behind the x, check, plus and minus, a disc
-# behind the arrows), so they use the
-# regular weight, outline only.
 LINE_ONLY = {"cross", "check", "chevron_forward", "chevron_backward", "arrow_down",
              "arrow_up_right", "more",
              "plus", "cancel", "renew"}
@@ -108,7 +86,6 @@ def phosphor_dir() -> pathlib.Path:
 
 def idle(svg: str, line_only: bool) -> str:
     svg = svg.replace(' fill="currentColor"', "", 1)
-    # The duotone layer carries opacity="0.2"; everything else is outline.
     layer = "" if line_only else r'<path d="\1" fill="#FF00FF"/>'
     svg = re.sub(r'<path d="([^"]*)" opacity="0.2"/>', layer, svg)
     return re.sub(r'<path d="([^"]*)"/>', rf'<path d="\1" {OUTLINE}/>', svg)

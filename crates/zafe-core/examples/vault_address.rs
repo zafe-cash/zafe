@@ -1,13 +1,9 @@
-//! Prints a regtest unified address and UFVK for a freshly generated (throwaway) vault key.
-//! Used to probe regtest mining; not part of the product.
-
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use zafe_core::keys::{VaultKeys, VaultSecret};
 use zcash_keys::address::UnifiedAddress;
 use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork};
 
 fn main() {
-    // A throwaway ak with even y, from an orchard key; stands in for a DKG group key.
     let ak: [u8; 32] = FullViewingKey::from(&SpendingKey::from_bytes([42; 32]).unwrap()).to_bytes()
         [..32]
         .try_into()

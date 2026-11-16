@@ -5,8 +5,6 @@ import 'vault_provider.dart';
 
 const kPaymentSoundsKey = 'zafe_payment_sounds';
 
-/// "Payment sounds" (Settings): the sound on approve, send and receive. On by default;
-/// haptics play either way, and the phone's silent mode always wins.
 class PaymentSoundsNotifier extends Notifier<bool> {
   @override
   bool build() => ref.watch(vaultBootstrapProvider).paymentSounds;

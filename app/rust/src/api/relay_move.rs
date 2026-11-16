@@ -1,10 +1,3 @@
-//! Moving a vault to another relay (`docs/relay-move.md` §4.2-4.5): start, follow,
-//! status, cancel, and the move link.
-//!
-//! Privacy rule: nothing here connects to a new relay unless the member asked for it.
-//! [`relay_move_notice`] and [`parse_move_link`] read only the vault's current relay (or
-//! nothing); [`follow_relay_move`] is called only after the member tapped Move.
-
 use rand::rngs::OsRng;
 use zafe_core::{
     moves::{relay_host, MoveLink},
@@ -18,36 +11,25 @@ use super::{
 
 type Result<T, E = ZafeError> = std::result::Result<T, E>;
 
-/// A move this phone started.
 pub struct RelayMoveStarted {
-    /// `https://zafe.cash/move#…` (share it with the group).
     pub link: String,
-    /// `relay.dao.org`.
     pub host: String,
     pub relay_url: String,
 }
 
-/// Where a move stands on this phone.
 pub struct RelayMoveStatus {
     pub relay_url: String,
     pub host: String,
     pub link: String,
-    /// Who started it (signing key, hex).
     pub mover_hex: String,
-    /// This phone started it.
     pub mine: bool,
-    /// Members known to have moved (hex keys, descriptor order; this phone included once
-    /// it moved).
     pub arrived: Vec<String>,
-    /// m: "Payments switch when m of n have moved."
     pub needed: u32,
     pub members: u32,
     pub this_phone_arrived: bool,
     pub expired: bool,
     pub cancelled: bool,
-    /// The vault is on the new relay and this phone follows it.
     pub switched: bool,
-    /// The vault switched but this phone hasn't followed: "Move to continue."
     pub moved_elsewhere: bool,
 }
 
@@ -71,32 +53,24 @@ impl From<MoveStatus> for RelayMoveStatus {
     }
 }
 
-/// A move announced on the vault's current relay (the Home card).
 pub struct RelayMoveNotice {
     pub relay_url: String,
     pub host: String,
     pub link: String,
     pub mover_hex: String,
-    /// Members known to have moved, as far as the notice tells (the mover; everyone in the
-    /// switch once it happened).
     pub arrived: u32,
     pub needed: u32,
     pub members: u32,
-    /// The vault already switched there: "Grants moved to relay.dao.org. Move to continue."
     pub moved: bool,
 }
 
-/// What a move link says (nothing is checked or contacted yet).
 pub struct MoveLinkInfo {
     pub vault_id: String,
     pub relay_url: String,
     pub host: String,
-    /// The link, normalized (pass it to [`follow_relay_move`]).
     pub link: String,
 }
 
-/// Reads a move link (`https://zafe.cash/move#…`, or a message containing it). Contacts
-/// nothing.
 #[flutter_rust_bridge::frb(sync)]
 pub fn parse_move_link(text: String) -> Result<MoveLinkInfo> {
     let link = MoveLink::decode(&text).map_err(|_| ZafeError::invalid("not a move link"))?;
@@ -108,11 +82,6 @@ pub fn parse_move_link(text: String) -> Result<MoveLinkInfo> {
     })
 }
 
-/// Starts moving the vault to `new_relay_url` (call after unlock): the vault is restored
-/// there from this phone's history, this phone's arrival goes there, and move notices go
-/// to the others on the current relay. Fails with `MembersMustUpdate` (listing them) while
-/// a member's app is older than moves, `MoveInProgress` while this phone is in another
-/// move, `CreateTokenRefused` for a private relay without the right token.
 pub fn start_relay_move(
     relay_url: String,
     seeds: Vec<u8>,
@@ -138,10 +107,6 @@ pub fn start_relay_move(
     })
 }
 
-/// Follows a move from its link: **only after the member tapped Move** (with unlock). This
-/// is the first time the new relay is contacted. Refuses (`MoveNotFound`, `MoveExpired`,
-/// `MoveStale`, `RelayForked`, `RelayMembership`, `MoveInProgress`, `TwoMoves`) unless a
-/// current member's arrival for this move is there and the relay's history checks out.
 pub fn follow_relay_move(
     relay_url: String,
     seeds: Vec<u8>,
@@ -158,8 +123,6 @@ pub fn follow_relay_move(
     Ok(status.into())
 }
 
-/// This phone's move, moved on: arrivals counted on the new relay (only when this phone
-/// moved there itself), the switch made at m. `None`: no move.
 pub fn relay_move_status(
     relay_url: String,
     seeds: Vec<u8>,
@@ -172,7 +135,6 @@ pub fn relay_move_status(
     Ok(status.map(Into::into))
 }
 
-/// Withdraws this phone from its move (the mover: calls the move off).
 pub fn cancel_relay_move(relay_url: String, seeds: Vec<u8>, material: Vec<u8>) -> Result<()> {
     let me = identity(&seeds)?;
     let m = self::material(&material)?;
@@ -181,8 +143,6 @@ pub fn cancel_relay_move(relay_url: String, seeds: Vec<u8>, material: Vec<u8>) -
     Ok(())
 }
 
-/// A move notice on the vault's current relay, for the Home card (reads only that relay).
-/// `None` when there is none, it was cancelled or expired, or this phone is already in it.
 pub fn relay_move_notice(
     relay_url: String,
     seeds: Vec<u8>,
@@ -220,8 +180,6 @@ pub fn relay_move_notice(
     }))
 }
 
-/// Members (hex keys) whose app must update before the vault can move: from the vault's
-/// relay, or this phone's copy when it can't be reached.
 pub fn relay_move_blockers(
     relay_url: String,
     seeds: Vec<u8>,
@@ -246,7 +204,6 @@ pub fn relay_move_blockers(
         .collect())
 }
 
-/// The move link text the mover shares (§4.2).
 #[flutter_rust_bridge::frb(sync)]
 pub fn move_share_text(vault_name: String, host: String, link: String) -> String {
     format!("I'm moving our Zafe vault {vault_name} to {host}. Open this to move too: {link}")

@@ -1,10 +1,5 @@
-# Fly.io template for the testnet relay. Nothing here has been deployed.
-# Deploy from the repository root (the build context is the whole workspace):
-#   fly deploy --config infra/relay/fly.toml --dockerfile infra/relay/Dockerfile --ha=false .
-# See infra/relay/README.md for the one-time setup (app, volume, secrets, domain).
-
-app = "zafe-relay-testnet"        # CHANGE ME: app names are global on Fly
-primary_region = "fra"            # CHANGE ME: close to the testers (fly platform regions)
+app = "zafe-relay-testnet"
+primary_region = "fra"
 kill_signal = "SIGTERM"
 kill_timeout = "30s"
 
@@ -15,13 +10,8 @@ kill_timeout = "30s"
   PORT = "8080"
   ZAFE_RELAY_DB = "/data/relay.sqlite"
   RUST_LOG = "zafe_relay=info"
-  # Rate limits are on by default; Fly's proxy puts the client address in this header.
   ZAFE_RELAY_CLIENT_IP_HEADER = "fly-client-ip"
-  # FCM: `fly secrets set ZAFE_FCM_SERVICE_ACCOUNT_JSON="$(cat key.json)"` (a secret,
-  # never in this file). Without it the relay only logs pushes.
 
-# One SQLite file on one volume: exactly one machine. Never scale this app past 1
-# (a second machine would get its own empty volume and split the vaults).
 [[mounts]]
   source = "zafe_relay_data"
   destination = "/data"
@@ -30,13 +20,10 @@ kill_timeout = "30s"
 [http_service]
   internal_port = 8080
   force_https = true
-  # Always on: members poll and the relay sends pushes; no autoscaling or auto-stop.
   auto_stop_machines = "off"
   auto_start_machines = false
   min_machines_running = 1
 
-  # Every open app holds one long poll (`/v1/wait`, up to 25 s, under Fly's 60 s idle
-  # timeout), so concurrent requests grow with the number of open apps.
   [http_service.concurrency]
     type = "requests"
     soft_limit = 1000

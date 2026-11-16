@@ -1,22 +1,10 @@
-// Pointer and text motion (docs/site.md, research notes on cursors and text).
-//
-// Pointer: the cursor itself is CSS (site.css, drawn by the OS so it never lags). On fine
-// pointers without reduced motion a "Get Zafe" pill leans toward the pointer.
-//
-// Text: headings rise word by word from a mask when they appear; two "unshield"
-// scrambles (the proposal caption, the encrypted chain fields). All of it sets
-// transforms and text through the DOM APIs, which the CSP allows (no inline styles in
-// markup, no <style> elements).
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 gsap.registerPlugin(ScrollTrigger);
 
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-// ?pointer=fine forces the pill lean on (headless browsers report no fine pointer).
 const fine = window.matchMedia('(pointer: fine)').matches || new URLSearchParams(location.search).get('pointer') === 'fine';
-
-// ------------------------------------------------------------------ text: word rise
 
 function splitWords(el) {
   if (el.dataset.split) return el.querySelectorAll('.wi');
@@ -53,8 +41,6 @@ function rise(el) {
   gsap.fromTo(words, { yPercent: 115 }, { yPercent: 0, duration: 0.9, ease: 'power4.out', stagger: 0.06, overwrite: true });
 }
 
-// ------------------------------------------------------------------ text: unshield
-
 const GLYPHS = 'abcdef0123456789';
 function scramble(el, duration = 0.8) {
   if (!el || reduced) return;
@@ -82,7 +68,6 @@ function scramble(el, duration = 0.8) {
   );
 }
 
-// Story: the proposal caption decrypts into place; at "Sent" the chain fields unshield.
 const story = document.querySelector('.story');
 if (story) {
   new MutationObserver(() => {
@@ -91,12 +76,9 @@ if (story) {
   }).observe(story, { attributes: true, attributeFilter: ['data-beat'] });
 }
 
-// Other headings rise once as they enter.
 for (const el of document.querySelectorAll('.cta-card h2, .faq h2')) {
   ScrollTrigger.create({ trigger: el, start: 'top 85%', once: true, onEnter: () => rise(el) });
 }
-
-// ------------------------------------------------------------------ pills lean
 
 if (fine && !reduced) {
   for (const p of document.querySelectorAll('.pill')) {

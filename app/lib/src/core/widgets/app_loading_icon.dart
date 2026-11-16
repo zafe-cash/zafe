@@ -5,9 +5,6 @@ import 'package:flutter/widgets.dart';
 
 import '../theme/app_theme.dart';
 
-/// Animated loading icon used by `AppIcon(AppIcons.loader)`.
-///
-/// A comet arc around a faint ring (see [_LoaderIconPainter]).
 class AppLoadingIcon extends StatefulWidget {
   const AppLoadingIcon({
     this.size = AppIconSize.medium,
@@ -97,10 +94,8 @@ class _AppLoadingIconState extends State<AppLoadingIcon>
 }
 
 abstract final class AppLoadingIconTiming {
-  /// One turn of the arc.
   static const period = Duration(milliseconds: 1000);
 
-  /// How much of the circle the arc covers (its tail fades out).
   static const sweep = 0.72;
 
   @visibleForTesting
@@ -111,9 +106,6 @@ abstract final class AppLoadingIconTiming {
   }
 }
 
-/// A faint ring with an arc running around it: transparent at the tail, solid at its
-/// rounded head. Every loader turns in step (the frame clock, not its own start time).
-/// Still: the arc stops where it is.
 class _LoaderIconPainter extends CustomPainter {
   _LoaderIconPainter({required this.color, required super.repaint})
     : _animated = repaint != null,
@@ -150,8 +142,6 @@ class _LoaderIconPainter extends CustomPainter {
       ..translate(center.dx, center.dy)
       ..rotate(turn * 2 * math.pi - math.pi / 2)
       ..translate(-center.dx, -center.dy);
-    // A flat tail (a round cap there would reach past the gradient's start, where it
-    // wraps to the solid colour) and a round head drawn as a dot.
     canvas.drawArc(
       rect,
       0,

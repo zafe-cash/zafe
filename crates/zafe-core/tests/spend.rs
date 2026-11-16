@@ -1,9 +1,3 @@
-//! End-to-end offline spend from a 2-of-3 vault on a local NU6.3 network:
-//! vault keygen → Ironwood note to the vault → PCZT → find spends → local sighash →
-//! FROST sign each spend with its alpha → inject → prove → extract and verify.
-//!
-//! Modeled on `pczt`'s own `wallet_can_set_ironwood_witness_after_signing` test.
-
 use std::collections::BTreeMap;
 
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
@@ -12,7 +6,7 @@ use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{signing, tx};
 use zcash_protocol::memo::MemoBytes;
 
-mod common;
+pub mod common;
 use common::*;
 
 fn pay_outside(
@@ -43,12 +37,10 @@ fn vault_spends_ironwood_note_with_frost() {
     let vault_fvk = vault.vault_keys.fvk().clone();
     let vault_address = vault_fvk.address_at(0u32, Scope::External);
 
-    // The vault receives 0.01 ZEC in the Ironwood pool.
     let note = receive_ironwood_note(&vault_fvk, vault_address, 1_000_000);
     let (anchor, path) = witness(&note);
     let pczt = pay_outside(&vault_fvk, note, path, anchor);
 
-    // Every member independently finds the spends to sign and computes the sighash.
     let spends = tx::spends_to_sign(&pczt, &vault_fvk).unwrap();
     assert_eq!(
         spends.len(),
@@ -57,7 +49,6 @@ fn vault_spends_ironwood_note_with_frost() {
     );
     let sighash = tx::shielded_sighash(&pczt).unwrap();
 
-    // Two members sign: round 1 (commitments), leader builds packages, round 2 (shares).
     let signers = &members[1..3];
     let mut signatures = Vec::new();
     for spend in &spends {
@@ -87,8 +78,6 @@ fn vault_spends_ironwood_note_with_frost() {
         signatures.push((spend.action_index, sig));
     }
 
-    // Inject (checked against rk), prove, and extract; extraction verifies the whole
-    // Ironwood bundle: spend auth signatures, binding signature and the Halo 2 proof.
     let signed = tx::apply_signatures(pczt, &signatures).unwrap();
     assert!(tx::spends_to_sign(&signed, &vault_fvk).unwrap().is_empty());
     let proved = Prover::new(signed)
@@ -108,7 +97,6 @@ fn rejects_spend_of_foreign_note() {
     let members = run_keygen(params(2, 3), &mut rng);
     let vault_fvk = members[0].1.vault_keys.fvk().clone();
 
-    // A PCZT that spends someone else's note.
     let other_fvk = FullViewingKey::from(&SpendingKey::from_bytes([3; 32]).unwrap());
     let note = receive_ironwood_note(
         &other_fvk,

@@ -35,7 +35,6 @@ fn members_build_and_replay_the_same_chain() {
         let e = entry(&mut rng, &ids[i], &key, &relay, event);
         relay.append(e, &members).unwrap();
     }
-    // A member replays the relay's entries from scratch and decrypts them.
     let mut member = Chain::new(MAILBOX);
     for e in relay.entries() {
         member.append(e.clone(), &members).unwrap();
@@ -52,7 +51,6 @@ fn detects_fork_gap_and_outsiders() {
         .append(entry(&mut rng, &ids[0], &key, &chain, b"a"), &members)
         .unwrap();
 
-    // Fork: an entry at index 1 that references genesis instead of entry 0.
     let fork =
         LogEntry::create(&ids[1], &key, MAILBOX, 1, GENESIS_PREV_HASH, b"b", &mut rng).unwrap();
     assert_eq!(
@@ -60,7 +58,6 @@ fn detects_fork_gap_and_outsiders() {
         ChainError::Fork(1)
     );
 
-    // Gap: the relay withholds entry 1 and serves entry 2.
     let skipped =
         LogEntry::create(&ids[1], &key, MAILBOX, 2, chain.head(), b"c", &mut rng).unwrap();
     assert!(matches!(
@@ -71,7 +68,6 @@ fn detects_fork_gap_and_outsiders() {
         })
     ));
 
-    // Outsider: signed by someone who is not a member.
     let outsider = Identity::generate(&mut rng);
     let e = entry(&mut rng, &outsider, &key, &chain, b"d");
     assert_eq!(

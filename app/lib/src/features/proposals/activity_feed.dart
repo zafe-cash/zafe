@@ -8,12 +8,9 @@ import '../../rust/api/received.dart' as rust;
 import '../received/received_row.dart';
 import 'proposal_status.dart';
 
-/// One row of the vault's activity: a payment proposal, or money received.
 sealed class ActivityItem {
   const ActivityItem();
 
-  /// When it happened: the proposal's creation, or the receiving block's time. `null` when
-  /// unknown, or for a received payment that is not mined yet.
   DateTime? get time;
 }
 
@@ -39,7 +36,6 @@ class ReceivedActivity extends ActivityItem {
       : DateTime.fromMillisecondsSinceEpoch(received.blockTimeSecs * 1000);
 }
 
-/// The vault switched to another relay: "Grants moved to relay.dao.org".
 class RelayMovedActivity extends ActivityItem {
   const RelayMovedActivity({required this.vaultName, required this.record});
   final String vaultName;
@@ -53,14 +49,11 @@ class RelayMovedActivity extends ActivityItem {
       : DateTime.fromMillisecondsSinceEpoch(record.at.toInt() * 1000);
 }
 
-/// Sort key, newest largest: pending receipts first, then by time; unknown times last.
 int _key(ActivityItem item) {
   if (item is ReceivedActivity && item.pending) return 1 << 62;
   return item.time?.millisecondsSinceEpoch ?? -1;
 }
 
-/// Merges proposals and received payments, newest first. Both lists arrive newest first;
-/// each keeps its own order (ties go to the proposal).
 List<ActivityItem> mergeActivity(
   List<rust.ProposalInfo> proposals,
   List<rust.ReceivedInfo> received, {
@@ -80,7 +73,6 @@ List<ActivityItem> mergeActivity(
   out
     ..addAll(a.skip(i))
     ..addAll(b.skip(j));
-  // Moves are rare: each goes before the first item older than it.
   for (final m in moves) {
     final at = out.indexWhere((x) => _key(x) < _key(m));
     at < 0 ? out.add(m) : out.insert(at, m);
@@ -88,7 +80,6 @@ List<ActivityItem> mergeActivity(
   return out;
 }
 
-/// The row for an activity item; tapping opens its detail page.
 class ActivityRow extends StatelessWidget {
   const ActivityRow({
     super.key,
@@ -99,7 +90,6 @@ class ActivityRow extends StatelessWidget {
   final ActivityItem item;
   final bool hideAmount;
 
-  /// Synced chain tip, to show expired proposals.
   final int? height;
 
   @override

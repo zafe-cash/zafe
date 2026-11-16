@@ -1,8 +1,3 @@
-// One section loop: an illustrated scene (infra/site/scenes, rendered into public/gen/<bg>/,
-// "<bg>_tall" for the 9:16 cut) behind one app component, a card the app renders itself.
-// The scene's action is timed to the card, so both share one length. The card sits still
-// (the scene does the moving) except where it is pressed. Wide: the card is centred at a
-// fixed scale; tall: it is wider and sits higher, the scene's action happens below it.
 import type React from "react";
 import { AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { CLIPS, type Clip, lerp } from "./parts";
@@ -11,11 +6,8 @@ export type LoopProps = {
   bg: string;
   clip: Clip;
   dark?: boolean;
-  /** Hold one frame of the card. */
   at?: number;
-  /** The card is pressed over these frames (a small squeeze). */
   press?: [number, number];
-  /** Over these frames the card crossfades back to its first frame, so the loop closes. */
   settle?: [number, number];
 };
 
@@ -26,7 +18,7 @@ export const Loop: React.FC<LoopProps> = ({ bg, clip, dark, at, press, settle })
   const { width: W, height: H } = useVideoConfig();
   const tall = H > W;
   const { frames, h } = CLIPS[clip];
-  const w = tall ? W * 0.58 : (H * 0.78 * 1080) / 1602; // wide: the request card fills 78% of the height
+  const w = tall ? W * 0.58 : (H * 0.78 * 1080) / 1602;
   const ch = (h * w) / 1080;
   const top = tall ? H * 0.4 - ch / 2 : (H - ch) / 2;
   const i = Math.max(0, Math.min(frames - 1, Math.floor(at ?? f)));

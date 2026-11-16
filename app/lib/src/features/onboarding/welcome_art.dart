@@ -9,17 +9,12 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../core/theme/app_theme.dart';
 import 'onboarding_art.dart';
 
-/// The Welcome door's wheel centre and key ring: `WELCOME_WHEEL` and the scene's `ring`
-/// in scripts/illustrations/scenes.py.
 const _centre = Offset(540, 560);
 const _ring = 225.0;
 const _gold = Color(0xFFF4B728);
 
-/// The keys that turn (scene `turned`), in the order they turn: upper-left, top,
-/// upper-right. Key k sits at -90 + 72k degrees on the ring.
 const _keys = [4, 0, 1];
 
-/// The gold arc joining them: from the upper-left key over the top to the upper-right.
 const _arcStart = 198 * math.pi / 180;
 const _arcSweep = 144 * math.pi / 180;
 
@@ -28,18 +23,9 @@ Offset _keyAt(int k) {
   return _centre + Offset(math.cos(a), math.sin(a)) * _ring;
 }
 
-/// The Welcome vault door, from its layers (scenes.py `LAYERS`). The still already tells
-/// the story (three of five keys turned, the gold arc joining them), so only the heavy
-/// hand wheel moves: it is worked by hand, in uneven pushes (20-50 degrees, a little
-/// give-back as the hand lets go, pauses of uneven length), never quite the same rhythm.
-/// Now and then the gold blooms with light in place (as Vizor's welcome hero does over
-/// its treasure). Tapping the door gives the wheel one strong full turn, with a haptic
-/// tick. Nothing is drawn between moves. Reduced motion: still.
 class WelcomeArt extends StatefulWidget {
   const WelcomeArt({super.key, this.replay});
 
-  /// Gives the wheel a full turn (with haptics) each time it notifies: the screen's tap
-  /// target over the door (the art itself sits under the screen's scroll view).
   final Listenable? replay;
 
   @override
@@ -47,11 +33,9 @@ class WelcomeArt extends StatefulWidget {
 }
 
 class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
-  /// One push of the wheel: from [_from] by [_by] degrees.
   late final AnimationController _push = AnimationController(vsync: this);
   double _from = 0, _by = 0;
 
-  /// The gold's light: 0.9 s up, 0.8 s held, 0.6 s down; then a rest.
   late final AnimationController _shine = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 2300),
@@ -65,7 +49,6 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
 
   double get _wheelDegrees {
     final u = _push.value;
-    // The hand pushes (ease in and out) a touch past, then the wheel gives back.
     const give = 0.07;
     if (u < 0.82) {
       return _from +
@@ -124,14 +107,12 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
     _nextBloom = Timer(after, () async {
       if (!mounted) return;
       await _shine.forward(from: 0).orCancel.catchError((_) {});
-      // Rarer than Vizor's (every 3.8 s): the wheel already gives the door life.
       if (mounted && _visible) {
         _scheduleBloom(const Duration(milliseconds: 5200));
       }
     });
   }
 
-  /// One uneven push by hand, then a pause of uneven length before the next.
   Future<void> _turn({double? by, Duration? over}) async {
     if (!mounted) return;
     _from = _wheelDegrees % 360;
@@ -140,15 +121,12 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
         over ?? Duration(milliseconds: 600 + (_rng.nextDouble() * 500).round());
     await _push.forward(from: 0).orCancel.catchError((_) {});
     if (!mounted || !_visible) return;
-    // Now and then two pushes close together, like re-gripping.
     final pause = _rng.nextDouble() < 0.3
         ? 250 + _rng.nextInt(250)
         : 700 + _rng.nextInt(1300);
     _schedulePush(Duration(milliseconds: pause));
   }
 
-  /// A tap: one strong full turn, a tick as the hand takes it and a firmer one as it
-  /// lands.
   Future<void> _fullTurn() async {
     if (_still || _push.isAnimating) return;
     _nextPush?.cancel();
@@ -199,8 +177,6 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
       layer('locks'),
       for (final k in _keys) layer('key$k'),
     ];
-    // The rim and its light stay still; the spokes, grips and hub turn above them (the
-    // light drawn over the turning grips cut across them).
     final rim = layer('rim'), glint = layer('glint');
     final wheel = layer('wheel'), top = layer('top');
     return FittedBox(
@@ -244,9 +220,6 @@ class _WelcomeArtState extends State<WelcomeArt> with TickerProviderStateMixin {
   }
 }
 
-/// A see-through tap target over the Welcome door (the hero's 1080 x 1240 canvas,
-/// door centre 540,560, radius ~395): taps replay the unlock, drags still reach the
-/// scroll view underneath.
 class WelcomeDoorTap extends StatelessWidget {
   const WelcomeDoorTap({super.key, required this.onTap});
   final VoidCallback onTap;
@@ -259,7 +232,6 @@ class WelcomeDoorTap extends StatelessWidget {
     child: Align(
       alignment: Alignment.topCenter,
       child: SizedBox.fromSize(
-        // Over the hero's art, wherever it sits.
         size: OnboardingHero.sizeIn(MediaQuery.sizeOf(context)),
         child: Align(
           alignment: Alignment(0, 560 / 1240 * 2 - 1),
@@ -279,8 +251,6 @@ class WelcomeDoorTap extends StatelessWidget {
   );
 }
 
-/// The gold arc joining the turned keys (scene: from the upper-left key over the top
-/// to the upper-right one, width 10, 90%), warming with the bloom at `shine` (0-1).
 class _ArcPainter extends CustomPainter {
   _ArcPainter(this.shine);
   final double shine;
@@ -319,8 +289,6 @@ class _ArcPainter extends CustomPainter {
   bool shouldRepaint(_ArcPainter old) => old.shine != shine;
 }
 
-/// The bloom: warm light swelling over the gold, around the three keys and the arc
-/// (added light, so the gold and the metal under it brighten), at `light` 0-1.
 class _BloomPainter extends CustomPainter {
   _BloomPainter(this.light, this.dark);
   final double light;
@@ -329,8 +297,6 @@ class _BloomPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (light <= 0) return;
-    // Between Zafe's faint gleam and Vizor's chest glow (21% brighter at its peak).
-    // Measured: 0.16 brightened the upper door 30% at its peak; this is ~15%.
     final peak = (dark ? 0.08 : 0.12) * light;
     final glow = Paint()..blendMode = BlendMode.plus;
     void bloomAt(Offset c, double r, double a) {
@@ -341,7 +307,6 @@ class _BloomPainter extends CustomPainter {
       canvas.drawCircle(c, r, glow);
     }
 
-    // Over the upper door, where the arc runs, and a brighter heart at each key.
     bloomAt(_centre - const Offset(0, 120), 360, peak * 0.7);
     for (final k in _keys) {
       bloomAt(_keyAt(k), 140, peak);

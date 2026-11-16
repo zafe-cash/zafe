@@ -1,6 +1,3 @@
-//! Asynchronous signing sessions (spec §9.4–§9.5): approve with commitments, leader
-//! request, sign with nonce deletion, aggregate, restart after a dropout.
-
 use std::collections::BTreeMap;
 
 use orchard::keys::Scope;
@@ -18,7 +15,7 @@ use zafe_core::{
 };
 use zcash_protocol::memo::{Memo, MemoBytes};
 
-mod common;
+pub mod common;
 use common::*;
 
 const PROPOSAL: ProposalId = [0x42; 16];
@@ -123,7 +120,6 @@ impl Fixture {
         self.members[i].0
     }
 
-    /// Signs, proves, extracts and fully verifies the transaction.
     fn finalize(&self, signatures: &[(usize, [u8; 64])]) {
         let signed = tx::apply_signatures(self.pczt.clone(), signatures).unwrap();
         let proved = Prover::new(signed)
@@ -168,18 +164,15 @@ fn restart_after_signer_drops_out() {
         f.approve(i, &mut leader, &mut rng);
     }
 
-    // Leader asks members 0 and 1; member 0 signs, member 1 never answers.
     let first = leader.request(&[f.id(0), f.id(1)]).unwrap();
     f.sign(0, &first).unwrap();
 
-    // Member 0's commitments are spent; only member 2 is still available.
     assert_eq!(leader.available_signers(), vec![f.id(2)]);
     assert!(matches!(
         leader.request(&[f.id(0), f.id(2)]),
         Err(SessionError::UnknownApprover)
     ));
 
-    // Member 0 re-approves with fresh commitments; the leader restarts with 0 and 2.
     f.approve(0, &mut leader, &mut rng);
     let second = leader.request(&[f.id(0), f.id(2)]).unwrap();
     let mut shares = BTreeMap::new();
@@ -202,9 +195,7 @@ fn nonces_are_single_use() {
     }
     let request = leader.request(&[f.id(0), f.id(1)]).unwrap();
     f.sign(0, &request).unwrap();
-    // Signing the same request again must fail: the nonces were deleted.
     assert!(matches!(f.sign(0, &request), Err(SessionError::NoNonces)));
-    // And approving twice without signing in between is refused.
     let mut fresh = MemoryNonceStore::default();
     let m = f.member(2);
     m.approve(PROPOSAL, &f.pczt, &f.expected, &mut fresh, &mut rng)
@@ -224,7 +215,6 @@ fn rejects_package_signing_a_different_message() {
         f.approve(i, &mut leader, &mut rng);
     }
     let mut request = leader.request(&[f.id(0), f.id(1)]).unwrap();
-    // A malicious leader swaps in a package over another transaction's sighash.
     let commitments = request.packages[0].signing_commitments().clone();
     request.packages[0] = zafe_core::signing::signing_package(commitments, &[0xEE; 32]);
     assert!(matches!(
@@ -260,7 +250,6 @@ fn invalid_share_is_attributed() {
     let request = leader.request(&[f.id(0), f.id(1)]).unwrap();
     let mut shares = BTreeMap::new();
     shares.insert(f.id(0), f.sign(0, &request).unwrap());
-    // Member 1 returns member 0's share as its own.
     let forged = shares[&f.id(0)].clone();
     shares.insert(f.id(1), forged);
 
@@ -271,7 +260,6 @@ fn invalid_share_is_attributed() {
     assert!(text.contains("InvalidSignatureShare"), "{text}");
 }
 
-/// From the code review: a stale or forged request must not consume a member's nonces.
 #[test]
 fn bad_request_does_not_burn_nonces() {
     let mut rng = StdRng::seed_from_u64(46);
@@ -282,7 +270,6 @@ fn bad_request_does_not_burn_nonces() {
     }
     let real = leader.request(&[f.id(0), f.id(1)]).unwrap();
 
-    // A forged request with the right proposal and PCZT but made-up commitments for member 0.
     let mut forged = real.clone();
     let mut commitments = forged.packages[0].signing_commitments().clone();
     let (_, fake) = zafe_core::signing::commit(&f.members[2].1.key_package, &mut rng);
@@ -297,7 +284,6 @@ fn bad_request_does_not_burn_nonces() {
         Err(SessionError::NotOurCommitments(0))
     ));
 
-    // The real request still signs: the nonces survived.
     let mut shares = BTreeMap::new();
     for i in [0, 1] {
         shares.insert(f.id(i), f.sign(i, &real).unwrap());

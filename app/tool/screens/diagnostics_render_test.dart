@@ -1,10 +1,3 @@
-// Renders the Settings > "Diagnostic report" sheet (empty log, and a log with app, background
-// and Rust panic entries) in both themes to PNGs for review without a device.
-// Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/diagnostics_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): diagnostics_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -107,8 +100,7 @@ void main() {
         });
         final path = '${out.path}/diagnostics_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

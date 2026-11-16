@@ -1,9 +1,3 @@
-// Renders the "Use Tor" sheet in each state, in both themes, to PNGs for review without
-// a device. Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/tor_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): tor_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -71,7 +65,6 @@ void main() {
         final boundary = GlobalKey();
         await tester.pumpWidget(
           ProviderScope(
-            // A new scope per state: overrides can't change on a live one.
             key: ValueKey('$name-$theme'),
             overrides: [torProvider.overrideWith(() => _Fixed(setting))],
             child: MaterialApp(
@@ -120,8 +113,7 @@ void main() {
         });
         final path = '${out.path}/tor_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

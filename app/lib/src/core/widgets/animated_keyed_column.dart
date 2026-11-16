@@ -1,8 +1,5 @@
 import 'package:flutter/widgets.dart';
 
-/// A column whose children (each with a unique key) grow and fade in when they appear
-/// and shrink and fade out when they're gone, instead of jumping (250 ms). Children that
-/// stay keep their state. With reduced motion, changes are instant.
 class AnimatedKeyedColumn extends StatefulWidget {
   const AnimatedKeyedColumn({
     super.key,
@@ -10,7 +7,6 @@ class AnimatedKeyedColumn extends StatefulWidget {
     this.spacing = 0,
   });
 
-  /// Every child needs a key that is unique in this column.
   final List<Widget> children;
   final double spacing;
 
@@ -21,7 +17,6 @@ class AnimatedKeyedColumn extends StatefulWidget {
 }
 
 class _AnimatedKeyedColumnState extends State<AnimatedKeyedColumn> {
-  /// Current and leaving children in display order.
   late List<_Entry> _entries = [
     for (final c in widget.children) _Entry(c, appearing: false),
   ];
@@ -31,7 +26,6 @@ class _AnimatedKeyedColumnState extends State<AnimatedKeyedColumn> {
     super.didUpdateWidget(old);
     final before = {for (final e in _entries) e.child.key!: e};
     final keys = {for (final c in widget.children) c.key!};
-    // The new order, then each leaving child put back at its old position.
     final out = [
       for (final c in widget.children)
         _Entry(

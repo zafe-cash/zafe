@@ -9,8 +9,6 @@ import 'prepared_modal_sheet_route.dart';
 
 typedef _Geometry = ({Rect rect, Size viewSize, double scale});
 
-/// Resolves settled modal geometry, never the intermediate translated frame
-/// of a sheet entrance/drag. Animation and all painting remain in Flutter.
 class MobileModalCorners extends StatefulWidget {
   const MobileModalCorners({
     required this.followsScreenCorners,
@@ -113,7 +111,6 @@ class _MobileModalCornersState extends State<MobileModalCorners>
     if (status == AnimationStatus.completed) {
       _schedule();
     } else {
-      // A settled-frame response must not alter a dismissing/dragged sheet.
       if (_pending) {
         _invalidate();
       } else {
@@ -154,8 +151,6 @@ class _MobileModalCornersState extends State<MobileModalCorners>
     _request = geometry;
     final epoch = ++_epoch;
     _pending = true;
-    // Native owns the shared memory cache and validates the host on
-    // every read. Never expose the fallback while awaiting the initial result.
     final radii = await NativeModalCorners.resolve(
       rect: geometry.rect,
       viewSize: geometry.viewSize,

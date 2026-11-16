@@ -2,20 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// The vault card (Home's balance card) and the payment card that mirrors it
-/// (docs/brand.md "Vault card").
-///
-/// Plain since 2026-10-27 (user's pick after comparing the dial, a glow and tinted
-/// cards): the surface every other card uses, nothing drawn on it, the Zcash mark and
-/// "Vault balance" in the secondary text colour.
-///
-/// * [background] — The card itself (the cards' ground surface).
-/// * [text] / [textSecondary] — Amount, and the label, mark, notes and threshold text.
-/// * [accent] — Filled signer dots and the recipient's shield.
-/// * [emptyDot] — Outline of a signer dot beyond the threshold.
-/// * [ticker] — The currency ticker next to amounts: Zcash gold, the value colour.
-/// * [chip] — Small buttons on the card (show/hide balance, full address).
-/// * [inset] / [insetBorder] — The recipient box on the payment card.
 class AppVaultCardColors {
   const AppVaultCardColors({
     required this.background,

@@ -55,7 +55,6 @@ void main() {
     expect(problem(SyncFailureKind.timeout, lwd), isTrue);
     expect(problem(SyncFailureKind.tls, lwd), isTrue);
     expect(problem(SyncFailureKind.serverBehind, lwd), isTrue);
-    // The phone is offline, the relay failed, or it's this app's own problem.
     expect(problem(SyncFailureKind.offline), isFalse);
     expect(problem(SyncFailureKind.timeout, SyncEndpoint.relay), isFalse);
     expect(problem(SyncFailureKind.wrongNetwork, lwd), isFalse);

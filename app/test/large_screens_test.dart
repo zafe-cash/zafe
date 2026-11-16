@@ -1,5 +1,3 @@
-// Large screens, foldables and multi-window: which windows rotate, where a page's column
-// goes (centred, clear of a hinge), and what the column reports below it.
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
@@ -26,28 +24,18 @@ void main() {
 
     test('phones, cover screens and flip phones stay portrait', () {
       expect(rotates(const Size(390, 844)), isFalse);
-      expect(
-        rotates(const Size(344, 882)),
-        isFalse,
-      ); // a foldable's cover screen
-      expect(rotates(const Size(412, 1005)), isFalse); // a flip phone, open
-      expect(
-        rotates(const Size(466, 678)),
-        isFalse,
-      ); // a short, wide outer screen
+      expect(rotates(const Size(344, 882)), isFalse);
+      expect(rotates(const Size(412, 1005)), isFalse);
+      expect(rotates(const Size(466, 678)), isFalse);
     });
 
     test('tablets and unfolded foldables rotate, also in split screen', () {
       expect(rotates(const Size(800, 1280)), isTrue);
-      expect(
-        rotates(const Size(673, 841)),
-        isTrue,
-      ); // a foldable's inner screen
+      expect(rotates(const Size(673, 841)), isTrue);
       expect(rotates(const Size(1280, 800), const Size(640, 800)), isTrue);
     });
 
     test('a window larger than the display reported at start still counts', () {
-      // iOS reads the display once, at start: on the outer screen, then unfolded.
       expect(rotates(const Size(466, 678), const Size(626, 890)), isTrue);
     });
 
@@ -134,7 +122,6 @@ void main() {
       appColumnRect(media, TextDirection.ltr),
     );
     expect(inside.size, const Size(540, 720));
-    // The right inset is on the other screen.
     expect(inside.padding, const EdgeInsets.fromLTRB(30, 24, 0, 16));
     expect(inside.displayFeatures, isEmpty);
   });
@@ -159,22 +146,22 @@ void main() {
       tester.view.physicalSize = logical * tester.view.devicePixelRatio;
     }
 
-    show(const Size(344, 882)); // cover screen
+    show(const Size(344, 882));
     OrientationPolicy.install();
     await tester.pump();
     expect(calls, [
       ['DeviceOrientation.portraitUp'],
     ]);
 
-    show(const Size(673, 841)); // unfolded
+    show(const Size(673, 841));
     await tester.pump();
-    expect(calls.last, isEmpty); // whatever the platform allows
+    expect(calls.last, isEmpty);
 
-    show(const Size(841, 673)); // rotated: nothing new to ask
+    show(const Size(841, 673));
     await tester.pump();
     expect(calls, hasLength(2));
 
-    show(const Size(344, 882)); // folded again
+    show(const Size(344, 882));
     await tester.pump();
     expect(calls.last, ['DeviceOrientation.portraitUp']);
   });

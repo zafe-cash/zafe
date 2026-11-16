@@ -1,8 +1,4 @@
 ---
-// The body of the invite page (https://<host>/join#<invite>), shared by the mainnet page
-// (join.astro) and the testnet page (join-testnet.astro, served at /join on the testnet
-// host): same markup and ids, because public/assets/join.js drives both. The invite is in
-// the fragment and is handled only by join.js, loaded as-is (never bundled or inlined).
 import Base from '../layouts/Base.astro';
 import { downloadUrl, sourceUrl, testnetUrl } from '../config';
 

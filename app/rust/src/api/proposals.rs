@@ -1,10 +1,3 @@
-//! Payment proposals: propose, review, approve/reject, answer signing requests, and (as the
-//! leader) collect signatures and broadcast.
-//!
-//! `state_dir` must be app-private and excluded from backups: it holds single-use FROST
-//! nonces (`nonces/`) and the leader's signing rounds (`leader/`). Reusing a nonce leaks the
-//! member's key share, so a restored backup must never bring old nonces back.
-
 use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
 
 use rand::rngs::OsRng;
@@ -36,19 +29,13 @@ use crate::frb_generated::StreamSink;
 
 type Result<T, E = ZafeError> = std::result::Result<T, E>;
 
-/// How long the leader waits for signature shares per attempt. Retrying reuses the same
-/// signing request, so shares that arrive later are not wasted.
 const COLLECT_TIMEOUT: Duration = Duration::from_secs(90);
-
-// --- Input helpers ----------------------------------------------------------------------
 
 pub struct AddressCheck {
     pub valid: bool,
-    /// Why the address can't be paid (empty when valid).
     pub reason: String,
 }
 
-/// Vault payments go to shielded (Orchard-receiver) unified addresses only.
 #[flutter_rust_bridge::frb(sync)]
 pub fn check_address(network_name: String, address: String) -> AddressCheck {
     let result = network(&network_name)
@@ -73,7 +60,6 @@ pub fn check_address(network_name: String, address: String) -> AddressCheck {
                     .iter()
                     .any(|other| *other != network_name && decodes_on(other))
                 {
-                    // Same wording as the send recipient step.
                     "This address is for a different Zcash network".into()
                 } else {
                     "Invalid address".into()
@@ -83,30 +69,19 @@ pub fn check_address(network_name: String, address: String) -> AddressCheck {
     }
 }
 
-/// One payment read from a scanned QR code or pasted text.
 pub struct ScannedPayment {
     pub address: String,
-    /// 0 when the request leaves the amount to the payer.
     pub amount_zat: u64,
-    /// Text memo (empty if none or not text).
     pub memo: String,
-    /// What the link calls the recipient (ZIP 321 `label`; empty if none). Written by
-    /// whoever made the link: show it as the link's claim, never as verified.
     pub label: String,
-    /// The link's note to the payer (ZIP 321 `message`; empty if none). Same caveat.
     pub message: String,
 }
 
 pub struct ScannedRequest {
-    /// Empty when `problem` is set.
     pub payments: Vec<ScannedPayment>,
-    /// Why it can't be paid from this vault (empty when fine).
     pub problem: String,
 }
 
-/// Reads a scanned or pasted payment target: a plain address, or a ZIP 321 `zcash:` URI
-/// (amount, memo, several recipients). Every address must be payable from a vault on
-/// `network_name` (see `check_address`).
 #[flutter_rust_bridge::frb(sync)]
 pub fn parse_payment_request(network_name: String, text: String) -> ScannedRequest {
     let text = text.trim();
@@ -156,7 +131,6 @@ pub fn parse_payment_request(network_name: String, text: String) -> ScannedReque
     }
 }
 
-/// Parses a ZEC amount ("1.5", "0,25") to zatoshis. `None` if malformed or above 8 decimals.
 #[flutter_rust_bridge::frb(sync)]
 pub fn parse_zec(text: String) -> Option<u64> {
     let t = text.trim().replace(',', ".");
@@ -177,7 +151,6 @@ pub fn parse_zec(text: String) -> Option<u64> {
     whole.checked_mul(100_000_000)?.checked_add(frac)
 }
 
-/// Bytes a memo takes (the limit is 512).
 #[flutter_rust_bridge::frb(sync)]
 pub fn memo_length(memo: String) -> u32 {
     memo.len() as u32
@@ -203,13 +176,9 @@ fn memo_text(bytes: &[u8]) -> String {
         .unwrap_or_default()
 }
 
-// --- Listing ----------------------------------------------------------------------------
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProposalStage {
-    /// Waiting for approvals.
     Open,
-    /// Enough approvals; waiting for a member to collect signatures and send.
     Approved,
     Rejected,
     Cancelled,
@@ -241,43 +210,19 @@ pub struct ProposalInfo {
     pub my_vote: MyVote,
     pub threshold: u16,
     pub rejection_threshold: u16,
-    /// Proposer's clock (unix seconds, display only).
     pub created_at: u64,
     pub txid: Option<String>,
-    /// This device already sent a signing request for it (it can resume collecting).
     pub signing_started: bool,
-    /// Signed at approval time (one tap): approvals carry the signatures.
     pub one_tap: bool,
-    /// Some signer group has every signature: any member can send it now, alone.
     pub ready: bool,
-    /// This member's approval completed the signatures (it sends when `auto_send`).
     pub completed_by_me: bool,
-    /// The proposer asked for it to be sent as soon as the signatures are complete.
     pub auto_send: bool,
-    /// Last block the transaction can be mined in; after it the proposal is expired.
     pub expiry_height: u32,
-    /// This member must approve again before a signing round can include it: it approved
-    /// with signing commitments whose nonces are gone from this device (used in a round
-    /// that didn't finish, or restored from a backup), or it signed one tap and no signer
-    /// group can complete (another signer approved interactively).
     pub needs_reapproval: bool,
-    /// Cancelled or rejected, but it may have been signed (it reached Approved, or a vote
-    /// carried signatures) and can still be mined: anyone holding the signed transaction
-    /// could send it until it expires (offer to make it unsendable). A new payment must
-    /// spend one of its notes.
     pub still_sendable: bool,
-    /// Cancelled or rejected after it was signed, and its transaction was mined anyway
-    /// (`stage` is `Sent`, `txid` that transaction's).
     pub sent_anyway: bool,
-    /// It reached Approved or a vote carried signatures: a signed transaction may exist
-    /// whatever was decided after (cancelling or rejecting can't take it back).
     pub maybe_signed: bool,
-    /// A live proposal (id) that spends this cancelled one's notes back to the vault, while
-    /// this one can still be sent (`still_sendable` before the sweep).
     pub invalidated_by: Option<String>,
-    /// One-tap, open, and no signer group can be completed any more (a member's phone
-    /// was restored or replaced while it was open): the proposer should propose it again
-    /// (`propose_again`), and everyone approves once more.
     pub needs_new_proposal: bool,
 }
 
@@ -296,7 +241,6 @@ fn request_file(state_dir: &str, id: &ProposalId) -> PathBuf {
     leader_dir(state_dir).join(format!("{}.{}", hex::encode(id), state_dir::REQUEST_EXT))
 }
 
-/// This member's key for its nonce files in this vault (derived, never stored).
 fn nonce_key(seeds: &[u8], m: &VaultMaterial) -> NonceKey {
     NonceKey::derive(seeds, &m.descriptor.vault_id)
 }
@@ -325,9 +269,6 @@ fn info(
     let d = &state.descriptor;
     let nonces = nonce_store(state_dir, seeds, m);
     let pool = pool_store(state_dir, seeds, m);
-    // Cancelled or rejected payments that may be signed and can still mine, as of the last
-    // sync; without one, every such payment counts (it can't be told dead yet). And those
-    // whose transaction was mined anyway.
     let view = super::vault::synced_view(&m.descriptor.vault_id);
     let anyway = view
         .as_ref()
@@ -391,7 +332,7 @@ fn info(
             sent_anyway: anyway.contains_key(&p.id),
             txid: p.txid.or_else(|| anyway.get(&p.id).copied()).map(|t| {
                 let mut t = t;
-                t.reverse(); // display order, like block explorers
+                t.reverse();
                 hex::encode(t)
             }),
             signing_started: request_file(state_dir, &p.id).exists(),
@@ -402,8 +343,6 @@ fn info(
             expiry_height: p.expiry_height,
             still_sendable: sendable.contains(&p.id) && !anyway.contains_key(&p.id),
             maybe_signed: p.possibly_signed,
-            // Only while it can still go out: once the sweep (or any spend of its notes) is
-            // deep, there is nothing left to make unsendable.
             invalidated_by: (matches!(
                 p.status,
                 ProposalStatus::Cancelled | ProposalStatus::Rejected
@@ -421,10 +360,7 @@ fn info(
             .map(|q| hex::encode(q.id)),
             needs_reapproval: matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved)
                 && match p.approvals.get(&me) {
-                    // Interactive: its nonces were used in a round that didn't finish.
                     Some(c) if !c.is_empty() => !nonces.contains(&p.id, &p.pczt_hash),
-                    // One tap: no signer group can complete, so this member's shares need
-                    // commitments for an interactive round too (`approve` adds them).
                     Some(_) => p.shares.contains_key(&me) && p.one_tap_blocked(),
                     None => false,
                 },
@@ -438,114 +374,60 @@ fn info(
 }
 
 pub struct ProposalList {
-    /// Newest first.
     pub items: Vec<ProposalInfo>,
-    /// Log entries written by a newer version of Zafe that this build skipped: other
-    /// members may see something this device can't, so the app asks to update.
     pub newer_version_entries: u32,
-    /// Names members gave themselves in the log (this member's included). The app shows
-    /// its own local label first, then these.
     pub shared_names: Vec<SignerName>,
-    /// Members (hex signing keys) who attested a backup of their current keys
-    /// (backup health, spec §12.2).
     pub backed_up: Vec<String>,
-    /// This phone's seat switched to it in the log and the server is still finishing the
-    /// move: it reads but can't write yet (not an error; the next refresh tries again).
     pub seat_finishing: bool,
-    /// Seat moves waiting for approvals (a signer who lost their phone, spec §10.1).
     pub seat_moves: Vec<SeatMove>,
-    /// Seat moves with every approval, waiting for the helpers (72 h each) and for the old
-    /// phone, which can keep the seat in the first round.
     pub pending_seat_moves: Vec<PendingSeatMove>,
-    /// Seats whose old phone said it still has them (`KeepSeat`): whoever approves moving
-    /// one again must call its owner first.
     pub seat_keeps: Vec<SeatKeep>,
-    /// Seat moves whose key isn't rebuilt yet, pending ones included (a helper may have
-    /// stalled; a restart works for either).
     pub repairs: Vec<RepairInfo>,
-    /// The vault's switches to other relays, in log order.
     pub moves: Vec<RelayMoveRecord>,
-    /// This member's vault material with the current membership, when a seat moved since
-    /// the stored copy, or on the vault's new relay after a move: save it in place of the
-    /// old one (and register push on the new relay).
     pub updated_material: Option<Vec<u8>>,
 }
 
-/// A seat move whose key the helpers are still rebuilding on the new phone.
 pub struct RepairInfo {
-    /// The move (pass to `retry_repair`).
     pub replacement: u64,
-    /// The seat hasn't switched yet (see [`PendingSeatMove`]).
     pub pending: bool,
-    /// The new phone's key (hex).
     pub new_key_hex: String,
-    /// The members rebuilding it in the current attempt (hex keys).
     pub helpers: Vec<String>,
-    /// 0 for the approvers' attempt, +1 per restart.
     pub attempt: u32,
-    /// Restarts asked for in this attempt: each starts once every helper it names asked.
     pub restarts: Vec<RepairRestart>,
 }
 
-/// A restart of a key repair some members asked for.
 pub struct RepairRestart {
-    /// The helpers it names (hex keys).
     pub helpers: Vec<String>,
-    /// Who asked so far (hex keys).
     pub asked: Vec<String>,
 }
 
-/// A signer moving to a new phone, waiting for approvals.
 pub struct SeatMove {
-    /// The signer who lost their phone (hex key).
     pub old_key_hex: String,
-    /// The new phone's key (hex).
     pub new_key_hex: String,
-    /// Members who approved so far (hex keys).
     pub approvals: Vec<String>,
     pub needed: u32,
-    /// The recovery code, rebuilt from the log, for approving from this list.
     pub code: String,
-    /// When the old phone last said it still has this seat (`KeepSeat`, its clock, unix
-    /// seconds): approvers must call its owner first. `None` in the first round.
     pub kept_at: Option<u64>,
 }
 
-/// The last time a seat's old phone kept it.
 pub struct SeatKeep {
-    /// The seat (hex key of the phone that kept it).
     pub old_key_hex: String,
-    /// Its clock, unix seconds (display only).
     pub at: u64,
 }
 
-/// A seat move with every approval: the old key still holds the seat until every helper
-/// waited 72 h (by its own clock) and logged its part.
 pub struct PendingSeatMove {
-    /// The move (pass to `retry_repair`).
     pub replacement: u64,
-    /// The signer whose seat moves (hex key); this phone's own when it is the old phone.
     pub old_key_hex: String,
-    /// The new phone's key (hex).
     pub new_key_hex: String,
-    /// The old phone can still keep the seat (first round only).
     pub can_keep: bool,
-    /// When the old phone said it still has this seat before this round, if it did.
     pub kept_at: Option<u64>,
-    /// The members rebuilding the key (hex keys) and those of them whose part is logged.
     pub helpers: Vec<String>,
     pub helped: Vec<String>,
-    /// When this phone first saw the move with every approval (unix seconds; `None` until
-    /// its next refresh records it) and when its 72 h end from then.
     pub seen_at: Option<u64>,
     pub completes_at: Option<u64>,
-    /// Helpers who stopped helping this move (hex keys), for good.
     pub stopped: Vec<String>,
 }
 
-/// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
-/// Zcash libraries this build uses know it. Blocks come every 75 s before it and every 25 s
-/// from it on, which the app needs to turn a block count into a time.
 #[flutter_rust_bridge::frb(sync)]
 pub fn nu7_activation_height(network: String) -> Option<u32> {
     use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
@@ -553,10 +435,6 @@ pub fn nu7_activation_height(network: String) -> Option<u32> {
     net.activation_height(NetworkUpgrade::Nu7).map(u32::from)
 }
 
-/// A device restored from a backup has no signing nonces, so its next refresh retires the
-/// commitments the previous device published and publishes a fresh pool (see
-/// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the
-/// vault's signing state directory, which backups never contain.
 pub fn mark_pool_reset(state_dir: String) -> Result<(), ZafeError> {
     fs::create_dir_all(&state_dir).map_err(anyhow::Error::from)?;
     fs::write(PathBuf::from(&state_dir).join(state_dir::POOL_RESET), b"1")
@@ -564,10 +442,6 @@ pub fn mark_pool_reset(state_dir: String) -> Result<(), ZafeError> {
     Ok(())
 }
 
-/// Every proposal in the vault log, newest first. Also keeps this device ready for
-/// one-tap signing: tops up its pre-published commitments when they run low, and deletes
-/// nonces of proposals that closed or expired (as of `tip_height`, the synced tip, when
-/// known).
 pub fn list_proposals(
     relay_url: String,
     state_dir: String,
@@ -579,19 +453,13 @@ pub fn list_proposals(
     let m = self::material(&material)?;
     let relay = vault_relay(&relay_url, &m);
     let mut pool = pool_store(&state_dir, &seeds, &m);
-    // A device just restored from a backup retires the commitments its previous device
-    // published (see `node::top_up_pool`); the marker is removed once that is logged.
     let reset_marker = PathBuf::from(&state_dir).join(state_dir::POOL_RESET);
     let reset = reset_marker.exists();
     let mut watch = crate::diag::Stopwatch::new("proposals");
     let state = runtime().block_on(async {
         let notes = super::vault::note_count(&m.descriptor.vault_id);
-        // One load of the log for both: the pool top-up keeps `state` current with
-        // whatever it appends (it used to load the log a second time).
         let (mut chain, mut state) = node::load_state(&relay, &me, &m).await?;
         watch.lap("log");
-        // This phone's seat switched to it but the server hasn't finished the move: it can
-        // read, not write (writes would answer 403); the next refresh tries again.
         if repair::seat_finishing(&relay, &me, &m, &state).await {
             return Ok::<_, ZafeError>((state, true));
         }
@@ -605,9 +473,6 @@ pub fn list_proposals(
                     let _ = std::fs::remove_file(&reset_marker);
                 }
             }
-            // The vault moved and this phone hasn't followed yet, or this phone can't tell
-            // where it lives (rule 6: it writes nowhere): still list what is here (the Home
-            // card offers the move; the Server screen its cancel).
             Err(
                 node::NodeError::VaultMoved { .. }
                 | node::NodeError::MoveUnconfirmed { .. }
@@ -616,21 +481,16 @@ pub fn list_proposals(
             Err(e) => return Err(e.into()),
         }
         watch.lap("pool");
-        // This app's event version, once, so the others can see it supports relay moves.
         if let Err(e) =
             node::announce_version(&relay, &me, &m, &mut chain, &mut state, &mut OsRng).await
         {
             eprintln!("announce version: {e}");
         }
-        // A relay move this phone takes part in: count arrivals, switch at m (connects only
-        // to a relay this member chose: the mover's pick, or one it tapped Move for).
         if node::move_state(&relay, &m).is_some_and(|ms| ms.arrived && !ms.switched) {
             if let Err(e) = Box::pin(node::move_progress(&relay, &me, &m, &mut OsRng)).await {
                 eprintln!("relay move: {e}");
             }
         }
-        // This member's part in repairing a moved seat's key (best effort: retried on
-        // every refresh).
         let repair_dir = PathBuf::from(&state_dir).join(state_dir::REPAIR);
         if let Err(e) = repair::help_repairs(
             &relay,
@@ -646,7 +506,6 @@ pub fn list_proposals(
         {
             eprintln!("share repair: {e}");
         }
-        // A recovered phone tells the others its key is back (once).
         if state
             .replacement_to(&me.public().sig_pk)
             .is_some_and(|r| !r.done)
@@ -700,17 +559,13 @@ pub fn list_proposals(
     })
 }
 
-/// A switch of the vault to another relay, for Activity ("Grants moved to relay.dao.org").
 pub struct RelayMoveRecord {
     pub relay_url: String,
     pub host: String,
-    /// The switching phone's clock, unix seconds (display only).
     pub at: u64,
     pub log_index: u64,
 }
 
-/// The material to save in place of `stored`, when the membership changed (a seat move)
-/// or this phone followed the vault to another relay since it was stored.
 fn updated_material(
     stored: &[u8],
     m: &VaultMaterial,
@@ -749,10 +604,6 @@ fn repairs(state: &VaultState) -> Vec<RepairInfo> {
         .collect()
 }
 
-/// Asks to restart rebuilding a moved seat's key with `taker_key_hex` in place of
-/// `stalled_key_hex`, a helper not doing its part: this member offering to help, or a
-/// helper agreeing to another member's offer. The restart starts once every new helper
-/// asked.
 pub fn retry_repair(
     relay_url: String,
     seeds: Vec<u8>,
@@ -781,7 +632,6 @@ pub fn retry_repair(
     Ok(())
 }
 
-/// When the owner of `old`'s seat last kept it, if ever.
 fn kept_at(state: &VaultState, old: &[u8; 32]) -> Option<u64> {
     state.seat_keeps.get(old)?.last().map(|k| k.at)
 }
@@ -844,11 +694,6 @@ fn backed_up(state: &VaultState) -> Vec<String> {
         .collect()
 }
 
-/// Names members gave themselves, minus any that could pass for someone else: a member
-/// writes its own name, so it could call itself "You" (every other phone shows that for
-/// its owner), take another member's name, or hide text behind bidi or zero-width
-/// characters. Those are left out and that member shows as its short key. Display only:
-/// replay keeps every `Name` event as it is.
 fn shared_names(state: &VaultState) -> Vec<SignerName> {
     let folded = |name: &str| name.trim().to_lowercase();
     let mut seen = std::collections::BTreeMap::<String, usize>::new();
@@ -866,8 +711,6 @@ fn shared_names(state: &VaultState) -> Vec<SignerName> {
         .collect()
 }
 
-/// Invisible or direction-changing characters: they can hide text or make it read in
-/// another order than it is (an amount or address inside a memo, a name).
 fn hidden_char(c: char) -> bool {
     matches!(c,
         '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
@@ -875,19 +718,12 @@ fn hidden_char(c: char) -> bool {
         | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}')
 }
 
-/// Text from outside (memos, a payment link's label and message) as shown: each hidden
-/// character becomes U+FFFD, so it is visible and can't reorder what's around it.
 pub(crate) fn visible_text(text: &str) -> String {
     text.chars()
         .map(|c| if hidden_char(c) { '\u{FFFD}' } else { c })
         .collect()
 }
 
-/// Only letters, digits, single spaces and `- ' ’ &` (the app's name fields take only
-/// these), and not "You" (with anything after). Screens add a member's short key after
-/// the name it gave itself, "Alice (97c9ce...123e)", so a name must not hold anything that
-/// could pass for one (brackets, dots) or push the real key out of view (runs of spaces).
-/// This also keeps out invisible and direction-changing characters.
 fn plain_name(name: &str) -> bool {
     let lower = name.trim().to_lowercase();
     let you = lower == "you" || lower.starts_with("you ") || lower.starts_with("you(");
@@ -911,18 +747,15 @@ mod name_tests {
         assert_eq!(visible_text("pay \u{202E}01 ZEC"), "pay \u{FFFD}01 ZEC");
         assert_eq!(visible_text("plain memo"), "plain memo");
         assert!(!plain_name("Ali\u{200B}ce"));
-        // A name with a key in it: screens would read "Alice (a1a1a1...a1a1) (c3c3...)".
         assert!(!plain_name("Alice (a1a1a1...a1a1)"));
         assert!(!plain_name("Alice a1a1a1\u{2026}a1a1"));
         assert!(!plain_name("Alice\u{00A0}\u{00A0}\u{00A0}"));
         assert!(!plain_name("Alice    x"));
         assert!(plain_name("Anne-Marie O\u{2019}Neil & Co 2"));
-        assert!(plain_name("\u{0905}\u{0928}\u{092E}\u{094B}\u{0932}")); // अनमोल
+        assert!(plain_name("\u{0905}\u{0928}\u{092E}\u{094B}\u{0932}"));
         assert!(plain_name("José"));
     }
 }
-
-// --- Proposing and reviewing ------------------------------------------------------------
 
 pub struct PaymentInput {
     pub address: String,
@@ -930,7 +763,6 @@ pub struct PaymentInput {
     pub memo: String,
 }
 
-/// Checks `payments` and turns them into wallet requests.
 fn payment_requests(
     m: &VaultMaterial,
     payments: &[PaymentInput],
@@ -955,9 +787,6 @@ fn payment_requests(
         .collect()
 }
 
-/// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
-/// last synced: the same note selection as `propose_payment`, nothing built or logged.
-/// Fails like a proposal would (e.g. not enough funds), so the review can say so first.
 pub fn estimate_fee(
     lightwalletd_url: String,
     db_dir: String,
@@ -980,9 +809,6 @@ pub fn estimate_fee(
     fee
 }
 
-/// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns
-/// the proposal id.
-#[allow(clippy::too_many_arguments)]
 pub fn propose_payment(
     relay_url: String,
     lightwalletd_url: String,
@@ -1013,21 +839,13 @@ pub fn propose_payment(
     Ok(hex::encode(proposed?.id))
 }
 
-/// What [`propose_and_approve`] gets back.
 pub struct ProposeOutcome {
     pub id: String,
-    /// This member's approval, given under the same unlock (`None` if it failed).
     pub approved: Option<ApproveResult>,
-    /// Why the approval failed: the payment then stays open for this member's approval.
     pub approve_error: Option<ZafeError>,
-    /// The vault's proposals right after, so the app shows the new payment at once.
     pub items: Vec<ProposalInfo>,
 }
 
-/// Proposes `payments` and approves them as this member, in one call: the approval uses
-/// the log state the proposal left (one read of the log fewer, ~1.5 s over Tor). A
-/// failed approval is reported in the outcome, not as an error: the payment exists.
-#[allow(clippy::too_many_arguments)]
 pub fn propose_and_approve(
     relay_url: String,
     lightwalletd_url: String,
@@ -1099,7 +917,6 @@ pub fn propose_and_approve(
     })
 }
 
-/// A logged proposal, the log state that includes it, and the wallet's view of the chain.
 struct Proposed {
     id: ProposalId,
     chain: Chain,
@@ -1107,10 +924,6 @@ struct Proposed {
     view: node::ChainView,
 }
 
-/// Proposing, timed into `watch`. The network-only steps run first, together and without
-/// the wallet lock: lightwalletd's tip and branch (one request) and the vault log. Then,
-/// under the lock, the wallet catches up to that tip (a scan only if needed) and builds.
-#[allow(clippy::too_many_arguments)]
 fn propose_inner(
     watch: &mut crate::diag::Stopwatch,
     relay: &RelayClient,
@@ -1157,8 +970,6 @@ fn propose_inner(
             &mut OsRng,
         )
         .await;
-        // Built without scanning and the wallet refused (e.g. funds it hasn't seen yet):
-        // scan and try once more, so skipping the scan only ever costs time.
         let id = match first {
             Err(node::NodeError::Wallet(_)) if !scanned => {
                 wallet.sync(&mut client).await?;
@@ -1193,13 +1004,6 @@ fn propose_inner(
     })
 }
 
-/// Brings the wallet up to the server's tip before building a transaction: one cheap
-/// height request, and a scan only when needed. The scan's round trips cost about 2 s on
-/// a phone even for a single new block. `lenient`: a wallet that has scanned everything
-/// it knows of and is at most a few blocks behind builds as it is
-/// ([`VaultWallet::can_build_without_scan`]); the caller retries after a full sync if the
-/// build fails. Strict: scan whenever the server has anything new (as `sync_vault` does).
-/// Returns whether it scanned.
 async fn catch_up(
     wallet: &mut VaultWallet<ZafeNetwork>,
     client: &mut Client,
@@ -1209,7 +1013,6 @@ async fn catch_up(
     catch_up_to(wallet, client, tip, lenient).await
 }
 
-/// [`catch_up`] with the server's tip already read.
 async fn catch_up_to(
     wallet: &mut VaultWallet<ZafeNetwork>,
     client: &mut Client,
@@ -1228,8 +1031,6 @@ async fn catch_up_to(
     Ok(true)
 }
 
-/// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
-/// commitments (see `ProposalInfo.needs_new_proposal`). Returns the new proposal's id.
 pub fn propose_again(
     relay_url: String,
     lightwalletd_url: String,
@@ -1270,8 +1071,6 @@ pub fn propose_again(
     Ok(hex::encode(id?))
 }
 
-/// Proposes spending a cancelled proposal's notes back to the vault, so the cancelled
-/// transaction can never be sent (see `node::invalidate`). Returns the new proposal id.
 pub fn invalidate_proposal(
     relay_url: String,
     lightwalletd_url: String,
@@ -1312,10 +1111,7 @@ pub fn invalidate_proposal(
     Ok(hex::encode(id?))
 }
 
-/// This device's independent check of a proposal (spec §9.3).
 pub struct ReviewInfo {
-    /// Whether the transaction pays exactly the proposed payments, with change back to
-    /// the vault and the standard fee. If false, `problem` says why: do not approve.
     pub verified: bool,
     pub problem: String,
     pub fee_zat: u64,
@@ -1332,8 +1128,6 @@ fn local_tip(
     lightwalletd_url: &str,
     m: &VaultMaterial,
 ) -> Result<u32, ZafeError> {
-    // The last sync's height when this process has one (see `vault::synced_tip`):
-    // opening the wallet waits for any sync holding it.
     if let Some(tip) = super::vault::synced_tip(&m.descriptor.vault_id) {
         return Ok(tip);
     }
@@ -1344,10 +1138,6 @@ fn local_tip(
         .ok_or_else(|| ZafeError::new(ZafeErrorKind::NotReady, "The vault has not synced yet"))
 }
 
-/// This device's view of the chain for checking a vote (`node::check_vote`): the last
-/// sync's, when this process has one (see `vault::synced_view`), else read from the wallet,
-/// waiting for any sync holding it, with the mempool read for `state`'s sent payments when
-/// the caller has the log.
 fn chain_view(
     db_dir: &str,
     db_key: &[u8],
@@ -1419,20 +1209,12 @@ pub fn review_proposal(
     }
 }
 
-// --- Voting -----------------------------------------------------------------------------
-
 pub struct ApproveResult {
-    /// The approval carried this member's signatures (one tap).
     pub signed: bool,
-    /// This approval completed the signatures: the proposal can be sent now.
     pub completed: bool,
-    /// The proposer asked for the completing member to send right away.
     pub auto_send: bool,
 }
 
-/// Verifies the proposal on this device and, only if it passes, approves it. For one-tap
-/// proposals the approval also signs; see `ApproveResult`.
-#[allow(clippy::too_many_arguments)]
 pub fn approve_proposal(
     relay_url: String,
     lightwalletd_url: String,
@@ -1447,8 +1229,6 @@ pub fn approve_proposal(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let id = parse_id(&proposal_id)?;
-    // Timed per step (diagnostic report, "Slow steps"): `lock` is the wait for a sync
-    // holding the wallet, `tip` the chain height read, then the core's steps.
     let mut watch = crate::diag::Stopwatch::new("approve");
     let view = chain_view(&db_dir, &db_key, &lightwalletd_url, &m, None)?;
     watch.lap("tip");
@@ -1474,8 +1254,6 @@ pub fn approve_proposal(
     })
 }
 
-/// Rejects the proposal, unless this phone's signature for it may already be out
-/// (`ZafeErrorKind::AlreadySigned`: nothing is logged).
 pub fn reject_proposal(
     relay_url: String,
     state_dir: String,
@@ -1502,8 +1280,6 @@ pub fn reject_proposal(
     Ok(())
 }
 
-/// Sets this member's display name for the other members (empty clears it). Logged only
-/// when it changes.
 pub fn set_my_name(
     relay_url: String,
     seeds: Vec<u8>,
@@ -1522,8 +1298,6 @@ pub fn set_my_name(
     Ok(())
 }
 
-/// Records in the vault log that this member saved a backup that opens (backup health).
-/// Logged once per key epoch.
 pub fn attest_backup(
     relay_url: String,
     seeds: Vec<u8>,
@@ -1544,7 +1318,6 @@ pub fn attest_backup(
     Ok(())
 }
 
-/// Cancels a proposal this member authored (open or approved, not yet sent).
 pub fn cancel_proposal(
     relay_url: String,
     seeds: Vec<u8>,
@@ -1568,11 +1341,6 @@ pub fn cancel_proposal(
     Ok(())
 }
 
-// --- Signing ----------------------------------------------------------------------------
-
-/// Leader: abandons this device's unfinished signing round for a proposal (a chosen
-/// signer never answered), so the next send starts a new one. Commitment sets the old
-/// round used stay recorded as used; signers who took part approve again for fresh ones.
 #[flutter_rust_bridge::frb(sync)]
 pub fn restart_signing(state_dir: String, proposal_id: String) -> Result<(), ZafeError> {
     let id = parse_id(&proposal_id)?;
@@ -1587,10 +1355,6 @@ pub fn restart_signing(state_dir: String, proposal_id: String) -> Result<(), Zaf
     Ok(())
 }
 
-/// A payment this phone just sent: store it in the wallet as unmined, so the balance
-/// stops counting the notes it spent and shows its change as pending. Block sync only sees
-/// it once mined, a minute or more later, and Home read "Sent" over the old balance until
-/// then. The same store the mempool watch uses; best effort (the next sync catches up).
 fn store_own_send(db_dir: &str, db_key: &[u8], m: &VaultMaterial, tip: u32, raw: &[u8]) {
     let (Ok(net), Ok(key)) = (
         network(&m.descriptor.network),
@@ -1609,18 +1373,11 @@ fn store_own_send(db_dir: &str, db_key: &[u8], m: &VaultMaterial, tip: u32, raw:
     }
 }
 
-/// Builds the proving and verifying keys now (seconds on a phone, then kept for the
-/// process), so sending an approved payment starts proving at once. Returns when built.
 pub fn prewarm_prover() {
     node::proving_key();
     node::verifying_key();
 }
 
-/// Answers signing requests for proposals this member approved (each is re-verified first)
-/// and lets the relay delete what this member has handled. Called on every poll.
-/// `tip_height` is the synced tip when the caller knows it (saves opening the wallet).
-/// Returns how many were answered.
-#[allow(clippy::too_many_arguments)]
 pub fn answer_signing_requests(
     relay_url: String,
     lightwalletd_url: String,
@@ -1635,8 +1392,6 @@ pub fn answer_signing_requests(
     let m = self::material(&material)?;
     let net = network(&m.descriptor.network)?;
     let mut store = nonce_store(&state_dir, &seeds, &m);
-    // Runs even without stored nonces (one-tap members rarely hold any): the inbox still
-    // has keygen messages, finished requests and old shares for the relay to delete.
     let mut watch = crate::diag::Stopwatch::new("respond");
     let tip = match tip_height {
         Some(tip) => tip,
@@ -1659,10 +1414,8 @@ pub fn answer_signing_requests(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SendStage {
-    /// Signing requests are out; the transaction proof is being built meanwhile.
     Collecting,
     Sent,
-    /// Not sent; `error` says why. Retrying resumes the same signing round.
     Failed,
 }
 
@@ -1674,10 +1427,6 @@ pub struct SendProgress {
     pub error: Option<ZafeError>,
 }
 
-/// Leader: asks the approvers for signatures (once per proposal on this device), signs its
-/// own part, collects the rest while proving, and broadcasts. On a timeout, call again: it
-/// resumes the same signing round.
-#[allow(clippy::too_many_arguments)]
 pub fn send_proposal(
     relay_url: String,
     lightwalletd_url: String,
@@ -1703,8 +1452,6 @@ pub fn send_proposal(
             let _ = sink.add(p);
         },
     );
-    // Failures travel as a typed event: a streaming function's own error never reaches the
-    // Dart listener, and `add_error` is decoded as an untyped anyhow string.
     if let Err(e) = result {
         let _ = sink.add(SendProgress {
             stage: SendStage::Failed,
@@ -1717,10 +1464,7 @@ pub fn send_proposal(
     Ok(())
 }
 
-/// `send_proposal` with a plain callback and how long to wait for signature shares
-/// (tests and non-Flutter callers).
 #[flutter_rust_bridge::frb(ignore)]
-#[allow(clippy::too_many_arguments)]
 pub fn send_with_progress(
     relay_url: String,
     lightwalletd_url: String,
@@ -1745,11 +1489,8 @@ pub fn send_with_progress(
     let silent = node::SilentSigners::at(leader_dir(&state_dir).join(state_dir::SILENT_SIGNERS));
     let io = |e: std::io::Error| ZafeError::new(ZafeErrorKind::Other, e.to_string());
 
-    // One tap: the approvals already carry every signature; aggregate and send alone.
     let (_, state) = runtime().block_on(node::load_state(&relay, &me, &m))?;
     watch.lap("log");
-    // Already sent by another member, or by this app's other process (a background check
-    // finishing an auto-send while the app sent it too): nothing left to do.
     if let Some(p) = state.proposals.get(&id) {
         if let (ProposalStatus::Broadcast, Some(mut display)) = (p.status, p.txid) {
             display.reverse();
@@ -1809,7 +1550,6 @@ pub fn send_with_progress(
     let request = match fs::read(&req_path) {
         Ok(bytes) => node::decode_request(&bytes)?,
         Err(_) => {
-            // Commitment sets already put in a request must never be reused.
             let used_path = leader_dir(&state_dir).join(state_dir::USED_COMMITMENTS);
             let mut used: BTreeSet<[u8; 32]> = match fs::read(&used_path) {
                 Ok(bytes) => node::decode_used_commitments(&bytes)?,
@@ -1820,8 +1560,6 @@ pub fn send_with_progress(
             )))?;
             used.extend(sent.used_commitments);
             fs::create_dir_all(leader_dir(&state_dir)).map_err(io)?;
-            // Atomic: a torn file would block sending (or, for the used set, fail closed
-            // forever).
             durable::write(&used_path, &node::encode_used_commitments(&used)?).map_err(io)?;
             durable::write(&req_path, &node::encode_request(&sent.request)?).map_err(io)?;
             sent.request
@@ -1836,8 +1574,6 @@ pub fn send_with_progress(
     });
 
     runtime().block_on(async {
-        // Our own shares, if we are one of the chosen signers: signed once (that consumes
-        // the nonces) and kept until the broadcast, so a retry reuses them.
         let own_path = leader_dir(&state_dir).join(format!(
             "{}.{}",
             hex::encode(id),
@@ -1885,8 +1621,6 @@ pub fn send_with_progress(
                 sent
             }
             Err(e @ node::NodeError::Timeout(_)) => {
-                // Remember who never answered, so the next round (after "Start over")
-                // asks someone else first.
                 if let Ok(quiet) =
                     Box::pin(node::unanswered_signers(&relay, &me, &m, &request)).await
                 {
@@ -1900,8 +1634,6 @@ pub fn send_with_progress(
                 return Err(e.into());
             }
             Err(node::NodeError::InvalidShares(culprits)) => {
-                // This round can't complete with them: start the next one without them
-                // (asked last from now on). Those who signed approve again.
                 silent.update(&culprits, &[]);
                 let _ = fs::remove_file(&req_path);
                 let _ = fs::remove_file(&own_path);

@@ -1,54 +1,17 @@
-# The relay on a VPS: Caddy (TLS) in front of one relay per network, plus a backup
-# sidecar per relay. Deployed by .github/workflows/relay-deploy.yml (testnet) and
-# .github/workflows/relay-mainnet.yml (mainnet) through deploy.sh, which keeps the image
-# references and domains in .env next to this file:
-#
-#   RELAY_TESTNET_IMAGE=ghcr.io/zafe-cash/zafe-relay@sha256:...
-#   RELAY_TESTNET_DOMAIN=testnet.relay.zafe.cash
-#   RELAY_MAINNET_IMAGE=ghcr.io/zafe-cash/zafe-relay@sha256:...     (once mainnet is deployed)
-#   RELAY_MAINNET_DOMAIN=relay.zafe.cash
-#   COMPOSE_PROFILES=mainnet
-#
-# Self-hosting: set the two testnet lines in .env (a single relay under any name works the
-# same), then `docker compose up -d`.
-#
-# (A variable with no default would fail the whole file even while its profile is off, so
-# the mainnet image has a placeholder default that only a missed deploy would ever pull.)
-#
-# Mainnet is a second set of services (profile `mainnet`) with its own volume, backups and
-# Litestream replica to object storage; nothing starts until deploy.sh mainnet has run once
-# (it adds COMPOSE_PROFILES=mainnet). A testnet deploy never touches them.
-
 x-relay: &relay
   restart: unless-stopped
-  # Runs as the image's `zafe` user straight away: a named volume starts out with the
-  # image's /data ownership (uid 10001), so the entrypoint's chown step isn't needed.
   user: "10001:10001"
   read_only: true
   tmpfs: [/tmp]
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
-  # Each relay is capped so a flood against one (testnet) can't take the host's memory from
-  # the other (mainnet) or Caddy. A read page holds at most 16 MiB plus one 1 MiB entry
-  # (zafe_proto READ_BUDGET_BYTES), about 35 MiB with its encoded copy; 768 MiB is ~20 such
-  # reads at once on top of SQLite's cache. Two relays + Caddy stay under 2 GiB on the
-  # VPS (OVH VPS-1: 8 GB RAM, 75 GB disk; confirm on the host when it changes). A few tokio
-  # workers per core: 256 tasks is ample.
   mem_limit: 768m
   pids_limit: 256
   environment:
     RUST_LOG: zafe_relay=info
-    # Caddy sets X-Forwarded-For to the client address (it drops client-supplied values).
     ZAFE_RELAY_CLIENT_IP_HEADER: x-forwarded-for
-    # The whole database's cap (writes past it are 507; at 90% new vaults stop, and so do
-    # writes from vaults less than 30 days old here). Each
-    # network's backups share the disk (backup.sh: at most 15 nightly + 2 deploy copies,
-    # plus 2 while one is taken and gzipped; ciphertext barely compresses), so a full
-    # database takes up to 20x its size, and both networks back up at 03:17:
-    # (75 GB - ~10 GB for the system and images) / (2 networks x 20) ≈ 1.5 GiB.
     ZAFE_RELAY_MAX_DB_MB: "1536"
   networks: [relay]
-  # No published ports: only Caddy reaches the relay.
 
 x-backup: &backup
   restart: unless-stopped
@@ -67,8 +30,6 @@ x-litestream: &litestream
   tmpfs: [/tmp]
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
-  # Bucket, endpoint and keys come from litestream.env, which CI writes from the
-  # `relay-mainnet` environment (never in the repo or the image).
   env_file:
     - path: litestream.env
       required: false
@@ -81,8 +42,6 @@ services:
   caddy:
     image: caddy:2.11-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
-    # Caddy buffers at most a 1 MiB request body (request_body max_size) and streams
-    # responses; 256 MiB leaves room for TLS state of many long polls.
     mem_limit: 256m
     pids_limit: 256
     ports:
@@ -91,22 +50,16 @@ services:
       - "443:443/udp"
     environment:
       RELAY_TESTNET_DOMAIN: ${RELAY_TESTNET_DOMAIN:?set in .env}
-      # Only read by caddy/mainnet/relay.caddy, which exists once mainnet is deployed.
       RELAY_MAINNET_DOMAIN: ${RELAY_MAINNET_DOMAIN:-mainnet.invalid}
     volumes:
       - ./caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
-    # On both relays' networks, which can't reach each other.
     networks: [relay, mainnet]
 
   relay-testnet:
     <<: *relay
     image: ${RELAY_TESTNET_IMAGE:?set in .env}
-    # Optional secrets, never in the repo or the image: ZAFE_FCM_SERVICE_ACCOUNT_JSON (the
-    # Firebase service-account key on one line) enables pushes. CI writes this file from
-    # the environment secret RELAY_FCM_SERVICE_ACCOUNT_JSON; without it pushes are only
-    # logged.
     env_file:
       - path: secrets.env
         required: false
@@ -121,11 +74,6 @@ services:
       - ./backup.sh:/backup.sh:ro
       - /var/backups/zafe-relay/testnet:/backups
 
-  # --- mainnet (profile `mainnet`) -------------------------------------------------------
-
-  # Brings the database back from the object-storage replica when the volume is empty (a
-  # new server, a lost volume); does nothing when the database exists or no replica does.
-  # The relay starts after it.
   restore-mainnet:
     <<: *litestream
     profiles: [mainnet]
@@ -146,7 +94,6 @@ services:
     volumes:
       - relay-mainnet-data:/data
 
-  # Streams the write-ahead log to object storage continuously (point-in-time restore).
   litestream-mainnet:
     <<: *litestream
     profiles: [mainnet]
@@ -166,8 +113,6 @@ services:
       - /var/backups/zafe-relay/mainnet:/backups
 
 networks:
-  # testnet's relay and Caddy; mainnet's services have their own, so a compromised
-  # testnet image can't reach the mainnet relay or Litestream.
   relay: {}
   mainnet: {}
 

@@ -1,13 +1,9 @@
 ---
-// "iPhone waitlist" beside Google Play: opens the waitlist form right there, in the
-// browser's own popover (no JavaScript: `popovertarget`), instead of sending people to
-// the bottom of the page.
 import BrandIcon from './BrandIcon.astro';
 import Waitlist from './Waitlist.astro';
 
 interface Props {
   id: string;
-  /** Icon only (the platform tab under the hero). */
   icon?: boolean;
 }
 const { id, icon = false } = Astro.props;

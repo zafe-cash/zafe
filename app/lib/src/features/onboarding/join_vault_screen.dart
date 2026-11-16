@@ -24,7 +24,6 @@ import 'onboarding_art.dart';
 class JoinVaultScreen extends ConsumerStatefulWidget {
   const JoinVaultScreen({super.key, this.initialInvite});
 
-  /// Filled in from an invite link. Joining still needs a tap.
   final String? initialInvite;
 
   @override
@@ -66,7 +65,6 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
     _info = _tryParse(invite);
   }
 
-  /// Accepts a raw invite or an invite link (pasted, typed or scanned).
   static rust.InviteInfo? _tryParse(String text) {
     final invite = extractInvite(text);
     if (invite == null) return null;
@@ -152,8 +150,6 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // The camera, as an icon: a QR glyph next to an invite field needs no
-              // words.
               Tooltip(
                 message: 'Scan QR code',
                 child: AppTappable(
@@ -188,7 +184,6 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
               name: info.name,
               threshold: info.threshold,
               members: info.members,
-              // An invite from an older app runs on this phone's default relay.
               relayHost: relayHost(
                 info.relayUrl ?? ref.watch(endpointsProvider).relayUrl,
               ),
@@ -235,7 +230,6 @@ class _JoinVaultScreenState extends ConsumerState<JoinVaultScreen> {
   }
 }
 
-/// What an invite is, as a fact: `Grants · 2 of 3 · relay.dao.org`.
 String inviteFact({
   required String name,
   required int threshold,

@@ -17,15 +17,12 @@ import '../../core/widgets/mobile/mobile_surface_card.dart';
 import '../../core/widgets/mobile_text_field.dart';
 import '../../rust/api/endpoints.dart' as rust;
 
-/// The relay picked for a vault, and its create token when the relay is private.
 class RelayChoice {
   const RelayChoice(this.url, {this.token});
   final String url;
   final String? token;
 }
 
-/// What the selected relay answered: `info` once it answered, `error` (user copy) when it
-/// couldn't be used; neither while checking.
 class RelayCheckResult {
   const RelayCheckResult.checking() : info = null, error = null;
   const RelayCheckResult.ok(rust.RelayCheck this.info) : error = null;
@@ -39,7 +36,6 @@ class RelayCheckResult {
   bool get usable => info != null && !info!.tooOld;
 }
 
-/// What the server list opens with (the `/pick-server` route's extra).
 class RelayPickerArgs {
   const RelayPickerArgs({
     required this.title,
@@ -58,10 +54,6 @@ class RelayPickerArgs {
   final String confirmLabel;
 }
 
-/// Opens the server list as a full screen. Returns the choice on "Use this server",
-/// null on Back. `askToken`: offer the create-token field when the server needs one
-/// (creating a vault). `currentUrl`: the server the vault is on (moving it), shown but
-/// never chosen.
 Future<RelayChoice?> showRelayPicker(
   BuildContext context, {
   required String title,
@@ -82,7 +74,6 @@ Future<RelayChoice?> showRelayPicker(
   ),
 );
 
-/// Checks the one relay `url` (never the list) and turns a failure into user copy.
 Future<RelayCheckResult> checkRelayAt(String url) async {
   try {
     return RelayCheckResult.ok(await rust.checkRelay(relayUrl: url));
@@ -101,8 +92,6 @@ Future<RelayCheckResult> checkRelayAt(String url) async {
   }
 }
 
-/// The server list: Zafe's servers, "Other address" (typed, pasted or scanned), what the
-/// selected one says about itself, and its create token when it needs one.
 class RelayPickerScreen extends ConsumerStatefulWidget {
   const RelayPickerScreen({
     super.key,
@@ -119,7 +108,6 @@ class RelayPickerScreen extends ConsumerStatefulWidget {
   final String initialUrl;
   final String? currentUrl;
 
-  /// Asks one relay what it is ([checkRelayAt]; replaced in tests).
   final Future<RelayCheckResult> Function(String url) check;
   final String? initialToken;
   final bool askToken;
@@ -143,10 +131,8 @@ class _RelayPickerScreenState extends ConsumerState<RelayPickerScreen> {
   late bool _otherOpen = relayPresetFor(widget.initialUrl) == null;
   String? _otherError;
 
-  /// "Use this server" was tapped with an unchecked typed address: confirm once it checks out.
   bool _confirmWhenChecked = false;
 
-  /// Bumped on every selection, so a slow answer for an earlier one is dropped.
   int _generation = 0;
 
   @override
@@ -227,7 +213,6 @@ class _RelayPickerScreenState extends ConsumerState<RelayPickerScreen> {
     return current != null && sameRelayUrl(_url, current);
   }
 
-  /// The typed address isn't the selected one yet (the keyboard was closed without Done).
   bool get _otherPending {
     final text = _other.text.trim();
     return _otherOpen &&
@@ -297,8 +282,6 @@ class _RelayPickerScreenState extends ConsumerState<RelayPickerScreen> {
   }
 }
 
-/// The server list's buttons: use the selected one (or try it again when it didn't
-/// answer), and the way to run one's own.
 class RelayPickerActions extends StatelessWidget {
   const RelayPickerActions({
     super.key,
@@ -342,9 +325,6 @@ class RelayPickerActions extends StatelessWidget {
   );
 }
 
-/// The server list's content from plain data (rendered without Rust in previews): the
-/// listed servers and "Other address" in one card, the typed address, what the selected
-/// server said, and the create token when it needs one.
 class RelayPickerBody extends StatelessWidget {
   const RelayPickerBody({
     super.key,
@@ -369,7 +349,6 @@ class RelayPickerBody extends StatelessWidget {
   final List<RelayPreset> presets;
   final String selectedUrl;
 
-  /// The selected relay is the one the vault is on (moving it): shown as current.
   final bool selectedIsCurrent;
   final RelayCheckResult result;
   final bool otherOpen;
@@ -377,7 +356,6 @@ class RelayPickerBody extends StatelessWidget {
   final FocusNode otherFocus;
   final String? otherError;
 
-  /// The create-token field, when the selected relay needs one.
   final TextEditingController? token;
   final FocusNode? tokenFocus;
   final ValueChanged<RelayPreset>? onSelect;
@@ -397,7 +375,6 @@ class RelayPickerBody extends StatelessWidget {
           ? AppIcon(AppIcons.check, size: 20, color: colors.icon.accent)
           : null,
     );
-    // Only the selected relay was asked; the others show who runs them.
     String? status(String fallback) => selectedIsCurrent
         ? 'Current'
         : result.checking
@@ -492,7 +469,6 @@ class RelayPickerBody extends StatelessWidget {
             _Line(otherError!, color: colors.text.destructive),
           ],
         ],
-        // The current server is never picked: what it answered doesn't matter here.
         if (selectedIsCurrent)
           ...[]
         else if (result.tooOld) ...[
@@ -546,10 +522,8 @@ class _Line extends StatelessWidget {
       Text(text, style: AppTypography.bodySmall.copyWith(color: color));
 }
 
-/// The host shown for a relay URL (`Uri` drops the default https port).
 String relayHost(String url) => Uri.tryParse(url)?.authority ?? url;
 
-/// Whether two relay URLs name the same relay (scheme, host and port).
 bool sameRelayUrl(String a, String b) {
   final x = Uri.tryParse(a.trim()), y = Uri.tryParse(b.trim());
   if (x == null || y == null) return a.trim() == b.trim();

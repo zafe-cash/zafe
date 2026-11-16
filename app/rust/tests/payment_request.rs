@@ -1,5 +1,3 @@
-//! Scanned payment targets: plain addresses and ZIP 321 URIs.
-
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use rust_lib_zafe::api::proposals::parse_payment_request;
 use zcash_keys::address::UnifiedAddress;
@@ -28,7 +26,6 @@ fn plain_addresses_and_payment_links() {
     assert_eq!(plain.payments[0].address, a);
     assert_eq!(plain.payments[0].amount_zat, 0);
 
-    // ZIP 321: amount and a base64url memo ("Grant #7").
     let uri = format!("zcash:{a}?amount=1.25&memo=R3JhbnQgIzc");
     let one = parse_payment_request("regtest".into(), uri);
     assert!(one.problem.is_empty(), "{}", one.problem);
@@ -36,14 +33,12 @@ fn plain_addresses_and_payment_links() {
     assert_eq!(one.payments[0].memo, "Grant #7");
     assert!(one.payments[0].label.is_empty() && one.payments[0].message.is_empty());
 
-    // The link's own label and message come through (percent-decoded) for display.
     let uri = format!("zcash:{a}?amount=2&label=Coffee%20shop&message=Order%20%2342");
     let labelled = parse_payment_request("regtest".into(), uri);
     assert!(labelled.problem.is_empty(), "{}", labelled.problem);
     assert_eq!(labelled.payments[0].label, "Coffee shop");
     assert_eq!(labelled.payments[0].message, "Order #42");
 
-    // Several recipients become a batch.
     let uri = format!("zcash:?address={a}&amount=1&address.1={b}&amount.1=0.5");
     let batch = parse_payment_request("regtest".into(), uri);
     assert!(batch.problem.is_empty(), "{}", batch.problem);

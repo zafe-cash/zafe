@@ -1,13 +1,3 @@
-// Renders the app components the website's section loops are made of (infra/site/film),
-// from the app's own widgets with fake data, frame by frame at 30 fps: each moment as a card
-// on its own (the request through "Approved", sending through "Sent!", the keys being made,
-// the vault with a request waiting).
-// Not part of `flutter test`; run it from app/:
-//
-//   flutter test --dart-define=ZAFE_NETWORK=main tool/screens/site_motion_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): motion_<card>/f_<n>.png, the
-// card alone (transparent around it), 360 wide at 3x. infra/site/film composes them.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -39,7 +29,7 @@ const _names = {_maya: 'Maya', _ravi: 'Ravi'};
 const _addr =
     'u1k3v8m2q9x7h5f4d6s8a0p2o4i6u8y0t2r4e6w8q0z9x7c5v3b1n2m4l6k8j0h2g4f6d8s0a';
 
-const _frame = Duration(microseconds: 33333); // 30 fps
+const _frame = Duration(microseconds: 33333);
 
 final _asked = rust.ProposalInfo(
   id: 'p1',
@@ -102,8 +92,6 @@ Future<void> _loadFonts() async {
   }
 }
 
-// One moment as a card for the page's loops: the app's own widgets on the app's surface
-// colour, nothing around them.
 Widget _card({
   required Widget child,
   EdgeInsets padding = const EdgeInsets.fromLTRB(20, 28, 20, 20),
@@ -120,7 +108,6 @@ Widget _card({
   ),
 );
 
-// The request: the app's request view and Approve button.
 Widget _requestCard() => _card(
   child: Column(
     mainAxisSize: MainAxisSize.min,
@@ -144,8 +131,6 @@ Widget _requestCard() => _card(
   ),
 );
 
-// Sending: the progress badge (spinner, then the check and the coin fountain) and the
-// words, as the progress screen shows them. The words keep one height so nothing moves.
 Widget _sendCard(bool sent) => Builder(
   builder: (context) {
     final colors = context.colors;
@@ -163,8 +148,6 @@ Widget _sendCard(bool sent) => Builder(
           const SizedBox(height: AppSpacing.xl),
           SizedBox(
             height: 124,
-            // As the progress screen: the old words leave in the first half, the new ones
-            // arrive in the second, rising a little; never both at once.
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 420),
               layoutBuilder: (current, previous) => Stack(
@@ -220,7 +203,6 @@ Widget _sendCard(bool sent) => Builder(
   },
 );
 
-// The keys being made: the key shards art over the status, as the setup screen shows them.
 Widget _keysCard(bool ready) => Builder(
   builder: (context) {
     final colors = context.colors;
@@ -230,7 +212,6 @@ Widget _keysCard(bool ready) => Builder(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // The art fills its box and fades into the card at the bottom.
           SizedBox(
             height: 240,
             child: ClipRect(
@@ -288,7 +269,6 @@ Widget _keysCard(bool ready) => Builder(
   },
 );
 
-// The vault as Home shows it: the balance, the two actions, and Maya's request waiting.
 Widget _vaultCard() => _card(
   padding: const EdgeInsets.all(16),
   child: Column(
@@ -369,7 +349,6 @@ void main() {
       }
     }
 
-    // Cards (transparent around them) at 3x, for the page's loops.
     final cardKey = GlobalKey();
     Future<void> mountCard(Widget card, {AppThemeData? theme}) =>
         tester.pumpWidget(
@@ -407,7 +386,6 @@ void main() {
       }
     }
 
-    // The request: Approve through "Approved".
     await clip('request_card');
     await mountCard(_requestCard());
     await settle();
@@ -419,7 +397,6 @@ void main() {
     await approve.up();
     await cardRoll(2.0);
 
-    // Sending through "Sent!" with the coins (the progress screen's timing: Sent at frame 47).
     await clip('send_card');
     await mountCard(_sendCard(false));
     for (var i = 0; i < 8; i++) {
@@ -435,7 +412,6 @@ void main() {
     );
     await cardRoll(3.0);
 
-    // The keys: shards drift, then close into the key ("ready" at frame 62).
     await clip('keys_card');
     await mountCard(_keysCard(false));
     await settle();
@@ -443,7 +419,6 @@ void main() {
     await mountCard(_keysCard(true));
     await cardRoll(3.0);
 
-    // The vault with Maya's request waiting, dark (one still).
     await clip('vault_card_dark');
     await mountCard(_vaultCard(), theme: AppThemeData.dark);
     await settle();

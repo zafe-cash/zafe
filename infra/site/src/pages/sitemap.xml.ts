@@ -1,6 +1,3 @@
-// /sitemap.xml, built from `site` in astro.config.mjs. Only indexable pages: /join is
-// noindex (invite page) and stays out, like /relay (a redirect). Add a page here when one is
-// added to the site; docs pages come from src/docs/pages.ts.
 import type { APIRoute } from 'astro';
 import { allPages, docHref } from '../docs/pages';
 

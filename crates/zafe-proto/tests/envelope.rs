@@ -74,7 +74,6 @@ fn tampering_is_detected() {
         ProtoError::BadSignature
     );
 
-    // Claiming a different sender than the signer.
     assert_eq!(
         env.verify(ids[1].public()).unwrap_err(),
         ProtoError::WrongSender
@@ -83,8 +82,6 @@ fn tampering_is_detected() {
 
 #[test]
 fn ciphertext_cannot_be_moved_to_another_header() {
-    // Member 2 intercepts a payload sealed to member 1 and re-sends it, validly signed by
-    // itself, under a different header. The header is the HPKE AAD, so opening fails.
     let (mut rng, ids) = identities(3);
     let original = Envelope::sealed(
         &ids[0],

@@ -92,7 +92,6 @@ void main() {
       titles(proposal('p', author: a, stage: ProposalStage.cancelled)).last,
       'Cancelled',
     );
-    // Signed, cancelled, and its transaction mined anyway: sent, and says why.
     final anyway = timelineSteps(
       proposal('p', author: a, stage: ProposalStage.sent, sentAnyway: true),
       members: [a, b, c],

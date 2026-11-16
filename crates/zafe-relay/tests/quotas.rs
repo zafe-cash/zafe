@@ -1,5 +1,3 @@
-//! Storage quotas per mailbox: inbox count, delivery bytes, log bytes (HTTP 507).
-
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -63,7 +61,6 @@ fn clock(now: &Arc<AtomicU64>) -> Arc<dyn Fn() -> u64 + Send + Sync> {
     Arc::new(move || now.load(Ordering::SeqCst))
 }
 
-/// A sealed mailbox with every `ids` as a member.
 async fn mailbox(app: &Router, ids: &[Identity]) {
     let create = CreateMailbox {
         mailbox: MAILBOX,
@@ -109,7 +106,6 @@ fn to_all(from: &Identity, seq: u64, payload: &[u8]) -> Vec<u8> {
         .unwrap()
 }
 
-/// Posts `envelope` (bytes) as its sender `who` (`/v1/envelope/send`).
 async fn post(app: &Router, who: &Identity, envelope: Vec<u8>) -> (StatusCode, String) {
     let body = Signed::new(who, PostEnvelope { envelope })
         .unwrap()
@@ -119,9 +115,6 @@ async fn post(app: &Router, who: &Identity, envelope: Vec<u8>) -> (StatusCode, S
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
-/// The inbox cap is per (sender, recipient) pair (security review 2026-11, NEW 6: one
-/// member's envelopes, never acked, must not close the inbox for everyone). The refusal's
-/// body names the recipient, so a leader skips only that signer.
 #[tokio::test]
 async fn a_senders_full_share_of_an_inbox_refuses_only_that_sender() {
     let now = Arc::new(AtomicU64::new(T0));
@@ -141,17 +134,14 @@ async fn a_senders_full_share_of_an_inbox_refuses_only_that_sender() {
     let (status, body) = post(&app, &ids[0], to_one(&ids[0], &ids[1], 3, &mut rng)).await;
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert_eq!(body, zafe_proto::relay::RECIPIENT_FULL);
-    // A broadcast reaching the full share is refused whole.
     assert_eq!(
         post(&app, &ids[0], to_all(&ids[0], 3, b"all")).await.0,
         StatusCode::INSUFFICIENT_STORAGE
     );
     assert_eq!(relay.usage(&MAILBOX).unwrap().deliveries, 2);
 
-    // Other recipients still receive, and the refused sends did not use up seq 3.
     let env = to_one(&ids[0], &ids[2], 3, &mut rng);
     assert_eq!(post(&app, &ids[0], env).await.0, StatusCode::OK);
-    // Another sender still reaches the same inbox, up to its own share.
     for seq in 1..=2 {
         let env = to_one(&ids[2], &ids[1], seq, &mut rng);
         assert_eq!(post(&app, &ids[2], env).await.0, StatusCode::OK);
@@ -161,7 +151,6 @@ async fn a_senders_full_share_of_an_inbox_refuses_only_that_sender() {
         post(&app, &ids[2], env).await.0,
         StatusCode::INSUFFICIENT_STORAGE
     );
-    // Acking frees the share.
     let cursors = inbox_cursors(&app, &ids[1]).await;
     assert_eq!(ack(&app, &ids[1], cursors).await, (StatusCode::OK, 4));
     let env = to_one(&ids[0], &ids[1], 4, &mut rng);
@@ -175,8 +164,6 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(&mut rng)).collect();
     let payload = vec![0u8; 1000];
     let len = to_all(&ids[0], 1, &payload).len() as u64;
-    // A sender may use half of the mailbox's bytes: room for four copies and a half, so
-    // two broadcasts (4 stored copies), not a third.
     let relay = Relay::with_clock(clock(&now)).with_quotas(Quotas {
         delivery_bytes: Some(9 * len),
         ..Quotas::none()
@@ -203,13 +190,11 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert!(body.contains("undelivered"), "{body}");
     assert_eq!(relay.usage(&MAILBOX).unwrap().delivery_bytes, 4 * len);
-    // Another member still delivers.
     assert_eq!(
         post(&app, &ids[1], to_all(&ids[1], 1, &payload)).await.0,
         StatusCode::OK
     );
 
-    // A day later one more small envelope still fits; then retention frees the old ones.
     now.store(T0 + 86_400, Ordering::SeqCst);
     let small = to_one(&ids[0], &ids[1], 3, &mut rng);
     let small_len = small.len() as u64;
@@ -230,8 +215,6 @@ async fn delivery_bytes_are_capped_and_pruning_frees_them() {
     );
 }
 
-/// Appends `entry` through `who` (`/v1/log/append-labelled`, now: these relays use the
-/// system clock).
 async fn append(app: &Router, who: &Identity, entry: &LogEntry) -> (StatusCode, Vec<u8>) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -290,12 +273,10 @@ async fn the_log_is_capped() {
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert_eq!(String::from_utf8_lossy(&body), zafe_proto::relay::LOG_FULL);
     assert_eq!(relay.usage(&MAILBOX).unwrap().log_bytes, 2 * len);
-    // Pruning never touches the log.
     relay.prune().unwrap();
     assert_eq!(relay.usage(&MAILBOX).unwrap().log_bytes, 2 * len);
 }
 
-/// Fills a persisted relay with one broadcast and one log entry; returns the usage.
 async fn fill(relay: &Relay, rng: &mut StdRng) -> Usage {
     let app = relay.clone().router();
     let ids: Vec<Identity> = (0..3).map(|_| Identity::generate(rng)).collect();
@@ -333,14 +314,11 @@ async fn counters_survive_a_restart() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Drops what schema 4 added (labels and expiry), turning a fresh database into schema 3.
 const V4_COLUMNS: &str = "ALTER TABLE mailboxes DROP COLUMN vault_id;
      ALTER TABLE mailboxes DROP COLUMN last_seen_day;
      ALTER TABLE mailboxes DROP COLUMN created_day;
      ALTER TABLE mailboxes DROP COLUMN shared;";
 
-/// Schema 1 had no counters (nor thresholds): opening it adds them and fills the counters
-/// from the stored rows.
 #[tokio::test]
 async fn a_schema_1_database_is_migrated() {
     let (dir, path) = temp_db("quota-migrate");
@@ -368,7 +346,6 @@ async fn a_schema_1_database_is_migrated() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Schema 2 had no thresholds: opening it adds the column (0: the vault can't move seats).
 #[tokio::test]
 async fn a_schema_2_database_is_migrated() {
     let (dir, path) = temp_db("threshold-migrate");
@@ -398,8 +375,6 @@ async fn a_schema_2_database_is_migrated() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Schema 3 had no labels or expiry: every mailbox is filed under its vault id, counts as
-/// seen today and as shared, so the first expiry after the upgrade deletes nothing.
 #[tokio::test]
 async fn a_schema_3_database_is_migrated() {
     use zafe_relay::expiry::Expiry;
@@ -412,7 +387,6 @@ async fn a_schema_3_database_is_migrated() {
         .unwrap();
     drop(conn);
 
-    // Long after the mailbox was made: the migration counts it as seen at the upgrade.
     let now = Arc::new(AtomicU64::new(T0 + 400 * 86_400));
     let relay = Relay::open_with_clock(&path, clock(&now))
         .unwrap()
@@ -434,14 +408,11 @@ async fn a_schema_3_database_is_migrated() {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
     assert_eq!(version, zafe_proto::version::RELAY_DB);
-    // A year later with no member request, it does expire.
     now.fetch_add(366 * 86_400, Ordering::SeqCst);
     assert_eq!(relay.expire().unwrap(), 1);
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Schema 4 kept seat-recovery values per (new phone, signer): opening it makes the table
-/// again per (new phone, co-signer), dropping the old values (a week old at most).
 #[tokio::test]
 async fn a_schema_4_database_is_migrated() {
     let (dir, path) = temp_db("recovery-migrate");
@@ -539,12 +510,10 @@ async fn acknowledged_deliveries_are_deleted_and_free_their_bytes() {
     let theirs = inbox_cursors(&app, &ids[2]).await;
     assert_eq!((mine.len(), theirs.len()), (3, 1));
 
-    // Another member can't delete deliveries that aren't theirs; unknown cursors are ignored.
     assert_eq!(
         ack(&app, &ids[2], vec![mine[0], 999]).await,
         (StatusCode::OK, 0)
     );
-    // The recipient deletes exactly the ones it names.
     assert_eq!(
         ack(&app, &ids[1], vec![mine[0], mine[2]]).await,
         (StatusCode::OK, 2)
@@ -559,7 +528,6 @@ async fn acknowledged_deliveries_are_deleted_and_free_their_bytes() {
         "the byte counter drops with the deleted envelopes (same size here)"
     );
 
-    // Outsiders are refused; too many cursors in one request is a bad request.
     let outsider = Identity::generate(&mut rng);
     assert_eq!(
         ack(&app, &outsider, vec![mine[1]]).await.0,
@@ -571,7 +539,6 @@ async fn acknowledged_deliveries_are_deleted_and_free_their_bytes() {
     );
 }
 
-/// A recorded restore request can't be replayed later to give a mailbox an old member list.
 #[tokio::test]
 async fn a_stale_reseed_is_refused() {
     let app = Relay::new().router();
@@ -604,10 +571,6 @@ async fn a_stale_reseed_is_refused() {
     );
 }
 
-/// Schema 6 had no per-sender inbox counters, no log counters per author and no index on
-/// delivery age: opening it adds `deliveries.sender` (read from each stored envelope's
-/// header), fills `inbox_counts` from the stored deliveries and `log_counts` from the
-/// stored entries' authors, and adds the indexes.
 #[tokio::test]
 async fn a_schema_6_database_is_migrated() {
     let (dir, path) = temp_db("inbox-counts-migrate");

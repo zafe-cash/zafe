@@ -2,18 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Border / divider weights.
-///
-/// * [subtle] — Hairline dividers, row separators.
-/// * [subtleOpacity] — Alpha border used on strong filled controls.
-/// * [inverseOpacity] — Alpha border used over inverted / strong fills.
-/// * [regular] — Default field/card/chip border. (Named `regular` instead of
-///   Figma's `default` because `default` is a reserved word in Dart.)
-/// * [medium] — Active/filled field border.
-/// * [strong] — Max-contrast border.
-/// * [destructive] — Validation / destructive emphasis.
-/// * [destructiveSubtle] — Soft destructive border.
-/// * [brandStrong] — Brand feedback / accent border.
 class AppBorderColors {
   const AppBorderColors({
     required this.subtle,

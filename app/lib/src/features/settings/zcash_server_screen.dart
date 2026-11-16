@@ -24,11 +24,8 @@ import '../../providers/server_failover_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../../rust/api/endpoints.dart' as rust;
 
-/// The host shown for an endpoint URL.
 String endpointHost(String url) => Uri.tryParse(url)?.authority ?? url;
 
-/// Tries `url` for `kind`: a relay `GET /health`, or lightwalletd's info (network and
-/// tip). Returns null when it answers, else what went wrong (user copy).
 Future<String?> tryEndpoint(EndpointKind kind, String url) async {
   try {
     switch (kind) {
@@ -60,7 +57,6 @@ Future<String?> tryEndpoint(EndpointKind kind, String url) async {
         'This server is on another network than this app ($kZafeNetwork).',
       SyncFailureKind.updateRequired ||
       SyncFailureKind.relayOutdated ||
-      // "Use Tor" is on: the test goes through Tor too, never directly.
       SyncFailureKind.torConnecting ||
       SyncFailureKind.torFailed => zafeErrorMessage(e),
       _ =>
@@ -71,8 +67,6 @@ Future<String?> tryEndpoint(EndpointKind kind, String url) async {
   }
 }
 
-/// The public servers and the custom one, with what each answered, in one card. Plain
-/// data, so it can be rendered without Rust (`tool/screens/servers_render_test.dart`).
 class LightwalletdServerList extends StatelessWidget {
   const LightwalletdServerList({
     super.key,
@@ -91,10 +85,8 @@ class LightwalletdServerList extends StatelessWidget {
   final ValueChanged<LightwalletdPreset>? onSelect;
   final VoidCallback? onCustom;
 
-  /// The custom address field is open under the list.
   final bool customOpen;
 
-  /// The server being tried after a tap.
   final String? busyUrl;
 
   @override
@@ -143,9 +135,6 @@ class LightwalletdServerList extends StatelessWidget {
   }
 }
 
-/// Settings > Zcash server (this phone's, for every vault): the public servers, each
-/// checked when the screen opens, picked with a tap; "Custom server" opens an address
-/// field right here, tested before it is saved.
 class ZcashServerScreen extends ConsumerStatefulWidget {
   const ZcashServerScreen({super.key});
 
@@ -184,7 +173,6 @@ class _ZcashServerScreenState extends ConsumerState<ZcashServerScreen> {
     super.dispose();
   }
 
-  /// Saves `url` once it answered, then syncs with it.
   Future<bool> _use(String url, {String? label}) async {
     setState(() {
       _busyUrl = url;
@@ -229,8 +217,6 @@ class _ZcashServerScreenState extends ConsumerState<ZcashServerScreen> {
       setState(() => _error = check.error);
       throw const ActionCancelled();
     }
-    // A server of someone else's choosing sees this phone's activity: with a vault on
-    // the phone, ask the owner.
     if (ref.read(vaultProvider).vaults.isNotEmpty &&
         !await confirmUnlock(
           context,

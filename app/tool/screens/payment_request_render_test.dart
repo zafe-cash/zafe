@@ -1,11 +1,3 @@
-// Renders the payment request page (opened by a `zcash:` link) and the app lock screen in
-// both themes to PNGs for review without a device. Not part of `flutter test`; run it
-// explicitly (from app/):
-//
-//   flutter test tool/screens/payment_request_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/):
-// payment_request_<case>_<theme>.png, lock_<case>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -194,8 +186,7 @@ void main() {
         });
         final path = '${out.path}/${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

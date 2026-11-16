@@ -8,7 +8,6 @@ import 'package:flutter/widgets.dart';
 import '../theme/app_theme.dart';
 import 'app_icon.dart';
 
-/// One choice in an [AppMenu].
 class AppMenuItem {
   const AppMenuItem({
     required this.label,
@@ -22,25 +21,15 @@ class AppMenuItem {
   final VoidCallback onTap;
   final String? icon;
 
-  /// The current value of a setting (a check after the label).
   final bool selected;
   final bool destructive;
 }
 
-/// A short list of choices anchored to what opened it (a row's value, a ⋯): picking one
-/// acts at once, no Update button and no sheet. For a handful of short options; anything
-/// with typing or a second step is a pushed screen.
-///
-/// Placed by [AppMenuLayout], not MenuAnchor: MenuAnchor starts a menu at the anchor
-/// and, when it would run off screen, flips it to the other side or pins it to the
-/// screen edge with no margin, so a ⋯ near the right edge got a menu hanging past the
-/// page margin, and a narrow phone at large text one off the left edge.
 class AppMenu extends StatefulWidget {
   const AppMenu({super.key, required this.items, required this.builder});
 
   final List<AppMenuItem> items;
 
-  /// The anchor; call `open` to show the menu.
   final Widget Function(BuildContext context, VoidCallback open) builder;
 
   @override
@@ -50,8 +39,6 @@ class AppMenu extends StatefulWidget {
 class _AppMenuState extends State<AppMenu> {
   final _controller = MenuController();
 
-  /// While open, Back closes the menu instead of leaving the screen (neither
-  /// MenuAnchor nor RawMenuAnchor handles Back).
   bool _open = false;
 
   static const _shortcuts = <ShortcutActivator, Intent>{
@@ -81,7 +68,6 @@ class _AppMenuState extends State<AppMenu> {
           child: CustomSingleChildLayout(
             delegate: AppMenuLayout(
               anchor: info.anchorRect,
-              // Status bar, navigation bar and an open keyboard are off limits.
               safe:
                   media.padding +
                   EdgeInsets.only(bottom: media.viewInsets.bottom),
@@ -138,7 +124,6 @@ class _AppMenuState extends State<AppMenu> {
             ),
           ],
         ),
-        // Taller than the screen allows (many items at 2x text): it scrolls.
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -155,7 +140,6 @@ class _AppMenuState extends State<AppMenu> {
       _controller.close();
       item.onTap();
     },
-    // A label longer than the widest menu the screen allows wraps.
     overflowAxis: Axis.vertical,
     style: const ButtonStyle(
       minimumSize: WidgetStatePropertyAll(Size(0, 48)),
@@ -186,10 +170,6 @@ class _AppMenuState extends State<AppMenu> {
   );
 }
 
-/// Where an [AppMenu] goes: hanging from the anchor's trailing edge (a ⋯ or a row's
-/// value sits at the end of its row), [gap] below it, or above it when there is no room
-/// below; never wider than the screen less a [margin] each side, and moved inside those
-/// margins rather than off screen, on any screen and at any text size.
 class AppMenuLayout extends SingleChildLayoutDelegate {
   const AppMenuLayout({
     required this.anchor,
@@ -237,7 +217,6 @@ class AppMenuLayout extends SingleChildLayoutDelegate {
     } else if (above >= area.top) {
       y = above;
     } else {
-      // Fits neither way: as low as it goes, inside the margins.
       y = math.max(area.top, area.bottom - childSize.height);
     }
     return Offset(x, y);

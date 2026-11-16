@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Renders the stills of the 3D world that the static fallback shows (no GPU, reduced
-# motion, no JavaScript) and the social image, from the built site in capture mode
-# (/showcase?still: full quality, the camera lands at once, the page's text hidden).
-#
-#   ./build.sh && ./stills.sh     # needs agent-browser and Pillow (PYTHON=venv/bin/python)
-#
-# Writes public/assets/stills/*.webp and public/assets/og-mainnet.png; rebuild afterwards.
-# Software WebGL takes seconds per frame here, so each shot waits; the whole run takes
-# a few minutes. Re-run whenever the world or the story changes.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -22,8 +13,6 @@ S="agent-browser --session stills"
 
 box() { $S get box "$1" 2>/dev/null | awk -v k="$2" '$1==k":"{print int($2)}'; }
 
-# shoot <query> <w> <h> <scale> then pairs of: <name> <selector> <fraction of its scroll range>
-# One page load per viewport; shots in scroll order (smooth scrolling only goes forward).
 shoot() {
   local query=$1 w=$2 h=$3 scale=$4; shift 4
   $S set viewport "$w" "$h" "$scale" >/dev/null
@@ -35,7 +24,7 @@ shoot() {
     local name=$1 sel=$2 frac=$3; shift 3
     local y hh start range t d
     y=$(box "$sel" y); hh=$(box "$sel" height)
-    y=$(( y + pos ))  # box y is relative to the viewport
+    y=$(( y + pos ))
     start=$(( y - h )); [ $start -lt 0 ] && start=0
     range=$(( y + hh - h - start ))
     t=$(python3 -c "print(int($start + $range * $frac))")
@@ -49,7 +38,6 @@ shoot() {
   done
 }
 
-# Wide: the hero, the story beats (each where its screen shows), the view from above.
 shoot still 1440 900 1 \
   hero_wide .hero 0 \
   beat_1 .story 0.06 \
@@ -58,10 +46,7 @@ shoot still 1440 900 1 \
   beat_4 .story 0.74 \
   beat_5 .story 0.93 \
   above .cta-world 1
-# Tall: the hero on phones.
 shoot still 390 844 2 hero_tall .hero 0
-# The social image: the home page's hero (headline and the app's screens) after the
-# CSS intro; it's the share card of every page.
 $S set viewport 1200 630 1 >/dev/null
 $S open "http://127.0.0.1:$port/index.html" >/dev/null
 $S wait 4500 >/dev/null

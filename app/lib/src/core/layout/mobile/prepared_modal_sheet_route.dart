@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../app_column.dart';
 
-/// Lays out the sheet at its final position without painting, then runs the
-/// normal Material entrance after its initial corners are ready.
 class PreparedModalSheetRoute<T> extends ModalBottomSheetRoute<T> {
   PreparedModalSheetRoute({
     required super.builder,
@@ -28,8 +26,6 @@ class PreparedModalSheetRoute<T> extends ModalBottomSheetRoute<T> {
   @override
   void install() {
     super.install();
-    // ModalRoute exposes a completed animation while offstage, so Flutter
-    // performs the genuine final sheet layout (including its constraints).
     offstage = true;
   }
 
@@ -43,7 +39,6 @@ class PreparedModalSheetRoute<T> extends ModalBottomSheetRoute<T> {
   void cornersReady() {
     if (!_waiting || _disposed) return;
     _waiting = false;
-    // Allow the prepared shape to rebuild while still offstage first.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_disposed || _popped || !isActive) return;
       offstage = false;

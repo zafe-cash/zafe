@@ -1,16 +1,3 @@
-//! `zafe interop` end to end through its files: two Zafe members (always), and a Zafe
-//! member with frost-zec (`FROST_ZEC_BIN`, ignored by default): key generation, then a
-//! spend signed with each side coordinating, and a refusal.
-//!
-//! ```text
-//! git clone https://github.com/OpenPGP-Wallet/frost-zec && cd frost-zec && cargo build
-//! FROST_ZEC_BIN=$PWD/target/debug/frost-zec \
-//!   cargo test -p zafe-cli --test interop -- --ignored --nocapture
-//! ```
-//!
-//! The PCZT spends an invented note of the new vault (a one-leaf tree), so it is checked
-//! and signed for real but never broadcast.
-
 use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Output},
@@ -45,11 +32,9 @@ use zcash_primitives::transaction::{
 };
 use zcash_protocol::{memo::MemoBytes, value::Zatoshis};
 
-/// A testnet height after NU7 (the PCZT is v6 with the NU7 branch id).
 const TIP: u32 = 5_000_000;
 const FUNDS: u64 = 1_000_000;
 const PAY: u64 = 400_000;
-/// ZIP 317 for the two actions a payment plus change takes.
 const FEE: u64 = 10_000;
 
 fn root(name: &str) -> PathBuf {
@@ -59,7 +44,6 @@ fn root(name: &str) -> PathBuf {
     dir
 }
 
-/// One `zafe` member (its own home), on testnet, offline.
 struct Zafe(PathBuf);
 
 impl Zafe {
@@ -84,12 +68,10 @@ impl Zafe {
             .unwrap()
     }
 
-    /// `zafe interop <args>`.
     fn run(&self, args: &[&str]) -> Output {
         self.zafe(&[&["interop"], args].concat())
     }
 
-    /// `zafe interop <args>`, which must succeed.
     fn ok(&self, args: &[&str]) -> String {
         let out = self.run(args);
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -114,7 +96,6 @@ fn field<'a>(v: &'a Value, name: &str) -> &'a str {
     v[name].as_str().unwrap()
 }
 
-/// Runs `step` until `done` holds (each run is one step of the other side's pace).
 fn until(what: &str, mut step: impl FnMut(), done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -158,7 +139,6 @@ fn encode(address: Address) -> String {
         .encode(&ZafeNetwork::Test)
 }
 
-/// A PCZT paying `PAY` to [`payee`] from an invented note of the vault, with change.
 fn pczt(fvk: &FullViewingKey) -> Vec<u8> {
     let version = BundleVersion::ironwood_v3();
     let mut receive = orchard::builder::Builder::new(
@@ -239,7 +219,6 @@ fn pczt(fvk: &FullViewingKey) -> Vec<u8> {
         .unwrap()
 }
 
-/// Every vault spend in the PCZT carries a signature (checked against its rk on insertion).
 fn assert_signed(path: &Path, fvk: &FullViewingKey) {
     let signed = Pczt::parse(&std::fs::read(path).unwrap()).unwrap();
     assert!(tx::spends_to_sign(&signed, fvk).unwrap().is_empty());
@@ -271,7 +250,6 @@ fn two_zafe_members_keygen_and_sign_in_both_roles() {
     let (a, b) = (Zafe::new(&root, "a"), Zafe::new(&root, "b"));
     let vault_id = "00112233445566778899aabbccddeeff";
 
-    // Round 1, round 2, finish: each member steps when the other's files are in.
     for z in [&a, &b] {
         z.ok(&["keygen", "--vault-id", vault_id, "--dir", ex]);
     }
@@ -291,7 +269,6 @@ fn two_zafe_members_keygen_and_sign_in_both_roles() {
     std::fs::write(&pczt_path, pczt(&fvk)).unwrap();
     let pczt_arg = pczt_path.to_str().unwrap();
 
-    // A coordinates, B co-signs, then the other way round.
     for (i, (coord, cosig)) in [(&a, &b), (&b, &a)].into_iter().enumerate() {
         let dir = root.join(format!("session{i}"));
         let dir = dir.to_str().unwrap();
@@ -303,7 +280,6 @@ fn two_zafe_members_keygen_and_sign_in_both_roles() {
             &["coordinate", "--dir", dir, "--pczt", pczt_arg, "--out", out],
             &expect,
         ));
-        // --inspect shows what the request pays and signs nothing.
         let shown = cosig.ok(&["cosign", "--dir", dir, "--inspect"]);
         assert!(shown.contains(&encode(payee())), "{shown}");
         assert!(shown.contains(&format!("({PAY} zat)")), "{shown}");
@@ -314,7 +290,6 @@ fn two_zafe_members_keygen_and_sign_in_both_roles() {
         assert_signed(Path::new(out), &fvk);
     }
 
-    // The co-signer expects another amount: it refuses, and the coordinator learns why.
     let dir = root.join("refused");
     let dir = dir.to_str().unwrap();
     let out = root.join("never.pczt");
@@ -334,7 +309,6 @@ fn two_zafe_members_keygen_and_sign_in_both_roles() {
     assert!(String::from_utf8_lossy(&failed.stderr).contains("refused"));
     assert!(!Path::new(out).exists());
 
-    // A message of another format is refused.
     let other = root.join("other");
     std::fs::create_dir_all(&other).unwrap();
     let c = Zafe::new(&root, "c");
@@ -377,7 +351,6 @@ fn zafe_and_frost_zec_share_a_vault_and_sign_in_both_roles() {
     };
     let vault_id = hex::encode(rand::random::<[u8; 16]>());
 
-    // Key generation: frost-zec waits for files; Zafe steps until its seat exists.
     let child = frost(
         &[
             "interop",
@@ -410,7 +383,6 @@ fn zafe_and_frost_zec_share_a_vault_and_sign_in_both_roles() {
     std::fs::write(&pczt_path, pczt(&fvk)).unwrap();
     let expect = expect_args(PAY);
 
-    // frost-zec coordinates, Zafe co-signs.
     let s1 = root.join("session1");
     let s1_arg = s1.to_str().unwrap().to_owned();
     let signed1 = root.join("signed-by-frost-zec.pczt");
@@ -432,7 +404,6 @@ fn zafe_and_frost_zec_share_a_vault_and_sign_in_both_roles() {
     println!("{}", wait(child, "frost-zec coordinate"));
     assert_signed(&signed1, &fvk);
 
-    // Zafe coordinates, frost-zec co-signs.
     let s2 = root.join("session2");
     let s2_arg = s2.to_str().unwrap().to_owned();
     let signed2 = root.join("signed-by-zafe.pczt");
@@ -463,7 +434,6 @@ fn zafe_and_frost_zec_share_a_vault_and_sign_in_both_roles() {
     println!("{}", wait(child, "frost-zec cosign"));
     assert_signed(&signed2, &fvk);
 
-    // Zafe expects another amount: it refuses, and frost-zec's coordinator stops.
     let s3 = root.join("session3");
     let s3_arg = s3.to_str().unwrap().to_owned();
     z.ok(&["cosign", "--dir", &s3_arg]);
@@ -494,7 +464,6 @@ fn zafe_and_frost_zec_share_a_vault_and_sign_in_both_roles() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Waits for the other side's file (frost-zec writes it atomically).
 fn wait_for(file: &Path) {
     let deadline = Instant::now() + Duration::from_secs(120);
     while !file.exists() {

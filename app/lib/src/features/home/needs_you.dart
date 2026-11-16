@@ -26,8 +26,6 @@ import '../../rust/api/proposals.dart' as rust;
 import '../proposals/proposal_status.dart';
 import '../signers/keep_seat.dart';
 
-/// Declines in flight (hidden at once, so the card leaves on the tap), and the ones that
-/// failed (the card comes back with the reason).
 class Declines {
   const Declines({this.pending = const {}, this.failed = const {}});
   final Set<String> pending;
@@ -38,8 +36,6 @@ class DeclinesNotifier extends Notifier<Declines> {
   @override
   Declines build() => const Declines();
 
-  /// Declining moves no money and needs no check, so the card leaves right away; the
-  /// vote (a log entry on the relay, a few seconds) finishes in the background.
   Future<void> decline(String id) async {
     state = Declines(
       pending: {...state.pending, id},
@@ -62,22 +58,15 @@ final declinesProvider = NotifierProvider<DeclinesNotifier, Declines>(
   DeclinesNotifier.new,
 );
 
-/// "Needs you" on Home: what the group is waiting on this member for, as request cards
-/// (a payment to approve or send, a seat move to check). Shown only when there is
-/// something; cards slide out once handled. Each opens where the action happens.
 class NeedsYou extends ConsumerStatefulWidget {
   const NeedsYou({super.key, this.height});
   final int? height;
 
-  /// From this many requests on, they stack (the first in full, the others' edges under
-  /// it) until opened.
   static const stackFrom = 3;
 
   @override
   ConsumerState<NeedsYou> createState() => _NeedsYouState();
 
-  /// "Send now" from Home: nothing is left to decide, so after the unlock it sends and
-  /// shows the sending screen.
   static Future<void> _send(
     BuildContext context,
     WidgetRef ref,
@@ -87,7 +76,6 @@ class NeedsYou extends ConsumerStatefulWidget {
     if (context.mounted) unawaited(context.push('/proposal/$id/send'));
   }
 
-  /// The message, else the recipient; with "expires in ..." when under a day is left.
   static String _detail(rust.ProposalInfo p, int? height) {
     final payment = p.payments.isEmpty ? null : p.payments.first;
     final base = payment == null
@@ -106,15 +94,11 @@ class NeedsYou extends ConsumerStatefulWidget {
 }
 
 class _NeedsYouState extends ConsumerState<NeedsYou> {
-  /// The member opened the stack; it folds back once fewer than [NeedsYou.stackFrom]
-  /// requests remain.
   bool _open = false;
 
-  /// A move being followed from its card, and why the last try failed.
   bool _following = false;
   String? _followError;
 
-  /// Keep my seat running on its card, and why the last try failed.
   bool _keeping = false;
   String? _keepError;
 
@@ -133,8 +117,6 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
     }
   }
 
-  /// Move, on a move card: the unlock, then the first contact with the new server
-  /// (nothing connects to it before this tap). The card leaves once the phone moved.
   Future<void> _follow(String link, String vaultName, String host) async {
     if (_following) return;
     if (!await confirmUnlock(
@@ -167,8 +149,6 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Home stays mounted behind the other tabs (their tickers are muted): leaving it
-    // folds the stack, so it's tidy on the way back.
     if (!TickerMode.valuesOf(context).enabled) _open = false;
   }
 
@@ -202,28 +182,23 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
             .length;
     final stacks = waiting >= NeedsYou.stackFrom;
     if (!stacks && _open) _open = false;
-    // Stacked, the top card's tap opens the stack (its buttons still act).
     var first = true;
     VoidCallback tap(VoidCallback open) {
       final collapsedTop = first && stacks && !_open;
       first = false;
       if (collapsedTop) return () => setState(() => _open = true);
-      // Leaving for a payment folds the stack, so Home is tidy on the way back.
       return () {
         if (_open) setState(() => _open = false);
         open();
       };
     }
 
-    // Start this phone's check of each payment waiting for this member's vote now, so
-    // "Checked on this phone" is ready when the request opens (the page reuses it).
     for (final p in proposals.items) {
       if (p.stage == rust.ProposalStage.open && p.myVote == rust.MyVote.none) {
         ref.watch(proposalReviewProvider(p.id));
       }
     }
     final cards = <Widget>[
-      // This phone's own seat is moving: first, and only its owner's tap keeps it.
       if (mySeat case final m?)
         RequestCard(
           key: ValueKey('keep:${m.replacement}'),
@@ -252,9 +227,6 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
                 : ZecAmount.fromZatoshi(p.totalZat).activity.amountText,
             detail: NeedsYou._detail(p, height),
             onTap: tap(() => context.push('/proposal/${p.id}')),
-            // Approve opens the request (the recipient and this phone's check come
-            // first, then the fingerprint); Decline moves no money, so it acts here. A
-            // payment with every approval is sent right away, after the unlock.
             action: p.stage == rust.ProposalStage.approved && !p.needsReapproval
                 ? 'Send now'
                 : 'Approve',
@@ -269,8 +241,6 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
                 : null,
             error: declines.failed[p.id],
           ),
-      // A move another member started, or a switch this phone hasn't followed: the same
-      // card as a request, Move instead of Approve. Your funds don't move.
       if (move != null)
         RequestCard(
           key: ValueKey('move:${move.link}'),
@@ -370,9 +340,6 @@ class _NeedsYouState extends ConsumerState<NeedsYou> {
   }
 }
 
-/// Three or more requests: the first in full with the edges of the next two under it,
-/// like a stack of notifications. Opening it fans the cards out: each grows down out of
-/// the stack while the edges fade (300 ms). Taps reach only the cards that are out.
 class _FanStack extends StatefulWidget {
   const _FanStack({
     required this.open,
@@ -382,7 +349,6 @@ class _FanStack extends StatefulWidget {
   final bool open;
   final List<Widget> cards;
 
-  /// The edges under the top card open the stack too.
   final VoidCallback onOpen;
 
   @override
@@ -431,7 +397,6 @@ class _FanStackState extends State<_FanStack>
     Widget edge(int i) => Container(
       height: 24,
       margin: EdgeInsets.symmetric(horizontal: AppSpacing.s * (i + 1)),
-      // Surfaces fading back, no outline: in dark mode an outline read as wire.
       decoration: BoxDecoration(
         color: colors.background.ground.withValues(alpha: i == 0 ? 0.7 : 0.4),
         borderRadius: BorderRadius.circular(AppRadii.large),
@@ -492,10 +457,6 @@ class _FanStackState extends State<_FanStack>
   }
 }
 
-/// One request: who it's from, a detail line (the message, or what is asked) and the
-/// amount, then a button naming the decision across the card (tonal, so several cards
-/// don't drown out the screen's main action). The card itself opens the payment;
-/// [onAction] defaults to the same.
 class RequestCard extends StatelessWidget {
   const RequestCard({
     super.key,
@@ -512,27 +473,21 @@ class RequestCard extends StatelessWidget {
     this.error,
   });
 
-  /// Key hex the signer tile is drawn from.
   final String tileKey;
 
-  /// Never cut: a member's own name comes with its key, and the key must stay in view.
   final String who;
 
-  /// Who asked, under [who] (also never cut), when [who] says what is asked.
   final String? by;
 
-  /// Without the ticker ("0.8"); the card adds it.
   final String? amount;
   final String detail;
   final String action;
   final VoidCallback onTap;
   final VoidCallback? onAction;
 
-  /// Shows [declineLabel] next to the action (a vote, "Not now"), done right on the card.
   final VoidCallback? onDecline;
   final String declineLabel;
 
-  /// Why the last attempt on this card failed, shown under its buttons.
   final String? error;
 
   @override
@@ -560,7 +515,6 @@ class RequestCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // The amount leads (what is asked); who and why under it.
                       if (amount == null)
                         Text(who, style: strong)
                       else
@@ -648,7 +602,6 @@ class RequestCard extends StatelessWidget {
   }
 }
 
-/// A move for the Needs you card, from what this phone knows.
 class MoveRequest {
   const MoveRequest({
     required this.link,
@@ -665,13 +618,9 @@ class MoveRequest {
   final int arrived;
   final int members;
 
-  /// The vault already switched there: this phone must move to continue.
   final bool moved;
 }
 
-/// The move waiting on this member: one another member started (from the notice on the
-/// current server, unless put off with Not now), or a switch this phone hasn't
-/// followed. Null when there is none.
 MoveRequest? moveRequest(RelayMoveView view) {
   final status = view.status;
   if (status != null && status.movedElsewhere) {

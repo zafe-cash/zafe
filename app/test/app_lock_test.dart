@@ -63,7 +63,6 @@ void main() {
       resume(AppLockDelay.immediately, Duration.zero, hasVaults: false),
       isFalse,
     );
-    // Behind the system PIN screen: the app was "away", but because of us.
     expect(
       resume(
         AppLockDelay.immediately,
@@ -72,7 +71,6 @@ void main() {
       ),
       isFalse,
     );
-    // Left with a prompt showing and back much later: that is being away.
     expect(
       resume(
         AppLockDelay.oneMinute,
@@ -92,14 +90,9 @@ void main() {
 
     expect(cover(AppLifecycleState.resumed), CoverMode.none);
     expect(cover(AppLifecycleState.resumed, topResumed: false), CoverMode.none);
-    // Lost focus but still the top app: the screenshot overlay, the notification
-    // shade. The cover would land on screen after the image was taken.
     expect(cover(AppLifecycleState.inactive, topResumed: true), CoverMode.none);
-    // Another activity on top: the app switcher (its live tile shows the app).
     expect(cover(AppLifecycleState.inactive, topResumed: false), CoverMode.now);
-    // Android 9 and older don't say: cover on any focus loss.
     expect(cover(AppLifecycleState.inactive), CoverMode.now);
-    // Really in the background: always.
     for (final away in [
       AppLifecycleState.hidden,
       AppLifecycleState.paused,
@@ -108,7 +101,6 @@ void main() {
       expect(cover(away, topResumed: true), CoverMode.now);
       expect(cover(away, topResumed: false), CoverMode.now);
     }
-    // Our own unlock prompt never draws it.
     expect(
       cover(AppLifecycleState.inactive, prompting: true, topResumed: false),
       CoverMode.none,

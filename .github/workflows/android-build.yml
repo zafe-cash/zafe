@@ -1,15 +1,5 @@
 name: Android build cache
 
-# Builds the release APK's Rust library on main and saves it as the cache the release
-# workflows (release.yml, release-mainnet.yml) restore. A tag run can only read caches saved
-# on its own tag or on main, so without this every release compiled the Rust from scratch
-# (~13 min of a ~15 min build). Also catches a release build that no longer compiles before
-# anyone tags it.
-#
-# No secrets: unsigned build (the debug key), testnet defines, never published. The cache it
-# saves goes into signed releases, so this must stay a main-only workflow (main's code is
-# what gets tagged anyway); pull requests can't write main's cache.
-
 on:
   push:
     branches: [main]
@@ -19,7 +9,6 @@ on:
       - 'app/rust_builder/**'
       - 'Cargo.*'
       - '.github/workflows/android-build.yml'
-  # Weekly: a new stable Rust changes the cache key, and a cache unused for 7 days is evicted.
   schedule:
     - cron: '17 4 * * 1'
   workflow_dispatch:
@@ -29,10 +18,8 @@ permissions:
 
 concurrency:
   group: android-build
-  # A newer push builds everything an older one would; cancelling is safe (nothing ships).
   cancel-in-progress: true
 
-# Must match the release workflows: rust-cache keys include CARGO_* and RUST* variables.
 env:
   CARGO_TERM_COLOR: always
 
@@ -50,7 +37,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
-      # Same workspaces and shared key as the release workflows (they restore, never save).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> app/build/rust_lib_zafe/build'

@@ -17,8 +17,6 @@ import '../../providers/vault_provider.dart';
 import '../../rust/api/vault.dart' as rust;
 import 'vault_emblem.dart';
 
-/// Tapping the vault on Home: the open vault in large, the others to switch to (a dot
-/// when one has something waiting for you), then Manage vaults and "+" to add one.
 Future<void> showVaultSwitcher(BuildContext context) =>
     showAppMobileSheet<void>(
       context: context,
@@ -78,7 +76,6 @@ class _VaultSwitcher extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpacing.xs),
             ConstrainedBox(
-              // About four rows; more scroll.
               constraints: const BoxConstraints(maxHeight: 248),
               child: SingleChildScrollView(
                 child: Column(
@@ -138,8 +135,6 @@ class _VaultSwitcher extends ConsumerWidget {
   }
 }
 
-/// The name this phone shows for a vault: its local rename, the creator's name, or
-/// the invite's while it's being set up.
 String vaultDisplayName(StoredVault v, String? localName) {
   if (localName != null && localName.isNotEmpty) return localName;
   if (v.ready) return rust.vaultSummary(material: v.material!).name;
@@ -147,8 +142,6 @@ String vaultDisplayName(StoredVault v, String? localName) {
   return 'Vault';
 }
 
-/// A vault in a list: emblem, name, balance (or "Setting up"), a dot when payments wait
-/// for you there, and an optional trailing widget (the ⋯ on Manage vaults).
 class VaultRow extends ConsumerWidget {
   const VaultRow({
     super.key,
@@ -163,7 +156,6 @@ class VaultRow extends ConsumerWidget {
   final String? localName;
   final VoidCallback onTap;
 
-  /// Adds the approval rule and network to the detail line.
   final bool showRule;
   final Widget? trailing;
 
@@ -204,7 +196,6 @@ class VaultRow extends ConsumerWidget {
                   clipBehavior: Clip.none,
                   children: [
                     VaultEmblem(vaultId: vault.id),
-                    // Something waits for you in this vault.
                     if (waiting)
                       Positioned(
                         right: -2,

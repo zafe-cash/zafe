@@ -1,10 +1,3 @@
-// Renders the Zcash server list (mainnet presets, with each kind of check result), in both
-// themes, to PNGs for review without a device. Not part of `flutter test`; run it
-// explicitly (from app/):
-//
-//   flutter test tool/screens/servers_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): servers_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -44,7 +37,6 @@ final _probes = <String, ServerProbe>{
   'https://ap.zec.rocks:443': _ms(233),
   'https://sa.zec.rocks:443': const ServerProbe(ServerCheck.unavailable),
   'https://us.zec.stardust.rest:443': _ms(158),
-  // eu.zec.stardust.rest still checking.
   'https://lwd.zcashexplorer.app:9067': _ms(190),
 };
 
@@ -106,8 +98,7 @@ void main() {
       });
       final path = '${out.path}/servers_$theme.png';
       File(path).writeAsBytesSync(bytes!);
-      // ignore: avoid_print
-      print(path);
+      stdout.writeln(path);
     }
   });
 }

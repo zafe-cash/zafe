@@ -4,10 +4,6 @@ import '../../layout/mobile/app_mobile_sheet.dart';
 import '../../theme/app_theme.dart';
 import '../app_button.dart';
 
-/// Bottom sheet explaining the (ZIP-317) network fee. The copy is
-/// context-agnostic — it describes what the fee is, not a send-specific
-/// moment — so it is shared by the send review composer and the transaction
-/// status detail cards.
 Future<void> showMobileTxFeeInfoSheet(
   BuildContext context, {
   String title = 'Network fee',
@@ -20,7 +16,6 @@ Future<void> showMobileTxFeeInfoSheet(
     builder: (sheetContext) {
       final colors = sheetContext.colors;
       return SingleChildScrollView(
-        // Scrolls once the sheet runs out of height (a short window).
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.sm,

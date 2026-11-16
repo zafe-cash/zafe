@@ -6,25 +6,8 @@ import 'package:flutter/widgets.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_icon.dart';
 
-/// Height of [MobileTopNav] — Figma `Mobile Top Nav` (node 4237:92733).
 const double kMobileTopNavHeight = 72;
 
-/// Mobile top navigation bar with the three Figma variants:
-///
-/// - [MobileTopNav.account] — avatar + account name (+ optional balance)
-///   on the left, sync status label + edge glow indicator on the right.
-///   Used by the tab roots.
-/// - [MobileTopNav.steps] — back button + centered progress track. Used
-///   by multi-step flows (onboarding, send wizard).
-/// - [MobileTopNav.back] — back button + centered serif title. Used by
-///   pushed detail screens; with a null [onBack] the button is omitted
-///   and only the centered title remains (tab roots like Activity).
-///
-/// Metrics come from Figma node 4237:92733 (393×72; not tokenized as
-/// variables yet, so they live here as constants). The Back-variant
-/// title uses [AppTypography.headlineLarge], which on mobile resolves to
-/// Space Grotesk 32 px (Headline L) — the size the shared Mobile Top Nav
-/// component's Back variant uses across the mobile screen frames.
 class MobileTopNav extends StatelessWidget {
   const MobileTopNav.account({
     required this.accountName,
@@ -100,53 +83,34 @@ class MobileTopNav extends StatelessWidget {
 
   final _MobileTopNavVariant _variant;
 
-  /// Account variant: display name, optional secondary balance line, and
-  /// the right-aligned sync status label. The label and edge-indicator
-  /// colors default to the synced tokens; pass overrides for syncing /
-  /// failed states.
   final String accountName;
   final String? balanceLabel;
   final String? syncLabel;
   final Color? syncLabelColor;
   final Color? syncIndicatorColor;
 
-  /// When true (the live syncing state, reduced-motion off) the label
-  /// shimmers a bright band across itself and the edge bar breathes
-  /// a slow glow pulse. Otherwise the label and bar render static.
   final bool syncAnimated;
 
-  /// Bright peak used for the shimmer band and the breathing glow.
-  /// Falls back to [syncLabelColor] when null.
   final Color? syncHighlightColor;
 
-  /// Account variant: leading 40×40 avatar. Falls back to a plain
-  /// surface circle until real profile pictures are wired in.
   final Widget? avatar;
   final VoidCallback? onAccountTap;
 
-  /// Account variant: tapping the sync status (e.g. to explain a failure).
   final VoidCallback? onSyncTap;
 
-  /// Steps variant: progress through the flow, 0.0–1.0.
   final double progress;
   final bool showBackButton;
 
-  /// Back variant: centered serif title.
   final String title;
   final TextStyle? titleStyle;
   final int titleMaxLines;
   final Color? foregroundColor;
   final double height;
 
-  /// Back variant: right-aligned widget (e.g. the swap composer's
-  /// "Powered by NEAR Intents" lockup — Figma 4686:102067).
   final Widget? trailing;
 
   final VoidCallback? onBack;
 
-  /// Back-variant leading icon. Defaults to the chevron; the swap composer
-  /// swaps it to a cross while its number-pad keyboard is open so the leading
-  /// button dismisses the keyboard instead of leaving the tab.
   final String backIcon;
 
   static const _avatarSize = 40.0;
@@ -211,9 +175,6 @@ class MobileTopNav extends StatelessWidget {
       ),
     );
 
-    // Zafe: the status keeps its natural width at the right edge, but never more than
-    // 60% of the bar (its label ellipsizes), so the vault name and avatar keep room on
-    // narrow phones with large system text.
     return LayoutBuilder(
       builder: (context, constraints) => Row(
         children: [
@@ -297,7 +258,6 @@ class MobileTopNav extends StatelessWidget {
     );
   }
 
-  // Zafe: a boxed back button with the title left-aligned beside it.
   Widget _buildBack(BuildContext context) {
     final colors = context.colors;
     return Padding(
@@ -399,31 +359,18 @@ class _AvatarPlaceholder extends StatelessWidget {
   }
 }
 
-/// Subtle/slow motion constants for the syncing affordance. One full
-/// breath (glow swell) and one shimmer sweep per [period]; both are
-/// driven by the same controller so the label and bar feel coordinated.
 abstract final class _SyncStatusMotion {
   static const period = Duration(milliseconds: 1400);
 
-  /// How often the sweep and the glow move. Not every vsync: any change redraws the whole
-  /// screen (about 5 ms of raster time per frame on a phone, measured with the profiler:
-  /// the cost is the redraw itself, whatever the widget), and a display runs at 60-120 Hz,
-  /// so a per-vsync animation held a core at ~70% for as long as a sync lasted. A 1.4 s
-  /// sweep stays smooth at ~16 updates a second and costs about a seventh of that.
   static const frameInterval = Duration(milliseconds: 60);
 
-  /// Half-width of the shimmer highlight band as a gradient-stop fraction.
-  /// Kept narrow for a gentle, low-contrast sparkle.
   static const _bandHalf = 0.18;
 
-  /// Edge-bar glow breathing range (shadow blur radius + alpha). Kept gentle
-  /// so the syncing glow stays subtle rather than vibrant.
   static const _minGlowBlur = 8.0;
   static const _maxGlowBlur = 13.0;
   static const _minGlowAlpha = 0.2;
   static const _maxGlowAlpha = 0.45;
 
-  /// 0 → 1 → 0 once per [period].
   static double _breath(double t) => (1 - math.cos(2 * math.pi * t)) / 2;
 
   static ({double blur, double alpha}) glowFor(double t) {
@@ -437,13 +384,6 @@ abstract final class _SyncStatusMotion {
   static double _lerp(double a, double b, double t) => a + (b - a) * t;
 }
 
-/// The right-aligned sync status: the label plus the edge glow bar.
-///
-/// While [animated] (the live syncing state, reduced-motion off) a timer steps a bright
-/// shimmer band sweeping across
-/// the label and a slow breathing pulse on the edge bar, so the two
-/// read as one "actively working" affordance. Otherwise — synced, failed,
-/// or reduced-motion — it renders the same static label + bar as before.
 class _SyncStatus extends StatefulWidget {
   const _SyncStatus({
     required this.label,
@@ -466,7 +406,6 @@ class _SyncStatus extends StatefulWidget {
 }
 
 class _SyncStatusState extends State<_SyncStatus> {
-  /// 0..1 through one [_SyncStatusMotion.period], stepped by [_ticker].
   final _progress = ValueNotifier<double>(0);
   final _clock = Stopwatch();
   Timer? _ticker;
@@ -481,7 +420,6 @@ class _SyncStatusState extends State<_SyncStatus> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Re-evaluate on dependency changes (e.g. the reduce-motion setting).
     _syncAnimation();
   }
 
@@ -523,7 +461,6 @@ class _SyncStatusState extends State<_SyncStatus> {
 
   @override
   Widget build(BuildContext context) {
-    // Its own layer: the motion repaints only this corner, never the screen under it.
     return RepaintBoundary(child: _content(context));
   }
 
@@ -581,12 +518,6 @@ class _SyncStatusState extends State<_SyncStatus> {
   }
 }
 
-/// The sync label with a bright highlight band sweeping across it.
-///
-/// A [ShaderMask] (`srcIn`) replaces the glyph pixels with a horizontal
-/// `base → highlight → base` gradient; sliding the gradient's mapping
-/// rect by [progress] travels the band left→right. The band fully exits
-/// both edges (pure base) at the loop ends, so the repeat is seamless.
 class _ShimmerLabel extends StatelessWidget {
   const _ShimmerLabel({
     required this.label,
@@ -624,7 +555,6 @@ class _ShimmerLabel extends StatelessWidget {
           tileMode: TileMode.clamp,
         ).createShader(rect);
       },
-      // Solid color so `srcIn` keeps the gradient over the full glyph.
       child: Text(
         label,
         maxLines: 1,
@@ -637,8 +567,6 @@ class _ShimmerLabel extends StatelessWidget {
   }
 }
 
-/// The thin glow bar hugging the right screen edge in the account
-/// variant — Figma `_Nav Sync Widget > light` (node 4237:92744).
 class _SyncEdgeIndicator extends StatelessWidget {
   const _SyncEdgeIndicator({
     required this.size,

@@ -8,13 +8,9 @@ import '../../core/layout/mobile/zafe_screen.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_button.dart';
 
-/// Settings > Diagnostic report: the errors recorded on this phone, shown in full before
-/// anything is shared. Zafe sends no telemetry and no crash reports; this is the only way
-/// the log leaves the phone, and only if the user taps Share.
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key, this.log});
 
-  /// Defaults to this process's log.
   final CrashLog? log;
 
   @override

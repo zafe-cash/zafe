@@ -1,12 +1,3 @@
-// Renders single illustration layers (the key's shards, a coin) on a transparent
-// background at high resolution, for the store listing's graphics. Not part of
-// `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/store_art_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): art_<layer>.png, each on
-// its scene's canvas (pieces stay where the scene draws them; crop by alpha).
-
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -30,7 +21,6 @@ void main() {
       Platform.environment['SCREEN_PREVIEW_OUT'] ?? 'build/screen_preview',
     )..createSync(recursive: true);
     for (final (name, w, h) in _layers) {
-      // Coins are tiny on their canvas: draw them larger.
       final scale = w < 200 ? 12.0 : 2.0;
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = Size(w * scale, h * scale);

@@ -1,7 +1,4 @@
 ---
-// Every page: CSP meta, SEO and social tags, icons, fonts, the one stylesheet. Pages add
-// their own scripts through the "head" slot, only as same-origin files (`is:inline src=...`).
-// URLs derive from `site` in astro.config.mjs. See docs/seo.md.
 import '../styles/site.css';
 import { csp, siteName, socialImage } from '../config';
 
@@ -10,20 +7,16 @@ interface Props {
   description?: string;
   bodyClass?: string;
   noindex?: boolean;
-  /** og:title / twitter:title when it should differ from <title>. */
   socialTitle?: string;
-  /** schema.org JSON-LD, rendered as data (build.sh allows exactly this script type). */
   jsonLd?: object;
 }
 
 const { title, description, bodyClass, noindex = false, socialTitle, jsonLd } = Astro.props;
 
-// build.format 'file' gives "/join.html" here; the hosts serve it at "/join".
 const path = Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/');
 const pageUrl = new URL(path, Astro.site).href;
 const imageUrl = new URL(socialImage.path, Astro.site).href;
 const shareTitle = socialTitle ?? title;
-// "<" escaped so the data can never close its <script> element.
 const ld = jsonLd && JSON.stringify(jsonLd).replace(/</g, '\\u003c');
 ---
 

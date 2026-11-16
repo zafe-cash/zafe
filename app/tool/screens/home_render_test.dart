@@ -1,13 +1,3 @@
-// Renders Home's parts (top bar, vault card, buttons, notice card, recent activity, tab
-// bar) with fake data, in both themes, to PNGs for review without a device. HomeScreen
-// itself needs the Rust bridge, so this pumps its public pieces, laid out as HomeScreen
-// does. Nothing waits on this member (payments that do are "Needs you" cards, not rows). Not part of `flutter test`;
-// run it explicitly (from app/):
-//
-//   flutter test tool/screens/home_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): home_{dark,light}.png.
-// HOME_NOTICE=0 leaves out the backup notice (the website's showcase uses that).
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -95,7 +85,7 @@ Widget _home() => Builder(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 40), // the status bar
+          const SizedBox(height: 40),
           const MobileTopNav.account(
             accountName: 'Ops fund',
             syncLabel: 'Synced',
@@ -229,7 +219,6 @@ Widget _home() => Builder(
 );
 
 final _showNotice = Platform.environment['HOME_NOTICE'] != '0';
-// HOME_FIAT=0 leaves out the dollar line (the website shows no made-up prices).
 final _showFiat = Platform.environment['HOME_FIAT'] != '0';
 
 void main() {
@@ -276,8 +265,7 @@ void main() {
       });
       final path = '${out.path}/home_$theme.png';
       File(path).writeAsBytesSync(bytes!);
-      // ignore: avoid_print
-      print(path);
+      stdout.writeln(path);
     }
   });
 }

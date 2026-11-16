@@ -1,34 +1,13 @@
-"""Zafe's app icon and splash mark (original work), as SVG.
-
-The mark is **Seam** (docs/brand.md §5): a square block split by a Z-shaped channel
-into an upper and a lower piece, on a deep verdigris tile. Pieces that lock together
-read as the vault and the co-signers; the channel is the Z. Flat colours only, no
-gradients: iOS Tinted/Clear icons and Android themed icons repaint the icon, and a
-flat shape survives that. Monochrome, themed and notification versions draw both
-pieces in one colour (the channel keeps them apart).
-
-Geometry (100-unit tile, the same numbers as `.claude/skills/logo-design/marks.js`
-`seam()`): block 22..78; the channel is the polyline (19,37) -> (63,37) -> (37,63) ->
-(81,63), 9.5 units wide with mitred joins; outer corners radius r*2+1.2, channel
-corners r*0.5, r = 2.6 ("Patina").
-
-Writes app/tool/brand/svg/*.svg; app/tool/brand/render_test.dart renders them with
-flutter_svg into the Android and iOS resources. Run scripts/brand/icons.sh, not this
-file directly.
-
-flutter_svg notes: no <line>/<polyline>/<pattern>/filters (use <path>).
-"""
 import math
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "..", "app", "tool", "brand", "svg")
 
-# "Verdigris" palette (docs/brand.md §3).
-TILE = "#004A46"    # deep verdigris tile, in both themes (it is the app icon)
-UPPER = "#D9F5F2"   # upper piece: patina pale
-LOWER = "#51DDD2"   # lower piece: the brand accent
-WHITE = "#FFFFFF"   # monochrome silhouettes (the launcher tints them)
+TILE = "#004A46"
+UPPER = "#D9F5F2"
+LOWER = "#51DDD2"
+WHITE = "#FFFFFF"
 
 SEAM_R = 2.6
 SEAM_W = 9.5
@@ -39,8 +18,6 @@ def n(v):
 
 
 def rounded_path(points, radii):
-    """Closed polygon path with each vertex rounded (quadratic, control at the vertex).
-    A radius is clamped to the shorter adjacent edge / 2.2, as in marks.js."""
     k = len(points)
     parts = []
     for i in range(k):
@@ -58,8 +35,6 @@ def rounded_path(points, radii):
 
 
 def offsets(pts, w):
-    """Both offset sides of a polyline at half-width w/2 with mitred joins
-    (up = left of travel)."""
     h = w / 2
     k = len(pts)
 
@@ -87,7 +62,6 @@ def offsets(pts, w):
 
 
 def seam(r=SEAM_R, w=SEAM_W):
-    """(upper, lower) piece paths on the 100-unit tile."""
     l, rr, t, b = 22, 78, 22, 78
     ro, ri = r * 2 + 1.2, max(0.4, r * 0.5)
     up, dn = offsets([(l - 3, 37), (63, 37), (37, 63), (rr + 3, 63)], w)
@@ -101,7 +75,6 @@ SEAM_UPPER, SEAM_LOWER = seam()
 
 
 def mark(x, y, size, upper=UPPER, lower=LOWER):
-    """The Seam mark for a tile of `size` at (x, y)."""
     s = size / 100
     return (f'<g transform="translate({n(x)} {n(y)}) scale({s:.5f})">'
             f'<path d="{SEAM_UPPER}" fill="{upper}"/>'
@@ -131,25 +104,15 @@ def main():
         if os.path.exists(path):
             os.remove(path)
     S = 1024
-    # iOS (and store listing): full-bleed tile; iOS applies its own mask.
     write("icon.svg", svg(S, f'<rect width="{S}" height="{S}" fill="{TILE}"/>'
                              + mark(0, 0, S)))
-    # Legacy Android launcher (pre-8): a rounded tile with a small margin.
     m = 40
     write("icon_legacy.svg", svg(S, tile(m, m, S - 2 * m, (S - 2 * m) * 0.22)
                                     + mark(m, m, S - 2 * m)))
-    # Adaptive icon: 108 dp canvas, the launcher shows the middle 72 dp, which maps to
-    # the 100-unit tile. The mark (56 units = 40 dp; its corners 28.5 dp from the
-    # centre) sits inside the 66 dp safe circle (radius 33 dp). The background is the
-    # colour resource @color/zafe_icon_tile.
     inner = S * 72 / 108
     off = (S - inner) / 2
     write("adaptive_foreground.svg", svg(S, mark(off, off, inner)))
     write("adaptive_monochrome.svg", svg(S, mark(off, off, inner, WHITE, WHITE)))
-    # Splash. Android 12+: 288 dp canvas, masked to the 192 dp circle; a 144 dp tile
-    # (radius 22.5 %) reaches 88 dp from the centre, inside the 96 dp mask radius.
-    # Pre-12 and iOS: a 160 dp/pt bitmap with the same 144 dp tile. The tile is the app
-    # icon, so it is the same in both themes.
     for theme in ("dark", "light"):
         t = S * 144 / 288
         write(f"splash_icon_{theme}.svg",
@@ -162,9 +125,6 @@ def main():
 
 
 def write_notification_icon():
-    """Android notification small icon: both Seam pieces, white on transparent (Android
-    uses only the alpha and tints it). A vector drawable, so no rendering step. The
-    62-unit viewport around the 56-unit mark leaves ~1 dp margin at 24 dp."""
     res = os.path.join(HERE, "..", "..", "app", "android", "app", "src", "main", "res",
                        "drawable", "ic_notification.xml")
     with open(res, "w") as fh:

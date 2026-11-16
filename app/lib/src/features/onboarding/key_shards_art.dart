@@ -6,8 +6,6 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/theme/app_theme.dart';
 
-/// Where each shard sits apart from its place in the whole key (SVG units and degrees):
-/// the same numbers as `SHARD_OFFSETS` in scripts/illustrations/scenes.py.
 const _offsets = [
   (-80.0, -18.0, -7.0),
   (-30.0, 48.0, 6.0),
@@ -16,19 +14,10 @@ const _offsets = [
   (84.0, -14.0, 10.0),
 ];
 
-/// How far apart the shards stay once joined (a fraction of their resting offsets).
 const _gap = 0.14;
 
-/// The key's centre in the 1080 x 1240 scene, which every shard turns around.
 const _cx = 540.0, _cy = 470.0;
 
-/// The key-shards scene, animated from its layers (scripts/illustrations: `LAYERS`):
-/// while [assembled] is false the five shards drift gently apart; when it turns true
-/// they close into the dashed outline of the whole key (900 ms) and settle with a small
-/// pulse, then [onAssembled] runs. They stop short of touching: the shares act together,
-/// but the whole key never exists, and the art shouldn't say otherwise. Each layer is drawn once and only moved, and
-/// nothing runs while the screen is hidden; reduced motion shows it still and joins it
-/// at once.
 class KeyShardsArt extends StatefulWidget {
   const KeyShardsArt({super.key, this.assembled = false, this.onAssembled});
   final bool assembled;
@@ -120,7 +109,6 @@ class _KeyShardsArtState extends State<KeyShardsArt>
               animation: Listenable.merge([_drift, _join, _pulse]),
               builder: (context, _) {
                 final apart = 1 - _join.value * (1 - _gap);
-                // A quick swell and settle once the key is whole.
                 final swell = math.sin(_pulse.value * math.pi) * 0.035;
                 return Transform.scale(
                   scale: 1 + swell,
@@ -144,12 +132,10 @@ class _KeyShardsArtState extends State<KeyShardsArt>
     );
   }
 
-  /// Moves a shard drawn in its place out by [apart] (1: as in the still scene), plus
-  /// its drift: the transform of the scene's group, relative to the key's place.
   Matrix4 _pieceTransform(int i, double apart) {
     final (dx, dy, dr) = _offsets[i];
     final phase = (_drift.value + i * 0.21) * 2 * math.pi;
-    final float = 1 - _join.value; // drift stops as the shards join
+    final float = 1 - _join.value;
     final ox = dx * apart;
     final oy = dy * apart + math.sin(phase) * 6 * float;
     final turn =

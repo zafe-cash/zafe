@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
-# Builds the site (home page, and the invite page https://<ZAFE_LINK_HOST>/join#<invite>) into
-# infra/site/dist, ready to upload to any static host. See README.md.
-#
-#   ZAFE_ANDROID_CERT_SHA256   SHA-256 fingerprints of the APK signing certificates,
-#                              comma-separated (AA:BB:... or plain hex). Without them
-#                              there is no assetlinks.json, so App Links can't verify.
-#   ZAFE_IOS_APP_IDS           optional: <TeamID>.xyz.zafe.zafe, comma-separated
-#   ZAFE_DOWNLOAD_URL          optional: where "Get Zafe" points (the site workflow sets it
-#                              to the newest release); unset, it falls back to config.ts
-#   ZAFE_SOURCE_URL            optional: where "Read the source" points
-#                              (default: the GitHub repository)
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 out="$here/dist"
-# The mainnet app and the separate testnet app (ZAFE_NETWORK=test builds).
 packages=(xyz.zafe.zafe xyz.zafe.zafe.testnet)
 repo="https://github.com/zafe-cash/zafe"
 download="${ZAFE_DOWNLOAD_URL:-}"
@@ -31,7 +19,6 @@ plain_https() {
 [[ -z "$testnet" ]] || plain_https "$testnet" || die "ZAFE_TESTNET_URL must be a plain https:// URL"
 plain_https "$source_url" || die "ZAFE_SOURCE_URL must be a plain https:// URL"
 
-# Fingerprints → "AA:BB:...", upper case, exactly 32 bytes.
 fingerprints=()
 if [[ -n "${ZAFE_ANDROID_CERT_SHA256:-}" ]]; then
   IFS=',' read -ra raw <<< "$ZAFE_ANDROID_CERT_SHA256"
@@ -58,16 +45,10 @@ cd "$here"
 [[ -d node_modules ]] || npm ci --no-audit --no-fund
 ZAFE_DOWNLOAD_URL="$download" ZAFE_TESTNET_URL="$testnet" ZAFE_SOURCE_URL="$source_url" ASTRO_TELEMETRY_DISABLED=1 \
   npx --no-install astro build --silent
-touch "$out/.nojekyll" # GitHub Pages: serve .well-known
+touch "$out/.nojekyll"
 
-# The CSP allows only same-origin files: refuse a build that inlined any script or style.
-# A <script> must have a src (Astro's bundled modules do); anything else is inline.
-# One exception: a <script> whose only attribute is type="application/ld+json" (schema.org
-# data for search engines, Base.astro). Browsers never execute that type, so script-src
-# doesn't apply to it; any other attribute or type still fails, and its contents must
-# parse as JSON (checked below).
 shopt -s nullglob
-pages=("$out"/*.html "$out"/docs/*.html) # docs pages: /docs/<slug> -> docs/<slug>.html
+pages=("$out"/*.html "$out"/docs/*.html)
 shopt -u nullglob
 if grep -l -P '<script(?![^>]*\ssrc=)(?!\s+type="?application/ld\+json"?>)[^>]*>|<style|\s(style|on[a-z]+)=' "${pages[@]}"; then
   die "inline script or style in the pages above (the CSP would block it)"
@@ -82,7 +63,6 @@ PY
 
 if (( ${#fingerprints[@]} )); then
   mkdir -p "$out/.well-known"
-  # One entry per app package, each with every signing certificate.
   python3 - "$out/.well-known/assetlinks.json" "${fingerprints[@]}" -- "${packages[@]}" <<'PY'
 import json, sys
 args = sys.argv[2:]
@@ -100,7 +80,6 @@ else
   echo "warning: no ZAFE_ANDROID_CERT_SHA256, so no assetlinks.json (App Links won't verify)" >&2
 fi
 
-# Universal Links, only for the join path (the invite is in the fragment).
 if (( ${#app_ids[@]} )); then
   mkdir -p "$out/.well-known"
   cat > "$out/.well-known/apple-app-site-association" <<EOF

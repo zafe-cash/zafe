@@ -11,9 +11,7 @@ import '../rust/api/error.dart';
 import '../rust/api/tor.dart' as rust;
 import 'vault_provider.dart';
 
-/// The Rust side of "Use Tor", behind an interface so the notifier is testable.
 abstract interface class TorRuntime {
-  /// Switches the route to Tor at once (fail-closed), before any bootstrap.
   void request();
   Future<TorConnection> enable({required int timeoutSecs});
   void disable();
@@ -47,8 +45,6 @@ class RustTorRuntime implements TorRuntime {
 
 final torRuntimeProvider = Provider<TorRuntime>((_) => const RustTorRuntime());
 
-/// "Use Tor": the saved choice (from the bootstrap) and the connection. The route was
-/// already switched in `main()` before anything could connect; [start] only bootstraps.
 class TorNotifier extends Notifier<TorSetting> {
   int _attempt = 0;
 
@@ -63,7 +59,6 @@ class TorNotifier extends Notifier<TorSetting> {
     );
   }
 
-  /// At launch: connects when the choice is on. Never awaited by the UI.
   Future<void> start() async {
     if (state.enabled) await _connect();
   }
@@ -72,8 +67,6 @@ class TorNotifier extends Notifier<TorSetting> {
     if (enabled == state.enabled) return;
     final prefs = await SharedPreferences.getInstance();
     if (enabled) {
-      // The route first, then the saved choice: whatever fails in between, the device
-      // is never less private than the user asked.
       _runtime.request();
       state = const TorSetting(
         enabled: true,
@@ -83,21 +76,17 @@ class TorNotifier extends Notifier<TorSetting> {
       await _connect();
     } else {
       await prefs.setBool(kUseTorKey, false);
-      _attempt++; // an attempt still running no longer counts
+      _attempt++;
       _runtime.disable();
       state = const TorSetting.off();
     }
   }
 
-  /// "Try again" after a failure (also run when the app comes back to the foreground).
   Future<void> retry() async {
     if (!state.enabled || state.connection == TorConnection.connecting) return;
     await _connect();
   }
 
-  /// The app went to the background or came back. A failed Tor gets another try on
-  /// the way back; the Rust state may also have moved (a background check in this
-  /// process can connect it).
   void setForeground(bool foreground) {
     _runtime.setDormant(!foreground);
     if (!foreground || !state.enabled) return;
@@ -135,8 +124,6 @@ class TorNotifier extends Notifier<TorSetting> {
 
 final torProvider = NotifierProvider<TorNotifier, TorSetting>(TorNotifier.new);
 
-/// Kept alive by `ZafeApp`: connects Tor at launch when it's on, and keeps it dormant
-/// while the app is in the background.
 final torLifecycleProvider = Provider<void>((ref) {
   final notifier = ref.read(torProvider.notifier);
   unawaited(notifier.start());

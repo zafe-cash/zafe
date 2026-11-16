@@ -1,18 +1,3 @@
-//! Moving a vault to another relay: the formats (`docs/relay-move.md` §4.2-4.7).
-//!
-//! A move has a target ([`MoveTarget`]): the vault, a move id naming the mover
-//! ([`move_id_for`]), the new relay's URL,
-//! the vault's new mailbox label there, the point of the log the mover started from
-//! (`base`) and an expiry. Each member who moves signs the target with its identity key:
-//! its **arrival**, sent sealed to every other member on the new relay. The first phone
-//! holding m = max(t, n − t + 1) arrivals appends `VaultEvent::VaultMoved` there, and from
-//! that entry on the vault lives on the new relay. On the old relay the mover leaves a
-//! sealed **move notice** for each member (never acknowledged, so a phone that was off
-//! finds it later); the switching phone adds the `VaultMoved` entry to it.
-//!
-//! The flows are in `node` (`move_vault`, `follow_move`, `move_progress`,
-//! `cancel_move`); this phone's part in a move is a [`MoveState`] file next to its log copy.
-
 use serde::{Deserialize, Serialize};
 use zafe_proto::{
     version::{self, DecodeError, Format},
@@ -23,31 +8,16 @@ const ARRIVAL_DOMAIN: &[u8] = b"Zafe relay move arrival v1";
 const STATE_KEY_DOMAIN: &str = "Zafe relay move state key v1";
 const MOVE_ID_DOMAIN: &str = "Zafe relay move id v1";
 
-/// How long a move stays open: 14 days from when the mover started it. Shorter than a
-/// relay keeps undelivered messages (`zafe_relay::DELIVERY_RETENTION_SECS`), so a member's
-/// cancel stays readable for the whole move.
 pub const MOVE_LIFETIME_SECS: u64 = 14 * 24 * 3600;
 
-/// The site the move link points at (only its fragment matters, and the site never sees it).
 pub const MOVE_LINK_BASE: &str = "https://zafe.cash/move#";
 
-/// Move messages are padded to a multiple of this many bytes, so the old relay can't tell
-/// a move notice from the sealed signing messages it relays every day by its size (a 2-of-3
-/// signing request for one spend is about 0.7 KB, its shares about 0.1 KB).
 pub const MOVE_PAD_BYTES: usize = 1024;
 
-/// Members who must have moved before the vault switches: at least t (so payments work on
-/// the new relay) and more than could be left behind (so they can never reach t on the old
-/// one): `max(t, n − t + 1)`. 2-of-3 and 3-of-5: t; 2-of-4: 3; 2-of-5: 4.
 pub fn switch_threshold(members: usize, threshold: usize) -> usize {
     threshold.max(members.saturating_sub(threshold) + 1)
 }
 
-/// The move id a mover gives its move to `label`: it names the mover inside the signed
-/// target (rule: the mover is never inferred from the order a relay serves arrivals). Anyone
-/// can compute it for anyone, so it only says *who* the mover is; that member's own arrival
-/// signature over the exact target is what counts. Moves made by apps before 2026-11-16
-/// have random ids and no derivable mover: they can't be followed.
 pub fn move_id_for(mover: &[u8; 32], label: &MailboxId) -> [u8; 16] {
     let mut input = mover.to_vec();
     input.extend_from_slice(label);
@@ -55,19 +25,14 @@ pub fn move_id_for(mover: &[u8; 32], label: &MailboxId) -> [u8; 16] {
     key[..16].try_into().expect("16 bytes")
 }
 
-/// What every arrival of a move signs.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MoveTarget {
     pub vault_id: MailboxId,
     pub move_id: [u8; 16],
-    /// The new relay ([`normalize_relay_url`]).
     pub relay: String,
-    /// The vault's mailbox label on the new relay.
     pub label: MailboxId,
-    /// Index and hash of the last log entry the mover's copy held when it started.
     pub base_index: u64,
     pub base_hash: [u8; 32],
-    /// Unix seconds (mover's clock): [`MOVE_LIFETIME_SECS`] after it started.
     pub expiry: u64,
 }
 
@@ -78,19 +43,14 @@ impl MoveTarget {
         msg
     }
 
-    /// `me`'s arrival: its signature over the target.
     pub fn sign(&self, me: &Identity) -> Vec<u8> {
         me.sign(&self.message()).to_vec()
     }
 
-    /// Whether `signature` is `who`'s arrival for this target.
     pub fn verify(&self, who: &IdentityPublic, signature: &[u8]) -> bool {
         who.verify(&self.message(), signature).is_ok()
     }
 
-    /// The member (signing key) among `members` whose key derives this move's id
-    /// ([`move_id_for`]): the mover. `None` for a move whose mover isn't a member (any
-    /// more) or an older app's move.
     pub fn mover_among<'a>(
         &self,
         members: impl IntoIterator<Item = &'a [u8; 32]>,
@@ -105,15 +65,11 @@ impl MoveTarget {
         now >= self.expiry
     }
 
-    /// The relay's host (and port) for display: `relay.dao.org`.
     pub fn host(&self) -> String {
         relay_host(&self.relay)
     }
 }
 
-/// `scheme://host[:port][/path]` with the scheme and host lower-cased and no trailing
-/// slash, so every member signs the same string for the same relay. `None` for anything
-/// that isn't an http(s) URL.
 pub fn normalize_relay_url(url: &str) -> Option<String> {
     let url = url.trim().trim_end_matches('/');
     let (scheme, rest) = url.split_once("://")?;
@@ -135,25 +91,18 @@ pub fn normalize_relay_url(url: &str) -> Option<String> {
     Some(format!("{scheme}://{}{path}", host.to_ascii_lowercase()))
 }
 
-/// `relay.dao.org` from `https://relay.dao.org/`.
 pub fn relay_host(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
     rest.split('/').next().unwrap_or(rest).to_owned()
 }
 
-/// What travels in a move's envelopes (`Kind::Arrival`, `Kind::MoveNotice`,
-/// `Kind::MoveCancelled`), version-tagged and padded ([`MoveMessage::to_padded`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MoveMessage {
-    /// On the new relay: the sender's arrival. The mover's also carries the relay's create
-    /// token (sealed), so every member can restore the vault on a private relay.
     Arrival {
         target: MoveTarget,
         signature: Vec<u8>,
         create_token: Option<String>,
     },
-    /// On the old relay, from the mover: where the vault is moving and the mover's arrival;
-    /// from the phone that switched, also the `VaultMoved` log entry (`LogEntry::to_bytes`).
     Notice {
         target: MoveTarget,
         mover: [u8; 32],
@@ -161,12 +110,12 @@ pub enum MoveMessage {
         create_token: Option<String>,
         moved: Option<Vec<u8>>,
     },
-    /// The sender withdraws its arrival for `move_id` (from the mover: the move is off).
-    Cancelled { move_id: [u8; 16] },
+    Cancelled {
+        move_id: [u8; 16],
+    },
 }
 
 impl MoveMessage {
-    /// `version || u32 length || postcard || zeros`, a multiple of [`MOVE_PAD_BYTES`].
     pub fn to_padded(&self) -> Vec<u8> {
         let body = postcard::to_allocvec(self).expect("encodable");
         let mut inner = (body.len() as u32).to_le_bytes().to_vec();
@@ -188,9 +137,6 @@ impl MoveMessage {
     }
 }
 
-/// What the move link carries in its fragment: enough to find the move, nothing secret
-/// (the create token never goes in a link) and nothing to trust: following needs a current
-/// member's arrival on that relay.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MoveLink {
     pub vault_id: MailboxId,
@@ -209,13 +155,11 @@ impl MoveLink {
         }
     }
 
-    /// `https://zafe.cash/move#<hex>`.
     pub fn encode(&self) -> String {
         let bytes = version::encode(Format::MoveLink, self).expect("encodable");
         format!("{MOVE_LINK_BASE}{}", hex::encode(bytes))
     }
 
-    /// Reads the link, its fragment, or a message that contains the link (the share text).
     pub fn decode(text: &str) -> Result<Self, DecodeError> {
         let bad = DecodeError::Malformed(Format::MoveLink);
         let text = text.trim();
@@ -234,41 +178,22 @@ impl MoveLink {
     }
 }
 
-/// This phone's part in a move of one vault (`<vault id>.move` in the log copy's
-/// directory, encrypted with a key derived from the vault secret). One move at a time per
-/// phone: a new one replaces it only once it switched, expired or was cancelled.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MoveState {
     pub target: MoveTarget,
-    /// Who started the move.
     pub mover: [u8; 32],
-    /// This phone sent its arrival (from then on it checks the new relay for `VaultMoved`
-    /// before every write to the old one, §4.5 rule 2).
     pub arrived: bool,
-    /// The new relay's create token (the mover's own, or from the mover's sealed arrival or
-    /// notice).
     pub create_token: Option<String>,
-    /// Members (signing keys) whose move notice reached the old relay.
     pub notified: Vec<[u8; 32]>,
     pub cancelled: bool,
-    /// This phone saw `VaultMoved` for the move and verified it: the vault is on the new
-    /// relay ([`MoveState::switched`] decides whether this phone already follows it).
     pub moved_seen: bool,
-    /// This phone verified `VaultMoved` on the new relay itself: its vault material
-    /// follows the new relay from now on.
     pub switched: bool,
-    /// This phone left the `VaultMoved` entry in the old relay's move notices.
     pub moved_notice_sent: bool,
-    /// This phone's arrival reached every other member on the new relay.
     pub arrival_delivered: bool,
-    /// Where the vault lived on this phone when this state was made: followed until the
-    /// move switches, so replacing the state of an earlier switch the app hadn't saved
-    /// into its material yet never sends it back to an older relay.
     pub from: crate::node::VaultRelay,
 }
 
 impl MoveState {
-    /// Still in progress: neither switched, cancelled nor expired.
     pub fn open(&self, now: u64) -> bool {
         !self.switched && !self.cancelled && !self.moved_seen && !self.target.expired(now)
     }
@@ -281,7 +206,6 @@ impl MoveState {
         format!("{}.move", hex::encode(vault))
     }
 
-    /// The vault's move file in `dir`, if there is a readable one.
     pub fn load(dir: &std::path::Path, vault: &MailboxId, vault_secret: &[u8; 32]) -> Option<Self> {
         let name = Self::file_name(vault);
         let bytes = std::fs::read(dir.join(&name)).ok()?;
@@ -290,7 +214,6 @@ impl MoveState {
         postcard::from_bytes(&plain).ok()
     }
 
-    /// Saves it durably (temp + fsync + rename).
     pub fn save(&self, dir: &std::path::Path, vault_secret: &[u8; 32]) -> std::io::Result<()> {
         let name = Self::file_name(&self.target.vault_id);
         let plain = postcard::to_allocvec(self).map_err(std::io::Error::other)?;

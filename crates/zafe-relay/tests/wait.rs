@@ -1,5 +1,3 @@
-//! Long polls (`/v1/wait`), driven in-process.
-
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -56,8 +54,6 @@ fn wait_req(log_len: u64, inbox_after: u64, max_wait_secs: u32) -> WaitRequest {
     }
 }
 
-/// Starts a wait for `who` in the background; the handle yields status, answer and how
-/// long it took.
 fn spawn_wait(
     app: &Router,
     who: &Identity,
@@ -76,7 +72,6 @@ fn spawn_wait(
 struct World {
     app: Router,
     rng: StdRng,
-    /// ids[0..3] are members (ids[0] created the mailbox); ids[3] is an outsider.
     ids: Vec<Identity>,
     key: LogKey,
     head: [u8; 32],
@@ -187,7 +182,6 @@ fn relay() -> Relay {
     Relay::with_clock(Arc::new(|| NOW))
 }
 
-/// Gives a spawned wait time to reach the relay and start waiting.
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 }
@@ -227,7 +221,6 @@ async fn an_envelope_wakes_its_recipient_only() {
     assert!(answer.inbox_cursor > 0);
     assert!(took < Duration::from_secs(5), "answered in {took:?}");
 
-    // Member 2 was woken by the same signal, found nothing for itself and kept waiting.
     let (status, answer, took) = to_two.await.unwrap();
     assert_eq!(status, StatusCode::OK);
     assert_eq!(answer.unwrap(), WaitResponse::default());
@@ -236,7 +229,6 @@ async fn an_envelope_wakes_its_recipient_only() {
         "waited its full time: {took:?}"
     );
 
-    // Behind already: answered without waiting.
     let (_, answer, took) = spawn_wait(&w.app, &w.ids[1], wait_req(0, 0, 20))
         .await
         .unwrap();
@@ -261,7 +253,6 @@ async fn a_quiet_wait_times_out_with_the_current_state() {
     );
     assert!(took >= Duration::from_secs(1) && took < Duration::from_secs(4));
 
-    // max_wait 0 is a plain read of where the mailbox is.
     let (_, answer, took) = spawn_wait(&w.app, &w.ids[0], wait_req(u64::MAX, u64::MAX, 0))
         .await
         .unwrap();
@@ -272,14 +263,12 @@ async fn a_quiet_wait_times_out_with_the_current_state() {
 #[tokio::test]
 async fn only_members_with_valid_signatures_may_wait() {
     let w = World::new(relay()).await;
-    // An outsider, and an unknown mailbox, are both 403 (404 means "no such endpoint").
     let (status, _) = signed(&w.app, "/v1/wait", &w.ids[3], wait_req(0, 0, 1)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let mut unknown = wait_req(0, 0, 1);
     unknown.mailbox = [1; 16];
     let (status, _) = signed(&w.app, "/v1/wait", &w.ids[0], unknown).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    // A forged signature, and a stale timestamp.
     let mut forged = Signed::new(&w.ids[3], wait_req(0, 0, 1)).unwrap();
     forged.signer = *w.ids[1].public();
     let (status, _) = call(&w.app, "/v1/wait", forged.to_bytes().unwrap()).await;
@@ -315,7 +304,6 @@ async fn concurrent_waits_are_capped_per_key() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert!(response.headers().contains_key("retry-after"));
 
-    // Other members have their own slots; answers needing no wait take none.
     let other = spawn_wait(&w.app, &w.ids[2], wait_req(0, 0, 20));
     settle().await;
     let (status, _, _) = spawn_wait(&w.app, &w.ids[1], wait_req(0, 0, 0))
@@ -323,7 +311,6 @@ async fn concurrent_waits_are_capped_per_key() {
         .unwrap();
     assert_eq!(status, StatusCode::OK);
 
-    // A client that gives up frees its slot.
     first.abort();
     let _ = first.await;
     settle().await;

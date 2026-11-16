@@ -1,5 +1,3 @@
-//! Compares the consensus branch id lightwalletd reports for its tip with the one this build
-//! uses at that height (dev tool): cargo run -p zafe-core --example branch_check
 use zafe_core::wallet::{connect, ZafeNetwork};
 use zcash_client_backend::proto::service;
 use zcash_protocol::consensus::{BlockHeight, BranchId};

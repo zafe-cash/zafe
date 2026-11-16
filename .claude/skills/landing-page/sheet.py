@@ -1,9 +1,3 @@
-"""Tile frames into one contact sheet so a whole scroll story fits in one look.
-
-    python sheet.py <dir> <tag> <cols> [scale]    (needs Pillow)
-
-Reads <dir>/<tag>_0.png, _1.png ... until one is missing; writes <dir>/<tag>_sheet.png.
-"""
 import os
 import sys
 

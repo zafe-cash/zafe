@@ -1,11 +1,3 @@
-// Renders the sending screen (MobileTransactionProgressScreen over the sent_slot
-// illustration, as SendingScreen builds it) in both phases the website shows, in both
-// themes, to PNGs. Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/sending_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/):
-// sending_{progress,sent}_{dark,light}.png. Copy is SendingScreen's.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -35,7 +27,6 @@ Future<void> _loadFonts() async {
   }
 }
 
-// As SendingScreen shows them: while sending, a "Back to Home" link; once sent, no buttons.
 final _phases =
     <String, (MobileTransactionProgressPhase, String, String, String?)>{
       'sending_progress': (
@@ -47,7 +38,7 @@ final _phases =
       'sending_sent': (
         MobileTransactionProgressPhase.succeeded,
         'Sent!',
-        'It confirms on-chain shortly.', // as SendingScreen says it
+        'It confirms on-chain shortly.',
         null,
       ),
     };
@@ -94,7 +85,6 @@ void main() {
             ),
           ),
         );
-        // Let the illustration load and the entrance animations finish.
         for (var i = 0; i < 8; i++) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 50)),
@@ -111,8 +101,7 @@ void main() {
         });
         final path = '${out.path}/${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

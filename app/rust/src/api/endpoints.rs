@@ -1,7 +1,3 @@
-//! Connection checks for the endpoint settings: the app tries a relay or lightwalletd URL
-//! before saving it. Errors carry the kind (unreachable, TLS, timeout, wrong network) and
-//! the endpoint, like sync failures.
-
 use zafe_core::{
     relay_client::RelayClient,
     wallet::{check_server, connect},
@@ -12,32 +8,19 @@ use super::{
     vault::runtime,
 };
 
-/// What a relay says about itself (`GET /v1/info`), for the relay picker.
 #[derive(Debug)]
 pub struct RelayCheck {
-    /// The relay is older than labelled mailboxes (no `/v1/info`): it can't hold a new
-    /// vault (grey it out). The other fields are then unknown (zero / false / `None`).
     pub too_old: bool,
     pub relay_api_version: u16,
-    /// It sends push notifications ("No notifications" when false).
     pub push: bool,
-    /// Creating or restoring a vault there needs its create token.
     pub create_token_required: bool,
-    /// Most members one vault may have.
     pub max_members: u16,
-    /// Requests per minute per signing key (`None`: unlimited).
     pub requests_per_minute: Option<u32>,
-    /// Bytes of vault history one vault may keep (`None`: unlimited).
     pub log_bytes: Option<u64>,
-    /// Days an undelivered message is kept.
     pub delivery_retention_days: u32,
-    /// Days without use after which the relay deletes a vault (`None`: never).
     pub idle_days: Option<u32>,
 }
 
-/// Checks the one relay the user selected (never a list of them in the background: each
-/// would learn this phone's address): that a Zafe relay answers at `relay_url` (`GET
-/// /health`), and what it says about itself. Through Tor when Tor is on.
 pub fn check_relay(relay_url: String) -> Result<RelayCheck, ZafeError> {
     let relay = RelayClient::pooled(relay_url);
     let at_relay =
@@ -72,8 +55,6 @@ pub fn check_relay(relay_url: String) -> Result<RelayCheck, ZafeError> {
     })
 }
 
-/// Checks that lightwalletd answers at `lightwalletd_url` and serves `network_name`
-/// (`main`, `test`, `regtest`). Returns its chain tip height.
 pub fn check_lightwalletd(
     lightwalletd_url: String,
     network_name: String,
@@ -92,7 +73,6 @@ mod tests {
 
     #[test]
     fn unreachable_endpoints_are_typed() {
-        // Port 9 (discard) on localhost: nothing listens there in CI or on dev machines.
         let e = check_relay("http://127.0.0.1:9".into()).unwrap_err();
         assert_eq!(e.kind, ZafeErrorKind::Network);
         assert_eq!(e.endpoint, ZafeEndpoint::Relay);

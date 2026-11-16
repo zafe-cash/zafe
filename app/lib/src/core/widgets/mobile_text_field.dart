@@ -5,17 +5,6 @@ import 'package:flutter/widgets.dart';
 
 import '../theme/app_theme.dart';
 
-/// The shared single-line mobile text field (Figma `_Modal Type` field
-/// 4755:84371 / 4755:85337): a flat `surface.input.primary` box sized by
-/// [AppInputSizing] (60px tall, radius 16 on mobile), label-m Medium text, NO
-/// visible border by default and a bright `background.inverse` outline only
-/// while focused, over the layered surface shadow — the same shell the
-/// canonical desktop [AppTextField] draws.
-///
-/// Optional [leading] / [trailing] slots host inline affordances (a search
-/// glyph, a clear button, contacts/scan icons), laid out inside the box around
-/// the text. This is the general mobile input: the swap modals use it, and it
-/// is reusable anywhere on mobile that needs the compact field.
 class MobileTextField extends StatefulWidget {
   const MobileTextField({
     required this.controller,
@@ -45,7 +34,6 @@ class MobileTextField extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
 
-  /// Key applied to the inner [TextField] — tests target the field by key.
   final Key? fieldKey;
   final String? hintText;
   final ValueChanged<String>? onChanged;
@@ -54,43 +42,28 @@ class MobileTextField extends StatefulWidget {
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
 
-  /// Rendered before the text (e.g. a search glyph). Owns its own sizing.
   final Widget? leading;
 
-  /// Rendered after the text (e.g. a clear button or contacts/scan icons).
-  /// Owns its own sizing; the field insets it from the border.
   final Widget? trailing;
 
-  /// Optional per-surface fill override for one-off Figma variants.
   final Color? backgroundColor;
 
-  /// Optional border shown when the field is not focused. Defaults to
-  /// transparent for the canonical mobile input.
   final Color? restingBorderColor;
 
-  /// Optional border shown when focused. Defaults to the inverse focus ring.
   final Color? focusedBorderColor;
 
-  /// Optional shadow shown only when focused.
   final List<BoxShadow>? focusedBoxShadow;
 
-  /// Optional text style override. Color is not injected automatically.
   final TextStyle? textStyle;
 
-  /// Optional placeholder style override.
   final TextStyle? hintStyle;
 
-  /// Optional height override for one-off embedded field variants.
   final double? height;
 
-  /// Optional radius override for one-off embedded field variants.
   final double? radius;
 
-  /// Whether the field and its outer tap target accept input.
   final bool enabled;
 
-  /// Holds a secret (backup passphrase, backup or invite text): no suggestions,
-  /// autocorrect or keyboard learning, so the keyboard doesn't remember it.
   final bool secret;
 
   @override
@@ -125,7 +98,6 @@ class _MobileTextFieldState extends State<MobileTextField> {
     super.dispose();
   }
 
-  // Repaint the border when focus toggles.
   void _onFocusChanged() {
     if (mounted) setState(() {});
   }
@@ -193,12 +165,6 @@ class _MobileTextFieldState extends State<MobileTextField> {
       onTapDown: widget.enabled ? _handleShellTapDown : null,
       onTap: widget.enabled ? _requestFocusFromShell : null,
       child: Container(
-        // Mobile input metrics (AppInputSizing → 60px tall, radius 16); desktop
-        // resolves these to 46 / 12. The surface fill, the focus-only inverse
-        // outline and the layered surface shadow mirror the canonical
-        // AppTextField shell.
-        // Zafe: a minimum, not a fixed height: with large system text the text (and
-        // a trailing pill) are taller than 60 and used to overflow.
         constraints: BoxConstraints(
           minHeight: widget.height ?? AppInputSizing.height,
         ),
@@ -221,8 +187,6 @@ class _MobileTextFieldState extends State<MobileTextField> {
         ),
         child: Row(
           children: [
-            // Zafe: an inset from the border, as above and below (callers' icons and
-            // pills used to touch it).
             if (widget.leading != null)
               Padding(
                 padding: const EdgeInsets.only(left: 14),

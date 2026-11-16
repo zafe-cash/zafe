@@ -1,6 +1,3 @@
-//! Member identities (spec §5.1): an Ed25519 signing key and an HPKE X25519 key,
-//! both derived from 32-byte seeds held in the device's secure storage.
-
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use hpke::{kem::X25519HkdfSha256, Deserializable, Kem as _, Serializable};
 use rand_core::{CryptoRng, RngCore};
@@ -13,12 +10,9 @@ pub(crate) type Kem = X25519HkdfSha256;
 
 const PERSONAL_FINGERPRINT: &[u8; 16] = b"Zafe_IdentityFP_";
 
-/// A member's public identity, shared with the relay and other members.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct IdentityPublic {
-    /// Ed25519 verifying key.
     pub sig_pk: [u8; 32],
-    /// HPKE X25519 public key.
     pub enc_pk: [u8; 32],
 }
 
@@ -34,7 +28,6 @@ impl IdentityPublic {
         <Kem as hpke::Kem>::PublicKey::from_bytes(&self.enc_pk).map_err(|_| ProtoError::BadKey)
     }
 
-    /// A hash of both public keys, used in safety numbers and for display.
     pub fn fingerprint(&self) -> [u8; 32] {
         let mut state = blake2b_simd::Params::new()
             .hash_length(32)
@@ -46,7 +39,6 @@ impl IdentityPublic {
     }
 }
 
-/// The secret seeds of an identity. This is what gets persisted and backed up.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct IdentitySeeds {
     pub sig_seed: [u8; 32],
@@ -54,7 +46,6 @@ pub struct IdentitySeeds {
 }
 
 impl IdentitySeeds {
-    /// Versioned storage form: `version (u16) || sig_seed || enc_seed`. Secret.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut raw = zeroize::Zeroizing::new([0u8; 64]);
         raw[..32].copy_from_slice(&self.sig_seed);
@@ -74,7 +65,6 @@ impl IdentitySeeds {
     }
 }
 
-/// A member's private identity.
 pub struct Identity {
     seeds: IdentitySeeds,
     signing: SigningKey,

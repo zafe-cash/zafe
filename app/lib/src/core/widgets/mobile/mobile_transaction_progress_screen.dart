@@ -12,8 +12,6 @@ import '../app_icon.dart';
 
 enum MobileTransactionProgressPhase { inProgress, pending, succeeded, failed }
 
-// Same in both themes, each passing 3:1 against the white icon: deep verdigris
-// (brand) while sending, Zcash gold (value) once sent, rose (error) on failure.
 const _sendingCircleColor = Color(0xFF00736C);
 const _successCircleColor = Color(0xFFAE7C00);
 const _failureCircleColor = Color(0xFFA82571);
@@ -22,10 +20,6 @@ const _statusCircleSize = 64.0;
 const _statusIconSize = 32.0;
 const _statusButtonWidth = 230.0;
 
-/// Shared full-page presentation for a transaction being submitted.
-///
-/// The caller owns execution, copy, navigation, and haptics. This widget owns
-/// only the common mobile TX-progress shell and its status animations.
 class MobileTransactionProgressScreen extends StatelessWidget {
   const MobileTransactionProgressScreen({
     required this.phase,
@@ -63,11 +57,8 @@ class MobileTransactionProgressScreen extends StatelessWidget {
   final VoidCallback? onSecondaryAction;
   final double? bodyMaxWidth;
 
-  /// Optional full-page background (e.g. an illustration).
   final Widget? background;
 
-  /// Drawn behind the status badge, centred on it, once the phase is succeeded (e.g. a
-  /// burst of coins). It sizes itself and may extend far past the badge.
   final Widget? successEffect;
   final Key? titleKey;
   final Key? bodyKey;
@@ -112,15 +103,10 @@ class MobileTransactionProgressScreen extends StatelessWidget {
             SafeArea(
               child: Column(
                 children: [
-                  // The Figma shell reserves the nav slot but hides its
-                  // content while the transaction is in flight.
                   const SizedBox(height: kMobileTopNavHeight),
                   Expanded(
-                    // Centred when it fits; scrolls in a short window (landscape, a
-                    // flip phone's cover screen) or with large text.
                     child: LayoutBuilder(
                       builder: (context, box) => SingleChildScrollView(
-                        // The success effect flies far past the badge.
                         clipBehavior: Clip.none,
                         child: ConstrainedBox(
                           constraints: BoxConstraints(minHeight: box.maxHeight),
@@ -147,11 +133,6 @@ class MobileTransactionProgressScreen extends StatelessWidget {
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: AppSpacing.md,
                                     ),
-                                    // The new words arrive just after the badge has
-                                    // changed, rising a little; the old ones leave first.
-                                    // The words' height can change (two lines to one):
-                                    // the block keeps its tallest height so the badge,
-                                    // the moment's focal point, never moves.
                                     child: _KeepTallest(
                                       child: AnimatedSwitcher(
                                         layoutBuilder: (current, previous) =>
@@ -165,9 +146,6 @@ class MobileTransactionProgressScreen extends StatelessWidget {
                                         transitionBuilder: (child, animation) {
                                           final a = CurvedAnimation(
                                             parent: animation,
-                                            // Leaving words use the first half (the
-                                            // animation runs backwards for them), new
-                                            // ones the second: never both at once.
                                             curve: const Interval(
                                               0.5,
                                               1,
@@ -308,7 +286,6 @@ class MobileTransactionProgressBadge extends StatefulWidget {
 
   final MobileTransactionProgressPhase phase;
 
-  /// See [MobileTransactionProgressScreen.successEffect].
   final Widget? successEffect;
   final Key? badgeKey;
   final Key? progressIconKey;
@@ -318,8 +295,6 @@ class MobileTransactionProgressBadge extends StatefulWidget {
   final Color? inProgressCircleColor;
   final Color? inProgressIconColor;
 
-  /// Whether success/failure motion may start for the current terminal phase.
-  /// The visual state still renders while terminal motion is deferred.
   final bool terminalAnimationEnabled;
 
   @override
@@ -339,14 +314,11 @@ class _MobileTransactionProgressBadgeState
     duration: const Duration(milliseconds: 500),
   );
 
-  /// Success: a short squeeze (anticipation), a spring past full size and a settle,
-  /// while the check draws in from the left.
   late final AnimationController _pop = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 620),
   );
 
-  /// The sending circle squeezes (anticipation) and stays under the gold one.
   late final Animation<double> _squeeze = TweenSequence<double>([
     TweenSequenceItem(
       tween: Tween(
@@ -358,8 +330,6 @@ class _MobileTransactionProgressBadgeState
     TweenSequenceItem(tween: ConstantTween(0.86), weight: 87),
   ]).animate(_pop);
 
-  /// The success circle grows from the centre past full size and settles (no colour
-  /// fade: teal to gold passed through olive).
   late final Animation<double> _grow = TweenSequence<double>([
     TweenSequenceItem(tween: ConstantTween(0.0), weight: 13),
     TweenSequenceItem(
@@ -458,14 +428,11 @@ class _MobileTransactionProgressBadgeState
     _shake
       ..stop()
       ..value = 0;
-    // Still: the check fully drawn, no squeeze.
     _pop
       ..stop()
       ..value = 1;
   }
 
-  /// Success, animated: the sending circle squeezes, the gold one grows out of its
-  /// centre with a spring, and the check draws in.
   Widget _successCircle(Widget check) {
     Widget disc(Color color) => Container(
       width: _statusCircleSize,
@@ -481,7 +448,6 @@ class _MobileTransactionProgressBadgeState
             opacity: _pop.value < 0.45 ? 1 : 0,
             child: Transform.scale(scale: _squeeze.value, child: child),
           ),
-          // The spinner stays until the gold covers it (an empty disc read as stuck).
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -534,7 +500,6 @@ class _MobileTransactionProgressBadgeState
             widget.successIconKey ??
             const ValueKey('mobile_transaction_progress_icon_success'),
         animation: _checkDraw,
-        // Drawn in from the left, like a pen stroke.
         builder: (context, child) =>
             ClipRect(clipper: _RevealClipper(_checkDraw.value), child: child),
         child: AppIcon(
@@ -571,12 +536,9 @@ class _MobileTransactionProgressBadgeState
               maxHeight: double.infinity,
               child: widget.successEffect,
             ),
-          // A thin wave from the check once it's in (a wide filled pulse flooded the
-          // whole screen).
           AnimatedBuilder(
             animation: _ripple,
             builder: (context, _) {
-              // Leaves once the gold circle has popped (a quarter in).
               final t = ((_ripple.value - 0.25) / 0.75).clamp(0.0, 1.0);
               if (widget.phase != MobileTransactionProgressPhase.succeeded ||
                   t <= 0 ||
@@ -640,8 +602,6 @@ class _MobileTransactionProgressBadgeState
   }
 }
 
-/// Lays out its child at its own height but never gets shorter than it has been, so
-/// what sits around it stays put when the content shrinks.
 class _KeepTallest extends SingleChildRenderObjectWidget {
   const _KeepTallest({super.child});
 
@@ -661,7 +621,6 @@ class _RenderKeepTallest extends RenderProxyBox {
   }
 }
 
-/// Shows the left `fraction` of its child.
 class _RevealClipper extends CustomClipper<Rect> {
   const _RevealClipper(this.fraction);
   final double fraction;
@@ -674,7 +633,6 @@ class _RevealClipper extends CustomClipper<Rect> {
   bool shouldReclip(_RevealClipper old) => old.fraction != fraction;
 }
 
-/// The success wave: a thin gold ring leaving the badge and fading.
 class _WavePainter extends CustomPainter {
   _WavePainter(this.t);
   final double t;

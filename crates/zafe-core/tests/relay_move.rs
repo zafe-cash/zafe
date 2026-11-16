@@ -1,6 +1,3 @@
-//! Moving a vault to another relay (`docs/relay-move.md` §4, §11): two in-process relays,
-//! members on 2-of-3 and 2-of-5 vaults, each with its own copy of the log.
-
 use std::{
     path::PathBuf,
     sync::{
@@ -28,7 +25,6 @@ async fn serve(relay: Relay) -> String {
     serve_counting(relay).await.0
 }
 
-/// A relay and the number of requests it has answered.
 async fn serve_counting(relay: Relay) -> (String, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -51,7 +47,6 @@ async fn serve_counting(relay: Relay) -> (String, Arc<AtomicUsize>) {
 
 struct World {
     dir: tempfile::TempDir,
-    /// The relay the vault was made on.
     old: String,
     ids: Vec<Identity>,
     material: Vec<VaultMaterial>,
@@ -62,7 +57,6 @@ impl World {
         self.dir.path().join(format!("copy-{i}"))
     }
 
-    /// Member `i`'s client for `url`, with its own copy of the log.
     fn client(&self, i: usize, url: &str) -> RelayClient {
         RelayClient::new(url).with_log_cache(Some(LogCache::in_dir(self.cache_dir(i))))
     }
@@ -71,8 +65,6 @@ impl World {
         self.client(i, &self.old)
     }
 
-    /// Member `i`'s material as its app would hold it: following the new relay once this
-    /// phone verified the switch.
     fn material(&self, i: usize) -> VaultMaterial {
         let mut m = self.material[i].clone();
         if let Some(relay) = followed_relay_in(&self.cache_dir(i), &m) {
@@ -81,7 +73,6 @@ impl World {
         m
     }
 
-    /// Member `i`'s client for wherever its vault lives now.
     fn here(&self, i: usize) -> RelayClient {
         let m = self.material(i);
         self.client(i, m.relay.url.as_deref().unwrap_or(&self.old))
@@ -95,7 +86,6 @@ impl World {
             .len()
     }
 
-    /// The old relay's log length, read as a new phone would (no copy, no move state).
     async fn old_len(&self) -> u64 {
         let bare = RelayClient::new(&self.old).with_log_cache(None);
         load_state(&bare, &self.ids[1], &self.material[1])
@@ -117,8 +107,6 @@ impl World {
         .await
     }
 
-    /// Every member's app writes the current event version once (as each app does on its
-    /// first refresh after an update).
     async fn announce_all(&self) {
         for i in 0..self.ids.len() {
             self.announce(i).await;
@@ -188,8 +176,6 @@ fn opts(creator: bool) -> KeygenOptions {
     }
 }
 
-/// `n` members make a `t`-of-`n` vault on a fresh relay; every member loads the log once
-/// (so each phone holds a copy).
 async fn world(t: u16, n: u16, seed: u64) -> World {
     let dir = tempfile::tempdir().unwrap();
     let old = serve(Relay::new()).await;
@@ -248,7 +234,6 @@ async fn world(t: u16, n: u16, seed: u64) -> World {
 async fn moving_needs_every_members_app_to_support_it() {
     let w = world(2, 3, 1).await;
     let new = serve(Relay::new()).await;
-    // Member 0 updated (its move announces it); 1 and 2 haven't written anything yet.
     let err = w.move_to(0, &new).await.unwrap_err();
     match err {
         NodeError::MembersMustUpdate(mut behind) => {
@@ -272,11 +257,9 @@ async fn a_move_with_the_old_relay_alive() {
     assert_eq!(started.notified.len(), 2, "notices for both other members");
     assert!(started.link.starts_with("https://zafe.cash/move#"));
 
-    // Payments (here: names) go on on the old relay until the switch.
     w.name(2, "Carol").await.unwrap();
     let old_len = w.len(2, &w.old(2)).await;
 
-    // Bob sees the card from the old relay; nothing has connected to the new one.
     let before = new_hits.load(Ordering::SeqCst);
     let notice = w.notice(1).await.unwrap().expect("a move notice");
     assert_eq!(notice.target, started.target);
@@ -288,14 +271,11 @@ async fn a_move_with_the_old_relay_alive() {
         "no request before the tap"
     );
 
-    // Bob taps Move: 2 of 3 have moved, which is m for 2-of-3, so the vault switches.
     let status = w.follow(1, &started.link).await.unwrap();
     assert_eq!(status.needed, 2);
     assert!(status.switched, "{status:?}");
     assert!(new_hits.load(Ordering::SeqCst) > before);
 
-    // The new relay holds everything the old one had (Carol's name included), then the
-    // switch.
     let bob = w.here(1);
     assert_eq!(bob.base_url(), new);
     let (chain, state) = load_state(&bob, &w.ids[1], &w.material(1)).await.unwrap();
@@ -305,7 +285,6 @@ async fn a_move_with_the_old_relay_alive() {
     assert_eq!(moved.target, started.target);
     assert_eq!(state.names[&w.ids[2].public().sig_pk], "Carol");
 
-    // Carol was off: she finds the switch in the notice and can't write to the old relay.
     let notice = w.notice(2).await.unwrap().unwrap();
     assert!(
         notice.moved,
@@ -316,16 +295,13 @@ async fn a_move_with_the_old_relay_alive() {
         matches!(&err, NodeError::VaultMoved { url } if *url == started.target.relay),
         "{err:?}"
     );
-    // She follows later and writes to the new relay.
     let status = w.follow(2, &started.link).await.unwrap();
     assert!(status.switched);
     w.name(2, "Carol B").await.unwrap();
     assert_eq!(w.len(2, &w.here(2)).await, old_len + 2);
-    // Alice, the mover, sees the switch on her next refresh.
     assert!(w.progress(0).await.unwrap().switched);
     assert_eq!(w.here(0).base_url(), new);
     assert_eq!(w.len(0, &w.here(0)).await, old_len + 2);
-    // The old relay got nothing after the switch.
     assert_eq!(w.old_len().await, old_len);
 }
 
@@ -333,7 +309,6 @@ async fn a_move_with_the_old_relay_alive() {
 async fn a_move_with_the_old_relay_dead() {
     let w = world(2, 3, 3).await;
     w.announce_all().await;
-    // The phones' copies are current from their last refresh before the relay died.
     for i in 0..3 {
         w.len(i, &w.old(i)).await;
     }
@@ -355,7 +330,6 @@ async fn a_move_with_the_old_relay_dead() {
     .await
     .unwrap();
     assert!(status.switched);
-    // Both write on the new relay now.
     w.name(0, "Alice").await.unwrap();
     w.name(1, "Bob").await.unwrap();
     let (_, state) = load_state(&w.here(1), &w.ids[1], &w.material(1))
@@ -374,7 +348,6 @@ async fn two_of_five_switches_at_four_not_at_two_or_three() {
         let s = w.follow(i, &started.link).await.unwrap();
         assert_eq!((s.arrived.len(), s.needed, s.switched), (expect, 4, false));
     }
-    // Payments still go to the old relay meanwhile, also from members who moved.
     w.name(1, "Bob").await.unwrap();
     assert_eq!(w.here(1).base_url(), w.old);
     let s = w.follow(3, &started.link).await.unwrap();
@@ -392,7 +365,6 @@ async fn a_new_entry_on_the_new_relay_before_the_switch_is_refused() {
     w.announce_all().await;
     let new = serve(Relay::new()).await;
     let started = w.move_to(0, &new).await.unwrap();
-    // Member 0's material pointed at the new relay before `VaultMoved`.
     let mut m = w.material(0);
     m.relay.url = Some(started.target.relay.clone());
     m.relay.label = started.target.label;
@@ -414,8 +386,6 @@ async fn an_arrived_phones_write_after_the_switch_goes_to_the_new_relay() {
     let started = w.move_to(0, &new).await.unwrap();
     assert!(w.follow(1, &started.link).await.unwrap().switched);
     let old_len = w.old_len().await;
-    // Alice hasn't refreshed: her phone still writes through the old relay's client, but it
-    // checks the new relay first and writes there.
     let mut rng = StdRng::seed_from_u64(2);
     set_name(&w.old(0), &w.ids[0], &w.material[0], "Alice", &mut rng)
         .await
@@ -425,7 +395,6 @@ async fn an_arrived_phones_write_after_the_switch_goes_to_the_new_relay() {
         .await
         .unwrap();
     assert_eq!(state.names[&w.ids[0].public().sig_pk], "Alice");
-    // And from now on her phone follows the new relay.
     assert_eq!(w.here(0).base_url(), new);
 }
 
@@ -433,7 +402,6 @@ async fn an_arrived_phones_write_after_the_switch_goes_to_the_new_relay() {
 async fn a_restore_from_a_pre_move_backup_follows() {
     let w = world(2, 3, 7).await;
     w.announce_all().await;
-    // The backup: member 2's material and copy of the log, before the move.
     let backup: Vec<Vec<u8>> = LogCache::in_dir(w.cache_dir(2))
         .read(&w.material[2].descriptor.vault_id)
         .unwrap()
@@ -445,7 +413,6 @@ async fn a_restore_from_a_pre_move_backup_follows() {
     assert!(w.follow(1, &started.link).await.unwrap().switched);
     w.name(1, "Bob").await.unwrap();
 
-    // Member 2's phone is lost; a new one restores the backup (another log copy dir).
     let restored = w.dir.path().join("restored");
     let cache = LogCache::in_dir(&restored);
     install_log_copy(&cache, &w.material[2], &backup).unwrap();
@@ -488,19 +455,13 @@ async fn a_cancelled_move_is_not_followed() {
     )
     .await
     .unwrap();
-    // The card goes away, and the link no longer works.
     assert_eq!(w.notice(1).await.unwrap(), None);
     let err = w.follow(1, &started.link).await.unwrap_err();
     assert!(matches!(err, NodeError::MoveNotFound), "{err:?}");
-    // Alice can start another move.
     let again = serve(Relay::new()).await;
     w.move_to(0, &again).await.unwrap();
 }
 
-/// The mover's cancel goes to both relays; here both withhold it from Carol, who switches
-/// with Alice's withdrawn arrival. Still one history: nobody writes to the old relay after
-/// the switch, and the two phones that didn't take part (Alice withdrew, Bob never tapped)
-/// follow only on their own tap (`relay_move_attacks.rs` has the narrower cases).
 #[tokio::test]
 async fn a_cancel_withheld_on_both_relays_still_leaves_one_history() {
     let w = world(2, 3, 9).await;
@@ -515,7 +476,6 @@ async fn a_cancel_withheld_on_both_relays_still_leaves_one_history() {
     )
     .await
     .unwrap();
-    // Both relays withhold the cancel from Carol (simulated: it's gone from her inboxes).
     for (url, label) in [
         (new.clone(), started.target.label),
         (w.old.clone(), w.material[2].label()),
@@ -530,10 +490,7 @@ async fn a_cancel_withheld_on_both_relays_still_leaves_one_history() {
         assert_eq!(cursors.len(), 1);
         client.ack_inbox(&w.ids[2], label, &cursors).await.unwrap();
     }
-    // Carol follows with Alice's withdrawn arrival: 2 of 3, the vault switches.
     assert!(w.follow(2, &started.link).await.unwrap().switched);
-    // Everyone acts on that one entry: Bob and Alice find it in the old relay's notices and
-    // stop writing there until they tap.
     let old_len = w.old_len().await;
     for i in [1, 0] {
         assert!(w.notice(i).await.unwrap().unwrap().moved);
@@ -559,11 +516,9 @@ async fn two_moves_honest_phones_reach_m_only_once() {
     let (r1, r2) = (serve(Relay::new()).await, serve(Relay::new()).await);
     let one = w.move_to(0, &r1).await.unwrap();
     let two = w.move_to(1, &r2).await.unwrap();
-    // Carol follows the first: it switches. Bob is in his own move: one move per phone.
     assert!(w.follow(2, &one.link).await.unwrap().switched);
     let err = w.follow(1, &one.link).await.unwrap_err();
     assert!(matches!(err, NodeError::MoveInProgress), "{err:?}");
-    // Bob's move never reaches m: Carol, switched, refuses it as older than the switch.
     let err = w.follow(2, &two.link).await.unwrap_err();
     assert!(
         matches!(err, NodeError::MoveStale | NodeError::MoveInProgress),
@@ -571,7 +526,6 @@ async fn two_moves_honest_phones_reach_m_only_once() {
     );
     let s = w.progress(1).await.unwrap();
     assert!(!s.switched && s.arrived.len() == 1, "{s:?}");
-    // Bob cancels his and follows the one that switched.
     node::cancel_move(
         &w.old(1),
         &w.ids[1],
@@ -590,9 +544,7 @@ async fn two_switches_from_the_same_point_are_both_refused() {
     let (r1, r2) = (serve(Relay::new()).await, serve(Relay::new()).await);
     let one = w.move_to(0, &r1).await.unwrap();
     let two = w.move_to(1, &r2).await.unwrap();
-    // Carol follows the first: it switches.
     assert!(w.follow(2, &one.link).await.unwrap().switched);
-    // Her own app refuses the second: it is older than the switch it made.
     let status = node::follow_move(
         &w.old(2),
         &w.ids[2],
@@ -602,8 +554,6 @@ async fn two_switches_from_the_same_point_are_both_refused() {
     )
     .await;
     assert!(matches!(status, Err(NodeError::MoveStale)), "{status:?}");
-    // A dishonest app signs the second too: Bob then holds 2 arrivals and switches, from
-    // the same point of the history as the first switch.
     let mut rng = StdRng::seed_from_u64(6);
     let carol_sig = two.target.sign(&w.ids[2]);
     let msg = MoveMessage::Arrival {
@@ -624,7 +574,6 @@ async fn two_switches_from_the_same_point_are_both_refused() {
     RelayClient::new(&r2).send(&w.ids[2], &env).await.unwrap();
     let s = w.progress(1).await.unwrap();
     assert!(s.switched, "{s:?}");
-    // Alice, on the first relay, reads the old relay's notices: two switches from one point.
     let err = node::move_notice(&w.old(0), &w.ids[0], &w.material[0])
         .await
         .unwrap_err();
@@ -637,12 +586,10 @@ async fn a_link_without_a_members_arrival_is_refused() {
     w.announce_all().await;
     let new = serve(Relay::new()).await;
     let started = w.move_to(0, &new).await.unwrap();
-    // A forged link: the right relay, another label (nobody's mailbox there).
     let mut forged = MoveLink::decode(&started.link).unwrap();
     forged.label = [9; 16];
     let err = w.follow(1, &forged.encode()).await.unwrap_err();
     assert!(matches!(err, NodeError::MoveNotFound), "{err:?}");
-    // The right mailbox, another move id: no arrival for it.
     let mut forged = MoveLink::decode(&started.link).unwrap();
     forged.move_id = [9; 16];
     let err = w.follow(1, &forged.encode()).await.unwrap_err();
@@ -653,7 +600,6 @@ async fn a_link_without_a_members_arrival_is_refused() {
 async fn an_expired_or_replayed_move_is_refused() {
     let w = world(2, 3, 13).await;
     w.announce_all().await;
-    // A move whose 14 days are over: Alice's arrival is valid but expired.
     let new = serve(Relay::new()).await;
     let (chain, _) = load_state(&w.old(0), &w.ids[0], &w.material(0))
         .await
@@ -696,8 +642,6 @@ async fn an_expired_or_replayed_move_is_refused() {
         .unwrap_err();
     assert!(matches!(err, NodeError::MoveExpired), "{err:?}");
 
-    // A replayed move: the vault moved to r1, then on to r2; the first link again is
-    // older than the last switch.
     let r1 = serve(Relay::new()).await;
     let one = w.move_to(0, &r1).await.unwrap();
     assert!(w.follow(1, &one.link).await.unwrap().switched);
@@ -741,8 +685,6 @@ async fn an_envelope_from_the_old_relay_is_dropped_by_the_new_one() {
     w.announce_all().await;
     let new = serve(Relay::new()).await;
     let started = w.move_to(0, &new).await.unwrap();
-    // A signed envelope from the old relay names the old mailbox label: the new relay has
-    // no such mailbox.
     let env = Envelope::sealed(
         &w.ids[0],
         w.ids[1].public(),
@@ -754,7 +696,6 @@ async fn an_envelope_from_the_old_relay_is_dropped_by_the_new_one() {
     )
     .unwrap();
     assert!(RelayClient::new(&new).send(&w.ids[0], &env).await.is_err());
-    // And a client reading the new mailbox drops envelopes naming another one.
     assert_ne!(w.material[0].label(), started.target.label);
 }
 
@@ -768,9 +709,6 @@ async fn a_second_move_starts_from_where_the_first_one_went() {
     assert!(w.progress(0).await.unwrap().switched);
     assert_eq!(w.here(0).base_url(), second);
 
-    // Alice moves again before her app saved the second relay into its material (World
-    // keeps the material each member was made with): until this move switches, her
-    // vault stays on the second relay, never back on the first.
     let third = serve(Relay::new()).await;
     let again = node::move_vault(
         &w.here(0),
@@ -826,9 +764,6 @@ async fn a_straggler_that_never_read_the_notice_cannot_fork_the_old_relay() {
     assert!(w.follow(1, &started.link).await.unwrap().switched);
     let old_len = w.old_len().await;
 
-    // Carol was off the whole time and writes before anything showed her the notice
-    // (her app's first refresh): refused, so the old relay's history stays the one the
-    // switch was made from.
     let err = w.name(2, "Carol").await.unwrap_err();
     assert!(
         matches!(&err, NodeError::VaultMoved { url } if *url == started.target.relay),
@@ -838,8 +773,6 @@ async fn a_straggler_that_never_read_the_notice_cannot_fork_the_old_relay() {
     assert!(w.follow(2, &started.link).await.unwrap().switched);
     w.name(2, "Carol").await.unwrap();
 
-    // The same after a second move, for a phone whose last move record is the switch
-    // that brought it to the relay it is on.
     assert!(w.progress(0).await.unwrap().switched);
     let third = serve(Relay::new()).await;
     let again = node::move_vault(
@@ -881,8 +814,6 @@ async fn a_straggler_that_never_read_the_notice_cannot_fork_the_old_relay() {
     assert_eq!(w.here(2).base_url(), third);
 }
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
 fn member_dir(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -900,12 +831,10 @@ fn member_dir(
     ))
 }
 
-/// The key that seals one member's setup state (any fixed key per member will do).
 fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
     zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
 }
 
-/// One member's safety words for `invite`, polled from its setup state dir.
 async fn safety_words(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -922,8 +851,6 @@ async fn safety_words(
     .await
 }
 
-/// A cancel is never acknowledged and is the only thing that keeps a withdrawn arrival
-/// from counting: the relays must keep it longer than a move lives.
 #[test]
 fn a_cancel_outlives_its_move_on_the_relay() {
     const _: () =

@@ -1,12 +1,3 @@
-// Renders the proposal screen's body (payment card, approvals, details) and the
-// signer rows with fake data, in both themes, to PNGs for review without a device.
-// Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/proposal_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): one PNG per scenario.
-// The action buttons are stand-ins with the screen's copy (the real ones live in
-// ProposalScreen, which needs the Rust bridge).
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -228,8 +219,6 @@ final _scenarios = <String, (String, List<Widget>)>{
       ),
     ],
   ),
-  // The website's story (infra/site /showcase): Bob proposes on his phone (shown in dark;
-  // proposing is his approval), you approve the request on yours (light) and it's sent.
   'story_bob_propose': (
     'Review',
     [
@@ -263,7 +252,6 @@ final _scenarios = <String, (String, List<Widget>)>{
       _actions('Propose payment', icon: AppIcons.plane, secondary: 'Cancel'),
     ],
   ),
-  // Proposing is Bob's approval (one fingerprint): he lands on his proposal, waiting.
   'story_bob_approved': (
     'Awaiting votes',
     [
@@ -297,8 +285,6 @@ final _scenarios = <String, (String, List<Widget>)>{
   ),
 };
 
-// Your phone: the request as the app shows it to a member who hasn't voted (ProposalScreen's
-// request view), with Approve and Decline pinned to the bottom. Rendered at a phone's height.
 Widget _request() => ZafeScreen(
   title: 'Payment request',
   bottom: Column(
@@ -408,7 +394,6 @@ void main() {
             ),
           ),
         );
-        // Let the SVG icons and the review future load.
         for (var i = 0; i < 5; i++) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 50)),
@@ -425,8 +410,7 @@ void main() {
         });
         final path = '${out.path}/${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Tells IndexNow search engines (Bing, Yandex, Seznam, ...; not Google) that every URL in
-# the built sitemap changed, so they recrawl soon after a deploy. Run after a production
-# deploy (site.yml). The key is public by design: IndexNow checks that
-# https://<host>/<key>.txt serves it, and that file is public/<key>.txt.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 die() { echo "indexnow: $*" >&2; exit 1; }
@@ -30,6 +26,5 @@ PY
 status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
   -H 'Content-Type: application/json; charset=utf-8' \
   --data "$body" https://api.indexnow.org/indexnow)"
-# 200 = accepted, 202 = accepted, key check pending (first submissions)
 [[ "$status" == 200 || "$status" == 202 ]] || die "HTTP $status for ${#urls[@]} URLs"
 echo "IndexNow: submitted ${#urls[@]} URLs for $host (HTTP $status)"

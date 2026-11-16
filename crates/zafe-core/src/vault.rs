@@ -1,9 +1,3 @@
-//! Vault descriptor, vault-log events, and replay of the log into current state
-//! (spec §6.3, §7.3, §9.1, §9.6).
-//!
-//! The relay only orders encrypted entries; every rule about what an entry may do is
-//! enforced here, by every member, when replaying the log.
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -22,8 +16,6 @@ const PERSONAL_EVENT_SIG: &[u8] = b"Zafe descriptor signature v1";
 pub enum VaultError {
     #[error("encoding")]
     Encoding,
-    /// An event or descriptor in a version this build doesn't read. Fatal for the
-    /// `Created` entry; any later entry is ignored like other invalid entries.
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
     #[error("log entry {0} cannot be decrypted with the current log key")]
@@ -52,16 +44,10 @@ pub enum VaultError {
     BadShares(u64),
     #[error("entry {0}: this member already signed; an approval with shares is final")]
     VoteFinal(u64),
-    /// The proposal spends a note that an earlier open or approved proposal also spends
-    /// (two members proposed at the same time). At most one of them could be mined.
     #[error("entry {0}: spends a note another open proposal already spends")]
     NotesInUse(u64),
-    /// A version 7 `Broadcast` whose txid isn't the one the proposal's PCZT determines.
     #[error("entry {0}: broadcast txid doesn't match the proposal's transaction")]
     TxidMismatch(u64),
-    /// From version 12 a broadcast must carry the signed transaction
-    /// ([`VaultEvent::SignedBroadcast`]): a txid alone, or a transaction that isn't the
-    /// proposal's with every spend signed.
     #[error("entry {0}: broadcast without the proposal's signed transaction")]
     BadBroadcast(u64),
     #[error("entry {0}: not a valid display name")]
@@ -72,32 +58,19 @@ pub enum VaultError {
     BadReplacement(u64),
     #[error("entry {0}: not a valid change to a seat's key repair")]
     BadRepair(u64),
-    /// A version 9 `Proposal` whose PCZT doesn't parse, or that declares more spends to
-    /// sign than the PCZT has: members would reject it anyway, and it would only drain
-    /// every member's one-tap pool.
     #[error("entry {0}: proposal with a transaction members can't use")]
     BadProposal(u64),
-    /// A `VaultMoved` without m distinct current members' valid arrivals for one move, for
-    /// a point not in this log, or older than the vault's last switch.
     #[error("entry {0}: not a valid switch to another relay")]
     BadMove(u64),
 }
 
-/// Most commitments one `Commitments` event may carry.
 pub const MAX_COMMITMENT_BATCH: usize = 256;
-/// Most unused commitments a member may have outstanding in the log.
 pub const MAX_POOL_OUTSTANDING: usize = 4096;
-/// Most signer groups (t-subsets) a proposal may be preprocessed for; beyond this the
-/// proposal uses interactive signing. C(n, t): 2-of-3 = 3, 3-of-5 = 10, 4-of-7 = 35.
 pub const MAX_PREPROCESSED_SUBSETS: usize = 64;
 
-/// A member's pre-published FROST round-1 commitments (spec §9.4, preprocessing). Every
-/// proposal takes the next unused ones in log order, so each is assigned at most once.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pool {
-    /// Serialized `SigningCommitments`, in publication order.
     pub commitments: Vec<Vec<u8>>,
-    /// Index of the next unassigned commitment.
     pub next: usize,
 }
 
@@ -106,30 +79,23 @@ impl Pool {
         self.commitments.len() - self.next
     }
 
-    /// Drops every unassigned commitment ([`VaultEvent::PoolReset`]).
     pub fn reset(&mut self) {
         self.commitments.truncate(self.next);
     }
 }
 
-/// One-tap signing for a proposal: every signer group (t-subset of members, in descriptor
-/// order) with the commitments fixed for it when the proposal was logged.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preprocessed {
-    /// Member `sig_pk`s of each group, in descriptor order.
     pub subsets: Vec<Vec<[u8; 32]>>,
-    /// `commitments[group][spend][position in group]`, serialized.
     pub commitments: Vec<Vec<Vec<Vec<u8>>>>,
 }
 
 impl Preprocessed {
-    /// The commitment assigned to `member` for `group` and `spend`, if it is in the group.
     pub fn commitment(&self, group: usize, spend: usize, member: &[u8; 32]) -> Option<&[u8]> {
         let pos = self.subsets.get(group)?.iter().position(|m| m == member)?;
         Some(self.commitments.get(group)?.get(spend)?.get(pos)?)
     }
 
-    /// Groups that include `member`.
     pub fn groups_of(&self, member: &[u8; 32]) -> Vec<usize> {
         (0..self.subsets.len())
             .filter(|g| self.subsets[*g].contains(member))
@@ -137,14 +103,12 @@ impl Preprocessed {
     }
 }
 
-/// A member's signature shares for one signer group: one share per spend.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupShares {
     pub group: u16,
     pub shares: Vec<Vec<u8>>,
 }
 
-/// All t-subsets of `items` (as index lists), in lexicographic order.
 fn combinations(n: usize, t: usize) -> Vec<Vec<usize>> {
     let mut out = Vec::new();
     let mut idx: Vec<usize> = (0..t).collect();
@@ -167,74 +131,46 @@ fn combinations(n: usize, t: usize) -> Vec<Vec<usize>> {
     }
 }
 
-/// A member as recorded in the descriptor.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberInfo {
     pub identity: IdentityPublic,
-    /// Serialized FROST identifier.
     pub frost_id: Vec<u8>,
     pub name: String,
 }
 
-/// Default proposal lifetime: 7 days at the 75-second block target (1152 blocks per day).
-/// Every expiry block count here and in the descriptor counts 75-second blocks, also after
-/// NU7: heights from NU7 on scale them by 3 (`wallet::block_scale`).
 pub const DEFAULT_PROPOSAL_EXPIRY_BLOCKS: u32 = 7 * 1152;
 
-/// Extra blocks a member accepts beyond the vault's expiry window, because the member's
-/// synced tip can lag the proposer's (about two hours).
 pub const EXPIRY_TIP_SLACK_BLOCKS: u32 = 96;
 
-/// Expiry heights are rounded up to a multiple of this (144 blocks, about 3 hours), so a
-/// vault transaction's expiry doesn't reveal when it was proposed. A long expiry still
-/// sets vault transactions apart from ordinary wallets (40 blocks); that's inherent to
-/// approving over days. Members accept up to this much extra delta.
 pub const EXPIRY_ROUNDING_BLOCKS: u32 = 144;
 
-/// Allowed expiry windows (vault setting): 1 to 30 days. A small fixed menu in the app
-/// (1, 3, 7, 14 days) keeps Zafe vaults in a few shared buckets.
 pub const MIN_PROPOSAL_EXPIRY_BLOCKS: u32 = 1152;
 pub const MAX_PROPOSAL_EXPIRY_BLOCKS: u32 = 30 * 1152;
 
-/// The expiry height for a transaction targeting `target` in a vault with `window`:
-/// `target + window`, rounded up to [`EXPIRY_ROUNDING_BLOCKS`].
 pub fn expiry_height(target: u32, window: u32) -> u32 {
     expiry_height_scaled(target, window, 1)
 }
 
-/// [`expiry_height`] with every block count (the window and the rounding) multiplied by
-/// `scale`: the windows and constants here count 75-second blocks, so from NU7 on (25 s
-/// blocks, ZIP 218) they are scaled by 3 to keep their durations (`wallet::block_scale`).
 pub fn expiry_height_scaled(target: u32, window: u32, scale: u32) -> u32 {
     let rounding = EXPIRY_ROUNDING_BLOCKS * scale;
     (target + window * scale).div_ceil(rounding) * rounding
 }
 
-/// What every member signs at the end of vault creation (spec §7.3).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultDescriptor {
     pub vault_id: [u8; 16],
-    /// [`version::DESCRIPTOR`]. Part of the hash every member signs, so it can't be changed
-    /// after creation.
     pub version: u16,
     pub name: String,
-    /// "main", "test" or "regtest".
     pub network: String,
     pub threshold: u16,
     pub members: Vec<MemberInfo>,
-    /// `I2LEOSP_256(ak)`.
     pub group_public_key: [u8; 32],
     pub ufvk: String,
     pub address: String,
     pub use_qsk: bool,
     pub birthday_height: u32,
-    /// How long a payment proposal stays valid, in blocks after the height it is built for
-    /// (the transaction's expiry height). Approvals and signing are asynchronous, so this is
-    /// days rather than the 40-block wallet default. Expiry stays a safety feature: a signed
-    /// but unsent transaction must not remain valid forever.
     pub proposal_expiry_blocks: u32,
     pub epoch: u32,
-    /// Hash of the key-generation transcript (binds the descriptor to the DKG run).
     pub transcript_hash: [u8; 32],
 }
 
@@ -250,7 +186,6 @@ impl VaultDescriptor {
             .expect("32 bytes"))
     }
 
-    /// The message each member signs with their identity key.
     pub fn signing_message(&self) -> Result<Vec<u8>, VaultError> {
         let mut msg = PERSONAL_EVENT_SIG.to_vec();
         msg.extend_from_slice(&self.hash()?);
@@ -261,27 +196,22 @@ impl VaultDescriptor {
         self.members.iter().find(|m| &m.identity.sig_pk == sig_pk)
     }
 
-    /// Rejections needed to make a proposal impossible to approve: n − t + 1.
     pub fn rejection_threshold(&self) -> usize {
         self.members.len() - usize::from(self.threshold) + 1
     }
 }
 
-/// One payment as recorded in a proposal (what members are asked to approve).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProposedPayment {
     pub address: String,
     pub amount_zat: u64,
-    /// Full 512-byte memo field.
     pub memo: Vec<u8>,
 }
 
-/// Events carried in the vault log.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VaultEvent {
     Created {
         descriptor: VaultDescriptor,
-        /// `(member sig_pk, signature over descriptor.signing_message())` for every member.
         signatures: Vec<([u8; 32], Vec<u8>)>,
     },
     Proposal {
@@ -289,252 +219,139 @@ pub enum VaultEvent {
         payments: Vec<ProposedPayment>,
         pczt: Vec<u8>,
         pczt_hash: [u8; 32],
-        /// Chain tip the proposer built against (for expiry checks).
         tip_height: u32,
-        /// Proposer's clock, unix seconds (display only; not trusted).
         created_at: u64,
-        /// Spends needing a FROST signature (members check it against the PCZT). With
-        /// enough pre-published commitments, the proposal is signed at approval time.
         signing_spends: u16,
-        /// Whether the member whose approval completes a signer group sends right away
-        /// (otherwise any member sends when they choose).
         auto_send: bool,
     },
     Vote {
         proposal: ProposalId,
         pczt_hash: [u8; 32],
         approve: bool,
-        /// Interactive signing: fresh round-1 commitments, one per spend (empty for
-        /// rejections and one-tap approvals).
         commitments: Vec<Vec<u8>>,
-        /// One-tap signing: this member's shares for the proposal's signer groups.
         shares: Vec<GroupShares>,
     },
-    /// Pre-published FROST round-1 commitments of the author (preprocessing).
     Commitments {
         batch: Vec<Vec<u8>>,
     },
     Cancelled {
         proposal: ProposalId,
     },
-    /// The author sent the proposal's transaction. Up to version 11 only. From version 12
-    /// a broadcast is [`VaultEvent::SignedBroadcast`]: a txid is a claim anyone can make
-    /// (rule 4), and it would end the proposal for every member.
     Broadcast {
         proposal: ProposalId,
         txid: [u8; 32],
     },
-    /// The author's display name for the other members (empty: no name). Only the
-    /// author can name themselves; a member's own label for them wins on their device.
-    /// Event version 2.
     Name {
         name: String,
     },
-    /// The author made a backup of this device's copy of the vault and checked that it
-    /// opens (spec §12.2, backup health). Event version 3.
     BackupVerified {
-        /// The descriptor epoch the backup holds keys for (must be the current one).
         epoch: u32,
-        /// Author's clock, unix seconds (display only; not trusted).
         at: u64,
     },
-    /// The author approves moving the seat of `old` (a member who lost their device) to
-    /// the key `new` (spec §10.1). Event version 4. Up to version 11 `signature` is over
-    /// the old [`ReplaceApproval`] and the threshold of approvals moves the seat at once.
-    /// From version 12 it is over [`SeatMoveApproval`] for the seat's current round (how
-    /// often its owner kept it, [`VaultEvent::KeepSeat`]), which also goes to the relay,
-    /// and the threshold of approvals makes the move *pending*: the old key stays a member,
-    /// the new key isn't one, until every helper logged [`VaultEvent::RepairHelped`].
     ReplaceApproval {
         old: [u8; 32],
         new: IdentityPublic,
         signature: Vec<u8>,
     },
-    /// The repair of a moved seat's key stalled (a helper never did its part): the author
-    /// asks to replace the helpers with `helpers` (the threshold of current members, the
-    /// author among them, the new key not). Event version 5. Up to version 10 it starts a
-    /// new attempt at once; from version 11 only once every member of `helpers` logged the
-    /// same list for the current attempt (rule 4: one member can't restart a repair alone).
     RepairRetry {
-        /// The move ([`Replacement::index`]).
         replacement: u64,
         helpers: Vec<[u8; 32]>,
     },
-    /// The moved seat's new device has its repaired key (checked): helpers stop. Only the
-    /// new key may log it (so only after the seat switched). Event version 5.
     RepairDone {
         replacement: u64,
     },
-    /// The author retires every one-tap commitment of theirs that no proposal has been
-    /// assigned yet, so the next ones they publish are the next ones assigned. Logged by a
-    /// device restored from a backup: the backup has no nonces, so the commitments the
-    /// previous device published can never be signed with, yet proposals would be assigned
-    /// them one by one. Proposals already assigned keep theirs (re-propose those). Event
-    /// version 8.
     PoolReset,
-    /// The vault switched to another relay (`docs/relay-move.md` §4.4): `arrivals` are
-    /// `(member sig_pk, signature over target)` of at least m = max(t, n − t + 1) current
-    /// members. Written by the first phone holding m arrivals, as the first new entry on
-    /// the new relay; from it on the vault lives at `target.relay` under `target.label`.
-    /// Event version 10.
     VaultMoved {
         target: crate::moves::MoveTarget,
         arrivals: Vec<([u8; 32], Vec<u8>)>,
-        /// Author's clock, unix seconds: must fall within the move's lifetime.
         at: u64,
     },
-    /// The seat's owner still has its phone: the pending first-round move of its seat
-    /// (`replacement`, [`Replacement::index`]) is void. `signature` is the old key's over
-    /// [`SeatCancel`] for that move, the same object the relay takes as the cancel, so any
-    /// member may log it (the old phone usually does, a member who saw the cancel on the
-    /// relay otherwise). Only the old phone's tap ever creates the signature. After it, a
-    /// new round of approvals may move the seat again, and that round can't be kept. Event
-    /// version 12.
     KeepSeat {
         replacement: u64,
-        /// The old phone's clock, unix seconds (signed; display only: "the old phone said
-        /// it still has this seat on <date>").
         at: u64,
-        /// The relay label the cancel was signed for (signed; it may differ from the
-        /// vault's current one after a relay move).
         mailbox: [u8; 16],
         signature: Vec<u8>,
     },
-    /// A helper of the pending move `replacement` stops helping it, for good: the person
-    /// whose seat it is said they didn't lose their phone (round 1 can't be kept). From
-    /// then on its `RepairHelped` for the move is invalid and no restart may name it (nor
-    /// its key after its own seat moves), so the seat doesn't switch with it named. Only
-    /// from a helper of the current attempt, only while the move is pending. Event version
-    /// 12.
     StopHelping {
         replacement: u64,
     },
-    /// A helper of the pending move `replacement` waited its time (72 h from when it first
-    /// saw the move pending, its own clock) and is about to send its part to the new key,
-    /// in repair attempt `attempt`. The seat switches once every helper of the current
-    /// attempt logged it. Event version 12.
     RepairHelped {
         replacement: u64,
         attempt: u32,
     },
-    /// The author sent the proposal's transaction: `tx` is the signed transaction as sent.
-    /// Valid only if it is the proposal's transaction with every spend authorization
-    /// signature valid ([`crate::tx::check_signed`]), which proves it was signed: the
-    /// signatures aren't part of the txid. Every member keeps the bytes and can send them
-    /// again if they drop out of the mempool. Event version 12.
     SignedBroadcast {
         proposal: ProposalId,
         tx: Vec<u8>,
     },
 }
 
-/// A switch to another relay that the log accepted ([`VaultEvent::VaultMoved`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Moved {
-    /// Index of the `VaultMoved` entry.
     pub index: u64,
     pub target: crate::moves::MoveTarget,
     pub author: [u8; 32],
-    /// The members whose arrivals it carries.
     pub arrived: Vec<[u8; 32]>,
-    /// Author's clock (display only).
     pub at: u64,
 }
 
-/// Approvals collected so far for moving `old`'s seat to `new`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingReplacement {
     pub old: [u8; 32],
     pub new: IdentityPublic,
-    /// The seat's round the approvals are for (version 12 on); `None`: the old format.
     pub round: Option<u32>,
-    /// `(approver sig_pk, signature)`, in log order.
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
 }
 
-/// A seat move that has its threshold of approvals (a lost device replaced, spec §10.1).
-/// Up to event version 11 the seat switched at once. From version 12 it is pending
-/// (`switched == false`: the old key is still the member) until every helper of the
-/// current attempt logged `RepairHelped`; the old key's `KeepSeat` voids a first-round
-/// one (it then leaves this list).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Replacement {
-    /// Log index of the approval that completed the approvals (identifies the move).
     pub index: u64,
     pub old: [u8; 32],
     pub new: IdentityPublic,
-    /// The member's FROST identifier (unchanged: repair recreates the same share).
     pub frost_id: Vec<u8>,
-    /// The threshold of approvals that moved it, in log order (also sent to the relay).
     pub approvals: Vec<([u8; 32], Vec<u8>)>,
-    /// The members repairing the share in the current attempt: the approvers at first, then
-    /// whoever a `RepairRetry` named.
     pub helpers: Vec<[u8; 32]>,
-    /// 0 for the approvers' attempt, +1 per restart. Repair messages carry it, so a
-    /// stalled attempt's messages never mix with the new one's.
     pub attempt: u32,
-    /// Restarts asked for in the current attempt (version 11 on): the helpers each names,
-    /// and who logged it so far, in log order.
     pub retries: BTreeMap<Vec<[u8; 32]>, Vec<[u8; 32]>>,
-    /// The new device logged `RepairDone`.
     pub done: bool,
-    /// The seat's round the approvals were for (version 12 on); `None`: an old-format move
-    /// that switched at once.
     pub round: Option<u32>,
-    /// Helpers of the current attempt that logged `RepairHelped`, in log order.
     pub helped: Vec<[u8; 32]>,
-    /// The seat switched: the new key holds it.
     pub switched: bool,
-    /// Helpers who stopped helping this move (`StopHelping`), for good, across attempts.
     pub stopped: Vec<[u8; 32]>,
 }
 
 impl Replacement {
-    /// The members who repair the share in the current attempt.
     pub fn helpers(&self) -> Vec<[u8; 32]> {
         self.helpers.clone()
     }
 
-    /// The move's id on the relay ([`zafe_proto::relay::seat_move_id`]); `None` for an
-    /// old-format move.
     pub fn move_id(&self, vault_id: &[u8; 16]) -> Option<[u8; 32]> {
         self.round
             .map(|round| zafe_proto::relay::seat_move_id(vault_id, &self.old, &self.new, round))
     }
 
-    /// A version 12 move still waiting for its helpers.
     pub fn is_pending(&self) -> bool {
         self.round.is_some() && !self.switched
     }
 }
 
-/// The owner of a seat kept it ([`VaultEvent::KeepSeat`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeatKept {
-    /// Index of the `KeepSeat` entry.
     pub index: u64,
-    /// The move it voided ([`Replacement::index`]) and the key it would have gone to.
     pub replacement: u64,
     pub new: IdentityPublic,
-    /// The signed cancel (the relay takes the same object) and the old key's signature.
     pub cancel: SeatCancel,
     pub signature: Vec<u8>,
-    /// The old phone's clock (display only).
     pub at: u64,
 }
 
-/// A member's latest backup attestation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackupRecord {
     pub epoch: u32,
     pub at: u64,
 }
 
-/// Longest display name, in characters (as the app's local labels).
 pub const MAX_NAME_CHARS: usize = 32;
 
-/// Whether `name` is a display name the log accepts: trimmed, at most
-/// [`MAX_NAME_CHARS`] characters, no control characters. Empty clears the name.
 pub fn valid_name(name: &str) -> bool {
     name.trim() == name
         && name.chars().count() <= MAX_NAME_CHARS
@@ -551,19 +368,14 @@ impl From<DecodeError> for VaultError {
 }
 
 impl VaultEvent {
-    /// `version (u16) || postcard(event)`: the plaintext of a log entry.
     pub fn to_bytes(&self) -> Result<Vec<u8>, VaultError> {
         Ok(version::encode(Format::VaultEvent, self)?)
     }
 
-    /// Reads the current version and every older one: version 2 only appended a variant,
-    /// so a version 1 body decodes as the same event.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, VaultError> {
         Self::from_bytes_versioned(bytes).map(|(event, _)| event)
     }
 
-    /// Like [`VaultEvent::from_bytes`], also returning the version the author's app wrote
-    /// the event with (replay rules that changed in a version are keyed by it).
     pub fn from_bytes_versioned(bytes: &[u8]) -> Result<(Self, u16), VaultError> {
         let (found, body) = version::split(Format::VaultEvent, bytes)?;
         if found == 0 || found > version::VAULT_EVENT {
@@ -591,50 +403,26 @@ pub struct ProposalState {
     pub pczt: Vec<u8>,
     pub pczt_hash: [u8; 32],
     pub tip_height: u32,
-    /// Proposer-claimed creation time, unix seconds (display only).
     pub created_at: u64,
-    /// Index of the proposal's log entry (orders proposals).
     pub log_index: u64,
     pub status: ProposalStatus,
-    /// Latest approval per member: their serialized commitments (empty for one-tap).
     pub approvals: BTreeMap<[u8; 32], Vec<Vec<u8>>>,
     pub rejections: BTreeMap<[u8; 32], ()>,
     pub txid: Option<[u8; 32]>,
     pub signing_spends: u16,
     pub auto_send: bool,
-    /// Nullifiers of the notes the PCZT spends, and its expiry height (empty and 0 if the
-    /// PCZT doesn't parse; members' verification rejects such a proposal anyway).
     pub nullifiers: Vec<[u8; 32]>,
     pub expiry_height: u32,
-    /// The txid the PCZT determines (its shielded sighash; `None` if it doesn't parse).
-    /// A version 7 `Broadcast` must carry it.
     pub expected_txid: Option<[u8; 32]>,
-    /// Set when the proposal is signed at approval time (enough commitments were in the
-    /// members' pools when it was logged); `None` means interactive signing.
     pub preprocessed: Option<Preprocessed>,
-    /// One-tap shares posted per member.
     pub shares: BTreeMap<[u8; 32], Vec<GroupShares>>,
-    /// First signer group (in group order) with every member's shares: ready to send.
     pub ready_group: Option<u16>,
-    /// The member whose approval completed `ready_group` (the one who auto-sends).
     pub completed_by: Option<[u8; 32]>,
-    /// A signature for it may exist: it reached Approved, or a vote carried shares. Set
-    /// once and for good (rule 5): cancelling, rejecting or a withdrawn approval changes
-    /// intent, never whether someone holds a signed transaction. Such a proposal can mine
-    /// until its notes are spent or it expires, so wallet holds, the "still sendable"
-    /// warning, the unapproved-spend grace and member verification follow this flag.
     pub possibly_signed: bool,
-    /// The signed transaction a version 12 broadcast carried (checked), so any member can
-    /// send it again.
     pub signed_tx: Option<Vec<u8>>,
 }
 
 impl ProposalState {
-    /// Whether no signer group of a one-tap proposal can complete any more, as the log
-    /// shows: in every group a member rejected, approved interactively (commitments
-    /// without shares: its phone can't sign that group), or posted shares for other groups
-    /// only. Members whose vote carried shares then add interactive commitments (version
-    /// 12), so the payment can still be signed in an interactive round.
     pub fn one_tap_blocked(&self) -> bool {
         let Some(pre) = &self.preprocessed else {
             return false;
@@ -650,13 +438,6 @@ impl ProposalState {
             && !(0..pre.subsets.len()).any(|g| pre.subsets[g].iter().all(|m| can_sign(m, g)))
     }
 
-    /// Whether this proposal holds its notes against later proposals (`NotesInUse`, from
-    /// version 12): only while open or approved, and only while a member other than its
-    /// author approves it (rule 4: one member alone can't freeze funds), interactively or
-    /// one tap (a one-tap vote is an approval with no commitments). With a threshold of 1 the
-    /// author's own approval is the one that signs. The author's shares never count as a
-    /// second member: replay doesn't verify them, so "may be signed" (`possibly_signed`)
-    /// can't reserve on its own; it keeps driving holds and votes on members' phones.
     pub fn reserves(&self, threshold: u16) -> bool {
         matches!(self.status, ProposalStatus::Open | ProposalStatus::Approved)
             && self
@@ -679,58 +460,27 @@ impl ProposalState {
     }
 }
 
-/// Current vault state, rebuilt from the log.
 #[derive(Clone, Debug)]
 pub struct VaultState {
     pub descriptor: VaultDescriptor,
     pub proposals: BTreeMap<ProposalId, ProposalState>,
-    /// Number of log entries processed (applied or ignored).
     pub applied: u64,
-    /// Entries that were validly signed and chained but semantically invalid (e.g. a vote
-    /// racing a cancellation). Every member skips the same entries, so all members reach
-    /// the same state; a bad entry can never make the log unreadable.
     pub ignored: Vec<(u64, VaultError)>,
-    /// Pre-published commitments per member.
     pub pools: BTreeMap<[u8; 32], Pool>,
-    /// Display names members gave themselves (latest `Name` event per member).
     pub names: BTreeMap<[u8; 32], String>,
-    /// Members' latest backup attestations (`BackupVerified`).
     pub backups: BTreeMap<[u8; 32], BackupRecord>,
-    /// Seat moves waiting for approvals, by `(old, new sig_pk)`.
     pub pending_replacements: BTreeMap<([u8; 32], [u8; 32]), PendingReplacement>,
-    /// Seat moves with their threshold of approvals, in log order: switched ones and (from
-    /// version 12) pending ones. `descriptor.members` holds the keys of switched ones: the
-    /// state's descriptor is the current membership, not the signed original.
     pub replacements: Vec<Replacement>,
-    /// Seats whose owner kept them ([`VaultEvent::KeepSeat`]), by the owner's key; their
-    /// count is the seat's round.
     pub seat_keeps: BTreeMap<[u8; 32], Vec<SeatKept>>,
-    /// Valid seat-move entries applied (approvals, keeps, helped): a membership check is
-    /// due again when it changes.
     pub seat_changes: u64,
-    /// Identities whose seat moved away. Their log entries still chain (see
-    /// [`VaultState::log_authors`]) and replay ignores them as `NotAMember`.
     pub former_members: Vec<IdentityPublic>,
-    /// Highest event version seen in the log so far. From version 9 on it is a floor:
-    /// an entry tagged with an older version is replayed under the newer rules, so a
-    /// member can't skip a rule (e.g. the version 7 broadcast txid check) by tagging an
-    /// event with an old version. Logs without a version 9 entry replay as before.
     pub max_event_version: u16,
-    /// The highest event version each author's app wrote: whether every member's app can
-    /// take part in something newer (a relay move needs version 10 everywhere).
     pub member_versions: BTreeMap<[u8; 32], u16>,
-    /// Switches to other relays, in log order; the last one is where the vault lives.
     pub moves: Vec<Moved>,
-    /// Hash of every entry replayed (by index): a move names the entry it starts from.
     pub entry_hashes: Vec<[u8; 32]>,
 }
 
 impl VaultState {
-    /// Replays verified log entries (already chain-checked by `zafe_proto::Chain`).
-    ///
-    /// Only structural problems are fatal: the first entry must be a `Created` event signed
-    /// by every member. After that, entries that cannot be decrypted, decoded or applied are
-    /// recorded in `ignored` and skipped deterministically.
     pub fn replay(entries: &[LogEntry], key: &LogKey) -> Result<Self, VaultError> {
         let (first, rest) = entries.split_first().ok_or(VaultError::NotCreatedFirst)?;
         let (event, first_version) = VaultEvent::from_bytes_versioned(
@@ -775,7 +525,6 @@ impl VaultState {
         Ok(state)
     }
 
-    /// Applies one more log entry, recording it in `ignored` if it is invalid.
     pub fn apply_entry(&mut self, entry: &LogEntry, key: &LogKey) {
         let index = entry.header.index;
         let author = entry.header.author;
@@ -787,8 +536,6 @@ impl VaultState {
             .and_then(|bytes| VaultEvent::from_bytes_versioned(&bytes))
             .and_then(|(event, found)| {
                 let effective = self.effective_version(found);
-                // Only current members' versions count from version 11: a former member's
-                // phone (its entries still chain) can't raise the floor.
                 if current || effective < CURRENT_AUTHORS_FROM {
                     self.max_event_version = self.max_event_version.max(found);
                     let seen = self.member_versions.entry(author).or_default();
@@ -797,7 +544,6 @@ impl VaultState {
                 self.apply_versioned(index, author, event, effective)
             });
         if let Err(e) = result {
-            // A newer version is a hint to update only when a current member wrote it.
             let e = match e {
                 VaultError::UnsupportedVersion(_) if !current => VaultError::NotAMember(index),
                 e => e,
@@ -815,12 +561,10 @@ impl VaultState {
         }
     }
 
-    /// Where the vault lives now, if it ever switched relays.
     pub fn moved(&self) -> Option<&Moved> {
         self.moves.last()
     }
 
-    /// m for a relay move: members who must have moved before the vault switches.
     pub fn switch_threshold(&self) -> usize {
         crate::moves::switch_threshold(
             self.descriptor.members.len(),
@@ -828,13 +572,10 @@ impl VaultState {
         )
     }
 
-    /// Current members whose app hasn't written a version 10 event yet (it may be older
-    /// than relay moves): moving waits for them.
     pub fn members_needing_update(&self) -> Vec<[u8; 32]> {
         self.members_below(MOVE_FROM)
     }
 
-    /// Current members whose app hasn't written an event of `version` or later yet.
     pub fn members_below(&self, version: u16) -> Vec<[u8; 32]> {
         self.descriptor
             .members
@@ -844,7 +585,6 @@ impl VaultState {
             .collect()
     }
 
-    /// The version whose rules apply to an event tagged `found` (see `max_event_version`).
     fn effective_version(&self, found: u16) -> u16 {
         if self.max_event_version >= VERSION_FLOOR_FROM {
             found.max(self.max_event_version)
@@ -853,8 +593,6 @@ impl VaultState {
         }
     }
 
-    /// Entries skipped because they come from a newer version of Zafe: other members can
-    /// see something this build can't, so the app should ask to update.
     pub fn newer_version_entries(&self) -> usize {
         self.ignored
             .iter()
@@ -862,13 +600,10 @@ impl VaultState {
             .count()
     }
 
-    /// Whether `event` by `author` would be valid on top of the current state. Callers
-    /// check this before appending, so they don't write entries everyone will ignore.
     pub fn check(&self, author: [u8; 32], event: &VaultEvent) -> Result<(), VaultError> {
         self.clone().apply(self.applied, author, event.clone())
     }
 
-    /// Applies one event authored by `author`. Also used to apply new entries incrementally.
     pub fn apply(
         &mut self,
         index: u64,
@@ -878,10 +613,6 @@ impl VaultState {
         self.apply_versioned(index, author, event, version::VAULT_EVENT)
     }
 
-    /// [`VaultState::apply`] for an event its author's app wrote with `event_version`.
-    /// Replay rules that changed in a version of the event format apply only to events
-    /// written with it or later, so old logs replay exactly as before and an app that
-    /// doesn't know the version skips those events instead of computing another state.
     pub fn apply_versioned(
         &mut self,
         index: u64,
@@ -926,14 +657,6 @@ impl VaultState {
                 {
                     return Err(VaultError::BadProposal(index));
                 }
-                // First come, first served: notes an earlier proposal that can still be
-                // signed spends are taken, until that proposal's transaction expires (as
-                // of the chain tip this proposal was built on, so every member agrees).
-                // Broadcast and cancelled proposals don't block: a new proposal may
-                // deliberately respend their notes, and at most one transaction is mined.
-                // From version 12 a proposal reserves only once a second member approved
-                // it or it may be signed, and never past the vault's window from its own
-                // tip (its `tip_height` is the proposer's word, `reservation_end`).
                 if self.proposals.values().any(|p| {
                     let live = if event_version >= PROPOSAL_RULES_FROM {
                         p.reserves(self.descriptor.threshold)
@@ -987,18 +710,12 @@ impl VaultState {
                     .proposals
                     .get_mut(&proposal)
                     .ok_or(VaultError::UnknownProposal(index))?;
-                // Approved proposals still accept fresh commitments (re-approval after a
-                // failed signing round); rejected, cancelled or broadcast ones do not.
                 if !matches!(p.status, ProposalStatus::Open | ProposalStatus::Approved) {
                     return Err(VaultError::ProposalClosed(index));
                 }
                 if pczt_hash != p.pczt_hash {
                     return Err(VaultError::PcztMismatch(index));
                 }
-                // Once a member has released signature shares, their approval cannot be
-                // withdrawn or replaced (the shares are out). From version 12 it may add
-                // commitments for interactive signing, so a one-tap approval never strands
-                // a payment whose signer groups can't complete: its shares stay.
                 if p.shares.contains_key(&author) {
                     let adds_commitments = event_version >= PROPOSAL_RULES_FROM
                         && approve
@@ -1085,14 +802,9 @@ impl VaultState {
                 if p.status != ProposalStatus::Approved {
                     return Err(VaultError::ProposalClosed(index));
                 }
-                // Version 12: "sent" needs the signed transaction (`SignedBroadcast`).
                 if event_version >= PROPOSAL_RULES_FROM {
                     return Err(VaultError::BadBroadcast(index));
                 }
-                // Version 7: the txid is fixed by the PCZT (it excludes signatures and
-                // the proof), so a member can't release the note reservation or fake a
-                // "logged as sent" txid with an arbitrary one. A PCZT that doesn't parse
-                // can't be signed (members reject it), so nothing to compare then.
                 if event_version >= BROADCAST_CHECKED_FROM
                     && p.expected_txid.is_some_and(|t| t != txid)
                 {
@@ -1139,7 +851,6 @@ impl VaultState {
                     .expect("checked above")
                     .identity;
                 let round = if event_version >= PENDING_SEATS_FROM {
-                    // One pending move per seat, and one per new key.
                     if self
                         .replacements
                         .iter()
@@ -1174,8 +885,6 @@ impl VaultState {
                         round,
                         approvals: Vec::new(),
                     });
-                // Approvals of another round or format don't add up with these: the
-                // relay counts only signatures over this round's approval.
                 if pending.round != round {
                     pending.round = round;
                     pending.approvals.clear();
@@ -1193,7 +902,6 @@ impl VaultState {
                         .map(|m| m.frost_id.clone())
                         .unwrap_or_default();
                     let helpers = approvals.iter().map(|(pk, _)| *pk).collect();
-                    // The seat's other moves are moot while this one is pending (or done).
                     self.pending_replacements.retain(|(o, _), _| *o != old);
                     let switched = round.is_none();
                     if switched {
@@ -1230,8 +938,6 @@ impl VaultState {
                     .position(|r| r.index == replacement && !r.done)
                     .ok_or_else(bad)?;
                 let (new, old) = (self.replacements[r].new.sig_pk, self.replacements[r].old);
-                // The old key can't help rebuild its own seat (version 12: it is still a
-                // member while the move is pending).
                 let own_seat = event_version >= PENDING_SEATS_FROM && helpers.contains(&old);
                 let stopped = helpers
                     .iter()
@@ -1275,8 +981,6 @@ impl VaultState {
                 r.done = true;
             }
             VaultEvent::PoolReset => {
-                // Only a version 8 app can write it (older apps don't know the variant), so
-                // an older tag here is a forged or corrupted entry.
                 if event_version < POOL_RESET_FROM {
                     return Err(VaultError::Encoding);
                 }
@@ -1307,7 +1011,6 @@ impl VaultState {
                 mailbox,
                 signature,
             } => {
-                // Only a version 12 app can write it.
                 if event_version < PENDING_SEATS_FROM {
                     return Err(VaultError::Encoding);
                 }
@@ -1318,8 +1021,6 @@ impl VaultState {
                     .position(|r| r.index == replacement && r.is_pending())
                     .ok_or_else(bad)?;
                 let r = &self.replacements[pos];
-                // Only the first round: a thief holding the old phone can't keep the seat
-                // for good (rule 4).
                 if r.round != Some(0) {
                     return Err(bad());
                 }
@@ -1332,7 +1033,6 @@ impl VaultState {
                     new: r.new.sig_pk,
                     at,
                 };
-                // The old key's word, whoever logs it.
                 cancel.verify(&old, &signature).map_err(|_| bad())?;
                 let r = self.replacements.remove(pos);
                 self.pending_replacements.retain(|(o, _), _| *o != r.old);
@@ -1381,7 +1081,6 @@ impl VaultState {
                 }
                 r.helped.push(author);
                 self.seat_changes += 1;
-                // The new key's word never completes anything (rule 4): only every helper's.
                 if r.helpers.iter().all(|h| r.helped.contains(h)) {
                     r.switched = true;
                     let (old, new) = (r.old, r.new);
@@ -1396,8 +1095,6 @@ impl VaultState {
                     .proposals
                     .get_mut(&proposal)
                     .ok_or(VaultError::UnknownProposal(index))?;
-                // Only an approved proposal is sent: a cancelled or rejected one that may be
-                // signed isn't marked sent (every member would then send it again).
                 if p.status != ProposalStatus::Approved {
                     return Err(VaultError::ProposalClosed(index));
                 }
@@ -1416,23 +1113,15 @@ impl VaultState {
 }
 
 impl VaultState {
-    /// How many blocks at `height` last as long as one 75-second block on this vault's
-    /// network (`wallet::block_scale`); 1 for a network this build doesn't know.
     pub fn block_scale(&self, height: u32) -> u32 {
         crate::wallet::ZafeNetwork::from_name(&self.descriptor.network)
             .map_or(1, |n| crate::wallet::block_scale(&n, height))
     }
 
-    /// Blocks a spend needs on top of it before a reorg is taken not to undo it, scaled
-    /// for the block time at `height`.
     pub fn reorg_margin(&self, height: u32) -> u32 {
         REORG_MARGIN_BLOCKS * self.block_scale(height)
     }
 
-    /// The height from which `p` no longer holds its notes: its expiry, but never later
-    /// than the vault's window from the tip it claims to be built on, with the slack and
-    /// rounding members accept (`node::expectations`), scaled like `expiry_height`. Every
-    /// value comes from the log, so every member computes the same.
     pub fn reservation_end(&self, p: &ProposalState) -> u32 {
         let window = self.descriptor.proposal_expiry_blocks
             + EXPIRY_TIP_SLACK_BLOCKS
@@ -1445,10 +1134,6 @@ impl VaultState {
 }
 
 impl VaultState {
-    /// The arrivals' members if `VaultMoved { target, arrivals, at }` at `index` is valid:
-    /// a target for this vault and a point of this log after the last switch, a time within
-    /// the move's lifetime, and at least m distinct current members' valid arrivals (any
-    /// invalid or duplicate one makes the whole entry invalid).
     pub fn check_move(
         &self,
         index: u64,
@@ -1488,23 +1173,16 @@ impl VaultState {
         Ok(seen)
     }
 
-    /// The current members' identities (after any seat moves).
     pub fn member_identities(&self) -> Vec<IdentityPublic> {
         self.descriptor.members.iter().map(|m| m.identity).collect()
     }
 
-    /// Keys whose signed entries may extend the log: current members and every key whose
-    /// seat moved away. A lost (possibly stolen) device keeps its old key, and the relay
-    /// may still accept its appends until it learns of the move; if such an entry stopped
-    /// the chain, nobody could read the log any more. It chains like any other entry and
-    /// replay ignores it (`NotAMember`), the same way on every member's device.
     pub fn log_authors(&self) -> Vec<IdentityPublic> {
         let mut authors = self.member_identities();
         authors.extend(self.former_members.iter().copied());
         authors
     }
 
-    /// The seat move that gave `new` its seat, if any (the latest one; switched only).
     pub fn replacement_to(&self, new: &[u8; 32]) -> Option<&Replacement> {
         self.replacements
             .iter()
@@ -1512,23 +1190,16 @@ impl VaultState {
             .find(|r| &r.new.sig_pk == new && r.switched)
     }
 
-    /// The pending move of `old`'s seat, if any (version 12: at most one).
     pub fn pending_seat_move(&self, old: &[u8; 32]) -> Option<&Replacement> {
         self.replacements
             .iter()
             .find(|r| r.is_pending() && &r.old == old)
     }
 
-    /// The round a new move of `old`'s seat would be in: how often its owner kept it.
     pub fn seat_round(&self, old: &[u8; 32]) -> u32 {
         self.seat_keeps.get(old).map_or(0, |k| k.len() as u32)
     }
 
-    /// Moves `old`'s seat to `new`: the member keeps its FROST identifier, its votes,
-    /// shares and place in signer groups, and its shared name, under the new key. Its
-    /// pre-published commitments are dropped (their nonces were on the lost device) and
-    /// so is its backup attestation (the new device has no backup yet). Called when the
-    /// seat switches (`event_version`: the version of the entry that switched it).
     fn move_seat(&mut self, old: [u8; 32], new: IdentityPublic, event_version: u16) {
         let rekey = |pk: &mut [u8; 32]| {
             if *pk == old {
@@ -1546,12 +1217,8 @@ impl VaultState {
             rekey(&mut p.author);
             if let Some(v) = p.approvals.remove(&old) {
                 if v.is_empty() || p.shares.contains_key(&old) {
-                    // One-tap: its shares (in `shares`) still count; commitments it added
-                    // later had their nonces on the lost device.
                     p.approvals.insert(new.sig_pk, Vec::new());
                 } else if p.status == ProposalStatus::Approved && p.approvals.len() < threshold {
-                    // Interactive commitments whose nonces were on the lost device: the
-                    // approval is void, and the new device can approve again.
                     p.status = ProposalStatus::Open;
                 }
             }
@@ -1569,17 +1236,12 @@ impl VaultState {
             }
         }
         self.pools.remove(&old);
-        // The new device's app announces its own version.
         self.member_versions.remove(&old);
         if let Some(name) = self.names.remove(&old) {
             self.names.insert(new.sig_pk, name);
         }
         self.backups.remove(&old);
-        // A helper of another seat's unfinished repair keeps helping under its new key.
-        // From version 12 that repair starts a new attempt (finding E): the helper's part
-        // of the old attempt was made by the lost key, and messages are keyed by attempt.
         for r in self.replacements.iter_mut().filter(|r| !r.done) {
-            // A helper who stopped stays stopped under its new key.
             r.stopped.iter_mut().for_each(rekey);
             if !r.helpers.contains(&old) {
                 continue;
@@ -1591,19 +1253,12 @@ impl VaultState {
                 r.helped.clear();
             }
         }
-        // Other moves of this seat are moot; the old key's approvals of others' moves go
-        // (the relay no longer counts that key).
         self.pending_replacements.retain(|(o, _), _| *o != old);
         for p in self.pending_replacements.values_mut() {
             p.approvals.retain(|(pk, _)| *pk != old);
         }
     }
 
-    /// Fixes the signing commitments of a new proposal: for every signer group (t-subset of
-    /// members, descriptor order), every spend and every member of the group, the member's
-    /// next unused pool commitment. Deterministic from the log, so every member computes the
-    /// same assignment; each commitment is assigned at most once. `None` (interactive
-    /// signing) if the vault has too many groups or any pool is short.
     fn assign_commitments(&mut self, spends: u16, event_version: u16) -> Option<Preprocessed> {
         let members: Vec<[u8; 32]> = self
             .descriptor
@@ -1618,8 +1273,6 @@ impl VaultState {
             return None;
         }
         let groups = if event_version < PARTIAL_GROUPS_FROM {
-            // Before version 6: every member's pool had to cover every group, or the
-            // whole proposal fell back to interactive signing.
             let per_member = groups.iter().filter(|g| g.contains(&0)).count() * spends;
             if members
                 .iter()
@@ -1629,11 +1282,6 @@ impl VaultState {
             }
             groups
         } else {
-            // Version 6 on: only groups whose members all still have enough commitments
-            // are assigned (in group order, so every member computes the same set). A
-            // member without a pool (a new device, a CLI member) no longer takes
-            // everyone else's one-tap signing away; it is just in no assigned group and
-            // signs interactively.
             let mut taken = vec![0usize; members.len()];
             let covered: Vec<Vec<usize>> = groups
                 .into_iter()
@@ -1676,49 +1324,24 @@ impl VaultState {
     }
 }
 
-/// First `VAULT_EVENT` version whose proposals are assigned commitments group by group
-/// (see [`VaultState::assign_commitments`]).
 const PARTIAL_GROUPS_FROM: u16 = 6;
 
-/// First `VAULT_EVENT` version whose `Broadcast` txid is checked against the PCZT.
 const BROADCAST_CHECKED_FROM: u16 = 7;
 
-/// First `VAULT_EVENT` version that has [`VaultEvent::PoolReset`].
 const POOL_RESET_FROM: u16 = 8;
 
-/// First `VAULT_EVENT` version that has [`VaultEvent::VaultMoved`] (relay moves).
 pub const MOVE_FROM: u16 = 10;
 
-/// First `VAULT_EVENT` version after which only current members' entries raise the
-/// version floor and `member_versions` (and count as newer): a former member's phone can't
-/// change which rules apply. Entries before it replay as before.
 const CURRENT_AUTHORS_FROM: u16 = 11;
 
-/// First `VAULT_EVENT` version whose `RepairRetry` restarts a repair only once every
-/// helper it names logged it. Offered only once every member's app writes it
-/// ([`VaultState::members_below`]).
 pub const REPAIR_QUORUM_FROM: u16 = 11;
 
-/// First `VAULT_EVENT` version whose seat moves are pending at the threshold of approvals
-/// (new approval format with the seat's round), switch once every helper logged
-/// `RepairHelped`, can be voided by the old key's `KeepSeat`, and restart other repairs a
-/// switched seat helped with.
 pub const PENDING_SEATS_FROM: u16 = 12;
 
-/// First `VAULT_EVENT` version with the proposal rules of the November 2026 review
-/// ("Proposals"): a proposal reserves notes only once a second member approved it or it
-/// may be signed, and only within the window from its tip; a member whose vote carried
-/// shares may add interactive commitments; "sent" needs the signed transaction
-/// ([`VaultEvent::SignedBroadcast`]). Joins the seat-move rules of the same version.
 pub const PROPOSAL_RULES_FROM: u16 = 12;
 
-/// Confirmations a spend needs before a reorg is taken not to undo it (75-second blocks,
-/// scaled like the expiry constants): until then a possibly-signed proposal whose notes it
-/// spent can still mine.
 pub const REORG_MARGIN_BLOCKS: u32 = 10;
 
-/// First `VAULT_EVENT` version after which versions only go up (see
-/// `VaultState::max_event_version`), and proposals must carry a usable PCZT.
 const VERSION_FLOOR_FROM: u16 = 9;
 
 fn check_descriptor_signatures(

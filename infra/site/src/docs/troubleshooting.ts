@@ -1,5 +1,3 @@
-// The troubleshooting page's problems, one anchor each (/docs/troubleshooting#<id>).
-// /support links to the same list.
 export const problems: { id: string; title: string }[] = [
   { id: 'safety-words', title: 'The safety words don’t match' },
   { id: 'payment-waiting', title: 'A payment is waiting' },

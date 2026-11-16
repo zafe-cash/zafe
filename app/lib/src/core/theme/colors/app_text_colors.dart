@@ -2,22 +2,6 @@ import 'package:flutter/painting.dart';
 
 import '../primitives.dart';
 
-/// Text color hierarchy.
-///
-/// * [accent] — Titles, headings; max contrast.
-/// * [primary] — Default body text, paragraphs.
-/// * [secondary] — Subtitles, timestamps, metadata.
-/// * [muted] — Descriptions. Theme-invariant.
-/// * [disabled] — Inactive, unavailable labels.
-/// * [inverse] — Text placed on inverted surfaces (e.g. dark text on a light
-///   chip inside dark mode).
-/// * [warning] — Inline caution copy (orange warning ladder).
-/// * [value] — Positive-state copy and money received: Zcash gold
-///   (the value colour; teal and green are too close to tell apart).
-/// * [destructive] — Destructive utility copy.
-/// * [destructiveLight] — Softer destructive copy for secondary error text.
-/// * [brand] — Brand-colored inline text accent.
-/// * [darkCard] — Text and QR dots on `background.darkCard`.
 class AppTextColors {
   const AppTextColors({
     required this.accent,
@@ -63,8 +47,6 @@ class AppTextColors {
   );
 
   static const light = AppTextColors(
-    // Accent in light mode reaches the *opposite* extreme of the ladder
-    // (p900Light = near-black) rather than mirroring p800Dark's step.
     accent: Primitives.p900Light,
     primary: Primitives.p700Light,
     secondary: Primitives.p600Light,

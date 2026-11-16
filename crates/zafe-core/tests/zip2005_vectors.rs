@@ -1,8 +1,3 @@
-//! Regression vectors for ZIP 2005 `use_qsk = true` vault key derivation.
-//!
-//! The vectors in `test-vectors/zip2005_use_qsk.json` are independently checked by
-//! `scripts/check_zip2005_vectors.py`. Regenerate with `ZAFE_REGEN_VECTORS=1`.
-
 use ff::PrimeField;
 use orchard::keys::{FullViewingKey, Scope, SpendingKey};
 use serde_json::{json, Value};
@@ -14,7 +9,6 @@ const PATH: &str = concat!(
     "/test-vectors/zip2005_use_qsk.json"
 );
 
-/// Deterministic, valid `ak` values: taken from orchard spending keys, so they have ỹ = 0.
 fn ak_for(i: u8) -> [u8; 32] {
     let mut seed = [i.wrapping_mul(29).wrapping_add(3); 32];
     loop {

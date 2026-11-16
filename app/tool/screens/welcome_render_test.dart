@@ -1,11 +1,3 @@
-// Renders the welcome screen (with and without a relay), its Server settings sheet and
-// the "already in a vault" sheet,
-// in both themes, to PNGs for review without a device. Not part of `flutter test`; run it
-// explicitly (from app/):
-//
-//   flutter test tool/screens/welcome_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): welcome_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -88,7 +80,6 @@ void main() {
               endpointsProvider.overrideWith(() => _Endpoints(endpoints)),
               vaultProvider.overrideWith(_Vault.new),
             ],
-            // The boundary wraps the whole app, so the sheet's route is captured too.
             child: RepaintBoundary(
               key: boundary,
               child: MaterialApp(
@@ -117,14 +108,12 @@ void main() {
         });
         final path = '${out.path}/welcome_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });
 }
 
-// SCREEN_PREVIEW_SCALE renders larger (the store listing uses 3).
 final _scale = double.parse(
   Platform.environment['SCREEN_PREVIEW_SCALE'] ?? '2',
 );

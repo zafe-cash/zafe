@@ -1,6 +1,3 @@
-// www.zafe.cash → zafe.cash, keeping the path and query (wrangler.jsonc next to this file).
-// The main Worker can't do it: Cloudflare serves its static files without running code,
-// whatever the host.
 const APEX = 'zafe.cash';
 
 export default {

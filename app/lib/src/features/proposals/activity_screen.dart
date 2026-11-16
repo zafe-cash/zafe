@@ -27,8 +27,6 @@ import '../../rust/api/history.dart' as rust_history;
 import 'activity_feed.dart';
 import '../../core/storage/wallet_key.dart';
 
-/// Exports the vault history as CSV (spec §11.3) through the share sheet. It lists every
-/// payment and memo, so it asks for an unlock first.
 Future<void> exportHistory(BuildContext context, WidgetRef ref) async {
   if (!await confirmUnlock(
     context,
@@ -83,8 +81,6 @@ Future<void> exportHistory(BuildContext context, WidgetRef ref) async {
   }
 }
 
-/// Every payment in the vault, sent and received, grouped into sections: "This week", then
-/// month and year, then "Earlier"; one card per section.
 class ActivityScreen extends ConsumerWidget {
   const ActivityScreen({super.key});
 
@@ -165,8 +161,6 @@ class ActivityScreen extends ConsumerWidget {
   }
 }
 
-/// Newest first (`mergeActivity`'s order), grouped by section title. Payments still
-/// being mined belong to "This week".
 List<(String, List<ActivityItem>)> activitySections(
   List<ActivityItem> items, {
   DateTime? now,
@@ -198,8 +192,18 @@ String sectionTitle(DateTime? timestamp, {DateTime? now}) {
     return 'This week';
   }
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June', //
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
   return '${months[local.month - 1]} ${local.year}';
 }
@@ -267,7 +271,6 @@ class _MessageCard extends StatelessWidget {
   }
 }
 
-/// Empty state: a quiet shelf with a blank ledger, and the message below it.
 class _EmptyCard extends StatelessWidget {
   const _EmptyCard();
 

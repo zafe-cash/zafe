@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Renders the site's illustrated loops (docs/site.md §6): the textures, then each scene wide
-# (1600x900) and tall (720x1280) into <workdir>/out/<scene>[_tall]/f_0001.png ...
-# A few Blender processes share each loop's frames (kit.render's placeholders); JOBS caps how
-# many run at once (each takes about 1 GB of GPU memory).
-#
-#   BLENDER=/path/to/blender scenes/render.sh <workdir> [scene ...]   # default: all four
-#
-# On WSL with Blender for Windows, point BLENDER at blender.exe and use a <workdir> on the
-# Windows side (/mnt/c/...): the scripts are copied there and paths are passed as Windows paths.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 work="${1:?usage: render.sh <workdir> [scene ...]}"
@@ -16,7 +7,7 @@ scenes=("$@")
 [ ${#scenes[@]} -eq 0 ] && scenes=(sign sent setup live)
 BLENDER="${BLENDER:-blender}"
 JOBS="${JOBS:-6}"
-PER="${PER:-2}"  # processes per loop
+PER="${PER:-2}"
 
 mkdir -p "$work/out"
 cp "$here"/{kit,props,tex,sign,sent,setup,live}.py "$work/"
@@ -24,7 +15,6 @@ python3 "$here/tex.py" "$work/tex" >/dev/null
 
 native() { if [[ "$BLENDER" == *.exe ]]; then wslpath -w "$1"; else echo "$1"; fi; }
 export BLENDER WSLENV="ZAFE_TALL:ZAFE_TAG"
-# one line per Blender process: <tall> TAB <tag> TAB <script> TAB <workdir> (paths may have spaces)
 for scene in "${scenes[@]}"; do
   for tall in 0 1; do
     tag="$scene"

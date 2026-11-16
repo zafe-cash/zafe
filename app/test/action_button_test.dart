@@ -31,7 +31,6 @@ void main() {
     );
     await tester.tap(find.text('Approve'));
     await tester.pump();
-    // Working: still labelled, a second tap does nothing.
     await tester.tap(find.text('Approve'));
     gate.complete();
     await tester.pump();

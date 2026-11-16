@@ -1,6 +1,3 @@
-//! FCM sender against a mock of Google's token and FCM endpoints: the OAuth JWT is signed
-//! correctly, the access token is used, and the message carries no vault data.
-
 use std::sync::{Arc, Mutex};
 
 use axum::{extract::State, http::HeaderMap, routing::post, Form, Json, Router};
@@ -10,7 +7,6 @@ use zafe_relay::{
     Notifier,
 };
 
-// A key generated for this test only (tests/fixtures), never used anywhere else.
 const TEST_KEY: &str = include_str!("fixtures/test-only-rsa.pem");
 const TEST_PUB: &str = include_str!("fixtures/test-only-rsa.pub.pem");
 
@@ -88,7 +84,6 @@ async fn sends_content_free_high_priority_pushes() {
         })
     );
 
-    // The assertion is an RS256 JWT for the service account, scoped to FCM.
     #[derive(serde::Deserialize)]
     struct Claims {
         iss: String,
@@ -158,7 +153,6 @@ async fn unregistered_tokens_are_reported_once_fcm_says_so() {
     }
     assert_eq!(*gone.lock().unwrap(), vec!["stale-device".to_owned()]);
 
-    // Other failures never forget a token.
     assert!(!FcmNotifier::is_unregistered(404, "not json"));
     assert!(!FcmNotifier::is_unregistered(
         400,

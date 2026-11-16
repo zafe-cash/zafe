@@ -1,6 +1,3 @@
-//! Encrypted vault backups (spec §12.2): round trip, wrong passphrase, tampering, bounds
-//! on the key-derivation settings, membership check, passphrase rules.
-
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     backup::{self, BackupError, Contents, KdfParams},
@@ -16,8 +13,6 @@ use zafe_proto::{
 const PASS: &str =
     "correct horse battery staple orbit lantern violet echo marble quiet river north";
 
-/// A vault's `ak`, viewing key and address (the external one at index 0, Orchard only) for
-/// the vault secret `[secret; 32]`.
 fn keys(secret: u8) -> ([u8; 32], String, String) {
     use orchard::keys::{FullViewingKey, Scope, SpendingKey};
     let net = zafe_core::wallet::regtest_network();
@@ -113,7 +108,6 @@ fn round_trip_as_bytes_and_text() {
     assert_eq!(back.invite, c.invite);
     assert_eq!(back.names, c.names);
 
-    // The text form survives line wrapping (e.g. pasted from a note).
     let text = backup::to_text(&bytes);
     assert!(text.starts_with("zafe-backup-v1:"));
     let wrapped: String = text
@@ -138,7 +132,6 @@ fn wrong_passphrase_and_tampering_fail() {
         .unwrap_err(),
         BackupError::WrongPassphraseOrDamaged
     );
-    // Any flipped bit in the header (authenticated) or ciphertext fails.
     for i in [22, 40, bytes.len() - 1] {
         let mut t = bytes.clone();
         t[i] ^= 1;
@@ -147,9 +140,8 @@ fn wrong_passphrase_and_tampering_fail() {
             BackupError::WrongPassphraseOrDamaged
         );
     }
-    // A file asking for weak (or absurd) key derivation is refused before any work.
     let mut weak = bytes.clone();
-    weak[8..12].copy_from_slice(&1024u32.to_le_bytes()); // 1 MiB
+    weak[8..12].copy_from_slice(&1024u32.to_le_bytes());
     assert_eq!(
         backup::decrypt(&weak, PASS).unwrap_err(),
         BackupError::BadParams
@@ -160,7 +152,6 @@ fn wrong_passphrase_and_tampering_fail() {
         backup::decrypt(&huge, PASS).unwrap_err(),
         BackupError::BadParams
     );
-    // Not a backup at all.
     assert_eq!(
         backup::decrypt(b"hello", PASS).unwrap_err(),
         BackupError::NotABackup
@@ -200,7 +191,7 @@ fn material_and_identity_inside_are_versioned() {
 fn identity_must_be_a_member() {
     let mut rng = StdRng::seed_from_u64(3);
     let (mut c, _) = contents(&mut rng);
-    c.identity_seeds = seeds(&Identity::generate(&mut rng)); // someone else
+    c.identity_seeds = seeds(&Identity::generate(&mut rng));
     assert_eq!(
         backup::encrypt(&c, PASS, KdfParams::DEFAULT, &mut rng).unwrap_err(),
         BackupError::NotAMember
@@ -227,8 +218,6 @@ fn passphrase_rules() {
     assert_ne!(suggested, backup::suggest_passphrase(&mut rng));
 }
 
-/// Rule 3: a backup whose vault address isn't its viewing key's is refused, and so is a
-/// log copy whose `Created` descriptor (signed by every member) says so.
 #[test]
 fn an_address_that_isnt_the_viewing_keys_is_refused() {
     let mut rng = StdRng::seed_from_u64(5);

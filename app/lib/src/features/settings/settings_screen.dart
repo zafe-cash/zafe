@@ -34,13 +34,11 @@ import '../../core/widgets/line_icon.dart';
 
 const _rowHeight = 44.0;
 
-/// The release's version, passed by the release workflows (`--dart-define=ZAFE_VERSION`).
 const _appVersion = String.fromEnvironment(
   'ZAFE_VERSION',
   defaultValue: '0.1.0',
 );
 
-/// Settings: grouped surface cards of 44px rows.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -100,11 +98,9 @@ class SettingsScreen extends ConsumerWidget {
                   AppSpacing.sm,
                   AppSpacing.s,
                   AppSpacing.sm,
-                  // Clears the floating tab bar.
                   112,
                 ),
                 children: [
-                  // What people come looking for first: privacy.
                   _Group(
                     title: 'Privacy',
                     rows: [
@@ -154,7 +150,6 @@ class SettingsScreen extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  // The open vault's own settings, by its name.
                   _Group(
                     title: vaultName,
                     rows: [
@@ -215,8 +210,6 @@ class SettingsScreen extends ConsumerWidget {
                         },
                         chevron: true,
                         onTap: () async {
-                          // Off: the system prompt (or the app's settings); on, only
-                          // the system settings can turn them off.
                           if (notifications == true) {
                             await openAppSettings();
                           } else {
@@ -303,8 +296,6 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  /// Turning the app lock off or making it wait longer needs an unlock; making it
-  /// stricter doesn't.
   Future<void> _setAppLock(
     BuildContext context,
     WidgetRef ref,
@@ -324,9 +315,6 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-/// Shown under the Security rows when the phone has no screen lock, so approvals
-/// go through without a prompt. "Open settings" goes to the phone's security settings;
-/// coming back re-checks, so the note goes away once a lock is set.
 class _NoScreenLockNote extends ConsumerStatefulWidget {
   const _NoScreenLockNote();
 

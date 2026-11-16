@@ -9,16 +9,12 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `at`, `invalid`, `net_kind`, `new`, `version_kind`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
 
-/// Which server an error came from, when it came from one.
 enum ZafeEndpoint { none, relay, lightwalletd }
 
 class ZafeError implements FrbException {
   final ZafeErrorKind kind;
   final String message;
   final ZafeEndpoint endpoint;
-
-  /// Members the error is about (signing keys, hex): `KeygenIncomplete` lists those
-  /// who never took part. Empty otherwise.
   final List<String> members;
 
   const ZafeError({
@@ -44,137 +40,45 @@ class ZafeError implements FrbException {
 }
 
 enum ZafeErrorKind {
-  /// The relay or lightwalletd could not be reached (`endpoint` says which).
   network,
-
-  /// Waiting on other members or on sync; try again later.
   notReady,
-
-  /// Other members did not answer in time; safe to retry.
   timeout,
-
-  /// This device's independent check failed: never approve or sign.
   verification,
-
-  /// The vault cannot cover the amount plus the fee.
   insufficientFunds,
-
-  /// The vault holds enough, but part of it is held by open proposals.
   fundsReserved,
-
-  /// Bad address, amount, memo or invite.
   invalidInput,
-
-  /// Data, a message or the relay comes from a newer version of Zafe: update the app.
   updateRequired,
-
-  /// The relay is older than this app and must be updated by whoever runs it.
   relayOutdated,
-
-  /// The relay's storage quota for this vault's messages is full; it frees up as old
-  /// messages expire (30 days), or whoever runs the relay raises it.
   relayStorageFull,
-
-  /// The vault's history (the log, kept for good) is at this relay's cap, or this
-  /// member's half of it: only a relay with more room helps.
   relayLogFull,
-
-  /// The relay's whole database is full (or nearly, for a vault new on it).
   relayFull,
-
-  /// The server already holds the most open moves it takes for this seat.
   tooManySeatMoves,
-
-  /// The relay has fewer log entries than this device saw: it lost data or was rewound
-  /// to an older backup. Nothing it says about the vault can be trusted until a member
-  /// restores the log on it from a device copy.
   relayRolledBack,
-
-  /// The relay serves another history than this device saw (a fork of the log). Do not
-  /// trust it; members compare notes outside Zafe.
   relayForked,
-
-  /// This device's own copy of the vault history doesn't verify. The member can follow
-  /// the relay's history instead, after checking with the others.
   logCopyInvalid,
-
-  /// The relay's member list or threshold differs from the vault's (someone seeded it
-  /// wrongly when restoring it): do not trust it; funds are not at risk.
   relayMembership,
-
-  /// The relay no longer knows this vault (wiped), though this device has its log: a
-  /// member can restore it from the device copy.
   relayLostVault,
-
-  /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
-  /// another host, or a server that doesn't speak TLS).
   tls,
-
-  /// `endpoint` accepted the connection but didn't answer in time.
   networkTimeout,
-
-  /// lightwalletd's chain is behind blocks this wallet already has.
   serverBehind,
-
-  /// lightwalletd serves another network than the vault's.
   wrongNetwork,
-
-  /// This device's wallet database failed (it is a cache: it resyncs if deleted).
   walletDatabase,
-
-  /// "Use Tor" is on and Tor is still connecting: nothing was sent (never direct).
   torConnecting,
-
-  /// "Use Tor" is on but Tor couldn't connect: nothing was sent (never direct).
   torFailed,
-
-  /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
   vaultNotOnRelay,
   other,
-
-  /// Key generation timed out because some members never took part (`members`).
   keygenIncomplete,
-
-  /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
   inviteExpired,
-
-  /// The relay is private: creating or restoring a vault there needs its create token,
-  /// and none or the wrong one was given (ask whoever runs it).
   createTokenRefused,
-
-  /// The vault moved to another relay and this phone hasn't followed: "Grants moved to
-  /// relay.dao.org. Move to continue." (`message` names the relay URL.)
   vaultMoved,
-
-  /// This phone already takes part in another relay move.
   moveInProgress,
-
-  /// Moving needs every member's app to support it; `members` must update first.
   membersMustUpdate,
-
-  /// No member's arrival for this move on that relay (a bad link, or cancelled).
   moveNotFound,
-
-  /// The move is past its 14 days.
   moveExpired,
-
-  /// The move is older than the vault's last move.
   moveStale,
-
-  /// Two moves switched from the same history: "Two moves found: ask your group."
   twoMoves,
-
-  /// This phone's signature for the payment may already be out, so it can't decline it
-  /// (nothing was logged); its proposer can cancel it.
   alreadySigned,
-
-  /// This phone cancelled this move: a cancel is final.
   moveCancelled,
-
-  /// This phone can't tell whether the vault moved, so it writes nowhere (`message` names
-  /// the relay it can't read): try again, or cancel the move to stay.
   moveUnconfirmed,
-
-  /// The new relay's history doesn't match the vault's: start the move again.
   moveConflict,
 }

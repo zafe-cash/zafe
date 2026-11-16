@@ -1,11 +1,3 @@
-//! End-to-end on a local Ironwood regtest network (`ths`: Zakura + lightwalletd in Docker):
-//! a 2-of-3 vault is funded from the `ths` faucet, every member syncs its own wallet,
-//! one member proposes a payment, members approve and sign, and the transaction is
-//! proven, broadcast, mined and seen by the recipient.
-//!
-//! Needs Docker and `ths` (see `infra/regtest/up.sh`). Run with:
-//!   cargo test -p zafe-core --test regtest_e2e -- --ignored --nocapture
-
 use std::{collections::BTreeMap, path::PathBuf, process::Command};
 
 use orchard::{
@@ -27,15 +19,13 @@ use zcash_protocol::{
     memo::{Memo, MemoBytes},
 };
 
-mod common;
+pub mod common;
 use common::{params, run_keygen};
 
 const NAME: &str = "zafe-e2e";
-// ths moves every port by this offset: Zakura RPC 48232, lightwalletd 39067.
 const PORT_OFFSET: u16 = 30000;
 const LWD_PORT: u16 = 9067 + PORT_OFFSET;
 
-/// A `ths` (thus-spoke-zakura) environment started by `infra/regtest/up.sh`.
 struct Regtest;
 
 impl Regtest {
@@ -55,7 +45,6 @@ impl Regtest {
         Self
     }
 
-    /// Several 5 ZEC faucet notes, confirmed.
     fn fund(&self, address: &str, notes: u32) {
         let status = Command::new(Self::script("fund.sh"))
             .args([address, &notes.to_string()])
@@ -117,7 +106,6 @@ async fn vault_pays_on_regtest() {
     let network = regtest_network();
     let mut rng = StdRng::seed_from_u64(99);
 
-    // 1. Create a 2-of-3 vault.
     let members = run_keygen(params(2, 3), &mut rng);
     let vault_keys = &members[0].1.vault_keys;
     let vault_fvk = vault_keys.fvk().clone();
@@ -133,8 +121,6 @@ async fn vault_pays_on_regtest() {
     .encode(&network);
     println!("vault address: {vault_ua}");
 
-    // 2. Start regtest and fund the vault from the ths faucet: several notes, so the
-    // reservation checks below have notes to spare.
     let chain = Regtest::start();
     chain.fund(&vault_ua, 4);
     let lwd = format!("http://127.0.0.1:{LWD_PORT}");
@@ -142,7 +128,6 @@ async fn vault_pays_on_regtest() {
     let funded = chain_tip(&mut client).await;
     wait_for_lightwalletd_height(&mut client, funded).await;
 
-    // 3. Each member keeps its own wallet database and syncs independently.
     let dir = tempdir();
     let mut wallets = Vec::new();
     for (i, _) in members.iter().enumerate() {
@@ -175,7 +160,6 @@ async fn vault_pays_on_regtest() {
         );
     }
 
-    // 4. Member 0 proposes paying 1 ZEC with a memo to an outside recipient.
     let recipient_fvk = FullViewingKey::from(&SpendingKey::from_bytes([77; 32]).unwrap());
     let recipient = recipient_fvk.address_at(0u32, Scope::External);
     let recipient_ua = UnifiedAddress::from_receivers(Some(recipient), None, None, None, None)
@@ -195,9 +179,6 @@ async fn vault_pays_on_regtest() {
         )
         .expect("proposal");
 
-    // 4b. Note reservation: member 1's wallet holds back the notes member 0's open
-    // proposal spends, so its own proposal picks other notes, and asking for more than
-    // what's left fails as "reserved", not "insufficient".
     let hold = NoteHold {
         owner: [1; 32],
         nullifiers: tx::spent_nullifiers(&pczt).unwrap(),
@@ -246,7 +227,6 @@ async fn vault_pays_on_regtest() {
         wallets[1].propose(std::slice::from_ref(&too_much), 8064, &[]),
         Err(zafe_core::wallet::WalletError::FundsReserved)
     ));
-    // Releasing (the proposal closed) makes the notes spendable again.
     assert_eq!(wallets[1].reserve(&[]).unwrap(), 0);
     assert_eq!(
         wallets[1].balance().unwrap().ironwood_spendable,
@@ -254,10 +234,6 @@ async fn vault_pays_on_regtest() {
     );
     wallets[1].propose(&[too_much], 8064, &[]).unwrap();
 
-    // 4c. Payments that may be signed and can still mine (cancelled, or dropped after
-    // sending) each need a note spent by the next payment, so at most one of them mines
-    // (security review 2026-11, rule 5). Their notes are held, and the wallet adds one of
-    // each to its selection, paying for the extra actions; members' checks accept it.
     let small = PaymentRequest {
         address: recipient_ua.clone(),
         amount_zat: 1_000_000,
@@ -310,14 +286,12 @@ async fn vault_pays_on_regtest() {
         5_000 * actions,
         "the fee covers the forced spends"
     );
-    // Notes this wallet doesn't know (not scanned yet) can't be forced: sync first.
     assert!(matches!(
         wallets[1].propose(std::slice::from_ref(&small), 8064, &[vec![[0x77; 32]]]),
         Err(zafe_core::wallet::WalletError::Proposal(_))
     ));
     assert_eq!(wallets[1].reserve(&[]).unwrap(), 0);
 
-    // 5. Members verify independently, approve, and sign (2 of 3).
     let tip = wallets[0].chain_height().unwrap().unwrap();
     let expected = Expectations {
         payments: vec![Payment {
@@ -327,7 +301,6 @@ async fn vault_pays_on_regtest() {
         }],
         consensus_branch_id: BranchId::for_height(&network, BlockHeight::from_u32(tip + 1)).into(),
         tip_height: tip,
-        // Regtest runs NU7 from height 1: 25 s blocks, so the window counts 3x the blocks.
         max_expiry_delta: 1 + zafe_core::wallet::block_scale(&network, tip + 1)
             * (8064 + 96 + zafe_core::vault::EXPIRY_ROUNDING_BLOCKS),
     };
@@ -370,9 +343,6 @@ async fn vault_pays_on_regtest() {
         .aggregate(&request, &shares, &members[0].1.public_key_package)
         .unwrap();
 
-    // 6. Inject, prove, extract (fully verified), broadcast, mine.
-    // The PCZT fixes the txid (v6 txids exclude signatures and the proof): the vault log
-    // checks a Broadcast against it (VAULT_EVENT 7).
     let expected_txid = tx::shielded_sighash(&pczt).unwrap();
     let unsigned = pczt.clone();
     let signed = tx::apply_signatures(pczt, &signatures).unwrap();
@@ -388,8 +358,6 @@ async fn vault_pays_on_regtest() {
         .expect("valid transaction");
     let mut raw = Vec::new();
     transaction.write(&mut raw).unwrap();
-    // What a version 12 broadcast entry carries: replay accepts these bytes as the
-    // proposal's signed transaction, and nothing else.
     assert_eq!(tx::check_signed(&unsigned, &raw).unwrap(), expected_txid);
     assert!(tx::check_signed(&unsigned, &raw[..raw.len() - 1]).is_err());
     let reply = client
@@ -410,7 +378,6 @@ async fn vault_pays_on_regtest() {
         reply.error_message
     );
     println!("txid {}", transaction.txid());
-    // Dropped-broadcast detection reads the whole mempool (txids in protocol order).
     let txid: [u8; 32] = *transaction.txid().as_ref();
     assert_eq!(
         txid, expected_txid,
@@ -445,9 +412,6 @@ async fn vault_pays_on_regtest() {
     .unwrap();
     recipient_wallet.sync(&mut client).await.unwrap();
 
-    // A payment still in the mempool, stored the way the app's mempool watch stores it:
-    // the balance counts it exactly once (the wallet summary already includes unmined
-    // notes; v0.1.20 added them again and showed twice the amount).
     recipient_wallet.store_mempool_tx(&transaction).unwrap();
     let pending = recipient_wallet.balance().unwrap();
     println!("recipient balance while pending: {pending:?}");
@@ -463,13 +427,10 @@ async fn vault_pays_on_regtest() {
     chain.mine(2);
     wait_for_lightwalletd_height(&mut client, u64::from(tip) + 2).await;
 
-    // 7. The vault sees the spend; the recipient sees the payment.
     wallets[1].sync(&mut client).await.unwrap();
     let after = wallets[1].balance().unwrap();
     println!("vault balance after payment: {after:?}");
 
-    // The unapproved-spend query sees exactly this transaction, mined, with the notes it
-    // spent (it is what the app's alert compares against the log).
     let spends = wallets[1].vault_spends().unwrap();
     let spend = spends
         .iter()

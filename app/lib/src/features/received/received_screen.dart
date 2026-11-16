@@ -14,8 +14,6 @@ import '../../rust/api/received.dart' as rust;
 import '../proposals/proposal_status.dart' show formatTimestamp;
 import 'received_row.dart';
 
-/// Money the vault received: amount, status, when, memo and transaction id. Shielded
-/// payments don't reveal their sender, so there is no "from".
 class ReceivedScreen extends ConsumerWidget {
   const ReceivedScreen({super.key, required this.txid});
   final String txid;

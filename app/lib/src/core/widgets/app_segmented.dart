@@ -5,9 +5,6 @@ import 'package:flutter/widgets.dart';
 import '../theme/app_theme.dart';
 import 'app_icon.dart';
 
-/// A few mutually exclusive choices shown as icons in one pill; the highlight slides to
-/// the chosen one (180 ms). Each choice keeps a label for screen readers and a tooltip
-/// on long press.
 class AppSegmented<T> extends StatelessWidget {
   const AppSegmented({
     super.key,
@@ -18,7 +15,6 @@ class AppSegmented<T> extends StatelessWidget {
 
   final T value;
 
-  /// (value, icon, label).
   final List<(T, String, String)> options;
   final ValueChanged<T> onChanged;
 

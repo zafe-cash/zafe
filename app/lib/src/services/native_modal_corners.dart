@@ -2,10 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-/// Optional iOS geometry. An unavailable channel must never block a modal.
 abstract final class NativeModalCorners {
   static const channel = MethodChannel('xyz.zafe/modal_corners');
-  // Debug preview counters are never updated in release builds.
   static int debugCacheHits = 0;
   static int debugCalculations = 0;
   static const timeout = Duration(milliseconds: 300);

@@ -7,10 +7,6 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// The vault's received payments, newest first. Reads the wallet database created by
-/// `sync_vault`; before the first sync there is none and the list is empty.
-/// A database this key can't open (from before encryption) also reads as empty until the
-/// next sync replaces it.
 Future<List<ReceivedInfo>> listReceived({
   required String dbDir,
   required List<int> dbKey,
@@ -21,26 +17,13 @@ Future<List<ReceivedInfo>> listReceived({
   material: material,
 );
 
-/// One incoming payment (a transaction that pays the vault and spends none of its notes).
 class ReceivedInfo {
-  /// Transaction id (hex, display order).
   final String txid;
   final BigInt amountZat;
-
-  /// 0 while unmined.
   final int minedHeight;
-
-  /// Unix seconds of the mining block; 0 when unknown (unmined, or block not scanned).
   final int blockTimeSecs;
-
-  /// Blocks on top of (and including) the mining block at the wallet's synced height; 0
-  /// while unmined.
   final int confirmations;
-
-  /// Text memos of the received outputs, joined by blank lines (empty if none).
   final String memo;
-
-  /// A mining reward (coinbase); spendable after 100 confirmations.
   final bool isCoinbase;
 
   const ReceivedInfo({

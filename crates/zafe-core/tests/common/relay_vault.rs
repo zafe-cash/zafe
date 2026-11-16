@@ -1,6 +1,3 @@
-//! A vault made by real members over an in-process relay, for tests of what a member's
-//! phone does (approve, respond, reject, send) through `zafe_core::node`.
-
 use std::time::Duration;
 
 use rand::{rngs::StdRng, SeedableRng};
@@ -17,7 +14,6 @@ pub async fn start_relay() -> RelayClient {
     start_relay_with(zafe_relay::Relay::new()).await
 }
 
-/// `relay` served on a local port (e.g. with quotas).
 pub async fn start_relay_with(relay: zafe_relay::Relay) -> RelayClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -25,8 +21,6 @@ pub async fn start_relay_with(relay: zafe_relay::Relay) -> RelayClient {
     RelayClient::new(format!("http://{addr}"))
 }
 
-/// A `t`-of-`n` vault made over the relay. With `pools`, every member publishes a full
-/// one-tap pool (proposals then get signer groups); without, proposals are interactive.
 pub async fn vault(
     t: u16,
     n: u16,
@@ -40,7 +34,6 @@ pub async fn vault(
     vault_on(zafe_relay::Relay::new(), t, n, pools).await
 }
 
-/// [`vault`] on `relay` (e.g. one with quotas).
 pub async fn vault_on(
     relay: zafe_relay::Relay,
     t: u16,
@@ -116,8 +109,6 @@ pub async fn vault_on(
     (relay, ids, materials, stores)
 }
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
 pub fn member_dir(relay: &RelayClient, id: &Identity) -> std::path::PathBuf {
     let port = relay
         .base_url()
@@ -132,12 +123,10 @@ pub fn member_dir(relay: &RelayClient, id: &Identity) -> std::path::PathBuf {
     ))
 }
 
-/// The key that seals one member's setup state (any fixed key per member will do).
 pub fn setup_key(id: &Identity) -> zafe_core::nonce_store::NonceKey {
     zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
 }
 
-/// One member's safety words for `invite`, polled from its setup state dir.
 pub async fn safety_words(
     relay: &RelayClient,
     id: &Identity,

@@ -1,9 +1,3 @@
-/// Public lightwalletd servers offered in Settings for each network, and the fallbacks
-/// sync switches to when the chosen one stops answering.
-///
-/// All of these answered `GetLightdInfo` on the right chain on 2026-10-06 (Stardust's
-/// `eu2`/`jp` hosts and two community servers with broken TLS were left out). The first
-/// preset of each network is its build default (`network_config.dart`).
 library;
 
 import 'network_config.dart';
@@ -15,7 +9,6 @@ class LightwalletdPreset {
     required this.url,
   });
 
-  /// Who runs it, e.g. `Zec Rocks`.
   final String operator;
   final String region;
   final String url;
@@ -82,14 +75,12 @@ const List<LightwalletdPreset> kRegtestLightwalletdPresets = [
   ),
 ];
 
-/// The presets for this build's network.
 const List<LightwalletdPreset> kLightwalletdPresets = kZafeNetwork == 'main'
     ? kMainnetLightwalletdPresets
     : kZafeNetwork == 'test'
     ? kTestnetLightwalletdPresets
     : kRegtestLightwalletdPresets;
 
-/// The preset with this URL, or null for a custom server.
 LightwalletdPreset? lightwalletdPresetFor(
   String url, [
   List<LightwalletdPreset> presets = kLightwalletdPresets,
@@ -100,8 +91,6 @@ LightwalletdPreset? lightwalletdPresetFor(
   return null;
 }
 
-/// Where sync may fail over from `url`: the other presets in list order. A custom server
-/// gets none, so the app never leaves a server the user chose by hand.
 List<LightwalletdPreset> lightwalletdFallbacks(
   String url, [
   List<LightwalletdPreset> presets = kLightwalletdPresets,

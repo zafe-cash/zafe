@@ -1,7 +1,3 @@
-//! One-tap signing (preprocessing): members sign at approval time from pre-published
-//! commitments, for every signer group they are in; any complete group aggregates into
-//! valid spend authorization signatures without a request round.
-
 use std::collections::BTreeMap;
 
 use orchard::keys::Scope;
@@ -22,7 +18,7 @@ use zafe_core::{
 };
 use zcash_protocol::memo::{Memo, MemoBytes};
 
-mod common;
+pub mod common;
 use common::*;
 
 struct Fixture {
@@ -30,9 +26,7 @@ struct Fixture {
     pools: Vec<MemoryPoolStore>,
     pczt: Pczt,
     expected: Expectations,
-    /// The three 2-of-3 groups as member indexes, in descriptor order.
     groups: Vec<Vec<usize>>,
-    /// `commitments[group][spend][position]`, as the vault log would assign them.
     commitments: Vec<Vec<Vec<Vec<u8>>>>,
 }
 
@@ -71,15 +65,12 @@ impl Fixture {
             memo: *memo.as_array(),
         }]);
 
-        // Preprocessing: each member publishes commitments ahead of time (2 each: one per
-        // group it is in, one spend), keeping the nonces.
         let mut pools: Vec<MemoryPoolStore> = (0..3).map(|_| MemoryPoolStore::default()).collect();
         let mut published: Vec<Vec<Vec<u8>>> = Vec::new();
         for (i, pool) in pools.iter_mut().enumerate() {
             published
                 .push(new_pool_commitments(&members[i].1.key_package, 2, pool, &mut rng).unwrap());
         }
-        // The log assigns them in order: groups {0,1}, {0,2}, {1,2}.
         let groups = vec![vec![0, 1], vec![0, 2], vec![1, 2]];
         let mut next = [0usize; 3];
         let commitments = groups
@@ -194,7 +185,6 @@ fn every_group_signs_at_approval_time() {
         assert_eq!(shares.len(), 2, "each member is in two 2-of-3 groups");
         posted.insert(m, shares);
     }
-    // Every group aggregates into valid signatures; one is fully proved and extracted.
     for g in 0..3 {
         let signatures = f.aggregate(g, &posted);
         if g == 2 {
@@ -210,7 +200,6 @@ fn two_approvals_are_enough() {
     for m in [0, 2] {
         posted.insert(m, f.approve(m).unwrap());
     }
-    // Group {0,2} (index 1) is complete; member 1 never took part.
     let signatures = f.aggregate(1, &posted);
     f.finalize(&signatures);
 }
@@ -225,7 +214,6 @@ fn nonces_are_single_use() {
 #[test]
 fn a_bad_plan_consumes_nothing() {
     let mut f = Fixture::new(63);
-    // Member 0's plan with member 1's commitment swapped in for group {0,2}: not ours.
     let mut plan = f.plan(0);
     plan[1].2[0][0] = f.commitments[0][0][1].clone();
     let (id, out) = &f.members[0];
@@ -238,7 +226,6 @@ fn a_bad_plan_consumes_nothing() {
         .sign_groups(&f.pczt, &f.expected, &plan, &mut f.pools[0])
         .unwrap_err();
     assert!(matches!(err, SessionError::NoNonces));
-    // Both of member 0's nonces are still there: the check ran before any was consumed.
     assert!(f.pools[0].contains(&f.commitments[0][0][0]));
     assert!(f.pools[0].contains(&f.commitments[1][0][0]));
 }
@@ -246,7 +233,6 @@ fn a_bad_plan_consumes_nothing() {
 #[test]
 fn a_mismatching_transaction_consumes_nothing() {
     let mut f = Fixture::new(64);
-    // The member expects a different amount than the PCZT pays: verification fails first.
     f.expected.payments[0].amount_zat += 1;
     assert!(matches!(f.approve(0), Err(SessionError::Verify(_))));
     assert!(f.pools[0].contains(&f.commitments[0][0][0]));

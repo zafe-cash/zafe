@@ -1,19 +1,5 @@
 name: Relay deploy
 
-# Builds the relay image, pushes it to GHCR with build provenance, and deploys that exact
-# digest to the testnet VPS (infra/relay/vps/), which rolls back if /health fails.
-# Mainnet never deploys from here: .github/workflows/relay-mainnet.yml promotes a digest
-# that has been running on testnet, after a reviewer approves.
-#
-# Needs a GitHub environment `relay-testnet` (deploys from main only) with:
-#   secret   RELAY_TESTNET_SSH_KEY   private key of the VPS user `zafe-testnet` (bootstrap.sh):
-#                                its forced command can only deploy testnet.
-#   secret   RELAY_KNOWN_HOSTS   `ssh-keyscan -t ed25519 <host>` output, checked out of band
-#   variable RELAY_HOST          the VPS address, e.g. 57.129.172.198
-#   variable RELAY_DOMAIN        e.g. testnet.relay.zafe.cash (DNS only, pointing at the VPS)
-#   secret   RELAY_FCM_SERVICE_ACCOUNT_JSON   optional: Firebase service-account key (JSON)
-#                                for pushes; written to the server's secrets.env each deploy
-
 on:
   push:
     branches: [main]
@@ -30,11 +16,6 @@ on:
 
 permissions:
   contents: read
-
-# Superseded runs stop where that's safe: a newer push cancels an older run's tests and
-# image build (job-level groups below), but never a deploy that has started: the deploy
-# job holds `relay-deploy` (shared with relay-mainnet.yml) without cancelling, so it
-# finishes and only a queued, not-yet-started deploy is replaced by the newer one.
 
 env:
   CARGO_TERM_COLOR: always
@@ -63,8 +44,6 @@ jobs:
     concurrency:
       group: relay-image-${{ github.ref }}
       cancel-in-progress: true
-    # Only main builds are pushed (and attested): a manual run from a branch must not
-    # produce an image the mainnet promotion's provenance check would accept, or move :main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -96,8 +75,6 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT OR Apache-2.0
-          # Layers cached in the registry, not in Actions' cache (10 GB per repo, shared
-          # with the Rust caches, which it pushed out).
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
       - uses: actions/attest-build-provenance@v2
@@ -136,14 +113,12 @@ jobs:
             "${{ vars.RELAY_HOST }}" zafe-testnet > ~/.ssh/config
       - name: Copy compose files
         run: |
-          # The server downloads this commit from GitHub itself (only commits on main).
           ssh relay "sync ${{ github.sha }}"
       - name: Relay secrets
         env:
           FCM: ${{ secrets.RELAY_FCM_SERVICE_ACCOUNT_JSON }}
         run: |
           if [ -n "$FCM" ]; then
-            # One line, single-quoted: Compose then takes it literally (no ${} interpolation).
             json=$(jq -ce . <<<"$FCM")
             case "$json" in *"'"*) echo "::error::the FCM key contains a single quote"; exit 1;; esac
             line=$(printf "ZAFE_FCM_SERVICE_ACCOUNT_JSON='%s'" "$json")
@@ -159,7 +134,6 @@ jobs:
           printf '%s' "$TOKEN" | ssh relay "deploy $DIGEST ${{ vars.RELAY_DOMAIN }}"
       - name: Public health check
         run: |
-          # The first deploy waits for Caddy's certificate.
           for _ in $(seq 30); do
             if [ "$(curl -fsS --max-time 10 "https://${{ vars.RELAY_DOMAIN }}/health")" = ok ]; then
               echo "https://${{ vars.RELAY_DOMAIN }} is healthy"; exit 0

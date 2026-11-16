@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""Checks that every relative link in the repo's Markdown resolves.
-
-For each tracked *.md file (git ls-files), every [text](target) link that isn't a URL,
-mailto or pure #anchor must point to a file or directory that exists; a `#heading` on a
-Markdown target must match one of its headings (GitHub's slug rules: lower case, spaces
-to hyphens, punctuation dropped). Code spans and fenced blocks are skipped.
-
-Usage: scripts/check_md_links.py   (exit 1 on broken links)
-"""
 import pathlib
 import re
 import subprocess

@@ -6,11 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'zafe_paths.dart';
 import 'zafe_secure_store.dart';
 
-/// What the vault switcher shows for each vault (including ones not on screen): last known
-/// balance and how many payments wait for this member. A small file per vault, written by
-/// the app and by background checks (files are shared across isolates, prefs caches aren't).
-/// The balance itself lives in secure storage ([ZafeSecureStore.balance]), not in the
-/// file; writing the file drops the plain-text balance older versions kept there.
 class VaultSummaryInfo {
   const VaultSummaryInfo({
     this.balanceZat,
@@ -21,19 +16,14 @@ class VaultSummaryInfo {
   final BigInt? balanceZat;
   final int actionable;
 
-  /// A backup of this device's copy exists (exported here, or restored from one).
   final bool backedUp;
 
-  /// Last successful wallet sync (by the app or a background check).
   final DateTime? syncedAt;
 }
 
 class VaultSummaries {
-  /// Bumped after each write on this isolate (the app's refreshes, and the check a push
-  /// runs while the app is open), so what's derived from several vaults can re-read.
   static final ValueNotifier<int> changes = ValueNotifier(0);
 
-  /// Whether any of [vaultIds] has a payment waiting for this member (file fields only).
   static Future<bool> anyWaiting(Iterable<String> vaultIds) async {
     for (final id in vaultIds) {
       if ((await _readFile(id)).actionable > 0) return true;
@@ -62,7 +52,6 @@ class VaultSummaries {
     }
   }
 
-  /// The file's fields only (no secure storage read).
   static Future<VaultSummaryInfo> _readFile(String vaultId) async {
     try {
       final j = jsonDecode(await (await _file(vaultId)).readAsString()) as Map;
@@ -78,10 +67,8 @@ class VaultSummaries {
     }
   }
 
-  // Writes are read-modify-write: serialize them (sync and refresh both write).
   static Future<void> _queue = Future.value();
 
-  /// Updates the given fields, keeping the others. Never throws (the summary is a cache).
   static Future<void> write(
     String vaultId, {
     BigInt? balanceZat,
@@ -97,7 +84,6 @@ class VaultSummaries {
         final old = await _readFile(vaultId);
         final f = await _file(vaultId);
         await f.parent.create(recursive: true);
-        // A unique temp name: background checks in another isolate may write too.
         final tmp = File(
           '${f.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
         );

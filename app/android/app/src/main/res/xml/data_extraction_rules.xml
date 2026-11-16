@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Zafe keeps single-use FROST nonces and key material on this device only: restoring an
-     old copy could make a member sign twice with the same nonces (spec §9.4). -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" path="." />

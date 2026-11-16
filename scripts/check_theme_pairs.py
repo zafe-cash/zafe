@@ -1,25 +1,4 @@
 #!/usr/bin/env python3
-"""Checks that every theme colour token means the same thing in dark and light mode.
-
-Each file in app/lib/src/core/theme/colors/ defines `static const dark = X(...)` and
-`static const light = X(...)`. For every token both values are resolved to a colour
-(from app/lib/src/core/theme/primitives.dart, or a literal `Color(0x...)`) and the pair
-is flagged when:
-
-  * ramp differs: both sides come from primitive ramps, but different ones (the sync
-    glow was gold in light mode and the neutral grey in dark, 2026-10-27);
-  * a foreground token (text, icon, label, sync, ticker) reads as a colour in one theme
-    and near-grey in the other (OKLCH chroma under 0.06 against 0.075 or more): the sync
-    text was gold in light mode and cream in dark, both from the gold ramp;
-  * literal colours: one is a colour and the other grey, or the hues differ by more
-    than 45 degrees;
-  * a token is set in one theme only.
-
-A deliberate difference is allowed with a comment on either line:
-`// theme-pair: <why>`.
-
-Usage: scripts/check_theme_pairs.py   (exit 1 on findings)
-"""
 import math
 import pathlib
 import re
@@ -30,9 +9,6 @@ THEME = ROOT / "app/lib/src/core/theme"
 PRIMITIVES = THEME / "primitives.dart"
 COLORS = THEME / "colors"
 
-# OKLCH chroma: under GREY_CHROMA a colour is grey; a foreground token under
-# FAINT_CHROMA reads grey next to one at COLOURED_CHROMA or more. Near-transparent and
-# near-black colours carry little hue, so they are only compared when visible.
 GREY_CHROMA = 0.03
 FAINT_CHROMA = 0.06
 COLOURED_CHROMA = 0.075
@@ -41,10 +17,12 @@ MIN_LIGHTNESS = 0.15
 MAX_HUE_DIFF = 45
 FOREGROUND_CLASSES = {"AppTextColors", "AppIconColors", "AppSyncColors"}
 FOREGROUND_FIELD = re.compile(r"(text|label|icon|ticker|glow|fg)", re.I)
+ON_FILL_FIELD = re.compile(r"^label")
+INACTIVE_CLASS = re.compile(r"Disabled")
+MIN_CONTRAST = 4.5
 
 
 def parse_primitives():
-    """{'GoldPrimitives.p500Dark': 0xAARRGGBB}"""
     values = {}
     family = None
     for line in PRIMITIVES.read_text().splitlines():
@@ -59,7 +37,6 @@ def parse_primitives():
 
 
 def parse_sets(text):
-    """[(class, {'dark': {field: (expr, line, allowed)}, 'light': {...}})]"""
     sets = {}
     lines = text.splitlines()
     i = 0
@@ -74,11 +51,9 @@ def parse_sets(text):
         i += 1
         while i < len(lines) and depth > 0:
             line = lines[i]
-            fm = re.match(r"\s*(\w+):\s*(.+?),?\s*(//.*)?$", line)
+            fm = re.match(r"\s*(\w+):\s*(.+?),?\s*$", line)
             if fm and depth == 1:
-                expr = fm.group(2).rstrip(",").strip()
-                allowed = "theme-pair:" in line or "theme-pair:" in lines[i - 1]
-                fields[fm.group(1)] = (expr, i + 1, allowed)
+                fields[fm.group(1)] = (fm.group(2).rstrip(",").strip(), i + 1)
             depth += line.count("(") - line.count(")")
             i += 1
         sets.setdefault(cls, {})[theme] = fields
@@ -86,7 +61,6 @@ def parse_sets(text):
 
 
 def resolve(expr, prims):
-    """(argb, ramp or None) for a primitive or a literal; None for anything else."""
     m = re.fullmatch(r"(?:const\s+)?Color\(0x([0-9A-Fa-f]{8})\)", expr)
     if m:
         return int(m.group(1), 16), None
@@ -97,7 +71,6 @@ def resolve(expr, prims):
 
 
 def oklch(argb):
-    """(alpha 0-255, L, C, hue degrees)"""
     a = (argb >> 24) & 0xFF
     rgb = [((argb >> sh) & 0xFF) / 255 for sh in (16, 8, 0)]
     r, g, b = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
@@ -108,6 +81,32 @@ def oklch(argb):
     ca = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
     cb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
     return a, lightness, math.hypot(ca, cb), math.degrees(math.atan2(cb, ca)) % 360
+
+
+def luminance(argb):
+    rgb = [((argb >> sh) & 0xFF) / 255 for sh in (16, 8, 0)]
+    r, g, b = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b):
+    hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def on_fill_findings(rel, cls, field, themes, prims):
+    findings = []
+    for theme, fields in themes.items():
+        fg, bg = resolve(fields[field][0], prims), resolve(fields["bg"][0], prims)
+        if fg is None or bg is None:
+            findings.append(f"{rel}:{fields[field][1]} {cls}.{field}: {theme} colour isn't a primitive")
+            continue
+        ratio = contrast(fg[0], bg[0])
+        if ratio < MIN_CONTRAST:
+            findings.append(
+                f"{rel}:{fields[field][1]} {cls}.{field}: {theme} contrast on bg is {ratio:.1f}, under {MIN_CONTRAST}"
+            )
+    return findings
 
 
 def visible(argb):
@@ -127,12 +126,14 @@ def main():
                     where = dark.get(field) or light.get(field)
                     findings.append(f"{rel}:{where[1]} {cls}.{field}: set in one theme only")
                     continue
-                (de, dl, da), (le, ll, la) = dark[field], light[field]
-                if da or la:
+                (de, dl), (le, ll) = dark[field], light[field]
+                active = not INACTIVE_CLASS.search(cls)
+                if active and ON_FILL_FIELD.search(field) and "bg" in dark and "bg" in light:
+                    findings.extend(on_fill_findings(rel, cls, field, themes, prims))
                     continue
                 d, l = resolve(de, prims), resolve(le, prims)
                 if d is None or l is None:
-                    continue  # another token or an expression: checked where it's defined
+                    continue
                 (dc, dramp), (lc, lramp) = d, l
                 tag = f"{rel}:{dl} {cls}.{field}: dark {de} #{dc:08X}, light {le} #{lc:08X}"
                 if dramp and lramp and dramp != lramp:
@@ -153,7 +154,7 @@ def main():
                     )
                     continue
                 if dramp and lramp:
-                    continue  # one ramp: same hue by construction
+                    continue
                 if (dch < GREY_CHROMA) != (lch < GREY_CHROMA):
                     findings.append(f"{tag}: grey in one theme, coloured in the other")
                     continue
@@ -164,8 +165,7 @@ def main():
     for f in findings:
         print(f)
     if findings:
-        print(f"\n{len(findings)} theme pair(s) differ. Fix them, or mark a deliberate one "
-              "with `// theme-pair: <why>`.", file=sys.stderr)
+        print(f"\n{len(findings)} theme pair(s) differ.", file=sys.stderr)
         return 1
     print("theme pairs match")
     return 0

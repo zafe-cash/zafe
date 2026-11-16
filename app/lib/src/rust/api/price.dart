@@ -7,5 +7,4 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// The latest price of 1 ZEC in USD.
 Future<double> zecUsdPrice() => RustLib.instance.api.crateApiPriceZecUsdPrice();

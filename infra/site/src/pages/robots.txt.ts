@@ -1,7 +1,3 @@
-// /robots.txt, built from `site` in astro.config.mjs. /join is deliberately NOT disallowed:
-// it carries `noindex`, and crawlers only see that if they may fetch the page (a blocked
-// URL can still be indexed from links). The invite itself is in the fragment, which
-// crawlers never receive.
 import type { APIRoute } from 'astro';
 
 export const GET: APIRoute = ({ site }) => {

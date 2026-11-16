@@ -117,7 +117,7 @@ void main() {
       final h = _Harness();
       h.controller.update(_a);
       h.controller.update(_b);
-      h.ended.first(); // a's stream closes after the stop
+      h.ended.first();
       expect(h.controller.running, _b);
       expect(h.timers, isEmpty);
     });
@@ -137,7 +137,7 @@ void main() {
       final h = _Harness();
       h.controller.update(_a);
       h.ended.single();
-      h.controller.update(null); // backgrounded meanwhile
+      h.controller.update(null);
       expect(h.timers.single.cancelled, isTrue);
       h.timers.single.fire();
       expect(h.log, ['start a']);
@@ -148,7 +148,6 @@ void main() {
       final h = _Harness();
       h.controller.update(_a);
       h.ended.single();
-      // Coming back to the same wanted target while waiting starts at once.
       h.controller.update(_b);
       expect(h.log, ['start a', 'start b']);
       expect(h.timers.single.cancelled, isTrue);

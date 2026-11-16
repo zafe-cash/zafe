@@ -22,18 +22,13 @@ import 'vault_provider.dart';
 import '../core/storage/wallet_key.dart';
 import 'respond_policy.dart';
 
-/// A send in progress (or just failed) on this device.
 class SendState {
   const SendState({this.progress, this.error, this.timedOut = false});
 
-  /// Latest progress; `null` until the first event.
   final rust.SendProgress? progress;
 
-  /// Friendly error once a send attempt failed (the send is then no longer running).
   final String? error;
 
-  /// The attempt failed because chosen signers didn't answer in time: the leader can
-  /// wait and try again, or start a new signing round.
   final bool timedOut;
 
   bool get running => error == null && progress?.stage != rust.SendStage.sent;
@@ -60,40 +55,26 @@ class ProposalsState {
   final List<rust.ProposalInfo> items;
   final bool loaded;
 
-  /// Why the last refresh failed (usually the relay); cleared by the next success.
   final Object? error;
 
-  /// Last successful refresh (this session).
   final DateTime? refreshedAt;
 
-  /// Sends started on this device, by proposal id.
   final Map<String, SendState> sends;
 
-  /// Vault log entries from a newer Zafe that this build skipped (ask to update).
   final int newerVersionEntries;
 
-  /// Names members gave themselves in the vault log (key hex → name).
   final Map<String, String> sharedNames;
 
-  /// Members (key hex) who attested a backup of their current keys in the vault log.
   final Set<String> backedUp;
 
-  /// Signers moving to a new phone, waiting for approvals.
   final List<rust.SeatMove> seatMoves;
 
-  /// Seat moves with every approval: they complete after the helpers' 72 h unless the
-  /// old phone keeps its seat.
   final List<rust.PendingSeatMove> pendingSeatMoves;
 
-  /// This phone's seat switched to it and the server is still finishing the move: it
-  /// reads but can't write yet (not an error).
   final bool seatFinishing;
 
-  /// When each seat's old phone last said it still has the seat (key hex → Unix
-  /// seconds): approving to move it again must start with a call.
   final Map<String, BigInt> seatKeeps;
 
-  /// The move of this phone's own seat that it can still keep, if any.
   rust.PendingSeatMove? myPendingSeat(String? me) {
     for (final m in pendingSeatMoves) {
       if (m.oldKeyHex == me && m.canKeep) return m;
@@ -101,10 +82,8 @@ class ProposalsState {
     return null;
   }
 
-  /// Moved seats whose key isn't rebuilt on the new phone yet.
   final List<rust.RepairInfo> repairs;
 
-  /// The vault's switches to other relays (Activity: "Grants moved to relay.dao.org").
   final List<rust.RelayMoveRecord> relayMoves;
 
   rust.ProposalInfo? byId(String id) {
@@ -148,28 +127,18 @@ class ProposalsState {
   );
 }
 
-/// Vault proposals from the log, plus the member actions on them.
-///
-/// Each refresh also keeps this device's one-tap commitments topped up (in Rust), answers
-/// interactive signing requests, and starts the auto-send for any proposal whose
-/// signatures this member's approval completed (so it survives leaving the screen or
-/// restarting the app).
 class ProposalsNotifier extends Notifier<ProposalsState> {
   bool _refreshing = false;
 
-  /// When a refresh also answers signing requests (Home tells it about the live watch).
   final respondPolicy = RespondPolicy();
 
-  /// A refresh was asked for while one was running (see [refreshSoon]).
   bool _again = false;
 
-  /// The proving key is built once per process (see `_prewarm`).
   static bool _prewarmed = false;
   final _subscriptions = <String, StreamSubscription<rust.SendProgress>>{};
 
   @override
   ProposalsState build() {
-    // A different vault on screen starts from scratch (and cancels this one's listeners).
     ref.watch(vaultProvider.select((v) => v.activeId));
     ref.onDispose(() {
       for (final s in _subscriptions.values) {
@@ -188,11 +157,8 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
 
   ZafeEndpoints get _endpoints => ref.read(endpointsProvider);
 
-  /// Synced chain tip of the active vault (null before the first sync).
   int? get _height => _vault.balance?.height;
 
-  /// Refreshes now, or right after the running refresh if there is one: news that
-  /// arrives during a refresh may not be in it. For live activity events.
   void refreshSoon() {
     if (_refreshing) {
       _again = true;
@@ -201,9 +167,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     unawaited(refresh());
   }
 
-  /// Like [refresh], but never returns early. Called after an action of this device
-  /// (propose, approve, cancel...): a refresh already running may have read the relay
-  /// before the action landed, so wait for it and run a full one after it.
   Future<void> refreshFresh() async {
     while (_refreshing) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -225,7 +188,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         tipHeight: _height,
       );
       final items = list.items;
-      // Proposals hold notes: when they change, the next wallet sync must run in full.
       if (_fingerprint(items) != _fingerprint(state.items)) {
         ref.read(vaultProvider.notifier).markDirty();
       }
@@ -244,9 +206,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         repairs: list.repairs,
         relayMoves: list.moves,
       );
-      // A signer's seat moved to a new phone, or this phone followed the vault to
-      // another relay: keep this device's copy of the material current (and push
-      // registered on the vault's relay).
       final updated = list.updatedMaterial;
       if (updated != null) {
         await ref
@@ -259,8 +218,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         unawaited(_attestIfBackedUp(vault.activeId!));
       }
       unawaited(_publishPendingName(vault.activeId!, list.sharedNames));
-      // Seen on screen: never announced from the background. Only while the app is in
-      // the foreground; a refresh running in the background must not swallow news.
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         unawaited(
           recordSeen(
@@ -283,7 +240,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     } catch (e) {
       debugPrint('refresh failed: ${describeError(e)}');
       state = state.copyWith(error: e);
-      // A refresh refused because the vault moved still shows the move to follow.
       unawaited(ref.read(relayMoveProvider.notifier).refresh());
     } finally {
       _refreshing = false;
@@ -294,11 +250,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     }
   }
 
-  /// Once this device may be the one to send a payment, build the proving key in the
-  /// background (once per process, 2-3 s on a phone) so the send doesn't wait for it:
-  /// a payment that is approved, or one waiting only for this member's approval (the
-  /// approval completes it and this phone sends at once; it used to build the key
-  /// during that send).
   void _prewarm() {
     if (_prewarmed) return;
     final sendable = state.items.any(
@@ -319,8 +270,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     );
   }
 
-  /// The member whose approval completed the signatures sends, if the proposer asked for
-  /// it. A failed attempt is not retried automatically (the screen offers "Try again").
   void _autoSend() {
     for (final p in state.items) {
       final due =
@@ -347,15 +296,10 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
         tipHeight: _height,
       );
     } catch (_) {
-      // Not synced yet or offline: the next poll retries.
       respondPolicy.failed();
     }
   }
 
-  /// Proposes [payments] (one, or a batch of up to 50) and approves them as this member,
-  /// in one bridge call under the caller's unlock (the approval reuses the log the
-  /// proposal read). The new payment is in [state] when this returns, already showing
-  /// this member's approval; if the approval failed, the payment stays open for it.
   Future<String> proposeAndApprove({
     required List<rust.PaymentInput> payments,
     required bool autoSend,
@@ -377,14 +321,11 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       debugPrint('approving my own proposal failed: ${describeError(e)}');
     }
     state = state.copyWith(items: out.items, loaded: true);
-    // Proposals hold notes: the next wallet sync runs in full.
     ref.read(vaultProvider.notifier).markDirty();
-    // The rest of a refresh (auto-send, seen, summaries) follows in the background.
     refreshSoon();
     return out.id;
   }
 
-  /// The exact network fee (zatoshis) proposing [payments] would pay now.
   Future<BigInt> estimateFee(List<rust.PaymentInput> payments) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
@@ -411,10 +352,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     );
   }
 
-  /// Approves (and, for one-tap proposals, signs). If this approval completed the
-  /// signatures, the sending screen (or the refresh that follows) starts sending.
-  /// Approves [id]. [refresh]: false when the caller awaits its own refresh (the
-  /// proposer, whose page must open with the approval already shown).
   Future<rust.ApproveResult> approve(String id, {bool refresh = true}) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
@@ -428,13 +365,9 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       material: vault.material!,
       proposalId: id,
     );
-    // A new approval makes an earlier failed send's message stale.
     if (state.sends[id] case final send? when !send.running) {
       state = state.copyWith(sends: {...state.sends}..remove(id));
     }
-    // Not awaited: the refresh can start the auto-send, and the caller opens the
-    // sending screen to show it. Awaiting it kept the Approve button spinning through
-    // the whole send.
     if (refresh) refreshSoon();
     return result;
   }
@@ -451,9 +384,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await refreshFresh();
   }
 
-  /// The name chosen during setup (Create or Join), published once the vault exists;
-  /// a name already shared (the member renamed themselves since) wins. Best effort:
-  /// a failure leaves it pending for the next refresh.
   Future<void> _publishPendingName(String id, List<SignerName> shared) async {
     final name = await MyName.pending(id);
     if (name == null || !_namePublishing.add(id)) return;
@@ -472,11 +402,8 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
 
   static final _namePublishing = <String>{};
 
-  /// Vaults this session already tried to attest a backup for.
   static final _attested = <String>{};
 
-  /// Tells the other members this device has a backup (export, or a restore from one)
-  /// when the log doesn't say so yet. Best effort, once per vault per session.
   Future<void> _attestIfBackedUp(String id) async {
     if (!(await VaultSummaries.read(id)).backedUp || !_attested.add(id)) return;
     final vault = _vault;
@@ -493,9 +420,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     }
   }
 
-  /// Puts the vault's history back on the relay from this phone's copy (the relay lost
-  /// it or was rewound; spec §6.3). Returns how many log entries went back (0: the relay
-  /// already had all of them).
   Future<int> restoreRelay() async {
     final vault = _vault;
     final restored = await rust_relay_log.restoreRelay(
@@ -503,15 +427,11 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
       seeds: vault.identity!,
       material: vault.material!,
     );
-    // A restored relay has forgotten this phone's push token.
     unawaited(reregisterPush());
     await refreshFresh();
     return restored;
   }
 
-  /// Leaves a fork: discards this phone's copy of the vault history and follows the
-  /// relay's (spec §6.3). Returns how many entries only this phone had. The caller must
-  /// have asked the user first.
   Future<int> followRelay() async {
     final vault = _vault;
     final dropped = await rust_relay_log.followRelay(
@@ -523,8 +443,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return dropped;
   }
 
-  /// One step of the safety check with the phone that showed `code`: `null` until the
-  /// new phone has taken part, then the words to compare with it.
   Future<String?> newPhoneWords(String code) => rust_repair.newPhoneWords(
     relayUrl: _endpoints.relayUrl,
     seeds: _vault.identity!,
@@ -532,9 +450,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     code: code,
   );
 
-  /// Approves moving `oldKeyHex`'s seat to the phone that showed `code`, after its owner
-  /// read out the same `words`. Returns whether this was the last approval needed (the
-  /// move is then pending: it completes after the helpers' wait).
   Future<bool> approveSeatMove(
     String oldKeyHex,
     String code,
@@ -553,8 +468,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return moved;
   }
 
-  /// This phone still holds its seat: voids the pending move of it (the owner's tap only,
-  /// behind unlock; never from a background check).
   Future<void> keepSeat() async {
     final vault = _vault;
     await rust_repair.keepSeat(
@@ -565,8 +478,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await refreshFresh();
   }
 
-  /// This phone stops helping the pending move at `replacement`, for good (its owner says
-  /// they didn't lose their phone). Behind a confirm and the unlock.
   Future<void> stopHelping(BigInt replacement) async {
     final vault = _vault;
     await rust_repair.stopHelping(
@@ -578,9 +489,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await refreshFresh();
   }
 
-  /// Asks to restart rebuilding the key of the seat moved at `replacement` with
-  /// `takerKeyHex` (this phone offering, or the member whose offer it agrees to) in place
-  /// of `stalledKeyHex`, a helper not doing its part.
   Future<void> retryRepair(
     BigInt replacement,
     String stalledKeyHex,
@@ -598,7 +506,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await refreshFresh();
   }
 
-  /// Sets this member's name for the other members (empty clears it).
   Future<void> setMyName(String name) async {
     final vault = _vault;
     await rust.setMyName(
@@ -610,7 +517,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await refreshFresh();
   }
 
-  /// Cancels a proposal this member authored.
   Future<void> cancel(String id) async {
     final vault = _vault;
     await rust.cancelProposal(
@@ -622,8 +528,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await refreshFresh();
   }
 
-  /// Proposes moving a cancelled payment's funds back to the vault so it can never be
-  /// sent (every signature for it may already be out). Returns the new proposal id.
   Future<String> invalidate(String id) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
@@ -640,8 +544,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return newId;
   }
 
-  /// Cancels a payment that can no longer be completed the one-tap way and proposes the
-  /// same payment again with fresh signing data. Returns the new proposal id.
   Future<String> proposeAgain(String id) async {
     final vault = _vault;
     final paths = await ZafePaths.get();
@@ -658,8 +560,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     return newId;
   }
 
-  /// Abandons this device's unfinished signing round and starts a new one with the
-  /// approvers whose signatures are still unused.
   Future<void> startOver(String id) async {
     if (state.sends[id]?.running ?? false) return;
     final paths = await ZafePaths.get();
@@ -670,9 +570,6 @@ class ProposalsNotifier extends Notifier<ProposalsState> {
     await startSend(id);
   }
 
-  /// Sends a proposal: directly from the approvals' signatures when they are complete
-  /// (one tap), otherwise by asking the approvers to sign (interactive). Progress and
-  /// errors land in `state.sends[id]`.
   Future<void> startSend(String id) async {
     if (state.sends[id]?.running ?? false) return;
     _setSend(id, const SendState());
@@ -728,7 +625,6 @@ final proposalsProvider = NotifierProvider<ProposalsNotifier, ProposalsState>(
   ProposalsNotifier.new,
 );
 
-/// This device's independent check of one proposal (re-run when the page opens).
 final proposalReviewProvider = FutureProvider.autoDispose
     .family<rust.ReviewInfo, String>(
       (ref, id) => ref.read(proposalsProvider.notifier).review(id),

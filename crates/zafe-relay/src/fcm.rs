@@ -1,18 +1,3 @@
-//! Firebase Cloud Messaging (HTTP v1) sender for content-free "vault activity" pushes.
-//!
-//! The relay is blind, so a push carries no data about the vault: it only wakes the app,
-//! which then reads the encrypted log itself. Messages are data-only, high priority, and
-//! share one collapse key, so a burst of log entries wakes a device once.
-//!
-//! Auth: the service-account key (the JSON file from the Firebase console) signs a short
-//! RS256 JWT, exchanged at Google's token endpoint for an OAuth access token, cached until
-//! shortly before it expires.
-//!
-//! Sends go through a queue that holds each token once and at most [`MAX_IN_FLIGHT`]
-//! workers, so a burst across vaults never opens unbounded connections and a queued push
-//! is never dropped (the relay already sends a token at most one push per window,
-//! [`crate::push`]).
-
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
@@ -27,7 +12,6 @@ use crate::Notifier;
 
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 
-/// Most pushes in flight to FCM at once.
 pub const MAX_IN_FLIGHT: usize = 32;
 const FCM_BASE: &str = "https://fcm.googleapis.com";
 
@@ -55,7 +39,6 @@ struct CachedToken {
     expires_at: u64,
 }
 
-/// Sends FCM pushes; APNs tokens are only logged until the APNs sender lands.
 pub struct FcmNotifier {
     account: ServiceAccount,
     fcm_base: String,
@@ -66,9 +49,6 @@ pub struct FcmNotifier {
     queue: Arc<Queue>,
 }
 
-/// Pushes waiting for a worker: each token once (a later push to a queued token is the
-/// same push), and how many workers run. One lock covers all three, so a push queued as
-/// the last worker stops always finds a worker.
 #[derive(Default)]
 struct Waiting {
     pushes: VecDeque<(PushPlatform, String)>,
@@ -81,16 +61,13 @@ struct Queue {
     waiting: std::sync::Mutex<Waiting>,
 }
 
-/// Callback for device tokens FCM reports as gone.
 type OnUnregistered = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl FcmNotifier {
-    /// Must be created inside the relay's tokio runtime (pushes are sent on it).
     pub fn new(account: ServiceAccount) -> Self {
         Self::with_endpoint(account, FCM_BASE)
     }
 
-    /// Custom FCM base URL (tests).
     pub fn with_endpoint(account: ServiceAccount, fcm_base: &str) -> Self {
         Self {
             account,
@@ -106,22 +83,11 @@ impl FcmNotifier {
         }
     }
 
-    /// Called with a device token FCM reports as no longer registered (app uninstalled,
-    /// token rotated), so the relay stops pushing to it.
     pub fn on_unregistered(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
         self.on_unregistered = Some(Arc::new(f));
         self
     }
 
-    /// Whether an FCM v1 error response says the device token will never work for this
-    /// relay (FCM v1 `ErrorCode` reference):
-    /// - 404 `UNREGISTERED`: "App instance was unregistered from FCM";
-    /// - 403 `SENDER_ID_MISMATCH`: "The authenticated sender ID is different from the
-    ///   sender ID for the registration token";
-    /// - 400 `INVALID_ARGUMENT` only when its `google.rpc.BadRequest` names the token field
-    ///   (`message.token` / `message.fid`): "An extension of type `google.rpc.BadRequest`
-    ///   is returned to specify which field was invalid", and "INVALID_ARGUMENT can also be
-    ///   returned in cases of issues in the message payload" (FCM "Manage tokens").
     pub fn is_unregistered(status: u16, body: &str) -> bool {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
             return false;
@@ -208,8 +174,6 @@ impl FcmNotifier {
         Ok(resp.access_token)
     }
 
-    /// The FCM message: data only, no vault information, high priority, one collapse key.
-    /// An installation ID goes in `fid`, an older registration token in `token`.
     pub fn message(platform: PushPlatform, target: &str) -> serde_json::Value {
         let field = if platform == PushPlatform::FcmFid {
             "fid"
@@ -227,7 +191,6 @@ impl FcmNotifier {
 }
 
 impl FcmNotifier {
-    /// Sends one push and reports a gone token.
     async fn send(
         http: &reqwest::Client,
         account: &ServiceAccount,
@@ -261,8 +224,6 @@ impl FcmNotifier {
         Ok(())
     }
 
-    /// Starts a worker (the caller counted it in [`Waiting::workers`]); it sends queued
-    /// pushes until the queue is empty.
     fn spawn_worker(&self) {
         let queue = self.queue.clone();
         let (http, account, cache) = (self.http.clone(), self.account.clone(), self.token.clone());
@@ -279,8 +240,6 @@ impl FcmNotifier {
                     if let Some((_, token)) = &next {
                         waiting.tokens.remove(token);
                     } else {
-                        // Under the queue's lock: a push queued after this sees one fewer
-                        // worker and starts its own.
                         waiting.workers -= 1;
                     }
                     next
@@ -318,10 +277,9 @@ impl Notifier for FcmNotifier {
         let start = {
             let mut waiting = self.queue.waiting.lock().expect("lock");
             if !waiting.tokens.insert(token.to_owned()) {
-                return; // already queued: that push covers this one
+                return;
             }
             waiting.pushes.push_back((platform, token.to_owned()));
-            // Enough workers run: one of them takes it.
             let start = waiting.workers < MAX_IN_FLIGHT;
             if start {
                 waiting.workers += 1;
@@ -352,7 +310,6 @@ mod tests {
         let token = FcmNotifier::message(PushPlatform::Fcm, "t1");
         assert_eq!(token["message"]["token"], "t1");
         assert!(token["message"].get("fid").is_none());
-        // No vault information either way.
         assert_eq!(fid["message"]["data"], serde_json::json!({ "t": "vault" }));
     }
 }

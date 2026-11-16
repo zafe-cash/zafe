@@ -2,13 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
-/// A vault's picture: one of [VaultEmblem.motifCount] small illustrations on a dark
-/// tile, with the motif and its colours picked from the vault id, so every member's
-/// phone shows the same picture for the same vault.
 class VaultEmblem extends StatelessWidget {
   const VaultEmblem({required this.vaultId, this.size = 40, super.key});
 
-  /// Vault id (hex).
   final String vaultId;
   final double size;
 
@@ -35,7 +31,6 @@ class VaultEmblem extends StatelessWidget {
   }
 }
 
-/// Motif and colours for one vault.
 @immutable
 class EmblemLook {
   const EmblemLook({
@@ -45,7 +40,6 @@ class EmblemLook {
     required this.accent,
   });
 
-  /// Deterministic from the id: FNV-1a over its characters picks the motif and palette.
   factory EmblemLook.of(String vaultId) {
     var h = 0x811c9dc5;
     for (final c in vaultId.codeUnits) {
@@ -65,33 +59,16 @@ class EmblemLook {
   final Color ink;
   final Color accent;
 
-  // (tile, ink, accent): dark tiles in both themes (pictures, not surfaces). Verdigris is
-  // the brand and gold is keys and funds, with pale verdigris and bronze as companions;
-  // no violet, coral or blue (see docs/brand.md). Keep six entries in this order: the
-  // vault id's hash picks one, so members agree.
   static const _palettes = <(Color, Color, Color)>[
-    (Color(0xFF091312), Color(0xFF51DDD2), Color(0xFFF3BA3C)), // teal on ink
-    (
-      Color(0xFF1B170C),
-      Color(0xFFF3BA3C),
-      Color(0xFF51DDD2),
-    ), // gold on dark bronze
-    (Color(0xFF0C1719), Color(0xFFD9F5F2), Color(0xFF51DDD2)), // pale verdigris
-    (
-      Color(0xFF004A46),
-      Color(0xFFD9F5F2),
-      Color(0xFFF3BA3C),
-    ), // the app icon's tile
-    (Color(0xFF1A140B), Color(0xFFC9923A), Color(0xFFD9F5F2)), // deep bronze
-    (
-      Color(0xFF0B1716),
-      Color(0xFF84E1D9),
-      Color(0xFFF3BA3C),
-    ), // light verdigris
+    (Color(0xFF091312), Color(0xFF51DDD2), Color(0xFFF3BA3C)),
+    (Color(0xFF1B170C), Color(0xFFF3BA3C), Color(0xFF51DDD2)),
+    (Color(0xFF0C1719), Color(0xFFD9F5F2), Color(0xFF51DDD2)),
+    (Color(0xFF004A46), Color(0xFFD9F5F2), Color(0xFFF3BA3C)),
+    (Color(0xFF1A140B), Color(0xFFC9923A), Color(0xFFD9F5F2)),
+    (Color(0xFF0B1716), Color(0xFF84E1D9), Color(0xFFF3BA3C)),
   ];
 }
 
-/// Paints [EmblemLook.motif] into a unit square scaled to the canvas.
 class EmblemPainter extends CustomPainter {
   const EmblemPainter(this.look);
   final EmblemLook look;
@@ -129,7 +106,6 @@ class EmblemPainter extends CustomPainter {
     canvas.restore();
   }
 
-  /// A safe dial: ring, ticks and a handle.
   void _dial(Canvas c, Paint s, Paint a) {
     const o = Offset(50, 50);
     c.drawCircle(o, 30, s);
@@ -144,7 +120,6 @@ class EmblemPainter extends CustomPainter {
     c.drawCircle(o, 6, a);
   }
 
-  /// A keyhole under an arch.
   void _keyhole(Canvas c, Paint f, Paint a) {
     c.drawCircle(const Offset(50, 40), 14, f);
     c.drawPath(
@@ -159,7 +134,6 @@ class EmblemPainter extends CustomPainter {
     c.drawCircle(const Offset(50, 40), 5, a);
   }
 
-  /// Two peaks and a sun.
   void _peaks(Canvas c, Paint f, Paint a) {
     c.drawCircle(const Offset(68, 32), 9, a);
     c.drawPath(
@@ -174,7 +148,6 @@ class EmblemPainter extends CustomPainter {
     );
   }
 
-  /// Three waves.
   void _waves(Canvas c, Paint s, Paint a) {
     for (var row = 0; row < 3; row++) {
       final y = 34.0 + row * 16;
@@ -188,7 +161,6 @@ class EmblemPainter extends CustomPainter {
     }
   }
 
-  /// A stack of coins.
   void _coins(Canvas c, Paint s, Paint a) {
     final coin = Paint.from(s)..strokeWidth = 5;
     for (var i = 0; i < 3; i++) {
@@ -204,7 +176,6 @@ class EmblemPainter extends CustomPainter {
     );
   }
 
-  /// A cut gem.
   void _gem(Canvas c, Paint s, Paint a) {
     final outline = Path()
       ..moveTo(30, 36)
@@ -227,7 +198,6 @@ class EmblemPainter extends CustomPainter {
     );
   }
 
-  /// A sun with rays.
   void _sun(Canvas c, Paint s, Paint a) {
     const o = Offset(50, 50);
     c.drawCircle(o, 13, a);
@@ -238,7 +208,6 @@ class EmblemPainter extends CustomPainter {
     }
   }
 
-  /// A planet with a ring and a moon.
   void _orbit(Canvas c, Paint s, Paint a) {
     c.save();
     c.translate(50, 50);
@@ -249,8 +218,6 @@ class EmblemPainter extends CustomPainter {
     );
     c.restore();
     c.drawCircle(const Offset(50, 50), 15, Paint()..color = s.color);
-    // The moon at the lower-left end of the ring: the top-right corner is where the
-    // "something waits" badge sits, and a moon there read as a second dot.
     c.drawCircle(const Offset(22, 74), 6, a);
   }
 

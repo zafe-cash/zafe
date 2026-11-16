@@ -1,4 +1,3 @@
-// The www redirect (index.js), deployed by .github/workflows/site.yml with the site.
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "zafe-www",

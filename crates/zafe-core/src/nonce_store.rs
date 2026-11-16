@@ -1,19 +1,3 @@
-//! File-backed FROST nonce store (one file per proposal and PCZT).
-//!
-//! Nonces are secret and single-use. On devices the directory must be app-private and
-//! excluded from backups and device transfer (spec §9.4): Android `allowBackup="false"`,
-//! iOS `isExcludedFromBackup`. Restoring an old copy could make a member sign twice with the
-//! same nonces, which leaks their key share.
-//!
-//! Files are versioned (`zafe_proto::version`). A file in a version this build can't read
-//! counts as missing: its nonces are never used, which is always safe.
-//!
-//! Since version 2 the nonces are encrypted (XChaCha20-Poly1305, the file name as
-//! associated data) with a [`NonceKey`] derived from the member's identity seeds, which
-//! live in the phone's secure storage: a leaked nonce file plus the share later signed
-//! with it would give away the member's key share. Version 1 files (plaintext, written
-//! before) are still read, so published one-tap commitments stay usable after an update.
-
 use std::{fs, path::PathBuf};
 
 use chacha20poly1305::{
@@ -27,13 +11,10 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::session::{NonceStore, PoolStore, ProposalId, SessionError};
 
-/// The key nonce files are encrypted with, one per member and vault.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct NonceKey([u8; 32]);
 
 impl NonceKey {
-    /// Derived from this member's identity seeds for the vault (BLAKE3 `derive_key`,
-    /// length-prefixed), like the wallet database key: nothing more to store.
     pub fn derive(identity_seeds: &[u8], vault_id: &[u8]) -> Self {
         let mut hasher = blake3::Hasher::new_derive_key("Zafe signing nonce file key v1");
         hasher.update(&(identity_seeds.len() as u64).to_le_bytes());
@@ -42,12 +23,10 @@ impl NonceKey {
         Self(*hasher.finalize().as_bytes())
     }
 
-    /// A key derived elsewhere (e.g. `moves::MoveState`'s, from the vault secret).
     pub(crate) fn from_raw(key: [u8; 32]) -> Self {
         Self(key)
     }
 
-    /// `nonce || ciphertext`, bound to `name` (the file name).
     pub(crate) fn seal(&self, name: &str, plain: &[u8]) -> Vec<u8> {
         let mut nonce = [0u8; 24];
         rand::rngs::OsRng.fill_bytes(&mut nonce);
@@ -78,13 +57,10 @@ impl NonceKey {
     }
 }
 
-/// The body of a nonce file of `format`: decrypted for the current version, as stored for
-/// version 1 (plaintext). `None` for anything else, or a file that doesn't decrypt.
 fn file_body(format: Format, key: &NonceKey, path: &std::path::Path) -> Option<Vec<u8>> {
     file_body_named(format, key, path, path.file_name()?.to_str()?)
 }
 
-/// [`file_body`] for a file sealed under the name `name` (a claimed nonce file was renamed).
 fn file_body_named(
     format: Format,
     key: &NonceKey,
@@ -99,7 +75,6 @@ fn file_body_named(
     }
 }
 
-/// A nonce file of `format` holding `plain`, encrypted.
 fn sealed_file(format: Format, key: &NonceKey, path: &std::path::Path, plain: &[u8]) -> Vec<u8> {
     let name = path
         .file_name()
@@ -123,14 +98,10 @@ impl FileNonceStore {
         ))
     }
 
-    /// A signed reply kept until sent (`NonceStore::keep_reply`), by request hash.
     fn reply_file(&self, request_hash: &[u8; 32]) -> PathBuf {
         self.0.join(format!("{}.reply", hex::encode(request_hash)))
     }
 
-    /// Where a `take` moves a nonce file while it signs: `<file>.<random>.taking`, one name
-    /// per take, so a later take (of nonces a re-approval wrote afresh) can never replace
-    /// the file an earlier one is still reading.
     fn claim_file(&self, proposal: &ProposalId, hash: &[u8; 32]) -> PathBuf {
         let mut tag = [0u8; 8];
         rand::rngs::OsRng.fill_bytes(&mut tag);
@@ -187,23 +158,15 @@ impl NonceStore for FileNonceStore {
         let path = self.file(&proposal, &hash);
         let bytes = sealed_file(Format::Nonces, &self.1, &path, &plain);
         fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
-        // Atomic and flushed: a crash never leaves a truncated nonce file.
         crate::durable::write(&path, &bytes).map_err(|e| storage(&e))
     }
 
     fn take(&mut self, proposal: &ProposalId, hash: &[u8; 32]) -> Option<Vec<SigningNonces>> {
-        // Claim by renaming: a rename is atomic, so of two processes taking at once (the
-        // app and a background check) only one gets the file. Reading and then deleting by
-        // name let a take that had read the old nonces delete a re-approval's fresh file
-        // instead, and return the old nonces another take already had. A claim a crash
-        // left behind counts as released (`claimed`): never read again nor renamed back.
         let file = self.file(proposal, hash);
         let claim = self.claim_file(proposal, hash);
         fs::rename(&file, &claim).ok()?;
         let name = file.file_name()?.to_str()?;
         let body = zeroize::Zeroizing::new(file_body_named(Format::Nonces, &self.1, &claim, name)?);
-        // Delete before use, durably (this also makes the rename durable): a file back
-        // after a power cut could sign twice.
         crate::durable::remove(&claim).ok()?;
         decode_nonces(&body)
     }
@@ -229,7 +192,6 @@ impl NonceStore for FileNonceStore {
     fn keep_reply(&mut self, request_hash: &[u8; 32], reply: &[u8]) -> Result<(), SessionError> {
         let storage = |e: &dyn std::fmt::Debug| SessionError::Storage(format!("{e:?}"));
         fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
-        // The reply carries its own version tag (`SIGNATURE_SHARES`).
         crate::durable::write(&self.reply_file(request_hash), reply).map_err(|e| storage(&e))
     }
 
@@ -255,8 +217,6 @@ impl NonceStore for FileNonceStore {
     }
 }
 
-/// File-backed [`PoolStore`]: one file per pre-published commitment, named by the hash of
-/// the commitment. Same storage rules as [`FileNonceStore`].
 pub struct FilePoolStore(PathBuf, NonceKey);
 
 impl FilePoolStore {
@@ -272,7 +232,6 @@ impl FilePoolStore {
         self.0.join(format!("{}.bin", hash.to_hex()))
     }
 
-    /// Number of stored nonces (pre-published, not yet used or forgotten).
     pub fn len(&self) -> usize {
         fs::read_dir(&self.0).map_or(0, |d| {
             d.filter_map(Result::ok)
@@ -303,7 +262,7 @@ impl PoolStore for FilePoolStore {
     fn take(&mut self, commitment: &[u8]) -> Option<SigningNonces> {
         let path = self.file(commitment);
         let body = zeroize::Zeroizing::new(file_body(Format::PoolNonce, &self.1, &path)?);
-        crate::durable::remove(&path).ok()?; // delete before use, durably: never reusable
+        crate::durable::remove(&path).ok()?;
         SigningNonces::deserialize(&body).ok()
     }
 
@@ -319,7 +278,6 @@ impl PoolStore for FilePoolStore {
     ) -> Result<(), SessionError> {
         let storage = |e: &dyn std::fmt::Debug| SessionError::Storage(format!("{e:?}"));
         fs::create_dir_all(&self.0).map_err(|e| storage(&e))?;
-        // The event bytes carry their own version tag (`VAULT_EVENT`).
         crate::durable::write(&self.vote_file(proposal, pczt_hash), event).map_err(|e| storage(&e))
     }
 
@@ -333,8 +291,6 @@ impl PoolStore for FilePoolStore {
 }
 
 impl FilePoolStore {
-    /// A kept one-tap vote ([`PoolStore::keep_vote`]); `.vote`, so [`FilePoolStore::len`]
-    /// doesn't count it as a nonce.
     fn vote_file(&self, proposal: &ProposalId, pczt_hash: &[u8; 32]) -> PathBuf {
         self.0.join(format!(
             "{}-{}.vote",
@@ -357,23 +313,18 @@ mod tests {
         let hash = [7u8; 32];
         assert_eq!(store.kept_reply(&hash), None);
         store.keep_reply(&hash, b"shares").unwrap();
-        // Another handle on the same directory (a restarted app) finds it.
         assert_eq!(
             FileNonceStore::new(&dir, key())
                 .kept_reply(&hash)
                 .as_deref(),
             Some(&b"shares"[..])
         );
-        // A reply is not a nonce file.
         assert!(!store.contains(&[0; 16], &hash));
         store.drop_reply(&hash);
         assert_eq!(store.kept_reply(&hash), None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// A take claims the file by renaming it, so of two processes taking at once only one
-    /// gets the nonces; a claim a crash left behind counts as released (`claimed`) and is
-    /// never read again, while a re-approval's fresh nonces are taken normally.
     #[test]
     fn a_take_claims_the_file_first() {
         use std::sync::{Arc, Barrier};
@@ -403,7 +354,6 @@ mod tests {
             assert_eq!(got, 1);
         }
 
-        // A crash between the claim and the delete: the claim stays, nothing reads it.
         let mut store = FileNonceStore::new(&dir, key());
         store.put(p, h, vec![nonces()]).unwrap();
         assert!(!store.claimed(&p, &h));
@@ -411,7 +361,6 @@ mod tests {
         std::fs::rename(&file, store.claim_file(&p, &h)).unwrap();
         assert!(store.claimed(&p, &h) && !store.contains(&p, &h));
         assert!(store.take(&p, &h).is_none());
-        // A fresh approval's nonces are taken; the old claim still says "released".
         store.put(p, h, vec![nonces()]).unwrap();
         assert!(store.take(&p, &h).is_some());
         assert!(store.claimed(&p, &h));
@@ -440,7 +389,6 @@ mod tests {
         let mut store = FilePoolStore::new(&dir, key(b"seeds"));
         store.put(b"commitment", n.clone()).unwrap();
 
-        // Nothing of the secret nonces is on disk in the clear.
         let file = std::fs::read_dir(&dir)
             .unwrap()
             .next()
@@ -450,7 +398,6 @@ mod tests {
         let raw = std::fs::read(&file).unwrap();
         assert!(!raw.windows(32).any(|w| secret.windows(32).any(|s| s == w)));
 
-        // Another member's key (or a copied file) reads nothing, and leaves the file.
         assert!(FilePoolStore::new(&dir, key(b"other"))
             .take(b"commitment")
             .is_none());
@@ -467,7 +414,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("zafe-pool-v1-{}", std::process::id()));
         let mut store = FilePoolStore::new(&dir, NonceKey::derive(b"seeds", b"vault"));
         let n = nonces();
-        // What a build before encryption wrote: tag 1, then the serialized nonces.
         let mut old = 1u16.to_le_bytes().to_vec();
         old.extend_from_slice(&n.serialize().unwrap());
         std::fs::create_dir_all(&dir).unwrap();

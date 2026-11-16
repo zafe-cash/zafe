@@ -1,12 +1,4 @@
 ---
-// Showcase: one payment through a 2-of-3 vault, played by scrolling through a 3D world
-// (src/scripts/world.js): the phones hold key shards, Bob proposes (the vault is notified,
-// end-to-end encrypted), your phone checks the payment, you approve, the shards fuse, the
-// vault opens, the payment goes; then the call to action from above. The features live in
-// the story where they happen (no detour). Kept off the home page on purpose (a multisig
-// product's home should be calm); without WebGL or JavaScript it shows stills of the same
-// world (stills.sh). Copy: short, every claim shipped; the chain card is the real testnet
-// payment from the 2026-09-30 dry run.
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
@@ -19,12 +11,7 @@ import { getLabel, getUrl } from '../config';
   bodyClass="home showcase"
 >
   <script is:inline src="/assets/boot.js" slot="head"></script>
-  <!-- No logo intro here (that's the home page's): the world fades up from the paper
-       under a title card, and a light fixed nav keeps the way home in reach. -->
   <canvas class="world" aria-hidden="true"></canvas>
-  <!-- The static fallback (no GPU, reduced motion, no JavaScript) shows stills rendered
-       from the same world (stills.sh); html.js hides them until story.js decides. The
-       hero still is also the poster while the world loads. -->
   <picture class="still hero-still" aria-hidden="true">
     <source media="(max-aspect-ratio: 4/5)" srcset="/assets/stills/hero_tall.webp" width="780" height="1688" />
     <img src="/assets/stills/hero_wide.webp" width="1440" height="900" alt="" fetchpriority="high" decoding="async" />
@@ -33,7 +20,6 @@ import { getLabel, getUrl } from '../config';
   <Nav light />
 
   <main>
-    <!-- A title card over the world, not the home page's hero: no buttons, a scroll cue. -->
     <section class="hero">
       <p class="sc-kicker">Zafe, in 3D</p>
       <h1>One payment,<br />start to finish</h1>
@@ -41,9 +27,6 @@ import { getLabel, getUrl } from '../config';
       <p class="scroll-cue" aria-hidden="true"><span>Scroll</span><i></i></p>
     </section>
 
-    <!-- The story: scrolling through this section plays one payment in the 3D world
-         behind the page (src/scripts/world.js). Without the world: five rendered beats
-         with their captions (.story-beats). -->
     <section class="story" data-beat="10" aria-label="How a shared payment works: each phone holds a share of the key; Bob proposes, your phone checks the payment and you approve, the two shares make the key, the vault opens and the payment is sent">
       <div class="story-pin">
         <h2 class="story-title">How it works</h2>
@@ -83,7 +66,6 @@ import { getLabel, getUrl } from '../config';
           <p class="cap k9">Sending&hellip;</p>
           <p class="cap k10">Sent. On-chain, it looks like any payment.</p>
         </div>
-        <!-- What the chain sees at the end: the real payment from the testnet trial. -->
         <div class="chain-card" aria-hidden="true">
           <p class="chain-title">What the chain sees</p>
           <dl class="chain-mini">
@@ -97,7 +79,6 @@ import { getLabel, getUrl } from '../config';
       </div>
     </section>
 
-    <!-- The call to action over the world seen from above (world.js). -->
     <section class="cta-world" aria-label="Get Zafe">
       <div class="cta-pin">
         <img class="still cta-still" src="/assets/stills/above.webp" width="1440" height="900" alt="" loading="lazy" decoding="async" />

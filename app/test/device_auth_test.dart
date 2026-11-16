@@ -117,7 +117,6 @@ void main() {
   });
 
   test('the Android prompt\'s error names map like local_auth\'s', () {
-    // MainActivity.unlockError answers with these names.
     final cases = {
       'userCanceled': UnlockOutcome.cancelled,
       'systemCanceled': UnlockOutcome.cancelled,

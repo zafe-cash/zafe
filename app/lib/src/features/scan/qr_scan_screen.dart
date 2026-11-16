@@ -19,8 +19,6 @@ import '../../rust/api/repair.dart' as rust_repair;
 import '../../rust/api/vault.dart' as rust;
 import '../onboarding/invite_link.dart';
 
-/// Camera scanner for a vault invite QR (raw invite or invite link). Pops with the raw
-/// invite once a valid one is seen; the Join screen still asks before joining.
 class ScanInviteScreen extends StatelessWidget {
   const ScanInviteScreen({super.key});
 
@@ -43,7 +41,6 @@ class ScanInviteScreen extends StatelessWidget {
   );
 }
 
-/// Scans the recovery code on a signer's new phone (spec §10.1). Pops the code.
 class ScanRecoveryScreen extends StatelessWidget {
   const ScanRecoveryScreen({super.key});
 
@@ -64,8 +61,6 @@ class ScanRecoveryScreen extends StatelessWidget {
   );
 }
 
-/// Scans a relay's address (`relay.example.org`, an https URL, either with
-/// `#<create token>`). Pops the scanned text; the picker checks the relay.
 class ScanRelayScreen extends StatelessWidget {
   const ScanRelayScreen({super.key});
 
@@ -77,7 +72,6 @@ class ScanRelayScreen extends StatelessWidget {
   );
 }
 
-/// Scans the vault link a co-signer shows (seat recovery). Pops the link text.
 class ScanSeatLinkScreen extends StatelessWidget {
   const ScanSeatLinkScreen({super.key});
 
@@ -98,8 +92,6 @@ class ScanSeatLinkScreen extends StatelessWidget {
   );
 }
 
-/// Scans a recipient: an address or a `zcash:` payment link (amount, message, several
-/// recipients). Pops the `ScannedRequest`.
 class ScanRecipientScreen extends StatefulWidget {
   const ScanRecipientScreen({super.key, required this.network});
   final String network;
@@ -131,8 +123,6 @@ class _ScanRecipientScreenState extends State<ScanRecipientScreen> {
   );
 }
 
-/// A camera QR scanner that pops the first code [accept] turns into a value; other codes
-/// show [rejected].
 class QrScanScreen extends StatefulWidget {
   const QrScanScreen({
     super.key,
@@ -145,7 +135,6 @@ class QrScanScreen extends StatefulWidget {
   final String prompt;
   final String rejected;
 
-  /// The value to return for a scanned text, or `null` to keep scanning.
   final Object? Function(String raw) accept;
 
   @override
@@ -178,10 +167,8 @@ class _QrScanScreenState extends State<QrScanScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
-        // Also picks up a permission granted in system settings meanwhile.
         unawaited(_start());
       case AppLifecycleState.inactive:
-        // The permission prompt itself makes the app inactive: leave that alone.
         if (_controller.value.isRunning) unawaited(_controller.stop());
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
@@ -194,12 +181,9 @@ class _QrScanScreenState extends State<QrScanScreen>
     if (_done) return;
     try {
       await _controller.start();
-    } catch (_) {
-      // Already starting, or failed: the error shows through the controller's state.
-    }
+    } catch (_) {}
   }
 
-  /// Reads a QR code from a picture (a shared QR image or a screenshot of one).
   Future<void> _chooseImage() async {
     final picked = await FilePicker.pickFile(type: FileType.image);
     final path = picked?.path;
@@ -239,12 +223,8 @@ class _QrScanScreenState extends State<QrScanScreen>
     if (sawCode && !_rejected) setState(() => _rejected = true);
   }
 
-  /// Keeps the camera view (and its state) when the layout below changes shape.
   final _cameraKey = GlobalKey();
 
-  /// The camera above the prompt and the button; beside them in a short, wide window
-  /// (landscape); scrolling under a camera of fixed height in a small one (a flip
-  /// phone's cover screen).
   Widget _layout(BuildContext context, BoxConstraints box) {
     final colors = context.colors;
     final camera = KeyedSubtree(
@@ -350,13 +330,11 @@ class _QrScanScreenState extends State<QrScanScreen>
   }
 }
 
-/// Rounded-rect guide in the middle of the camera view.
 class _Frame extends StatelessWidget {
   const _Frame();
 
   @override
   Widget build(BuildContext context) {
-    // 70% of the view's shorter side: its width on a phone, its height in a wide one.
     return LayoutBuilder(
       builder: (context, box) => Center(
         child: SizedBox.square(

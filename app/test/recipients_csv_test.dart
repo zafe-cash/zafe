@@ -4,8 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zafe/src/features/send/recipients_csv.dart';
 import 'package:zafe/src/rust/api/proposals.dart';
 
-/// Fakes of the bridge validators: addresses starting with "u" are valid; amounts are
-/// decimal ZEC with up to 8 places; memo length is UTF-8 bytes.
 AddressCheck check(String a) => a.startsWith('u')
     ? const AddressCheck(valid: true, reason: '')
     : const AddressCheck(valid: false, reason: 'Not a Zcash address');

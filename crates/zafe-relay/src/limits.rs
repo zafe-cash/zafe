@@ -1,15 +1,5 @@
-//! Request limits for the hosted relay: token buckets per signing key and per client IP.
-//!
-//! Keys are only charged after their signature verified, so nobody can drain another
-//! member's bucket. The IP limit catches floods of unauthenticated requests; behind a proxy
-//! it uses the client address the proxy reports (see [`Limits::client_ip_header`]).
-//! Creating a mailbox is free and keys cost nothing to make, so creations (and what
-//! co-signers leave for a recovering phone) have their own, much slower per-IP bucket
-//! ([`Limits::creates_per_ip`]).
-
 use std::{collections::HashMap, hash::Hash, net::IpAddr, sync::Mutex};
 
-/// Requests per minute and burst size of one bucket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rate {
     pub per_minute: u32,
@@ -22,7 +12,6 @@ impl Rate {
     }
 }
 
-/// Events per day and burst size of one bucket (for rare actions such as creating a mailbox).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DailyRate {
     pub per_day: u32,
@@ -35,26 +24,15 @@ impl DailyRate {
     }
 }
 
-/// Relay limits. `None` rates are unlimited (tests, self-hosting on a trusted network).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Per signing key. The app polls every 15 s (a few requests); a leader collecting
-    /// signatures reads its inbox twice a second for up to 90 s.
     pub per_key: Option<Rate>,
-    /// Per client IP (many members can share one address behind NAT).
     pub per_ip: Option<Rate>,
-    /// Mailboxes (vaults) created per client IP. Each vault is created once, by one member.
-    /// A co-signer's seat-recovery values (announce, challenge) take from the same bucket.
     pub creates_per_ip: Option<DailyRate>,
-    /// Header holding the client address when the relay runs behind a proxy (e.g.
-    /// `fly-client-ip`, or `x-forwarded-for` behind Caddy, whose rightmost entry is the
-    /// one the proxy added). `None`: the TCP peer address. Never trust a header a client
-    /// can set directly.
     pub client_ip_header: Option<String>,
 }
 
 impl Limits {
-    /// No limits.
     pub fn none() -> Self {
         Self {
             per_key: None,
@@ -64,7 +42,6 @@ impl Limits {
         }
     }
 
-    /// Defaults for a public relay.
     pub fn hosted() -> Self {
         Self {
             per_key: Some(Rate::new(300, 150)),
@@ -75,7 +52,6 @@ impl Limits {
     }
 }
 
-/// Token buckets keyed by `K`, refilled from a clock in seconds.
 pub(crate) struct Buckets<K> {
     per_sec: f64,
     burst: f64,
@@ -99,8 +75,6 @@ impl<K: Eq + Hash> Buckets<K> {
         }
     }
 
-    /// Takes one token for `key` at time `now` (seconds). On `Err`, the seconds until one
-    /// token is available again.
     pub(crate) fn take(&self, key: K, now: u64) -> Result<(), u64> {
         let (per_sec, burst) = (self.per_sec, self.burst);
         let mut state = self.state.lock().expect("lock");
@@ -117,7 +91,6 @@ impl<K: Eq + Hash> Buckets<K> {
         }
     }
 
-    /// Drops buckets that have refilled completely (idle keys), so memory stays bounded.
     pub(crate) fn prune(&self, now: u64) {
         let (per_sec, burst) = (self.per_sec, self.burst);
         self.state
@@ -134,7 +107,6 @@ impl<K: Eq + Hash> Buckets<K> {
     }
 }
 
-/// The client address from the configured proxy header (rightmost entry) or the peer.
 pub(crate) fn client_ip(
     headers: &axum::http::HeaderMap,
     header: Option<&str>,
@@ -165,12 +137,9 @@ mod tests {
         assert!(b.take("k", 100).is_ok());
         assert!(b.take("k", 100).is_ok());
         assert_eq!(b.take("k", 100), Err(1));
-        // One token per second at 60/min.
         assert!(b.take("k", 101).is_ok());
         assert!(b.take("k", 101).is_err());
-        // Other keys have their own bucket.
         assert!(b.take("other", 101).is_ok());
-        // Never more than the burst after a long pause.
         for _ in 0..3 {
             assert!(b.take("k", 10_000).is_ok());
         }
@@ -182,7 +151,6 @@ mod tests {
         let b = Buckets::daily(DailyRate::new(24, 2));
         assert!(b.take("ip", 0).is_ok());
         assert!(b.take("ip", 0).is_ok());
-        // 24 a day is one an hour.
         assert!(matches!(b.take("ip", 0), Err(3600..=3601)));
         assert!(matches!(b.take("ip", 1800), Err(1800..=1801)));
         assert!(b.take("ip", 3600).is_ok());

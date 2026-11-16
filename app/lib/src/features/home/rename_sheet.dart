@@ -14,7 +14,6 @@ import '../../providers/proposals_provider.dart';
 import '../../providers/vault_names_provider.dart';
 import '../../providers/vault_provider.dart';
 
-/// Names a signer on this device (other members never see it).
 Future<void> showRenameSignerSheet(
   BuildContext context,
   WidgetRef ref,
@@ -36,7 +35,6 @@ Future<void> showRenameSignerSheet(
   );
 }
 
-/// This member's name for the other signers, shared through the vault log.
 Future<void> showMyNameSheet(BuildContext context, WidgetRef ref) async {
   final me = ref.read(vaultProvider).myKeyHex;
   if (me == null) return;
@@ -61,7 +59,6 @@ Future<void> showMyNameSheet(BuildContext context, WidgetRef ref) async {
   );
 }
 
-/// Renames the active vault on this device (other members keep their names for it).
 Future<void> showRenameVaultSheet(BuildContext context, WidgetRef ref) async {
   final id = ref.read(vaultProvider).activeId;
   final creator = ref.read(vaultProvider).summary?.name;
@@ -101,11 +98,8 @@ class _RenameSheet extends StatefulWidget {
   final int maxLength;
   final String current;
 
-  /// Label of the button that clears the name; hidden when null.
   final String? removeLabel;
 
-  /// Saves the name (empty clears it); the sheet closes once it's done, and a failure
-  /// shows under the button.
   final Future<void> Function(String name) onSave;
   final String? errorFallback;
   final TextInputFormatter? formatter;

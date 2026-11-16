@@ -24,8 +24,6 @@ import '../send/send_screen.dart' show SendPrefill;
 import 'proposal_parts.dart';
 import 'proposal_status.dart';
 
-/// One payment proposal: what it pays, this device's independent check, the signers'
-/// votes, and the next action (approve/reject, or collect signatures and send).
 class ProposalScreen extends ConsumerStatefulWidget {
   const ProposalScreen({super.key, required this.id});
   final String id;
@@ -55,7 +53,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     super.dispose();
   }
 
-  /// "Approve again" (a signing round didn't finish, or the phone was restored).
   Future<void> _reapprove() async {
     await _unlock('Approve this payment. It can\'t be undone.');
     final r = await ref.read(proposalsProvider.notifier).approve(widget.id);
@@ -73,12 +70,9 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     }
   }
 
-  /// The request stays on screen from the tap until its button has shown "Approved"
-  /// or "Declined" (the vote changes the payment, which would swap the page at once).
   bool _holdRequest = false;
   rust.ApproveResult? _approved;
 
-  /// "Approve" on a request: the unlock prompt is the confirmation.
   Future<void> _approveRequest() async {
     setState(() => _holdRequest = true);
     try {
@@ -106,13 +100,9 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
   void _afterApprove() {
     final r = _approved;
     if (!mounted || r == null) return;
-    // Leaving keeps the request on screen as it slides away; only a payment that stays
-    // here (complete, sent by hand) switches to its status.
     if (r.completed && r.autoSend) {
-      // This approval completed the signatures: watch it go out.
       context.push('/proposal/${widget.id}/send');
     } else if (!r.completed) {
-      // Nothing left to do here until more signers approve.
       _leave();
     } else {
       setState(() => _holdRequest = false);
@@ -129,7 +119,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     }
   }
 
-  /// Back to where the payment was opened from (Home if it was opened directly).
   void _leave() {
     if (context.canPop()) {
       context.pop();
@@ -157,7 +146,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     )) {
       return;
     }
-    // Reset the round before the sending screen opens (it would resume the old one).
     await ref.read(proposalsProvider.notifier).startOver(widget.id);
     if (mounted) context.push('/proposal/${widget.id}/send');
   }
@@ -175,12 +163,9 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     );
     if (!cancel || !mounted) throw const ActionCancelled();
     await ref.read(proposalsProvider.notifier).cancel(widget.id);
-    // Leave from here, not from the button's onDone: cancelling refreshes the payment,
-    // the page rebuilds as "Cancelled" without this button, and its onDone never ran.
     if (mounted) _leave();
   }
 
-  /// The unlock prompt before an action; backing out cancels it quietly.
   Future<void> _unlock(String reason) async {
     if (!await confirmUnlock(context, ref, reason: reason)) {
       throw const ActionCancelled();
@@ -193,8 +178,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
     if (mounted) unawaited(context.push('/proposal/$id'));
   }
 
-  /// Cancels a payment that can no longer be signed the one-tap way and proposes the
-  /// same payment again, so everyone can approve it with one tap.
   Future<void> _repropose(rust.ProposalInfo p) async {
     await _unlock('Propose this payment again');
     final id = await ref.read(proposalsProvider.notifier).proposeAgain(p.id);
@@ -245,7 +228,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
       );
     }
 
-    // A leftover send state (a failed attempt) means nothing once the payment is closed.
     final closed =
         p.stage == rust.ProposalStage.cancelled ||
         p.stage == rust.ProposalStage.rejected;
@@ -256,14 +238,10 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
         p.stage == rust.ProposalStage.sent ||
         progress?.stage == rust.SendStage.sent;
 
-    // A payment that waits for this member's vote: a request with Approve and Decline
-    // always in reach.
     final request =
         _holdRequest ||
         !sent &&
             send == null &&
-            // A member who hasn't voted can approve until the payment is complete
-            // (more approvals help when an approver can't sign any more).
             (p.stage == rust.ProposalStage.open ||
                 (p.stage == rust.ProposalStage.approved && !p.ready)) &&
             p.myVote == rust.MyVote.none &&
@@ -436,9 +414,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
               style: note,
             ),
           ],
-          // A payment that can't be sent (it fails the check, for example after a network
-          // upgrade) must still be cancellable by its author, or it holds its notes until it
-          // expires.
           if (p.isMine) ...[
             const SizedBox(height: AppSpacing.s),
             ActionButton(
@@ -489,8 +464,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
 
     if (p.needsReapproval) return [..._approveAgain(note), ...footer];
 
-    // A signer's phone was restored or replaced while this payment was open, so its
-    // signatures can't all be collected any more. Nothing was sent.
     if (p.needsNewProposal) {
       return [
         Text(
@@ -529,7 +502,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
             ...footer,
           ];
         }
-        // Not voted yet: the request view shows Approve and Decline instead.
         return footer;
       case rust.ProposalStage.approved when p.ready:
         return [
@@ -593,7 +565,6 @@ class _ProposalScreenState extends ConsumerState<ProposalScreen> {
   }
 }
 
-/// Short page titles (the nav title has room for about 20 characters).
 String _screenTitle(rust.ProposalInfo p, int? height) =>
     proposalExpired(p, height)
     ? 'Expired'

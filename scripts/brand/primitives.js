@@ -1,5 +1,3 @@
-// Generates app/lib/src/core/theme/primitives.dart (Verdigris, docs/brand.md §3).
-// Run: node scripts/brand/primitives.js
 const path = require('path');
 const { oklch, hexToOklch } = require(path.resolve(__dirname, '../../.claude/skills/brand-palette/oklch.js'));
 const out = path.resolve(__dirname, '../../app/lib/src/core/theme/primitives.dart');
@@ -7,7 +5,6 @@ const H = 188, T = 0.01;
 const steps = ['0', '50', '100', '150', '200', '300', '400', '500', '600', '700', '800', '900'];
 const n = (L, m) => oklch(L, T * m, H);
 
-// Neutrals: the old ladder's OKLCH lightness per step, ~1% brand chroma; doc tokens pinned.
 const neutralDark = {
   0: n(0.154, 0.6), 50: '#111515', 100: n(0.218, 0.75), 150: '#1E2323', 200: '#272E2D',
   300: n(0.356, 1.2), 400: n(0.452, 1.3), 500: '#737F7D', 600: '#9DA9A7', 700: n(0.838, 0.9),
@@ -18,11 +15,9 @@ const neutralLight = {
   300: n(0.762, 1.0), 400: n(0.655, 1.2), 500: '#7E8987', 600: '#55615F', 700: n(0.386, 1.3),
   800: n(0.205, 0.8), 900: '#090E0E',
 };
-// Brand ramp exactly as docs/brand.md.
 const brandDark = ['#00110F', '#001B19', '#002825', '#003633', '#004743', '#006660', '#51DDD2', '#61EADF', '#70F8ED', '#8EFFF5', '#C7FFF9', '#EBFFFD'];
 const brandLight = ['#EBFFFD', '#BEFFF8', '#9EF4EC', '#84E1D9', '#47B9B0', '#00736C', '#00605A', '#004D49', '#003C38', '#002B28', '#001B19', '#000C0B'];
 
-/** A 12-step hue ladder: lightness per step, chroma peaking around `peakL`, anchors pinned. */
 function ladder(hue, Ls, peakC, peakL, anchors) {
   return Ls.map((L, i) => anchors[steps[i]] ?? oklch(L, Math.max(0.012, peakC * (1 - Math.abs(L - peakL) * 1.6)), hue));
 }

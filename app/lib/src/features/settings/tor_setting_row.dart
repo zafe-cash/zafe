@@ -10,9 +10,6 @@ import '../../providers/proposals_provider.dart';
 import '../../providers/tor_provider.dart';
 import '../../providers/vault_provider.dart';
 
-/// "Use Tor" in Settings: a switch on the row, with the connection's state beside it and
-/// a way to retry when it failed. No sheet, no confirmation: it's a privacy preference
-/// that can be switched back at any time.
 class TorSettingRow extends ConsumerWidget {
   const TorSettingRow({super.key, required this.rowStyle});
   final TextStyle rowStyle;
@@ -27,7 +24,6 @@ class TorSettingRow extends ConsumerWidget {
     await _refreshVault(ref);
   }
 
-  /// Picks up the new route right away instead of at the next poll.
   Future<void> _refreshVault(WidgetRef ref) async {
     if (ref.read(torProvider).failed) return;
     await ref.read(proposalsProvider.notifier).refreshFresh();
@@ -38,7 +34,6 @@ class TorSettingRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = context.colors;
     final tor = ref.watch(torProvider);
-    // The switch says on or off; only a state in between needs words.
     final status = tor.failed
         ? 'Couldn\'t connect'
         : tor.connecting

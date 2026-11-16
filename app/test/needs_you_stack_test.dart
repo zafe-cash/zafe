@@ -30,7 +30,6 @@ class _Privacy extends PrivacyModeNotifier {
   bool build() => false;
 }
 
-/// Whether Home is the visible tab (other tabs mute its tickers).
 final _visible = ValueNotifier(true);
 
 Future<List<String>> _pump(WidgetTester tester, int n) async {
@@ -95,7 +94,6 @@ void main() {
       reason: 'the first tap opens the stack, not a payment',
     );
     expect(find.text('3 waiting'), findsNothing);
-    // Open: a card's tap now opens its payment.
     await tester.tap(find.textContaining('1.5').first);
     await tester.pumpAndSettle();
     expect(opened, hasLength(1));

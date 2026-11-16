@@ -1,10 +1,3 @@
-//! The vault wallet on a member's device (spec §4.1, §8, §9.2).
-//!
-//! Like a hardware-signer (Keystone) account: the device imports the vault UFVK, syncs from
-//! lightwalletd, shows balance and history, and builds PCZTs. Spend authorization comes
-//! from FROST, never from a local key. The account is imported as `Spending` with no ZIP 32
-//! derivation, so the wallet tracks note witnesses (a `ViewOnly` account would not).
-
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
@@ -55,29 +48,21 @@ use zip321::{Payment, TransactionRequest};
 
 pub type Client = CompactTxStreamerClient<Channel>;
 
-/// How far behind the server a wallet may be and still build a transaction without
-/// scanning ([`VaultWallet::can_build_without_scan`]): about one sync interval of blocks.
 pub const BUILD_LAG_BLOCKS: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
     #[error("wallet database: {0}")]
     Db(String),
-    /// lightwalletd could not be reached or answered with an error.
     #[error("lightwalletd: {message}")]
     Remote {
         failure: crate::net::NetFailure,
         message: String,
     },
-    /// lightwalletd serves another network than the vault's.
     #[error("lightwalletd serves {server}, the vault is on {expected}")]
     WrongNetwork { server: String, expected: String },
-    /// lightwalletd's chain tip is below blocks this wallet already has (it is still
-    /// catching up, or follows another chain).
     #[error("lightwalletd is at block {server_tip}, behind this wallet ({wallet_tip})")]
     ServerBehind { server_tip: u32, wallet_tip: u32 },
-    /// The chain is on another consensus branch than this app builds transactions for (a
-    /// network upgrade this version doesn't know): a payment built here would be rejected.
     #[error("this version of Zafe doesn't support the network's current rules: {0}")]
     AppOutdated(String),
     #[error("sync: {0}")]
@@ -86,17 +71,10 @@ pub enum WalletError {
     Proposal(String),
     #[error("invalid payment: {0}")]
     Payment(String),
-    /// The vault could cover the payment, but some of its notes are held by open proposals.
     #[error("not enough unreserved funds: part of the balance is held by open proposals")]
     FundsReserved,
-    /// A payment that may be signed must have one of its notes spent by the next one, and
-    /// all of them are already spent (by a transaction not yet deep enough to rule out a
-    /// reorg): wait a few blocks.
     #[error("a cancelled payment's funds were just moved: try again in a few minutes")]
     NotesSpent,
-    /// The database can't be read with this key: a wrong key, or a plain (unencrypted)
-    /// database from before encryption. The wallet is a cache of chain data, so callers
-    /// delete it and resync.
     #[error("wallet database: wrong key or not encrypted")]
     WrongKey,
 }
@@ -105,9 +83,6 @@ fn db_err(e: impl core::fmt::Debug) -> WalletError {
     WalletError::Db(format!("{e:?}"))
 }
 
-/// The key of a vault's wallet database (SQLCipher, raw 256-bit key). The app generates
-/// one per vault and keeps it in platform secure storage; it is never backed up (a restored
-/// vault creates a fresh database and resyncs).
 #[derive(Clone)]
 pub struct WalletKey(zeroize::Zeroizing<[u8; 32]>);
 
@@ -123,12 +98,6 @@ impl WalletKey {
         Ok(Self::from_bytes(bytes))
     }
 
-    /// The key for one vault's wallet database, derived from this device's identity seeds
-    /// for that vault (BLAKE3 `derive_key`, domain-separated, length-prefixed). Nothing
-    /// is stored: a stored random key needed secure storage on the sync path, and on
-    /// Android that call can go unanswered for a minute right after key generation (a
-    /// background engine using the same storage). The seeds are what unlock the vault
-    /// anyway, so the key adds no exposure, and every isolate derives the same key.
     pub fn derive(identity_seeds: &[u8], vault_id: &str) -> Self {
         let mut hasher = blake3::Hasher::new_derive_key("Zafe wallet database key v1");
         hasher.update(&(identity_seeds.len() as u64).to_le_bytes());
@@ -154,9 +123,6 @@ impl core::fmt::Debug for WalletKey {
     }
 }
 
-/// Opens a connection to the wallet database at `path` (created if missing, unless
-/// `read_only`) and unlocks it with `key` before anything else touches it. Fails with
-/// [`WalletError::WrongKey`] if the file is not a database encrypted with this key.
 fn open_connection(
     path: &Path,
     key: &WalletKey,
@@ -169,20 +135,17 @@ fn open_connection(
         OpenFlags::default()
     };
     let conn = rusqlite::Connection::open_with_flags(path, flags).map_err(db_err)?;
-    // SQLCipher's raw key form: the 32 bytes are the AES key (no passphrase KDF).
     let pragma = zeroize::Zeroizing::new(format!(
         "PRAGMA key = \"x'{}'\";",
         hex::encode(key.as_bytes())
     ));
     conn.execute_batch(&pragma).map_err(db_err)?;
-    // Without SQLCipher compiled in, `PRAGMA key` is silently ignored: refuse to go on.
     let cipher: Option<String> = conn
         .query_row("PRAGMA cipher_version", [], |r| r.get(0))
         .ok();
     if cipher.is_none() {
         return Err(WalletError::Db("SQLCipher is not available".into()));
     }
-    // The key is only checked when the first page is read.
     match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
         r.get::<_, i64>(0)
     }) {
@@ -196,7 +159,6 @@ fn open_connection(
     }
 }
 
-/// A `WalletDb` over an encrypted connection (what `WalletDb::for_path` does, plus the key).
 fn open_wallet_db<P: Parameters>(
     path: &Path,
     key: &WalletKey,
@@ -212,8 +174,6 @@ fn open_wallet_db<P: Parameters>(
     ))
 }
 
-/// A regtest network with every upgrade through NU7 active at height 1, as a fresh `ths`
-/// (0.4.0+) environment runs it.
 pub fn regtest_network() -> LocalNetwork {
     let one = Some(BlockHeight::from_u32(1));
     LocalNetwork {
@@ -231,21 +191,11 @@ pub fn regtest_network() -> LocalNetwork {
     }
 }
 
-/// Time to establish the lightwalletd connection.
 pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-/// Per request, until the response starts (a block stream may then run longer).
 pub const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 const KEEPALIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Connects to a lightwalletd gRPC endpoint (e.g. `http://127.0.0.1:9067`, or
-/// `https://testnet.zec.rocks:443`). `https` endpoints use rustls with the bundled Mozilla
-/// roots (webpki-roots). TLS must be configured explicitly: `Channel::from_shared` with an
-/// `https` URI otherwise fails with "Connecting to HTTPS without TLS enabled".
-///
-/// Follows the Tor route policy ([`crate::tor`]): through Tor when it is on (failing with
-/// `NetFailure::TorConnecting`/`TorFailed` while it can't be used, never direct), else a
-/// direct connection that Tor cuts when it is turned on.
 pub async fn connect(endpoint: &str) -> Result<Client, WalletError> {
     use crate::tor::{self, Purpose, Route};
     let route = tor::route(Purpose::Lightwalletd, tor::ROUTE_WAIT)
@@ -259,8 +209,6 @@ pub async fn connect(endpoint: &str) -> Result<Client, WalletError> {
             let uri = endpoint
                 .parse::<tonic::transport::Uri>()
                 .map_err(|e| remote_error(&e))?;
-            // The Tor client applies its own connect and request timeouts; this bounds a
-            // re-bootstrap it may start first.
             return tokio::time::timeout(
                 TOR_CONNECT_TIMEOUT,
                 tor.connect_to_lightwalletd(uri, false),
@@ -277,7 +225,6 @@ pub async fn connect(endpoint: &str) -> Result<Client, WalletError> {
     connect_direct(endpoint, lease).await
 }
 
-/// A direct channel to `endpoint` that dies when Tor is turned on (see [`connect`]).
 async fn connect_direct(
     endpoint: &str,
     lease: crate::tor::DirectLease,
@@ -288,34 +235,23 @@ async fn connect_direct(
             .tls_config(ClientTlsConfig::new().with_webpki_roots())
             .map_err(|e| remote_error(&e))?;
     }
-    // Without these a lightwalletd that accepts the connection but never answers (seen
-    // while it was still starting) hangs the sync forever, holding the wallet lock.
     let channel = channel
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
         .http2_keep_alive_interval(KEEPALIVE_INTERVAL)
         .keep_alive_timeout(KEEPALIVE_TIMEOUT)
         .keep_alive_while_idle(true)
-        // Plain TCP from our connector (tonic adds TLS): the connection is cut, and never
-        // re-established, once Tor is turned on.
         .connect_with_connector(crate::tor::DirectConnector(lease))
         .await
         .map_err(|e| remote_error(&e))?;
     Ok(CompactTxStreamerClient::new(channel))
 }
 
-/// Like [`connect`], but reuses this process's channel to `endpoint` while it may still be
-/// used: a direct channel whose lease Tor hasn't revoked (tonic reconnects by itself when
-/// the server drops the connection, and the connector refuses once Tor is on). Saves a TCP
-/// and TLS handshake per call (~0.4 s from a phone). Through Tor nothing is reused. Only for
-/// a process whose calls run on **one long-lived runtime** (the app's bridge): a channel's
-/// worker task lives on the runtime that made it.
 pub async fn connect_pooled(endpoint: &str) -> Result<Client, WalletError> {
     use crate::tor::{self, Purpose, Route};
     use std::collections::HashMap;
     static POOL: std::sync::Mutex<Option<HashMap<String, (tor::DirectLease, Client)>>> =
         std::sync::Mutex::new(None);
-    // Turning Tor on revokes every direct lease at once, so a revoked one means: not this.
     if let Ok(pool) = POOL.lock() {
         if let Some((lease, client)) = pool.as_ref().and_then(|p| p.get(endpoint)) {
             if !lease.is_revoked() {
@@ -340,10 +276,8 @@ pub async fn connect_pooled(endpoint: &str) -> Result<Client, WalletError> {
     Ok(client)
 }
 
-/// Upper bound for opening a lightwalletd channel through Tor.
 pub const TOR_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
-/// tonic's errors say only "transport error"; keep the causes (e.g. a certificate error).
 fn remote_error(e: &(dyn std::error::Error + 'static)) -> WalletError {
     WalletError::Remote {
         failure: crate::net::NetFailure::of(e),
@@ -351,7 +285,6 @@ fn remote_error(e: &(dyn std::error::Error + 'static)) -> WalletError {
     }
 }
 
-/// A gRPC call's error status: the server's own answer, or the transport's failure.
 pub(crate) fn status_error(s: &tonic::Status) -> WalletError {
     WalletError::Remote {
         failure: crate::net::NetFailure::of_status(s),
@@ -359,7 +292,6 @@ pub(crate) fn status_error(s: &tonic::Status) -> WalletError {
     }
 }
 
-/// lightwalletd answered with something unusable.
 fn server_error(message: impl Into<String>) -> WalletError {
     WalletError::Remote {
         failure: crate::net::NetFailure::Server,
@@ -367,9 +299,6 @@ fn server_error(message: impl Into<String>) -> WalletError {
     }
 }
 
-/// Checks that lightwalletd serves the vault's network and is not behind `known_height`
-/// (the highest block the wallet has). Returns its tip. Names are compared as mainnet or
-/// not: test networks (testnet, regtest) don't report names consistently.
 pub async fn check_server(
     client: &mut Client,
     network: &str,
@@ -392,11 +321,8 @@ pub async fn check_server(
     Ok(tip)
 }
 
-/// The part of [`check_server`] that needs the wallet: lightwalletd at `server_tip` must not
-/// be behind `known_height` (the highest block the wallet has).
 pub fn check_server_tip(server_tip: u32, known_height: Option<u32>) -> Result<(), WalletError> {
     if let Some(known) = known_height {
-        // A few blocks of slack: a server a moment behind another one is normal.
         if server_tip.saturating_add(SERVER_LAG_SLACK) < known {
             return Err(WalletError::ServerBehind {
                 server_tip,
@@ -407,9 +333,6 @@ pub fn check_server_tip(server_tip: u32, known_height: Option<u32>) -> Result<()
     Ok(())
 }
 
-/// How many blocks at `height` last as long as one 75-second block: 3 from NU7 on (ZIP 218,
-/// 25-second blocks), else 1. Vault expiry windows (descriptor) and the expiry constants in
-/// [`crate::vault`] count 75-second blocks, so "7 days" stays 7 days after the upgrade.
 pub fn block_scale<P: Parameters>(params: &P, height: u32) -> u32 {
     use zcash_protocol::consensus::NetworkUpgrade;
     if params.is_nu_active(NetworkUpgrade::Nu7, BlockHeight::from_u32(height)) {
@@ -419,11 +342,6 @@ pub fn block_scale<P: Parameters>(params: &P, height: u32) -> u32 {
     }
 }
 
-/// The expiry height of a proposal targeting `target`: [`crate::vault::expiry_height`], but
-/// never past the block before the next network upgrade whose height is known. A
-/// transaction built (and signed) for the rules before an upgrade can't be mined after it,
-/// so it must not stay sendable across it; the payment is proposed again under the new
-/// rules instead. Without a known upgrade ahead, nothing changes.
 pub fn proposal_expiry<P: Parameters>(params: &P, target: u32, window: u32) -> u32 {
     use zcash_protocol::consensus::NetworkUpgrade;
     let expiry = crate::vault::expiry_height_scaled(target, window, block_scale(params, target));
@@ -433,11 +351,6 @@ pub fn proposal_expiry<P: Parameters>(params: &P, target: u32, window: u32) -> u
     }
 }
 
-/// Fails with [`WalletError::AppOutdated`] when lightwalletd's chain is on a consensus
-/// branch other than the one this app would build transactions for at that height (a
-/// network upgrade this version doesn't know). Called before proposing: a transaction built
-/// for the wrong branch is rejected by every node, so say so up front. Not part of
-/// `check_server`: an outdated app can still sync and show balances.
 pub async fn ensure_current_branch<P: Parameters>(
     client: &mut Client,
     params: &P,
@@ -451,8 +364,6 @@ pub async fn ensure_current_branch<P: Parameters>(
     check_branch(&info.consensus_branch_id, tip, params)
 }
 
-/// lightwalletd's tip, after the [`ensure_current_branch`] check: one request for both
-/// (each is a new stream over Tor, ~1.5 s).
 pub async fn tip_on_current_branch<P: Parameters>(
     client: &mut Client,
     params: &P,
@@ -467,9 +378,6 @@ pub async fn tip_on_current_branch<P: Parameters>(
     Ok(tip)
 }
 
-/// The comparison behind [`ensure_current_branch`]: `server_branch` is lightwalletd's hex
-/// branch id for the block at `tip`. An id the server doesn't give (or in a form we can't
-/// read) is not held against the app.
 pub fn check_branch<P: Parameters>(
     server_branch: &str,
     tip: u32,
@@ -489,10 +397,8 @@ pub fn check_branch<P: Parameters>(
     Ok(())
 }
 
-/// How far lightwalletd may trail the wallet before `check_server` calls it behind.
 const SERVER_LAG_SLACK: u32 = 3;
 
-/// The chain tip height lightwalletd reports.
 pub async fn latest_height(client: &mut Client) -> Result<u32, WalletError> {
     client
         .get_latest_block(service::ChainSpec::default())
@@ -504,9 +410,6 @@ pub async fn latest_height(client: &mut Client) -> Result<u32, WalletError> {
         .map_err(|_| server_error("height out of range"))
 }
 
-/// Txids (protocol byte order) of every transaction in lightwalletd's mempool with
-/// shielded data. The whole mempool is read, so the server learns nothing about which
-/// transaction the caller is looking for.
 pub async fn mempool_txids(
     client: &mut Client,
 ) -> Result<std::collections::BTreeSet<[u8; 32]>, WalletError> {
@@ -524,67 +427,42 @@ pub async fn mempool_txids(
     Ok(txids)
 }
 
-/// A payment in a proposal.
 #[derive(Clone, Debug)]
 pub struct PaymentRequest {
-    /// Encoded Zcash address (unified, or Orchard-receiver-bearing).
     pub address: String,
     pub amount_zat: u64,
     pub memo: Option<MemoBytes>,
 }
 
-/// Money the vault received from outside: one per transaction that pays the vault and
-/// spends none of its notes (so never the change of the vault's own payments).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceivedPayment {
-    /// Transaction id, in the usual (byte-reversed) hex display order.
     pub txid: String,
-    /// Sum of the vault's non-change outputs in the transaction.
     pub amount_zat: u64,
-    /// `None` while unmined: the vault's own sends, and receipts the mempool watch stored
-    /// (`store_mempool_tx`). The wallet summary already counts such notes (as pending).
     pub mined_height: Option<u32>,
-    /// Unix seconds of the mining block, when the wallet has scanned it.
     pub block_time: Option<u32>,
-    /// Text memos of the received outputs (empty and non-text memos are left out).
     pub memos: Vec<String>,
-    /// Whether this is a coinbase transaction (mining reward).
     pub coinbase: bool,
 }
 
-/// A transaction this wallet saw spending vault notes (mined, or in the mempool).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VaultSpend {
-    /// Protocol byte order, like `ProposalState::txid`.
     pub txid: [u8; 32],
     pub mined_height: Option<u32>,
-    /// Nullifiers of the vault notes it spends (the ones this wallet knows).
     pub nullifiers: Vec<[u8; 32]>,
 }
 
-/// Balances of the vault account, in zatoshis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VaultBalance {
     pub ironwood_spendable: u64,
-    /// Held for open or sent proposals (note reservation); counted in the total.
     pub ironwood_locked: u64,
-    /// The vault's own change waiting for confirmations.
     pub ironwood_change_pending: u64,
-    /// Other received notes waiting for confirmations (or for scanning).
     pub ironwood_pending: u64,
     pub ironwood_total: u64,
     pub total: u64,
 }
 
-/// How many spendable notes the vault keeps for payments in flight at once: change is
-/// split into up to this many notes (each at least [`CHANGE_NOTE_MIN_ZAT`]) while the
-/// vault has fewer. Splitting adds outputs, so a payment that splits pays up to
-/// 5,000 zats more per extra action (members' checks compute the same ZIP 317 fee, and
-/// count at most this many change outputs toward the action bound, `verify::MAX_CHANGE_OUTPUTS`:
-/// raising it needs every member updated first).
 pub const CHANGE_NOTES_TARGET: usize = 4;
 
-/// The smallest note change is split into (0.01 ZEC): below it, change stays in one note.
 pub const CHANGE_NOTE_MIN_ZAT: u64 = 1_000_000;
 
 fn change_split_policy() -> SplitPolicy {
@@ -603,20 +481,14 @@ pub struct VaultWallet<P: Parameters + Clone + Send + 'static> {
     key: WalletKey,
 }
 
-/// Notes an open vault proposal spends, held back from new proposals until the proposal's
-/// transaction expires (spec §9.1, `reservedNotes`).
 #[derive(Clone, Debug)]
 pub struct NoteHold {
-    /// Stable per proposal (its PCZT hash), so re-reserving is idempotent.
     pub owner: [u8; 32],
     pub nullifiers: Vec<[u8; 32]>,
-    /// The transaction's expiry height: after it the notes can't be spent by it any more.
     pub expiry_height: u32,
 }
 
 impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
-    /// Creates a wallet database at `path`, encrypted with `key`, and imports the vault
-    /// UFVK with the given birthday height (the vault's creation height).
     pub async fn create(
         path: &Path,
         key: &WalletKey,
@@ -626,8 +498,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         birthday_height: u32,
         client: &mut Client,
     ) -> Result<Self, WalletError> {
-        // Everything that needs the network happens before the database file exists: a
-        // half-created database (no account) would make every later `open` fail.
         let tip: u32 = client
             .get_latest_block(service::ChainSpec::default())
             .await
@@ -636,15 +506,11 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             .height
             .try_into()
             .map_err(|_| server_error("height out of range"))?;
-        // Sync downloads the chain state at (range start - 1), and lightwalletd reads a
-        // height of 0 as "unspecified", so a wallet cannot be born at height 1.
         if birthday_height < 2 {
             return Err(WalletError::Sync(
                 "birthday height must be at least 2".into(),
             ));
         }
-        // The creator picks the birthday as its server's tip + 1: a server whose tip is
-        // below that is behind (or on another chain) and has no tree state for it.
         if birthday_height > tip.saturating_add(1) {
             return Err(WalletError::ServerBehind {
                 server_tip: tip,
@@ -690,25 +556,15 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         })
     }
 
-    /// Whether `path` holds a usable vault wallet (a database this key opens, with its
-    /// account). Callers use this to decide between `open` and `create`; anything else (a
-    /// leftover without an account, a plain database from before encryption, a database
-    /// under a lost key) should be deleted and recreated: the wallet is a cache of chain data.
     pub fn exists(path: &Path, key: &WalletKey, params: P) -> bool {
         path.exists() && Self::open(path, key, params).is_ok()
     }
 
-    /// Opens an existing wallet database holding exactly one vault account.
     pub fn open(path: &Path, key: &WalletKey, params: P) -> Result<Self, WalletError> {
         if !path.exists() {
-            // Opening would create an empty database.
             return Err(WalletError::Db("no wallet database".into()));
         }
         let mut db = open_wallet_db(path, key, params.clone())?;
-        // A database made by an older build may need the schema of the current
-        // zcash_client_sqlite (a library bump changes it). The migrations are no-ops on a
-        // current database; a failed one makes `exists` say no, and the caller recreates
-        // the wallet (it only caches chain data).
         init_wallet_db(&mut db, None).map_err(db_err)?;
         let ids = db.get_account_ids().map_err(db_err)?;
         let [account] = ids.as_slice() else {
@@ -727,7 +583,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         })
     }
 
-    /// Scans until the wallet is at the chain tip.
     pub async fn sync(&mut self, client: &mut Client) -> Result<(), WalletError> {
         sync::run(client, &self.params, &self.cache, &mut self.db, 1000)
             .await
@@ -739,9 +594,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             })
     }
 
-    /// Records a transaction seen in the mempool (unmined) if it concerns the vault: trial
-    /// decryption with the vault's viewing key; irrelevant transactions store nothing.
-    /// Block sync later sets its mined height (or it expires).
     pub fn store_mempool_tx(
         &mut self,
         tx: &zcash_primitives::transaction::Transaction,
@@ -749,15 +601,10 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         decrypt_and_store_transaction(&self.params, &mut self.db, tx, None).map_err(db_err)
     }
 
-    /// The network this wallet is on.
     pub fn params(&self) -> &P {
         &self.params
     }
 
-    /// Whether a sync would have work to do with the server at `server_tip`: the server
-    /// has blocks this wallet hasn't heard of, or part of the known chain is still
-    /// unscanned (an earlier pass stopped, or the wallet is new). When false, a sync only
-    /// makes the server round trips to find that out (1-2 s on a phone).
     pub fn needs_scan(&self, server_tip: u32) -> Result<bool, WalletError> {
         let Some(known) = self.chain_height()? else {
             return Ok(true);
@@ -768,15 +615,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(!self.db.suggest_scan_ranges().map_err(db_err)?.is_empty())
     }
 
-    /// Whether a transaction can be built now without scanning first, with the server at
-    /// `server_tip`: the wallet has scanned everything it knows of, is at most
-    /// [`BUILD_LAG_BLOCKS`] behind, and no network upgrade falls in between (the build
-    /// would otherwise use the old branch). Confirmations are counted from the wallet's
-    /// own tip, so a wallet a few blocks behind can only treat a note as less confirmed
-    /// than it is (3 needed for change, 10 for other notes), never spend one too early;
-    /// what the unscanned blocks can hide (a note spent meanwhile by another proposal of
-    /// this vault) is caught by note reservation and at broadcast, as with any race.
-    /// Saves the scan's ~2 s of round trips.
     pub fn can_build_without_scan(&self, server_tip: u32) -> Result<bool, WalletError> {
         use zcash_protocol::consensus::BranchId;
         let Some(known) = self.chain_height()? else {
@@ -796,8 +634,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(self.db.chain_height().map_err(db_err)?.map(u32::from))
     }
 
-    /// The vault's balance. A vault whose birthday is still ahead of the chain (just
-    /// created, no new block yet) has nothing to scan and holds nothing: zero.
     pub fn balance(&self) -> Result<VaultBalance, WalletError> {
         let Some(summary) = self
             .db
@@ -833,23 +669,14 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         })
     }
 
-    /// Ironwood notes of the vault with value that no transaction this wallet has seen
-    /// spends (expired unmined spends still count as spends: an estimate, used to size the
-    /// one-tap pool for proposals that spend many notes, see `node::pool_target_for_notes`).
     pub fn unspent_note_count(&self) -> Result<usize, WalletError> {
         unspent_note_count_at(&self.path, &self.key, self.account.expose_uuid().as_bytes())
     }
 
-    /// Payments the vault received, newest first (unmined ones first). Excludes transactions
-    /// that spend any vault note: their outputs back to the vault are change (or a self
-    /// transfer), not incoming money. Expired unmined transactions are left out.
     pub fn received_payments(&self) -> Result<Vec<ReceivedPayment>, WalletError> {
         received_payments_at(&self.path, &self.key, self.account.expose_uuid().as_bytes())
     }
 
-    /// Every transaction that spent vault notes, as far as this wallet has seen (one row
-    /// per spent note, grouped by transaction). Expired unmined ones are left out. Input to
-    /// [`crate::spend_watch::unapproved_spends`].
     pub fn vault_spends(&self) -> Result<Vec<VaultSpend>, WalletError> {
         let conn = open_connection(&self.path, &self.key, true)?;
         let mut stmt = conn
@@ -891,8 +718,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(out)
     }
 
-    /// Unix time of the block that mined `txid` (protocol byte order), if the wallet has
-    /// seen it mined and scanned that block.
     pub fn mined_time(&self, txid: &[u8; 32]) -> Result<Option<u64>, WalletError> {
         let conn = open_connection(&self.path, &self.key, true)?;
         conn.query_row(
@@ -908,7 +733,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         })
     }
 
-    /// Whether this wallet has seen transaction `txid` mined (e.g. a vault spend).
     pub fn tx_mined(&self, txid: &[u8; 32]) -> Result<bool, WalletError> {
         let conn = open_connection(&self.path, &self.key, true)?;
         let mined: Option<Option<u32>> = conn
@@ -925,15 +749,8 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(matches!(mined, Some(Some(_))))
     }
 
-    /// Makes the wallet's note locks match `holds` exactly, so new proposals skip every note
-    /// an open proposal spends, whichever member built it. Holds are applied in order; a
-    /// note already held by an earlier one (two proposals raced for it) stays with the
-    /// earlier. Nullifiers this wallet doesn't know (not scanned yet, dummy spends) are
-    /// skipped. Returns the number of notes held.
     pub fn reserve(&mut self, holds: &[NoteHold]) -> Result<usize, WalletError> {
         let refs = {
-            // `WalletDb` doesn't expose its connection: map nullifiers to the outputs that
-            // created them on a read-only connection (callers serialize wallet access).
             let conn = open_connection(&self.path, &self.key, true)?;
             let mut stmt = conn
                 .prepare(
@@ -973,7 +790,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         for (hold, outputs) in refs {
             let owner = LockOwner::new(hold.owner);
             let expiry = BlockHeight::from(hold.expiry_height);
-            // One note at a time, so a note lost to an earlier hold doesn't release the rest.
             for output in outputs {
                 match self.db.lock_outputs(&[output], owner, expiry) {
                     Ok(_) => held += 1,
@@ -985,13 +801,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(held)
     }
 
-    /// The vault's outgoing viewing keys for a transaction: payments with the external one,
-    /// change with the internal one, so members can recover every output and check it
-    /// (`verify::verify_pczt`). `OvkPolicy::Sender` sets no internal key
-    /// (zcash_client_backend 0.25.0-pre.1 `data_api/wallet.rs:2225-2231`), which leaves
-    /// change's `out_ciphertext` random: a channel nobody could check. `Custom`'s keys go
-    /// as given (`wallet.rs:2232-2236`); Ironwood change is added with the internal one
-    /// (`wallet.rs:2531-2536`, `builder.add_ironwood_output(internal_ovk, ..)`).
     fn ovk_policy(&self, payments_external: bool) -> Result<OvkPolicy, WalletError> {
         let account = self
             .db
@@ -1016,16 +825,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         })
     }
 
-    /// Selects notes, builds and IO-finalizes a PCZT paying `payments`, with change back to
-    /// the vault in the Ironwood pool. Outputs are encrypted with the vault's outgoing
-    /// viewing keys ([`Self::ovk_policy`]), which member verification requires. The
-    /// transaction expires `expiry_blocks` after the height it is built for (the vault's
-    /// `proposal_expiry_blocks`), so members can approve and sign over days.
-    ///
-    /// `must_spend`: per payment that may be signed and can still mine (`node::still_sendable`),
-    /// its nullifiers; the transaction spends one of this wallet's notes among each, so at
-    /// most one of them can mine. Those notes are held, so ordinary selection skips them:
-    /// they are added to every selection ([`ForcedInputs`]), and the fee covers them.
     pub fn propose(
         &mut self,
         payments: &[PaymentRequest],
@@ -1059,9 +858,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         .map_err(|e| WalletError::Proposal(format!("{e:?}")))
     }
 
-    /// The exact ZIP 317 fee [`Self::propose`] would pay for `payments` now: the same note
-    /// selection, without building anything (nothing is written or locked). For the send
-    /// review, before anyone proposes.
     pub fn fee_for(&mut self, payments: &[PaymentRequest]) -> Result<u64, WalletError> {
         let proposal = self.transfer_proposal(payments, &[])?;
         Ok(proposal
@@ -1071,13 +867,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             .sum())
     }
 
-    /// Note selection and change for `payments` (ZIP 317 fee, Ironwood change), spending a
-    /// note of each set in `must_spend` (see [`Self::propose`]).
-    ///
-    /// This is `propose_transfer` (zcash_client_backend 0.25.0-pre.1 `data_api/wallet.rs:
-    /// 779-967`) over [`ForcedInputs`] instead of the database, without its two other parts:
-    /// the ZIP 318 canonical-crossing attempt (`wallet.rs:836-929`) spends an Orchard-pool
-    /// note, which a vault never holds, and input locking is off (`lock_inputs: None`).
     fn transfer_proposal(
         &mut self,
         payments: &[PaymentRequest],
@@ -1124,9 +913,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             forced: self.forced_notes(must_spend, target_height)?,
             db: &self.db,
         };
-        // Change comes back as several notes while the vault has fewer than
-        // CHANGE_NOTES_TARGET: each open proposal holds whole notes, so a vault with one
-        // note could only have one payment in flight ("funds are held by open payments").
         let change = MultiOutputChangeStrategy::new(
             StandardFeeRule::Zip317,
             None,
@@ -1166,9 +952,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(proposal.with_proposed_version(None))
     }
 
-    /// One spendable note of this wallet among each set of nullifiers (lock state ignored:
-    /// they are held for the very proposals they must be spent against). A set whose wallet
-    /// notes are all spent already fails with [`WalletError::NotesSpent`].
     fn forced_notes(
         &self,
         must_spend: &[Vec<[u8; 32]>],
@@ -1197,7 +980,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
                 );
                 let (txid, index) = match row {
                     Ok(row) => row,
-                    // A dummy spend's nullifier, or a note not scanned yet.
                     Err(rusqlite::Error::QueryReturnedNoRows) => continue,
                     Err(e) => return Err(db_err(e)),
                 };
@@ -1222,7 +1004,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
                 }
             }
             match found {
-                // Two such payments may share a note: spending it once covers both.
                 Some(note)
                     if !forced.iter().any(|f: &ReceivedNote<_, _>| {
                         f.internal_note_id() == note.internal_note_id()
@@ -1243,11 +1024,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         Ok(forced)
     }
 
-    /// Builds and IO-finalizes a PCZT that spends exactly the notes with `nullifiers` (all
-    /// of their value minus the ZIP 317 fee) to `recipient`, the vault's own internal
-    /// address. Used to make a cancelled proposal unsendable: once this is mined, the
-    /// cancelled transaction's notes are spent. Every other note is locked for the
-    /// duration of the call, so selection can only pick the target notes.
     pub fn propose_sweep(
         &mut self,
         nullifiers: &[[u8; 32]],
@@ -1256,8 +1032,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         expiry_blocks: u32,
     ) -> Result<Pczt, WalletError> {
         const SWEEP: LockOwner = LockOwner::new(*b"zafe-sweep-temporary-lock-owner!");
-        // The proposal's nullifiers include padding (dummy) spends that match no note:
-        // only the vault notes among them must be swept.
         let mut targets: Vec<[u8; 32]> = Vec::new();
         let others: Vec<OutputRef> = {
             let conn = open_connection(&self.path, &self.key, true)?;
@@ -1304,7 +1078,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
         }
         let tip = self.chain_height()?.unwrap_or(0);
         for output in &others {
-            // Already locked by a live proposal: excluded anyway.
             match self.db.lock_outputs(
                 std::slice::from_ref(output),
                 SWEEP,
@@ -1329,7 +1102,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             None,
             MaxSpendMode::MaxSpendable,
             ConfirmationsPolicy::default(),
-            // The target notes are held under their proposals' owners (`owners`).
             &locked_policy(owners).unwrap_or_default(),
             None,
         )
@@ -1362,7 +1134,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
             BundlePadding::DEFAULT,
         )
         .map_err(|e| WalletError::Proposal(format!("{e:?}")))?;
-        // Every target note must be spent, or the cancelled transaction stays sendable.
         let spent = crate::tx::spent_nullifiers(&pczt)
             .map_err(|e| WalletError::Proposal(format!("{e:?}")))?;
         if !targets.iter().all(|nf| spent.contains(nf)) {
@@ -1374,16 +1145,6 @@ impl<P: Parameters + Clone + Send + Sync + 'static> VaultWallet<P> {
     }
 }
 
-/// The wallet's notes for input selection, with notes every selection must include
-/// ([`VaultWallet::propose`]). `GreedyInputSelector` funds a transaction with the whole set
-/// `select_spendable_notes` returns and recomputes the fee over it each round
-/// (zcash_client_backend 0.25.0-pre.1 `data_api/wallet/input_selection.rs:1470-1497`), so
-/// adding the forced notes there makes them inputs, paid for. Accumulation asks only for
-/// the rest of the target. `select_single_spendable_note` (used only under
-/// `NoteSelection::PreferSingle`, `input_selection.rs:1453-1468`) finds nothing while notes
-/// are forced, so selection accumulates. Transparent sources keep the trait's defaults: the
-/// default `SpendPolicy` permits no transparent spending, and selection then skips the
-/// transparent gather entirely (`input_selection.rs:1023-1026`).
 struct ForcedInputs<'a, D: InputSource> {
     db: &'a D,
     forced: Vec<ReceivedNote<D::NoteRef, orchard::Note>>,
@@ -1434,7 +1195,6 @@ impl<D: InputSource> InputSource for ForcedInputs<'_, D> {
             .cloned()
             .collect();
         let forced_value = forced.iter().map(|n| n.note().value().inner()).sum::<u64>();
-        // The rest of the target from the other notes (none when the forced ones cover it).
         let rest = match target_value {
             TargetValue::AtLeast(v) if v.into_u64() <= forced_value => None,
             TargetValue::AtLeast(v) => Some(TargetValue::AtLeast(
@@ -1514,10 +1274,6 @@ impl<D: InputSource> InputSource for ForcedInputs<'_, D> {
     }
 }
 
-/// Input selection that draws on notes held by `owners` first (`LockedInputPolicy::
-/// PreferLocked`: "prefer outputs locked by one of these owners; draw on unlocked outputs
-/// only as needed", zcash_client_backend 0.25.0-pre.1 `data_api/locking.rs:441-443`);
-/// `None` without owners.
 fn locked_policy(owners: &[[u8; 32]]) -> Option<LockedInputPolicy> {
     zcash_client_backend::data_api::wallet::input_selection::NonEmptyBTreeSet::from_set(
         owners.iter().map(|o| LockOwner::new(*o)).collect(),
@@ -1525,7 +1281,6 @@ fn locked_policy(owners: &[[u8; 32]]) -> Option<LockedInputPolicy> {
     .map(LockedInputPolicy::PreferLocked)
 }
 
-/// `VaultWallet::unspent_note_count` for the account with this UUID in the database at `path`.
 fn unspent_note_count_at(
     path: &Path,
     key: &WalletKey,
@@ -1547,15 +1302,11 @@ fn unspent_note_count_at(
     Ok(usize::try_from(n).unwrap_or(0))
 }
 
-/// `VaultWallet::received_payments` for the account with this UUID in the database at `path`.
 fn received_payments_at(
     path: &Path,
     key: &WalletKey,
     account: &[u8; 16],
 ) -> Result<Vec<ReceivedPayment>, WalletError> {
-    // `WalletDb` doesn't expose its connection, so read the database's views
-    // (`v_received_outputs`, `v_received_output_spends`) on a second, read-only connection.
-    // Callers already serialize wallet access.
     let conn = open_connection(path, key, true)?;
     let mut stmt = conn
         .prepare(
@@ -1627,7 +1378,6 @@ fn received_payments_at(
         .collect()
 }
 
-/// The text of a memo, or `None` for an empty, non-text or malformed one.
 pub fn memo_text(bytes: &[u8]) -> Option<String> {
     let memo = zcash_protocol::memo::Memo::try_from(MemoBytes::from_bytes(bytes).ok()?).ok()?;
     match memo {
@@ -1636,7 +1386,6 @@ pub fn memo_text(bytes: &[u8]) -> Option<String> {
     }
 }
 
-/// In-memory compact block cache for `sync::run`.
 #[derive(Clone, Default)]
 pub struct MemBlockCache(Arc<Mutex<Vec<CompactBlock>>>);
 
@@ -1719,22 +1468,16 @@ impl BlockCache for MemBlockCache {
     }
 }
 
-/// Mainnet's NU7 activation height, agreed by the ZIP editors on 2026-10-20 (zips#1405, ZIP 259;
-/// about 2026-11-05). The librustzcash pre-releases we pin don't have it yet, so `ZafeNetwork::Main`
-/// supplies it; once a crate release carries a height, the crate's wins.
 pub const MAINNET_NU7_HEIGHT: u32 = 3_543_405;
 
-/// The networks Zafe runs on, selectable at runtime (e.g. from the app's settings).
 #[derive(Clone, Copy, Debug)]
 pub enum ZafeNetwork {
     Main,
     Test,
-    /// Local regtest with every upgrade through NU6.3 at height 1 (`infra/regtest`).
     Regtest(LocalNetwork),
 }
 
 impl ZafeNetwork {
-    /// "main", "test" or "regtest".
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "main" => Some(Self::Main),
@@ -1784,29 +1527,22 @@ mod tests {
     use super::*;
     use crate::keys::{VaultKeys, VaultSecret};
 
-    /// The guard against a network upgrade this version doesn't know: the server's branch
-    /// must be the one this app builds for at the server's tip.
     #[test]
     fn an_unknown_network_upgrade_is_reported_as_an_outdated_app() {
         use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
-        // Mainnet today: NU6.3, which this app knows.
         assert!(check_branch("37a5165b", 3_515_000, &MAIN_NETWORK).is_ok());
         assert!(check_branch("0x37A5165B", 3_515_000, &MAIN_NETWORK).is_ok());
-        // Testnet after NU7 (height 4,465,026): known, so fine ...
         assert!(check_branch("77190ad9", 4_493_000, &TEST_NETWORK).is_ok());
-        // ... and a chain that moved to NU7 while these rules say NU6.3 is not.
         let before_nu7 = LocalNetwork {
             nu7: None,
             ..regtest_network()
         };
         let err = check_branch("77190ad9", 10, &before_nu7).unwrap_err();
         assert!(matches!(err, WalletError::AppOutdated(_)), "{err}");
-        // A server that gives no id, or one we can't read, is not held against the app.
         assert!(check_branch("", 10, &before_nu7).is_ok());
         assert!(check_branch("nonsense", 10, &before_nu7).is_ok());
     }
 
-    /// Mainnet builds NU7 transactions from the agreed height on, NU6.3 ones before it.
     #[test]
     fn mainnet_knows_the_nu7_height() {
         use zcash_protocol::consensus::{BranchId, NetworkUpgrade};
@@ -1820,33 +1556,27 @@ mod tests {
         assert_eq!(at(MAINNET_NU7_HEIGHT), BranchId::Nu7);
         assert!(check_branch("37a5165b", MAINNET_NU7_HEIGHT - 1, &main).is_ok());
         assert!(check_branch("77190ad9", MAINNET_NU7_HEIGHT, &main).is_ok());
-        // A proposal whose window crosses the upgrade expires the block before it.
         assert_eq!(
             proposal_expiry(&main, MAINNET_NU7_HEIGHT - 500, 1_152),
             MAINNET_NU7_HEIGHT - 1
         );
     }
 
-    /// A proposal built under the rules before a known upgrade expires before it.
     #[test]
     fn a_proposal_does_not_outlive_a_known_network_upgrade() {
         let ahead = LocalNetwork {
             nu7: Some(BlockHeight::from_u32(2_000)),
             ..regtest_network()
         };
-        // 1,500 + 1,152 rounds up to 2,592, past the upgrade: cut to the block before it.
         assert_eq!(proposal_expiry(&ahead, 1_500, 1_152), 1_999);
-        // Already on the new rules: the window and rounding count 25 s blocks (x3).
         assert_eq!(
             proposal_expiry(&ahead, 2_500, 1_152),
             crate::vault::expiry_height_scaled(2_500, 1_152, 3)
         );
-        // The window ends before the upgrade: unchanged.
         assert_eq!(
             proposal_expiry(&ahead, 100, 1_152),
             crate::vault::expiry_height(100, 1_152)
         );
-        // No upgrade known: unchanged.
         let unknown = LocalNetwork {
             nu7: None,
             ..regtest_network()
@@ -1857,14 +1587,12 @@ mod tests {
         );
     }
 
-    /// Expiry windows keep their duration across NU7's 75 s -> 25 s block time.
     #[test]
     fn expiry_windows_keep_their_duration_after_nu7() {
         let main = ZafeNetwork::Main;
         let week = crate::vault::DEFAULT_PROPOSAL_EXPIRY_BLOCKS;
         assert_eq!(block_scale(&main, MAINNET_NU7_HEIGHT - 1), 1);
         assert_eq!(block_scale(&main, MAINNET_NU7_HEIGHT), 3);
-        // Before: 8,064 blocks of 75 s. After: 24,192 blocks of 25 s. Both a week.
         let before = proposal_expiry(&main, 3_000_001, week);
         assert!((3_000_001 + week..3_000_001 + week + 144).contains(&before));
         let target = MAINNET_NU7_HEIGHT + 10;
@@ -1872,8 +1600,6 @@ mod tests {
         assert!((target + 3 * week..target + 3 * week + 3 * 144).contains(&after));
         assert_eq!(after % (3 * 144), 0);
 
-        // A member accepts the proposer's scaled expiry, also from a tip a little behind
-        // the upgrade, and still refuses one past the scaled window.
         let check = |tip: u32, expiry: u32| {
             let e = crate::node::expectations(&main, &[], tip, week).unwrap();
             expiry > tip && expiry - tip <= e.max_expiry_delta
@@ -1881,7 +1607,6 @@ mod tests {
         assert!(check(target - 1, after));
         assert!(check(MAINNET_NU7_HEIGHT - 50, after));
         assert!(!check(target - 1, after + 3 * 144 + 3 * 96 + 1));
-        // Before NU7 the rule is what older apps check.
         let e = crate::node::expectations(&main, &[], 3_000_000, week).unwrap();
         assert_eq!(e.max_expiry_delta, week + 1 + 96 + 144);
     }
@@ -1890,12 +1615,10 @@ mod tests {
     fn the_wallet_key_is_derived_not_stored() {
         let seeds = [7u8; 66];
         let a = WalletKey::derive(&seeds, "vault-a");
-        // The same inputs give the same key in every isolate and after a restore.
         assert_eq!(
             a.as_bytes(),
             WalletKey::derive(&seeds, "vault-a").as_bytes()
         );
-        // Another vault or another identity gets another key.
         assert_ne!(
             a.as_bytes(),
             WalletKey::derive(&seeds, "vault-b").as_bytes()
@@ -1904,7 +1627,6 @@ mod tests {
             a.as_bytes(),
             WalletKey::derive(&[8u8; 66], "vault-a").as_bytes()
         );
-        // Moving bytes between the seeds and the id can't collide (length-prefixed).
         assert_ne!(
             WalletKey::derive(&[1, 2, 3], "x").as_bytes(),
             WalletKey::derive(&[1, 2], "\x03x").as_bytes()
@@ -1923,10 +1645,7 @@ mod tests {
             .to_vec()
     }
 
-    /// Builds a wallet database with one vault account and hand-written chain data, then
-    /// checks which transactions count as received payments.
     #[test]
-    #[allow(clippy::type_complexity)]
     fn received_payments_exclude_own_spends_and_expired() {
         let dir = std::env::temp_dir().join(format!("zafe-recv-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1975,13 +1694,13 @@ mod tests {
             )
             .unwrap();
         }
-        // (id, txid byte, mined height, tx index, expiry)
-        let txs: [(i64, u8, Option<u32>, Option<u32>, u32); 5] = [
-            (1, 0xa1, Some(10), Some(1), 50), // external payment, two outputs
-            (2, 0xa2, Some(12), Some(0), 0),  // coinbase
-            (3, 0xa3, Some(20), Some(1), 60), // the vault's own spend, with change
-            (4, 0xa4, None, None, 15),        // unmined and expired
-            (5, 0xa5, None, None, 100),       // unmined, still valid
+        type TxRow = (i64, u8, Option<u32>, Option<u32>, u32);
+        let txs: [TxRow; 5] = [
+            (1, 0xa1, Some(10), Some(1), 50),
+            (2, 0xa2, Some(12), Some(0), 0),
+            (3, 0xa3, Some(20), Some(1), 60),
+            (4, 0xa4, None, None, 15),
+            (5, 0xa5, None, None, 100),
         ];
         for (id, byte, mined, index, expiry) in txs {
             conn.execute(
@@ -1992,13 +1711,13 @@ mod tests {
             )
             .unwrap();
         }
-        // (note id, tx, action, value, is_change, memo)
-        let notes: [(i64, i64, u32, i64, bool, Option<Vec<u8>>); 6] = [
+        type NoteRow = (i64, i64, u32, i64, bool, Option<Vec<u8>>);
+        let notes: [NoteRow; 6] = [
             (1, 1, 0, 100_000, false, Some(text_memo("rent"))),
             (2, 1, 1, 50_000, false, Some(vec![0xf6])),
             (3, 2, 0, 625_000_000, false, None),
             (4, 3, 0, 40_000, true, None),
-            (5, 3, 1, 5_000, false, None), // a self-payment inside the vault's own spend
+            (5, 3, 1, 5_000, false, None),
             (6, 5, 0, 7_000, false, None),
         ];
         for (id, tx, action, value, change, memo) in notes {
@@ -2010,7 +1729,6 @@ mod tests {
             )
             .unwrap();
         }
-        // Transaction 3 spends note 1 (the vault paying someone).
         conn.execute(
             "INSERT INTO ironwood_received_note_spends VALUES (1, 3)",
             [],
@@ -2018,7 +1736,6 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        // Six notes, one spent by transaction 3.
         assert_eq!(
             unspent_note_count_at(&path, &key, account.expose_uuid().as_bytes()).unwrap(),
             5
@@ -2064,8 +1781,6 @@ mod tests {
         assert_eq!(memo_text(&[0xff; 512]), None);
     }
 
-    /// The wallet database is encrypted: it reopens with its key, and a wrong key or a plain
-    /// database from before encryption fails with `WrongKey` (so callers resync).
     #[test]
     fn wallet_database_is_encrypted() {
         let dir = std::env::temp_dir().join(format!("zafe-enc-{}", std::process::id()));
@@ -2083,7 +1798,6 @@ mod tests {
             .unwrap()
             .ufvk()
             .unwrap();
-        // Opening a missing database doesn't create one.
         assert!(VaultWallet::open(&path, &key, net).is_err());
         assert!(!path.exists());
 
@@ -2103,19 +1817,16 @@ mod tests {
         .unwrap();
         drop(db);
 
-        // Nothing readable on disk: no SQLite header, no account name.
         let raw = std::fs::read(&path).unwrap();
         assert!(!raw.starts_with(b"SQLite format 3"));
         assert!(!raw.windows(5).any(|w| w == b"vault"));
 
-        // Reopens with the key (both the wallet and the read-only second connection).
         assert!(VaultWallet::exists(&path, &key, net));
         let wallet = VaultWallet::open(&path, &key, net).unwrap();
         assert_eq!(wallet.balance().unwrap().total, 0);
         assert_eq!(wallet.received_payments().unwrap(), vec![]);
         drop(wallet);
 
-        // A wrong key fails with a typed error, on both kinds of connection.
         let wrong = WalletKey::random();
         assert!(matches!(
             VaultWallet::open(&path, &wrong, net),
@@ -2127,7 +1838,6 @@ mod tests {
         ));
         assert!(!VaultWallet::exists(&path, &wrong, net));
 
-        // A plain database (as written before encryption) doesn't open with a key.
         let plain = dir.join("plain.sqlite");
         let _ = std::fs::remove_file(&plain);
         let conn = rusqlite::Connection::open(&plain).unwrap();

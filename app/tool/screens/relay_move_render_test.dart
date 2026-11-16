@@ -1,14 +1,3 @@
-// Renders the server and move screens without a device (docs/relay-move.md §4.2-4.5):
-// the vault's Server screen (normal, a member must update, a private server), the
-// server list from Move, the waiting room (and with the old server down), the mover's
-// done page, the follow screen from a link, the Status screen's move suggestion, the
-// Zcash server screen, the Needs you move cards, Home's mover card, the confirm dialog
-// and the Activity row, in both themes. Not part of `flutter test`; run it explicitly
-// (from app/):
-//
-//   flutter test tool/screens/relay_move_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): move_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -124,7 +113,6 @@ Widget _waiting({String? resume}) => ZafeScreen(
   ],
 );
 
-/// Whole pages with their pinned buttons: (name, page).
 List<(String, Widget)> relayMoveScreens() => [
   ('server', _server()),
   ('server_must_update', _server(mustUpdate: mustUpdateText(['Bob']))),
@@ -306,7 +294,6 @@ Widget _followButtons() => Column(
   ],
 );
 
-/// Cards: (name, page title, content).
 List<(String, String?, Widget)> relayMoveCases() => [
   (
     'needs_you',
@@ -447,8 +434,7 @@ void main() {
         });
         final path = '${out.path}/move_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

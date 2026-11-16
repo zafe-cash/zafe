@@ -7,8 +7,6 @@ import '../../core/security/unlock_gate.dart';
 import '../../core/widgets/action_button.dart' show ActionCancelled;
 import '../../providers/proposals_provider.dart';
 
-/// Time left until `completesAt` (Unix seconds, this phone's own clock), short:
-/// "2 d 5 h", "3 h", "under 1 h"; null when unknown or past.
 String? timeLeft(BigInt? completesAt, {DateTime? now}) {
   final at = fromUnixSeconds(completesAt);
   if (at == null) return null;
@@ -20,20 +18,26 @@ String? timeLeft(BigInt? completesAt, {DateTime? now}) {
   return hours == 0 ? '${left.inDays} d' : '${left.inDays} d $hours h';
 }
 
-/// A Unix time (seconds) as "13 Nov".
 String? dayOf(BigInt? secs) {
   final at = fromUnixSeconds(secs);
   if (at == null) return null;
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${at.day} ${months[at.month - 1]}';
 }
 
-/// Keep my seat, from the old phone: the unlock, then the keep. Only ever from the
-/// owner's tap. Throws [ActionCancelled] when the unlock is cancelled (for an
-/// [ActionButton]).
 Future<void> keepMySeatOrThrow(BuildContext context, WidgetRef ref) async {
   if (!await confirmUnlock(
     context,
@@ -46,7 +50,6 @@ Future<void> keepMySeatOrThrow(BuildContext context, WidgetRef ref) async {
   await ref.read(proposalsProvider.notifier).keepSeat();
 }
 
-/// [keepMySeatOrThrow] for a card: why it failed, or null when kept or cancelled.
 Future<String?> keepMySeat(BuildContext context, WidgetRef ref) async {
   try {
     await keepMySeatOrThrow(context, ref);

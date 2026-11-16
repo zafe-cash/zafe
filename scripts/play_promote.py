@@ -1,18 +1,3 @@
-"""Promotes a build from Google Play's internal track to production, with its in-app update
-priority and notes. Run by .github/workflows/play-promote.yml; never by hand.
-
-    PLAY_KEY=<service account JSON> python3 scripts/play_promote.py <version> <rollout percent> [--dry-run]
-
---dry-run does everything but the change: it opens an edit, reads the tracks, finds the
-build, then deletes the edit (a check that the key and its Play permissions work).
-
-The build is the internal-track release named <version> (release-mainnet.yml uploads each
-mainnet tag there under that name), so production only ever gets a bundle that was tested
-first. `docs/releases/<version>.md` gives the class: essential = priority 5 and 100% at
-once (members of a vault update together); optional = priority 2, any rollout. A new app's
-first production release can't be staged (Play refuses it).
-"""
-
 import json
 import os
 import re
@@ -73,8 +58,6 @@ def main():
 
     edit = call("POST", "/edits")["id"]
     internal = call("GET", f"/edits/{edit}/tracks/internal")
-    # CI names releases "<version>"; by hand they may read "v0.1.16" or "2018 (0.1.16)".
-    # The version must appear as a whole token, so 0.1.1 never matches 0.1.16.
     token = re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
     names = [r.get("name", "") for r in internal.get("releases", [])]
     codes = [c for rel in internal.get("releases", []) if token.search(rel.get("name", ""))

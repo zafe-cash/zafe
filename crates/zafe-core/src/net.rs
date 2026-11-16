@@ -1,22 +1,12 @@
-//! Why a connection to the relay or lightwalletd failed, read from the error's types (not
-//! its text), so the app can tell "unreachable" from a certificate problem or a timeout.
-
 use std::error::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetFailure {
-    /// No connection: DNS, refused, reset, no route, offline.
     Unreachable,
-    /// The TLS handshake failed: an untrusted or expired certificate, a hostname mismatch,
-    /// or a server that doesn't speak TLS.
     Tls,
-    /// The server didn't answer in time.
     Timeout,
-    /// The server answered, with an error.
     Server,
-    /// Tor is on and still connecting: nothing is sent until it is (never direct).
     TorConnecting,
-    /// Tor is on but could not connect: nothing is sent until it does (never direct).
     TorFailed,
 }
 
@@ -30,7 +20,6 @@ impl From<crate::tor::Blocked> for NetFailure {
 }
 
 impl NetFailure {
-    /// Classifies a transport error by walking its causes.
     pub fn of(e: &(dyn Error + 'static)) -> Self {
         let mut timeout = false;
         let mut current = Some(e);
@@ -45,15 +34,12 @@ impl NetFailure {
             if let Some(r) = err.downcast_ref::<reqwest::Error>() {
                 timeout |= r.is_timeout();
             }
-            // HTTP over Tor (the relay client with Tor on).
             if let Some(zcash_client_backend::tor::http::HttpError::Timeout(_)) =
                 err.downcast_ref::<zcash_client_backend::tor::http::HttpError>()
             {
                 timeout = true;
             }
             current = match err.downcast_ref::<std::io::Error>() {
-                // `io::Error::source` skips the error it wraps (and reqwest nests them:
-                // io(Other, io(InvalidData, rustls::Error))), so step into it instead.
                 Some(io) => {
                     timeout |= io.kind() == std::io::ErrorKind::TimedOut;
                     match io.get_ref() {
@@ -71,12 +57,9 @@ impl NetFailure {
         }
     }
 
-    /// Classifies a gRPC status: transport codes by their cause, anything else is the
-    /// server's own answer.
     pub fn of_status(status: &tonic::Status) -> Self {
         use tonic::Code;
         match status.code() {
-            // tonic reports its own request timeout as `Cancelled`.
             Code::Cancelled => match Self::of(status) {
                 NetFailure::Unreachable => NetFailure::Timeout,
                 f => f,
@@ -91,8 +74,6 @@ fn is_tls(e: &(dyn Error + 'static)) -> bool {
     e.is::<rustls::Error>()
 }
 
-/// An error and its causes on one line ("error sending request: ...: invalid peer
-/// certificate: UnknownIssuer"), since the outer messages alone say little.
 pub fn error_chain(e: &dyn Error) -> String {
     let mut message = e.to_string();
     let mut source = e.source();
@@ -122,7 +103,6 @@ mod tests {
             rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer),
         );
         assert_eq!(NetFailure::of(&tls), NetFailure::Tls);
-        // As reqwest reports it: an io error wrapping the handshake's io error.
         let nested = std::io::Error::other(tls);
         assert_eq!(NetFailure::of(&nested), NetFailure::Tls);
     }

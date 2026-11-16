@@ -7,29 +7,17 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import '../core/errors/zafe_error_copy.dart' show describeError;
 import '../rust/api/watch.dart' as rust;
 
-/// Live vault activity while the app is open: the relay long poll (`rust.watchVault`)
-/// reports other members' proposals, votes and signing requests as they happen, and the
-/// app refreshes at once. The periodic poll keeps running as the fallback, slower while
-/// the watch is live. Background stays on push notifications and WorkManager.
-
-/// Decides what each watch event means. Pure, so it can be unit-tested.
 class LiveActivityPolicy {
-  /// Poll interval while the watch isn't live (older relay, failures, not started).
   static const fallbackPoll = Duration(seconds: 15);
 
-  /// Poll interval while the watch is live: only a safety net.
   static const livePoll = Duration(seconds: 60);
 
   bool _live = false;
 
-  /// Whether the watch currently reaches the relay.
   bool get live => _live;
 
   Duration get pollInterval => _live ? livePoll : fallbackPoll;
 
-  /// Handles one event; returns whether the app should refresh now. `Connected` also
-  /// refreshes: the watch starts from where the relay is when it connects, so a refresh
-  /// then covers anything between the last refresh and that point.
   bool onEvent(rust.VaultActivityKind kind) {
     switch (kind) {
       case rust.VaultActivityKind.connected:
@@ -43,7 +31,6 @@ class LiveActivityPolicy {
     }
   }
 
-  /// The watch ended or was stopped.
   void onEnded() => _live = false;
 }
 
@@ -71,8 +58,6 @@ Stream<rust.VaultActivity> _rustStart({
 void _rustStop(int watchId) =>
     rust.stopVaultWatch(watchId: PlatformInt64Util.from(watchId));
 
-/// The watch for the active vault. The owner starts it in the foreground and stops it
-/// when the app goes to the background, the vault changes, or the screen goes away.
 class LiveVaultWatch {
   LiveVaultWatch({
     required this.onRefresh,
@@ -83,13 +68,10 @@ class LiveVaultWatch {
   }) : _starter = starter ?? _rustStart,
        _stopper = stopper ?? _rustStop;
 
-  /// Called when something changed on the relay.
   final void Function() onRefresh;
 
-  /// Called when the fallback poll should run at a new interval.
   final void Function(Duration interval) onPollIntervalChanged;
 
-  /// Called (before [onRefresh]) when something was delivered to this member.
   final void Function()? onInbox;
 
   final WatchStarter _starter;
@@ -100,8 +82,6 @@ class LiveVaultWatch {
   int? _watchId;
   static int _lastId = 0;
 
-  /// Rust keeps one watch per process and orders them by id; ids from the clock stay
-  /// increasing across a Dart hot restart, when the Rust side keeps running.
   static int _nextId() {
     final now = DateTime.now().microsecondsSinceEpoch;
     _lastId = now > _lastId ? now : _lastId + 1;
@@ -112,7 +92,6 @@ class LiveVaultWatch {
 
   Duration get pollInterval => policy.pollInterval;
 
-  /// Starts watching (replacing any running watch).
   void start({
     required String relayUrl,
     required List<int> seeds,
@@ -137,7 +116,6 @@ class LiveVaultWatch {
         );
   }
 
-  /// Stops the watch; the fallback poll goes back to its normal interval.
   void stop() {
     final id = _watchId;
     final subscription = _subscription;

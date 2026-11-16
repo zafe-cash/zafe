@@ -1,12 +1,4 @@
 ---
-// Home page (direction: .impeccable/surfaces/src-pages-index-astro.md). One centred column:
-// the headline and the two ways to install, then the story in four illustrated loops (one
-// room; each scene moves with the app's own card, infra/site/scenes + film): your phone
-// checks every payment; two of three approve, it's sent; one key, never in one place;
-// quiet until it needs you (then the features); the close, questions.
-// The only script is loops.js (pause buttons, no play off screen); with reduced motion each
-// loop is a still. Every claim is shipped (docs/tracker.md); the link under the sending loop
-// is the real testnet payment from the 2026-09-30 dry run.
 import Base from '../layouts/Base.astro';
 import PlayButton from '../components/PlayButton.astro';
 import IphoneButton from '../components/IphoneButton.astro';
@@ -27,11 +19,9 @@ const faq = [
   { q: 'iPhone?', a: 'Coming. Tap the Apple icon under “Get Zafe” to join the waitlist, and we’ll send one email when it’s out.' },
 ];
 
-// SEO (docs/seo.md): <title> carries the search terms, the share cards the tagline.
 const description =
   'A private multisig wallet for Zcash. Nothing moves until enough of you approve, and on-chain it looks like any payment.';
 const home = Astro.site!.href;
-// schema.org data for search engines; every value must match what the page says.
 const jsonLd = {
   '@context': 'https://schema.org',
   '@graph': [
@@ -82,9 +72,6 @@ const jsonLd = {
   jsonLd={jsonLd}
   bodyClass="home landing"
 >
-  <!-- Intro (CSS only): the screen is the mark's tile, its two pieces lock, then it
-       collapses up into the nav logo while the page appears. Skipped with
-       prefers-reduced-motion. -->
   <div class="intro" aria-hidden="true">
     <div class="intro-veil"></div>
     <div class="intro-ring"></div>

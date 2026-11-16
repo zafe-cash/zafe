@@ -1,42 +1,3 @@
-//! `zafe-relay`: runs the relay.
-//!
-//! - `ZAFE_RELAY_LISTEN`: listen address (default `127.0.0.1:8787`; if unset and `PORT` is
-//!   set, `0.0.0.0:$PORT`, as container platforms expect)
-//! - `ZAFE_RELAY_DB`: SQLite file (default `zafe-relay.sqlite`; `:memory:` for none)
-//! - `ZAFE_FCM_SERVICE_ACCOUNT`: path to a Firebase service-account JSON key; enables
-//!   Android pushes (otherwise pushes are only logged)
-//! - `ZAFE_FCM_SERVICE_ACCOUNT_JSON`: the same key inline (for secret env vars); wins
-//! - `PORT`: see `ZAFE_RELAY_LISTEN`
-//! - `ZAFE_RELAY_LIMITS`: `off` disables rate limits (default: on, [`Limits::hosted`])
-//! - `ZAFE_RELAY_KEY_RATE` / `ZAFE_RELAY_IP_RATE`: requests per minute per signing key /
-//!   client IP (burst: half of it); `0` turns that limit off
-//! - `ZAFE_RELAY_CREATES_PER_DAY`: mailboxes (vaults) created per client IP per day
-//!   (burst: half of it; default 20); `0` turns it off
-//! - `ZAFE_RELAY_CLIENT_IP_HEADER`: behind a proxy, the header carrying the client address
-//!   (`fly-client-ip` on Fly.io, `x-forwarded-for` behind Caddy). Unset: the TCP peer
-//! - `ZAFE_RELAY_QUOTAS`: `off` disables storage quotas (default: on, [`Quotas::hosted`]:
-//!   256 envelopes and 2 MiB per sender per recipient, 64 MiB of undelivered envelopes and
-//!   512 MiB of vault log per mailbox, half of it per author). Over a quota the relay answers 507
-//! - `ZAFE_RELAY_MAX_INBOX`: undelivered envelopes one sender may leave one recipient
-//! - `ZAFE_RELAY_MAX_DELIVERY_MB` / `ZAFE_RELAY_MAX_LOG_MB`: MiB of undelivered envelopes /
-//!   of vault log per mailbox
-//! - `ZAFE_RELAY_MAX_VAULTS_PER_KEY`: mailboxes one signing key may create (default 8).
-//!   `0` turns that quota off, as for the three before it
-//! - `ZAFE_RELAY_MAX_DB_MB`: MiB the whole database may take (no default: size it to the
-//!   disk). Writes past it answer 507; at 90% new vaults stop, and so do writes from vaults
-//!   created here in the last 30 days. `0` or unset: no cap
-//! - `ZAFE_RELAY_EXPIRY`: `off` keeps every mailbox (default: on, [`Expiry::hosted`]:
-//!   deleted after a year without member requests, or 30 days after creation when no
-//!   member but the creator ever made one)
-//! - `ZAFE_RELAY_IDLE_DAYS` / `ZAFE_RELAY_UNUSED_DAYS`: those two periods; `0` turns that
-//!   rule off
-//! - `ZAFE_RELAY_CREATE_TOKEN`: when set, creating or restoring a mailbox needs this token
-//!   (a private relay). Never logged
-//!
-//! [`Limits::hosted`]: zafe_relay::limits::Limits::hosted
-//! [`Quotas::hosted`]: zafe_relay::quota::Quotas::hosted
-//! [`Expiry::hosted`]: zafe_relay::expiry::Expiry::hosted
-
 use std::{net::SocketAddr, path::Path, time::Duration};
 
 use zafe_relay::{
@@ -49,7 +10,6 @@ use zafe_relay::{
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        // Plain text for Docker / systemd / Fly log collectors.
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .init();
     let addr = listen_addr(
@@ -63,8 +23,6 @@ async fn main() -> std::io::Result<()> {
         zafe_relay::Relay::open(Path::new(&db)).map_err(std::io::Error::other)?
     };
 
-    // The key comes from a secret file, or inline from a secret env var (platforms such as
-    // Fly.io expose secrets as env vars). Never bake it into an image.
     let fcm_json = match (
         std::env::var("ZAFE_FCM_SERVICE_ACCOUNT_JSON"),
         std::env::var("ZAFE_FCM_SERVICE_ACCOUNT"),
@@ -128,7 +86,6 @@ async fn main() -> std::io::Result<()> {
         }
     );
 
-    // Hourly: old undelivered envelopes, then mailboxes nobody uses.
     let pruner = relay.clone();
     tokio::spawn(async move {
         loop {
@@ -146,7 +103,6 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    // Every few seconds: the pushes held back in windows that ended (`zafe_relay::push`).
     let pusher = relay.clone();
     tokio::spawn(async move {
         loop {
@@ -167,7 +123,6 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
-/// Rate limits from the environment (see the module docs).
 fn limits_from_env(var: impl Fn(&str) -> Option<String>) -> Limits {
     if var("ZAFE_RELAY_LIMITS").is_some_and(|v| v.eq_ignore_ascii_case("off")) {
         return Limits::none();
@@ -192,7 +147,6 @@ fn limits_from_env(var: impl Fn(&str) -> Option<String>) -> Limits {
     limits
 }
 
-/// Storage quotas from the environment (see the module docs).
 fn quotas_from_env(var: impl Fn(&str) -> Option<String>) -> Quotas {
     if var("ZAFE_RELAY_QUOTAS").is_some_and(|v| v.eq_ignore_ascii_case("off")) {
         return Quotas::none();
@@ -213,7 +167,6 @@ fn quotas_from_env(var: impl Fn(&str) -> Option<String>) -> Quotas {
     quotas
 }
 
-/// Mailbox expiry from the environment (see the module docs).
 fn expiry_from_env(var: impl Fn(&str) -> Option<String>) -> Expiry {
     if var("ZAFE_RELAY_EXPIRY").is_some_and(|v| v.trim().eq_ignore_ascii_case("off")) {
         return Expiry::none();
@@ -229,8 +182,6 @@ fn expiry_from_env(var: impl Fn(&str) -> Option<String>) -> Expiry {
     expiry
 }
 
-/// `ZAFE_RELAY_LISTEN` wins; otherwise `PORT` (Fly.io, Cloud Run, ...) on all interfaces;
-/// otherwise the local development default.
 fn listen_addr(listen: Option<String>, port: Option<String>) -> String {
     match (listen, port) {
         (Some(listen), _) if !listen.is_empty() => listen,
@@ -239,7 +190,6 @@ fn listen_addr(listen: Option<String>, port: Option<String>) -> String {
     }
 }
 
-/// Ctrl-C, or SIGTERM from Docker / systemd / Fly when stopping the service.
 async fn shutdown_signal() {
     #[cfg(unix)]
     {

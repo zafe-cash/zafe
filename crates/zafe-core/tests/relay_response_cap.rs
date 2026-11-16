@@ -1,10 +1,6 @@
-//! A relay can't make the client read an unbounded response (audit L6).
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zafe_core::relay_client::{RelayClient, RelayClientError};
 
-/// Answers every connection with a chunked body that never ends (no length to refuse up
-/// front), so only the client's streaming cap stops it.
 async fn endless_relay() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -1,6 +1,3 @@
-//! Member verification of proposal PCZTs (spec §9.3): the honest case, and each way a
-//! malicious proposer, leader or relay could try to get a bad transaction signed.
-
 use orchard::{
     keys::{FullViewingKey, Scope},
     note::Note,
@@ -13,7 +10,7 @@ use zafe_core::verify::{verify_pczt, Expectations, Payment, VerifyError};
 use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_protocol::memo::{Memo, MemoBytes};
 
-mod common;
+pub mod common;
 use common::*;
 
 const FUNDS: u64 = 1_000_000;
@@ -37,7 +34,6 @@ impl Vault {
         self.fvk.address_at(0u32, Scope::Internal)
     }
 
-    /// Builds a PCZT spending a freshly received vault note to `outputs`.
     fn pczt(&self, outputs: Vec<Out>) -> Pczt {
         let note =
             receive_ironwood_note(&self.fvk, self.fvk.address_at(0u32, Scope::External), FUNDS);
@@ -45,7 +41,6 @@ impl Vault {
         build_pczt(&self.fvk, note, path, anchor, outputs)
     }
 
-    /// An output recoverable by the vault (how Zafe builds payments).
     fn pay(&self, recipient: Address, value: u64, memo: &MemoBytes) -> Out {
         Out {
             ovk: Some(self.fvk.to_ovk(Scope::External)),
@@ -127,7 +122,6 @@ fn batch_payment_verifies() {
 
 #[test]
 fn rejects_hidden_output_to_attacker() {
-    // Pays the invoice, but "change" goes to an attacker instead of the vault.
     let v = Vault::new(32);
     let payee = outside_address(7);
     let m = memo("Invoice #123");
@@ -139,7 +133,6 @@ fn rejects_hidden_output_to_attacker() {
             &MemoBytes::empty(),
         ),
     ]);
-    // The builder shuffles action order, so match the error kind, not the index.
     let err = verify_pczt(&pczt, &v.fvk, &expect(vec![payment(payee, 400_000, &m)])).unwrap_err();
     assert!(matches!(err, VerifyError::UnexpectedOutput(_)), "{err:?}");
 }
@@ -155,9 +148,9 @@ fn rejects_wrong_amount_recipient_or_memo() {
     ]);
 
     for claimed in [
-        payment(payee, 300_000, &m),                    // amount differs
-        payment(outside_address(9), 400_000, &m),       // recipient differs
-        payment(payee, 400_000, &memo("Invoice #999")), // memo differs
+        payment(payee, 300_000, &m),
+        payment(outside_address(9), 400_000, &m),
+        payment(payee, 400_000, &memo("Invoice #999")),
     ] {
         let err = verify_pczt(&pczt, &v.fvk, &expect(vec![claimed])).unwrap_err();
         assert!(matches!(err, VerifyError::UnexpectedOutput(_)), "{err:?}");
@@ -187,7 +180,6 @@ fn rejects_missing_payment() {
 
 #[test]
 fn rejects_excess_fee() {
-    // Under-reported change silently burns value as fee.
     let v = Vault::new(35);
     let payee = outside_address(7);
     let m = memo("x");
@@ -210,7 +202,6 @@ fn rejects_excess_fee() {
 
 #[test]
 fn rejects_unrecoverable_payment_output() {
-    // Built without the vault OVK: the memo and recipient cannot be independently checked.
     let v = Vault::new(36);
     let payee = outside_address(7);
     let m = memo("x");
@@ -247,7 +238,7 @@ fn rejects_wrong_network_or_expiry() {
     ));
 
     let mut stale = expect(payments);
-    stale.tip_height = TARGET_HEIGHT + 1_000; // the transaction's expiry has passed
+    stale.tip_height = TARGET_HEIGHT + 1_000;
     assert!(matches!(
         verify_pczt(&pczt, &v.fvk, &stale).unwrap_err(),
         VerifyError::BadExpiry { .. }
@@ -279,9 +270,6 @@ fn rejects_spend_from_another_wallet() {
     assert!(matches!(err, VerifyError::ForeignSpend(_)), "{err:?}");
 }
 
-// --- Action count: padding must not raise the fee (security report 2026-11-12) ---------
-
-/// `count` vault notes of `value` each, in one tree.
 fn vault_notes(v: &Vault, count: usize, value: u64) -> (Anchor, Vec<(Note, MerklePath)>) {
     let notes: Vec<Note> = (0..count)
         .map(|_| receive_ironwood_note(&v.fvk, v.fvk.address_at(0u32, Scope::External), value))
@@ -297,15 +285,12 @@ fn padded_to(actions: u8) -> BundlePadding {
     }
 }
 
-/// A transaction to the vault's own address of `value` with no memo (zero-value change).
 fn zero_change(v: &Vault) -> Out {
     v.change(0)
 }
 
 #[test]
 fn rejects_padding_that_raises_the_fee() {
-    // One spend, a payment and change need 2 actions. The builder pads to 5 and charges the
-    // ZIP 317 fee for all 5: the payment is exact, the extra 15,000 zat come out of change.
     let v = Vault::new(40);
     let payee = outside_address(7);
     let m = memo("Invoice #123");
@@ -331,8 +316,6 @@ fn rejects_padding_that_raises_the_fee() {
 
 #[test]
 fn rejects_zero_value_vault_outputs_as_padding() {
-    // Padding made of zero-value outputs to the vault's own address: they decrypt like
-    // change, but no builder adds them next to real change.
     let v = Vault::new(41);
     let payee = outside_address(7);
     let m = memo("x");
@@ -363,7 +346,6 @@ fn rejects_zero_value_vault_outputs_as_padding() {
 
 #[test]
 fn rejects_change_split_beyond_the_policy() {
-    // More change notes than the split policy ever makes (4): the extra ones only add fee.
     let v = Vault::new(42);
     let payee = outside_address(7);
     let m = memo("x");
@@ -398,9 +380,6 @@ fn rejects_change_split_beyond_the_policy() {
 
 #[test]
 fn change_split_into_four_notes_verifies() {
-    // `wallet::change_split_policy`: up to 4 change notes while the vault has few notes,
-    // each at least `CHANGE_NOTE_MIN_ZAT`. Laid out as zcash_client_backend does: the
-    // quotient in every note, the remainder added to the first.
     let v = Vault::new(43);
     let payee = outside_address(7);
     let m = memo("x");
@@ -431,7 +410,6 @@ fn change_split_into_four_notes_verifies() {
 
 #[test]
 fn more_spends_than_outputs_verifies() {
-    // Five notes for one payment and change: 5 actions, each carrying a real spend.
     let v = Vault::new(44);
     let payee = outside_address(7);
     let m = memo("x");
@@ -455,7 +433,6 @@ fn more_spends_than_outputs_verifies() {
 
 #[test]
 fn sweep_without_payments_verifies() {
-    // A cancelled proposal's notes swept back to the vault: no payments, every note spent.
     let v = Vault::new(45);
     let (anchor, spends) = vault_notes(&v, 3, 200_000);
     let fee = 3 * 5_000;
@@ -474,8 +451,6 @@ fn sweep_without_payments_verifies() {
 
 #[test]
 fn exact_spend_with_zero_change_verifies() {
-    // Two payments that use the note up exactly: the wallet still adds one zero-value
-    // change output, so 3 actions are needed.
     let v = Vault::new(46);
     let (a, b) = (outside_address(7), outside_address(8));
     let (ma, mb) = (memo("a"), memo("b"));
@@ -505,8 +480,6 @@ fn exact_spend_with_zero_change_verifies() {
 
 #[test]
 fn unpadded_single_action_verifies() {
-    // A builder may skip padding (pad_to_minimum = 1): one note swept in one action still
-    // pays the 2-action ZIP 317 minimum, and fewer actions never raise the fee.
     let v = Vault::new(47);
     let (anchor, spends) = vault_notes(&v, 1, FUNDS);
     let pczt = build_pczt_custom(
@@ -523,10 +496,6 @@ fn unpadded_single_action_verifies() {
 
 #[test]
 fn rejects_zero_value_vault_spends_as_padding() {
-    // Zero-value notes to a vault address verify as vault spends (they are, and members
-    // sign them), but they move no value: a builder could add any number of them and take
-    // 5,000 zat each out of change. The notes need not exist on chain (the action circuit
-    // skips the Merkle check for v_old = 0).
     let v = Vault::new(48);
     let payee = outside_address(7);
     let m = memo("x");
@@ -555,8 +524,6 @@ fn rejects_zero_value_vault_spends_as_padding() {
 
 #[test]
 fn rejects_dust_vault_spends_as_padding() {
-    // Real vault notes worth no more than the marginal fee: no honest wallet spends one in
-    // an action of its own (each costs more fee than it brings), so they don't count.
     let v = Vault::new(49);
     let payee = outside_address(7);
     let m = memo("x");
@@ -588,9 +555,6 @@ fn rejects_dust_vault_spends_as_padding() {
 
 #[test]
 fn small_spends_in_free_actions_verify() {
-    // A payment and change need 2 actions; a zero-value and a 5,000-zat vault note fit in
-    // them for free (zcash_client_backend admits dust inputs exactly there), and every
-    // vault spend is still signed.
     let v = Vault::new(50);
     let payee = outside_address(7);
     let m = memo("x");
@@ -621,7 +585,6 @@ fn small_spends_in_free_actions_verify() {
 
 #[test]
 fn spends_above_the_marginal_fee_count() {
-    // One zat above the marginal fee, a note counts: five spends need five actions.
     let v = Vault::new(51);
     let payee = outside_address(7);
     let m = memo("x");
@@ -648,8 +611,6 @@ fn spends_above_the_marginal_fee_count() {
 
 #[test]
 fn rejects_two_zero_value_change_outputs() {
-    // No change left: one zero-value vault output is what the wallet adds; a second one
-    // is padding.
     let v = Vault::new(52);
     let payee = outside_address(7);
     let m = memo("x");
@@ -708,11 +669,6 @@ fn rejects_one_action_over_the_bound() {
     );
 }
 
-/// Change is recovered with the vault's internal outgoing viewing key as exactly what the
-/// wallet makes: the change address, its value, an empty memo. Anything else lets a
-/// proposer put data in change members can't see (a random `out_ciphertext`, a memo) or
-/// park change at another vault address. On 4b5ae0e each of these verified: change was
-/// only trial-decrypted with the vault's incoming viewing key.
 #[test]
 fn change_is_exactly_the_wallets() {
     let v = Vault::new(31);
@@ -726,7 +682,6 @@ fn change_is_exactly_the_wallets() {
     let unexpected = |r: Result<_, VerifyError>| {
         assert!(matches!(r, Err(VerifyError::UnexpectedChange(_))), "{r:?}")
     };
-    // No outgoing key (random out_ciphertext), or the external one.
     unexpected(check(Out {
         ovk: None,
         ..v.change(590_000)
@@ -735,12 +690,10 @@ fn change_is_exactly_the_wallets() {
         ovk: Some(v.fvk.to_ovk(Scope::External)),
         ..v.change(590_000)
     }));
-    // A memo in change.
     unexpected(check(Out {
         memo: memo("hidden"),
         ..v.change(590_000)
     }));
-    // Another vault address.
     unexpected(check(Out {
         recipient: v.fvk.address_at(0u32, Scope::External),
         ..v.change(590_000)
@@ -751,10 +704,6 @@ fn change_is_exactly_the_wallets() {
     }));
 }
 
-/// A payment two notes pay (2 spends, 2 outputs: 2 actions) plus a note of a cancelled
-/// payment that may still be sent, which it must spend (`node::check_vote`): 3 vault
-/// spends, 3 actions. Members accept it at the 3-action fee and refuse the 2-action one, so
-/// the wallet must pay for the forced spend (selection recomputes the fee over all inputs).
 #[test]
 fn a_forced_extra_spend_adds_an_action_and_its_fee() {
     let v = Vault::new(45);

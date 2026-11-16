@@ -1,6 +1,3 @@
-//! Format versions: each versioned type round-trips, carries the current tag, rejects
-//! other versions with a typed error, and (where it matters) signs its version.
-
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_proto::{
     relay::{decode_body, InboxResponse, LogResponse, MembersRead, Signed},
@@ -38,8 +35,6 @@ fn envelopes_are_versioned_and_sign_their_version() {
         newer(Format::Envelope)
     );
 
-    // A newer header version, even validly signed, is refused by recipients; changing the
-    // version of a signed envelope breaks its signature.
     let mut header = env.header.clone();
     header.version += 1;
     let future = Envelope::signed_raw(&ids[0], header, env.body.clone()).unwrap();
@@ -69,7 +64,6 @@ fn log_entries_are_versioned_and_sign_their_version() {
         newer(Format::LogEntry)
     );
 
-    // The version is signed and is the AEAD's associated data.
     let mut tampered = entry.clone();
     tampered.header.version += 1;
     assert_eq!(

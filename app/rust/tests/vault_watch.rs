@@ -1,7 +1,3 @@
-//! The bridge's vault watch (`watch_vault_with`) against a real HTTP relay: events for
-//! other members' activity, stopping, and the fallback on a relay without long polls.
-//! One test, because the watch is process-wide.
-
 use std::{
     sync::mpsc::{self, Receiver, RecvTimeoutError},
     time::Duration,
@@ -28,7 +24,6 @@ fn serve(rt: &tokio::runtime::Runtime, router: axum::Router) -> String {
     format!("http://{addr}")
 }
 
-/// A 2-of-2 vault made over the relay.
 async fn two_member_vault(relay: &RelayClient) -> (Vec<Identity>, Vec<VaultMaterial>) {
     let mut rng = StdRng::seed_from_u64(31);
     let ids: Vec<Identity> = (0..2).map(|_| Identity::generate(&mut rng)).collect();
@@ -139,7 +134,6 @@ fn vault_watch_reports_activity_and_stops() {
     let events = start(&url, &ids[0], &materials[0], 1);
     assert_eq!(next(&events), VaultActivityKind::Connected);
 
-    // The other member publishes commitments (a log append): news.
     let mut rng = StdRng::seed_from_u64(7);
     let mut pool = MemoryPoolStore::default();
     rt.block_on(top_up_pool(
@@ -154,8 +148,6 @@ fn vault_watch_reports_activity_and_stops() {
     .unwrap();
     assert_eq!(next(&events), VaultActivityKind::Activity);
 
-    // A message for this member (e.g. a signing request): news.
-    // Envelopes go to the vault's mailbox label on the relay.
     let vault = materials[0].label();
     let envelope = Envelope::sealed(
         &ids[1],
@@ -170,17 +162,14 @@ fn vault_watch_reports_activity_and_stops() {
     rt.block_on(relay.send(&ids[1], &envelope)).unwrap();
     assert_eq!(next(&events), VaultActivityKind::Activity);
 
-    // Stopping ends the loop (its callback is dropped) and reports nothing more.
     stop_vault_watch(1);
     assert_ended(&events);
 
-    // A newer watch replaces the running one.
     let first = start(&url, &ids[0], &materials[0], 2);
     assert_eq!(next(&first), VaultActivityKind::Connected);
     let second = start(&url, &ids[0], &materials[0], 3);
     assert_eq!(next(&second), VaultActivityKind::Connected);
     assert_ended(&first);
-    // Stopping an older id leaves the newer watch running.
     stop_vault_watch(2);
     let envelope = Envelope::sealed(
         &ids[1],
@@ -197,17 +186,14 @@ fn vault_watch_reports_activity_and_stops() {
     stop_vault_watch(3);
     assert_ended(&second);
 
-    // A stop that overtakes its start still wins.
     stop_vault_watch(4);
     let overtaken = start(&url, &ids[0], &materials[0], 4);
     assert_ended(&overtaken);
 
-    // A relay without long polls: "unsupported", and the watch ends.
     let old = serve(
         &rt,
         axum::Router::new().route("/health", axum::routing::get(|| async { "ok" })),
     );
-    // The watch follows the vault's own relay, not the default it is given.
     let mut moved = materials[0].clone();
     moved.relay.url = Some(old.clone());
     let events = start(&url, &ids[0], &moved, 5);
@@ -215,8 +201,6 @@ fn vault_watch_reports_activity_and_stops() {
     assert_ended(&events);
 }
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
 fn member_dir(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -234,12 +218,10 @@ fn member_dir(
     ))
 }
 
-/// The key that seals one member's setup state (any fixed key per member will do).
 fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
     zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
 }
 
-/// One member's safety words for `invite`, polled from its setup state dir.
 async fn safety_words(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,

@@ -1,13 +1,4 @@
 #!/usr/bin/env node
-// OKLCH palette derivation and WCAG contrast checks (the math behind docs/brand.md).
-//
-//   node oklch.js derive <hue> [chroma=0.12] [fillL=0.82] [deepL=0.5] [lightFill=deep|tint]
-//                 [--pos <hue|value>] [--warn <hue>] [--bad <hue>]
-//   node oklch.js hue <#hex> [#hex...]          # OKLCH L, C, h of existing colours
-//   node oklch.js contrast <#fg> <#bg>
-//
-// Lightness steps are Zafe's neutral ladder measured in OKLCH, so derived grays keep the
-// app's surface hierarchy and only change hue.
 const l2s = x => x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
 const s2l = x => x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
 function labToLin(L, a, b) {
@@ -16,7 +7,6 @@ function labToLin(L, a, b) {
 }
 const inGamut = (L, C, h) => { const r = h * Math.PI / 180; return labToLin(L, C * Math.cos(r), C * Math.sin(r)).every(v => v >= -1e-4 && v <= 1 + 1e-4); };
 function maxC(L, h) { let lo = 0, hi = 0.4; for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; inGamut(L, m, h) ? lo = m : hi = m; } return lo; }
-/** OKLCH -> #RRGGBB, reducing chroma until the colour is inside sRGB. */
 function oklch(L, C, h) {
   C = Math.min(C, maxC(L, h)); const r = h * Math.PI / 180;
   return '#' + labToLin(L, C * Math.cos(r), C * Math.sin(r)).map(v => Math.round(Math.min(1, Math.max(0, l2s(v))) * 255).toString(16).padStart(2, '0')).join('').toUpperCase();
@@ -28,17 +18,10 @@ function hexToOklch(hex) {
   return { L, C: Math.hypot(a, bb), h: (Math.atan2(bb, a) * 180 / Math.PI + 360) % 360 };
 }
 const lum = hex => { const [r, g, b] = [1, 3, 5].map(i => s2l(parseInt(hex.slice(i, i + 2), 16) / 255)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
-/** WCAG 2 contrast ratio. */
 const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
-const GOLD = { d: oklch(0.82, 0.15, 83), l: oklch(0.5, 0.11, 78) }; // Zcash gold, the value colour
+const GOLD = { d: oklch(0.82, 0.15, 83), l: oklch(0.5, 0.11, 78) };
 
-/**
- * Derive a full two-theme palette from one hue. Roles: brand (actions, "needs you"),
- * value (Zcash gold), status (received, warning, error), neutrals tinted ~1% toward the hue.
- * o = { hue, chroma, fillL, deepL, lightFill: 'deep'|'tint', lightL, tint, sem: { pos, warn, bad } }
- * sem.pos may be 'value' (received money uses the value colour).
- */
 function derive(o) {
   o = { chroma: 0.12, fillL: 0.82, deepL: 0.5, lightFill: 'deep', lightL: 0.84, tint: 0.01, sem: { pos: 'value', warn: 50, bad: 350 }, ...o };
   const h = o.hue, t = o.tint, n = (L, c) => oklch(L, c, h), s = o.sem;
@@ -55,7 +38,6 @@ function derive(o) {
   return { d, l, ink: n(0.178, t * 1.6), cardLight: n(0.95, t * 2) };
 }
 
-/** Every text pairing that must reach 4.5:1. */
 function checks(p) {
   const pairs = {
     'label on fill (dark)': [p.d.label, p.d.fill], 'label on fill (light)': [p.l.label, p.l.fill],

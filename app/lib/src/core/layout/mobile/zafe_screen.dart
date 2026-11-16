@@ -4,9 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../theme/app_theme.dart';
 import 'mobile_top_nav.dart';
 
-/// Pushed full-screen route: back nav, scrollable body, pinned CTA area. In a short
-/// window (landscape, a flip phone's cover screen) the CTA area scrolls with the body
-/// instead, so the body keeps room to show.
 class ZafeScreen extends StatefulWidget {
   const ZafeScreen({
     super.key,
@@ -23,8 +20,6 @@ class ZafeScreen extends StatefulWidget {
   final VoidCallback? onBack;
   final bool showBack;
 
-  /// Below this much height for the body and the CTA area (keyboard closed), the CTA
-  /// area scrolls.
   static const double pinBottomHeight = 360;
 
   @override
@@ -32,7 +27,6 @@ class ZafeScreen extends StatefulWidget {
 }
 
 class _ZafeScreenState extends State<ZafeScreen> {
-  /// The CTA area keeps its state (a button's spinner) when it moves.
   final _bottomKey = GlobalKey();
 
   @override
@@ -42,7 +36,6 @@ class _ZafeScreenState extends State<ZafeScreen> {
         ? null
         : KeyedSubtree(
             key: _bottomKey,
-            // Full width, so `AppButton(expand: true)` spans the screen.
             child: SizedBox(width: double.infinity, child: widget.bottom),
           );
     return Scaffold(
@@ -59,8 +52,6 @@ class _ZafeScreenState extends State<ZafeScreen> {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, box) {
-                  // Measured without the keyboard: above it, the CTA stays pinned
-                  // as on any phone.
                   final pinned =
                       bottom != null &&
                       box.maxHeight + MediaQuery.viewInsetsOf(context).bottom >=

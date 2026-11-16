@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Regenerates the payment sounds and writes the app's copies (Ogg Vorbis, which
-# Android's SoundPool plays natively). Needs python3 and ffmpeg with libvorbis.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 tmp="$(mktemp -d)"

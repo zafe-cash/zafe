@@ -1,6 +1,3 @@
-//! Zafe wire protocol: member identities, signed envelopes and HPKE sealing
-//! (spec §5). Transport-agnostic and free of Zcash dependencies, so the relay can use it.
-
 pub mod envelope;
 pub mod identity;
 pub mod log;

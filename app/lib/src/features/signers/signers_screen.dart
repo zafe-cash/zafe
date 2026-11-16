@@ -22,8 +22,6 @@ import '../../core/widgets/line_icon.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
 import 'keep_seat.dart';
 
-/// The vault's signers and its approval rule (a tab). Signer management, such as
-/// rotating a key, will live here.
 class SignersScreen extends ConsumerWidget {
   const SignersScreen({super.key});
 
@@ -38,9 +36,7 @@ class SignersScreen extends ConsumerWidget {
     final threshold = summary.threshold;
     final members = summary.members;
     final proposals = ref.watch(proposalsProvider);
-    // Unknown until the vault log has been read.
     final backedUp = proposals.loaded ? proposals.backedUp : null;
-    // This phone hasn't saved a backup (the same check as Home's reminder).
     final iNeedBackup = ref.watch(backupStatusProvider).value == false;
 
     return SafeArea(
@@ -110,7 +106,6 @@ class SignersScreen extends ConsumerWidget {
                       approvals: move.approvals.length,
                       needed: move.needed,
                       keptOn: dayOf(move.keptAt),
-                      // The signer who lost the phone can't approve; nor twice.
                       onApprove:
                           move.oldKeyHex == me || move.approvals.contains(me)
                           ? null
@@ -120,8 +115,6 @@ class SignersScreen extends ConsumerWidget {
                             ),
                     ),
                   ],
-                  // A pending move's helpers show on its card until its wait is over
-                  // here; after that one who never logged its part can be replaced.
                   for (final r in proposals.repairs)
                     if (r.newKeyHex != me &&
                         (!r.pending ||
@@ -155,7 +148,6 @@ class SignersScreen extends ConsumerWidget {
                                     memberLabel(k, me: me, names: names),
                               ),
                         ],
-                        // One offer at a time from this phone.
                         onTakeOver: r.restarts.any((x) => x.asked.contains(me))
                             ? null
                             : (stalled, name) => _takeOver(
@@ -220,8 +212,6 @@ class SignersScreen extends ConsumerWidget {
   }
 }
 
-/// Stop helping a pending seat move, for good: a confirm (it can't be undone), then the
-/// unlock. Throws [ActionCancelled] when either is declined (for an [ActionButton]).
 Future<void> _stopHelping(
   BuildContext context,
   WidgetRef ref,
@@ -242,8 +232,6 @@ Future<void> _stopHelping(
   await ref.read(proposalsProvider.notifier).stopHelping(replacement);
 }
 
-/// The one helper a restart replaces and the member taking its place, when it changes
-/// exactly one (what this app asks for).
 (String, String)? _change(rust.RepairInfo r, rust.RepairRestart x) {
   final leaving = r.helpers.where((h) => !x.helpers.contains(h)).toList();
   final taking = x.helpers.where((h) => !r.helpers.contains(h)).toList();
@@ -252,7 +240,6 @@ Future<void> _stopHelping(
       : null;
 }
 
-/// How the card shows a member's offer to help instead of `stalled`.
 RepairOffer _offer(
   BuildContext context,
   WidgetRef ref,
@@ -277,8 +264,6 @@ RepairOffer _offer(
   );
 }
 
-/// Asks, then takes over from a helper who isn't rebuilding a moved seat's key. The
-/// rebuild starts over once the other helpers agree.
 Future<void> _takeOver(
   BuildContext context,
   WidgetRef ref,
@@ -305,7 +290,6 @@ Future<void> _takeOver(
       .retryRepair(replacement, stalled, me);
 }
 
-/// A helper agrees that `taker` helps instead of `stalled`.
 Future<void> _agree(
   BuildContext context,
   WidgetRef ref,
@@ -332,8 +316,6 @@ Future<void> _agree(
       .retryRepair(replacement, stalled, taker);
 }
 
-/// The Signers tab's backup card text: what losing phones without a backup means for a
-/// vault of [signers] needing [threshold], with [backedUp] backups attested.
 @visibleForTesting
 String backupHealthText({
   required int signers,
@@ -353,7 +335,6 @@ String backupHealthText({
         'but each loss without a backup uses up that margin.';
   } else {
     final who = missing == 1 ? '1 signer hasn\'t' : '$missing signers haven\'t';
-    // No spare seat (n-of-n): one lost phone without a backup is enough.
     final loss = spare == 0
         ? (missing == 1
               ? 'If they lose their phone'
@@ -365,8 +346,6 @@ String backupHealthText({
   return body;
 }
 
-/// How many signers told the vault they have a backup, and what it means if they don't
-/// (spec §12.1–12.2).
 class BackupHealthCard extends StatelessWidget {
   const BackupHealthCard({
     super.key,
@@ -376,7 +355,6 @@ class BackupHealthCard extends StatelessWidget {
     this.onBackUp,
   });
 
-  /// Set when this phone has no backup yet: the card offers "Back up now".
   final VoidCallback? onBackUp;
 
   final int signers;
@@ -441,7 +419,6 @@ class BackupHealthCard extends StatelessWidget {
   }
 }
 
-/// "Backed up" or "No backup" at the end of a signer row.
 class BackupLabel extends StatelessWidget {
   const BackupLabel({super.key, required this.backedUp});
 
@@ -459,7 +436,6 @@ class BackupLabel extends StatelessWidget {
   }
 }
 
-/// A signer moving to a new phone, waiting for co-signers' approvals.
 class SeatMoveCard extends StatelessWidget {
   const SeatMoveCard({
     super.key,
@@ -474,10 +450,8 @@ class SeatMoveCard extends StatelessWidget {
   final int approvals;
   final int needed;
 
-  /// The day the seat's old phone said it still has the seat ("13 Nov"), if it did.
   final String? keptOn;
 
-  /// Null when this member can't approve (it's their seat, or they already did).
   final VoidCallback? onApprove;
 
   @override
@@ -539,9 +513,6 @@ class SeatMoveCard extends StatelessWidget {
   }
 }
 
-/// A seat move with every approval, waiting out the helpers' 72 h. On the old phone it
-/// offers Keep my seat (first round only); elsewhere it shows the countdown by this
-/// phone's clock.
 class PendingSeatCard extends StatelessWidget {
   const PendingSeatCard({
     super.key,
@@ -559,21 +530,17 @@ class PendingSeatCard extends StatelessWidget {
 
   final String who;
 
-  /// This phone's own seat.
   final bool mine;
   final bool canKeep;
 
-  /// Time left ("2 d 5 h"); null once over or before this phone counted.
   final String? left;
   final int helped;
   final int helpers;
   final String? keptOn;
 
-  /// Helpers who stopped helping (labels): the seat can't switch while they are named.
   final List<String> stopped;
   final Future<void> Function()? onKeep;
 
-  /// This phone helps and may stop (only if the seat's owner says they still have it).
   final Future<void> Function()? onStop;
 
   @override
@@ -659,17 +626,12 @@ class PendingSeatCard extends StatelessWidget {
   }
 }
 
-/// A member's offer to help instead of a stalled helper: what the card says, who still
-/// has to agree, and this phone's "Agree" when it is one of them.
 typedef RepairOffer = ({
   String text,
   String? waitingFor,
   Future<void> Function()? onAgree,
 });
 
-/// A moved seat whose key the helpers' phones are still rebuilding on the new phone. A
-/// member who isn't helping can offer to take over from a helper who can't; the rebuild
-/// starts over once the other helpers agree.
 class RepairCard extends StatelessWidget {
   const RepairCard({
     super.key,
@@ -682,7 +644,6 @@ class RepairCard extends StatelessWidget {
 
   final String who;
 
-  /// `(key hex, label)` of the helpers in the current attempt.
   final List<(String, String)> helpers;
   final bool meHelping;
   final List<RepairOffer> offers;

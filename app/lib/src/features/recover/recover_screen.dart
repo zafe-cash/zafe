@@ -25,11 +25,6 @@ import '../../core/widgets/line_icon.dart';
 import '../../rust/api/repair.dart' as rust;
 import '../../rust/api/vault.dart' as rust_vault;
 
-/// A new phone takes over a lost signer's seat without a backup (spec §10.1): it shows a
-/// recovery code for a co-signer and each co-signer's safety words, which the person
-/// confirms row by row, then waits until enough co-signers approved and their phones
-/// rebuilt its key. The vault is taken only through a co-signer the person confirmed
-/// (rule 2); before saving, the member also checks the vault's address with a co-signer.
 class RecoverScreen extends ConsumerStatefulWidget {
   const RecoverScreen({super.key});
 
@@ -43,18 +38,14 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
   rust.RecoveryCode? _code;
   rust.RecoveryProgress? _progress;
 
-  /// Co-signers (hex keys) whose words the person confirmed.
   List<String> _confirmed = const [];
   Object? _error;
   Timer? _timer;
   bool _checking = false;
   bool _saving = false;
 
-  /// A finished recovery waiting for the member to confirm the vault.
   rust.RecoveryProgress? _found;
 
-  /// The vault link a co-signer sent: the vault's relay and mailbox. Without one the
-  /// default relay is searched (a vault from before per-vault relays).
   rust.SeatLinkInfo? _link;
   String? _linkError;
 
@@ -76,9 +67,7 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       seeds = rust_vault.generateIdentity().seeds;
       await _store.writeRecoveryIdentity(seeds);
     }
-    // Kept on "Start over" (same vault); dropped with the identity when rejected.
     final link = await _store.readRecoveryLink();
-    // Confirmations and pins belong to the identity: a new code starts without any.
     if (fresh) {
       await _store.writeRecoveryConfirmed(const []);
       await (await ZafePaths.get()).deleteRecovery();
@@ -94,7 +83,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
       _error = null;
     });
     _timer?.cancel();
-    // Co-signers wait on this phone's part of each safety check: answer quickly.
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _check());
     unawaited(_check());
   }
@@ -128,7 +116,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     }
   }
 
-  /// The person compared words with this co-signer and they match.
   Future<void> _confirm(String keyHex) async {
     final confirmed = [..._confirmed, keyHex];
     await _store.writeRecoveryConfirmed(confirmed);
@@ -196,7 +183,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     await _store.deleteRecoveryIdentity();
     await (await ZafePaths.get()).deleteRecovery();
     if (!mounted) return;
-    // The key now exists only here: offer a backup first, as after key generation.
     context.go('/backup-prompt');
   }
 
@@ -214,13 +200,11 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
     }
   }
 
-  /// The member says the vault isn't theirs: drop it and this phone's identity.
   Future<void> _reject() async {
     await _store.deleteRecoveryIdentity();
     if (!mounted) return;
     setState(() => _found = null);
     await _start(fresh: true);
-    // Shown on the new code's screen until the next check succeeds.
     if (mounted) {
       setState(
         () => _error = const UserFacingError(
@@ -261,8 +245,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
               leading: const AppIcon(AppIcons.share, size: 20),
               onPressed: () => SharePlus.instance.share(
                 ShareParams(
-                  // The safety words are compared by voice: whoever can swap this
-                  // message can't make both phones show the same words.
                   text:
                       'Please move my Zafe seat to my new phone: in Zafe, open Signers, '
                       '"Replace a lost phone", paste this code and send me the vault '
@@ -300,7 +282,6 @@ class _RecoverScreenState extends ConsumerState<RecoverScreen> {
 
 String _host(String url) => Uri.tryParse(url)?.authority ?? url;
 
-/// The recovery screen's content from plain data (rendered without Rust in previews).
 class RecoverBody extends StatelessWidget {
   const RecoverBody({
     super.key,
@@ -321,16 +302,13 @@ class RecoverBody extends StatelessWidget {
 
   final String code;
 
-  /// The relay named by the co-signer's vault link, once pasted or scanned.
   final String? linkHost;
   final String? linkError;
   final VoidCallback? onPasteLink;
   final VoidCallback? onScanLink;
 
-  /// Each co-signer's words, once that co-signer opened the code.
   final List<rust.CosignerWords> checks;
 
-  /// Co-signers (hex keys) the person confirmed with "Words match".
   final List<String> confirmed;
   final void Function(String keyHex)? onConfirm;
   final rust.RecoveryStage? stage;
@@ -398,7 +376,6 @@ class RecoverBody extends StatelessWidget {
           onPaste: onPasteLink,
           onScan: onScanLink,
         ),
-        // The safety words, once a co-signer has opened the code.
         if (checks.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           Text(
@@ -498,8 +475,6 @@ class RecoverBody extends StatelessWidget {
   }
 }
 
-/// The new phone's vault link: pasted or scanned from the co-signer, it names the
-/// vault's relay (shown once set).
 class SeatLinkField extends StatelessWidget {
   const SeatLinkField({
     super.key,
@@ -564,7 +539,6 @@ class SeatLinkField extends StatelessWidget {
   }
 }
 
-/// The recovered vault, checked with a co-signer before it is saved.
 class VaultCheckBody extends StatelessWidget {
   const VaultCheckBody({
     super.key,

@@ -1,6 +1,3 @@
-//! Vault export and import (spec §12.2): passphrase-encrypted backups of one vault.
-//! See `zafe_core::backup` for the format. Backups never contain signing nonces.
-
 use rand::rngs::OsRng;
 use zafe_core::backup::{self, Contents, KdfParams};
 
@@ -40,11 +37,9 @@ impl From<backup::BackupError> for ZafeError {
 
 pub struct PassphraseCheck {
     pub ok: bool,
-    /// Why it's too weak (empty when ok).
     pub hint: String,
 }
 
-/// Live feedback while typing a backup passphrase.
 #[flutter_rust_bridge::frb(sync)]
 pub fn check_backup_passphrase(passphrase: String) -> PassphraseCheck {
     match backup::check_passphrase(&passphrase) {
@@ -60,23 +55,16 @@ pub fn check_backup_passphrase(passphrase: String) -> PassphraseCheck {
     }
 }
 
-/// 12 random words (128 bits): strong and writable on paper.
 #[flutter_rust_bridge::frb(sync)]
 pub fn suggest_backup_passphrase() -> String {
     backup::suggest_passphrase(&mut OsRng)
 }
 
 pub struct ExportedBackup {
-    /// The file contents.
     pub bytes: Vec<u8>,
-    /// The same backup as text (`zafe-backup-v1:...`), for password managers.
     pub text: String,
 }
 
-/// Encrypts this device's copy of a vault (Argon2id 64 MiB; takes a second or two), with
-/// the local names this device gave the signers and this phone's copy of the vault
-/// history, which anchors the restored phone. The backup names the vault's relay:
-/// `relay_url` (the app-wide setting) for a vault from before per-vault relays.
 pub fn export_vault_backup(
     relay_url: String,
     seeds: Vec<u8>,
@@ -113,7 +101,6 @@ pub fn export_vault_backup(
         log,
     };
     let bytes = backup::encrypt(&contents, &passphrase, KdfParams::DEFAULT, &mut OsRng)?;
-    // Open it again before handing it out: the member attests this backup in the log.
     backup::decrypt(&bytes, &passphrase)?.validate()?;
     let text = backup::to_text(&bytes);
     Ok(ExportedBackup { bytes, text })
@@ -125,15 +112,9 @@ pub struct ImportedVault {
     pub identity_seeds: Vec<u8>,
     pub material: Vec<u8>,
     pub invite: String,
-    /// Local signer names saved with the backup (empty for backups made before names were
-    /// included).
     pub names: Vec<SignerName>,
 }
 
-/// Decrypts a backup (file bytes, or the pasted text form) and checks it: the identity must
-/// be a member of the vault it restores. The backup's copy of the vault history (since
-/// backup version 3) is checked and installed as this phone's copy before anything talks
-/// to a relay, so no relay can serve this phone a shorter history than the backup's.
 pub fn import_vault_backup(data: Vec<u8>, passphrase: String) -> Result<ImportedVault, ZafeError> {
     let bytes = match std::str::from_utf8(&data) {
         Ok(text) if text.trim_start().starts_with("zafe-backup-v1:") => backup::from_text(text)?,

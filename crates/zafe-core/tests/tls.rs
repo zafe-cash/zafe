@@ -1,7 +1,3 @@
-//! The relay and lightwalletd clients speak TLS to `https://` endpoints, and verify the
-//! server certificate: a local rustls server with a self-signed certificate is rejected
-//! unless that certificate is explicitly trusted, and then only for the right hostname.
-
 use std::{net::SocketAddr, sync::Arc};
 
 use rand::{rngs::StdRng, SeedableRng};
@@ -20,7 +16,6 @@ use tokio_rustls::{
 use zafe_core::{relay_client::RelayClient, wallet};
 use zafe_proto::Identity;
 
-/// An axum listener that terminates TLS and reports each handshake's outcome.
 struct TlsListener {
     tcp: TcpListener,
     acceptor: TlsAcceptor,
@@ -59,7 +54,6 @@ struct Server {
     handshakes: mpsc::UnboundedReceiver<Result<(), String>>,
 }
 
-/// Serves the relay over TLS with a fresh self-signed certificate for `localhost`.
 async fn start_tls_relay() -> Server {
     let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
     let cert = certified.cert.der().clone();
@@ -130,14 +124,12 @@ async fn relay_client_rejects_an_untrusted_certificate() {
         ),
         "{err:?}"
     );
-    // The client did start a TLS handshake, and aborted it.
     assert!(matches!(server.handshakes.recv().await, Some(Err(_))));
 }
 
 #[tokio::test]
 async fn relay_client_checks_the_hostname() {
     let mut server = start_tls_relay().await;
-    // Trusted certificate, but it names `localhost`, not `127.0.0.1`.
     let relay =
         RelayClient::with_extra_root(format!("https://127.0.0.1:{}", server.port), &server.cert)
             .unwrap();
@@ -164,8 +156,6 @@ async fn relay_client_checks_the_hostname() {
 #[tokio::test]
 async fn lightwalletd_client_uses_tls_for_https() {
     let mut server = start_tls_relay().await;
-    // An https endpoint gets TLS with the bundled roots: the handshake happens and the
-    // self-signed certificate is refused.
     let err = wallet::connect(&format!("https://localhost:{}", server.port))
         .await
         .expect_err("self-signed must be refused");
@@ -186,7 +176,6 @@ async fn lightwalletd_client_uses_tls_for_https() {
     assert!(matches!(server.handshakes.recv().await, Some(Err(_))));
 }
 
-/// A public testnet lightwalletd over TLS (network access; Ironwood-aware per zec.rocks).
 #[tokio::test]
 #[ignore = "needs internet"]
 async fn public_testnet_lightwalletd_over_tls() {

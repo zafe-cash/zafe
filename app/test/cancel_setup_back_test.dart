@@ -18,8 +18,6 @@ import 'package:zafe/src/rust/frb_generated.dart';
 const _vaultId = 'aa';
 const _me = '1d426b3769983ed225fd919e80f48a4de61c76cdf31e4c805e78b81873000bef';
 
-/// The only bridge calls this flow makes once cancelling is faked: reading the invite
-/// and this member's key.
 class _Api implements RustLibApi {
   @override
   String crateApiVaultIdentityPublicKey({required List<int> seeds}) => _me;
@@ -69,7 +67,6 @@ class _Vault extends VaultNotifier {
   }
 }
 
-/// Fixed pumps: the setup screen animates for as long as it is open.
 Future<void> _settle(WidgetTester tester) async {
   for (var i = 0; i < 10; i++) {
     await tester.pump(const Duration(milliseconds: 100));
@@ -107,7 +104,6 @@ Future<void> _cancelSetup(WidgetTester tester) async {
 
   await tester.tap(find.text('Cancel setup'));
   await _settle(tester);
-  // The confirm dialog's button, over the screen's.
   await tester.tap(find.text('Cancel setup').last);
   await _settle(tester);
   expect(find.byType(CreateVaultScreen), findsOneWidget);

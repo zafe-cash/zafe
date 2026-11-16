@@ -1,22 +1,10 @@
-// The docs: every page, in sidebar order, grouped in sections. The sidebar, the /docs
-// index, breadcrumbs, "Related" lists and sitemap.xml all read this list, so a page is
-// added here and as src/pages/docs/<slug>.astro. URLs are flat (/docs/<slug>): the
-// section shows only in the sidebar and the breadcrumb, so a page can change section
-// without its link breaking. The app links to some of these pages
-// (app/lib/src/core/config/docs_links.dart; scripts/check_docs_links.py checks them).
-
-/** The app version and date the steps were last checked against (app/lib). */
 export const checked = { version: '0.1.23', date: '2026-10-27' };
 
 export interface DocPage {
   slug: string;
-  /** The H1: a task, in the reader's words. */
   title: string;
-  /** Shorter label for the sidebar, when the title is long. */
   label?: string;
-  /** One line under the H1; also the meta description and the index's line. */
   summary: string;
-  /** Two or three slugs for "Related". */
   related: string[];
 }
 
@@ -184,7 +172,6 @@ export const sections: DocSection[] = [
   },
 ];
 
-/** The /docs index's short list. */
 export const popular = ['create-a-vault', 'send', 'lost-phone', 'run-a-server'];
 
 export const allPages: DocPage[] = sections.flatMap((s) => s.pages);

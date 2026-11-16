@@ -4,9 +4,6 @@ import 'package:flutter/widgets.dart';
 import '../theme/app_theme.dart';
 import 'app_loading_icon.dart';
 
-/// An on/off switch: the thumb slides and the track eases to the brand colour (160 ms),
-/// with a selection tick. [busy] puts a spinner in the thumb while the change takes
-/// effect (Tor connecting). `onChanged == null` disables it.
 class AppSwitch extends StatelessWidget {
   const AppSwitch({
     super.key,
@@ -41,7 +38,6 @@ class AppSwitch extends StatelessWidget {
               }
             : null,
         child: Padding(
-          // A 48 px tall tap target around the 28 px track.
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: AnimatedOpacity(
             duration: _motion,

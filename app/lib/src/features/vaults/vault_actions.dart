@@ -15,9 +15,6 @@ import '../../providers/vault_provider.dart';
 import '../../rust/api/vault.dart' as rust;
 import '../home/rename_sheet.dart';
 
-/// One vault's ⋯ on Manage vaults: a menu of rename, back up, viewing key and remove.
-/// The ones that work on the open vault switch to it first. "How it's protected" is in
-/// Settings under the vault's name, not repeated here.
 class VaultActionsMenu extends ConsumerWidget {
   const VaultActionsMenu({super.key, required this.vaultId});
   final String vaultId;
@@ -94,7 +91,6 @@ class VaultActionsMenu extends ConsumerWidget {
   }
 }
 
-/// The viewing key reveals the vault's whole history: an unlock first.
 Future<void> openViewingKey(BuildContext context, WidgetRef ref) async {
   if (!await confirmUnlock(context, ref, reason: 'Show the viewing key')) {
     return;
@@ -102,8 +98,6 @@ Future<void> openViewingKey(BuildContext context, WidgetRef ref) async {
   if (context.mounted) unawaited(context.push('/viewing-key'));
 }
 
-/// Removing a vault deletes this member's key share from the phone: the one action
-/// here that can't be undone, so it asks, then wants an unlock.
 Future<void> confirmRemoveVault(
   BuildContext context,
   WidgetRef ref, {

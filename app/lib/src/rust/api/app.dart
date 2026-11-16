@@ -6,15 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Where this device keeps its own copy of every vault's log (spec §6.3, §14). Call it
-/// once at startup, in every isolate that talks to the relay, before anything else: the
-/// copy is what lets the app notice a relay that lost or rewound the log, so a relay
-/// client made before this runs has no such protection.
 void initLogCache({required String dir}) =>
     RustLib.instance.api.crateApiAppInitLogCache(dir: dir);
 
-/// Debug builds only (no effect in a release build): helpers wait `secs` instead of 72 h
-/// before their part can complete a pending seat move, for live runs on test devices
-/// (`--dart-define=ZAFE_SEAT_MOVE_WAIT_SECS=...`).
 void debugSeatMoveWait({required BigInt secs}) =>
     RustLib.instance.api.crateApiAppDebugSeatMoveWait(secs: secs);

@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/storage/vault_name.dart';
 import 'vault_provider.dart';
 
-/// Local vault names on this device (vault id → name), for every stored vault.
 class VaultNamesNotifier extends Notifier<Map<String, String>> {
   @override
   Map<String, String> build() {
@@ -23,7 +22,6 @@ class VaultNamesNotifier extends Notifier<Map<String, String>> {
     state = names;
   }
 
-  /// Renames a vault on this device (an empty name goes back to the creator's).
   Future<void> rename(String vaultId, String name) async {
     await VaultName.write(vaultId, name);
     final cleaned = VaultName.clean(name);
@@ -37,7 +35,6 @@ final vaultNamesProvider =
       VaultNamesNotifier.new,
     );
 
-/// The active vault's name as shown on this device.
 final activeVaultNameProvider = Provider<String?>((ref) {
   final vault = ref.watch(vaultProvider);
   final creator = vault.summary?.name;

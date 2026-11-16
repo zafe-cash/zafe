@@ -1,7 +1,3 @@
-//! Moving a lost member's seat to a new device and repairing its key share over a real HTTP
-//! relay (spec §10.1, §10.4.2). Helpers here pass no wait (`Duration::ZERO`); the wait
-//! itself is tested in `seat_move_attacks.rs` and `seat_move_wait`.
-
 use std::{collections::BTreeMap, time::Duration};
 
 use pasta_curves::pallas;
@@ -38,7 +34,6 @@ async fn start_relay() -> String {
     format!("http://{addr}")
 }
 
-/// A 2-of-`n` vault over the relay: the members' identities and material.
 async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial>) {
     let mut rng = StdRng::seed_from_u64(70);
     let ids: Vec<Identity> = (0..n).map(|_| Identity::generate(&mut rng)).collect();
@@ -63,7 +58,6 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
     let mut rngs: Vec<StdRng> = (0..n)
         .map(|i| StdRng::seed_from_u64(i as u64 + 1))
         .collect();
-    // The creator picks the birthday (regtest isn't running here).
     let runs = ids
         .iter()
         .zip(rngs.iter_mut())
@@ -96,8 +90,6 @@ async fn vault(relay: &RelayClient, n: u16) -> (Vec<Identity>, Vec<VaultMaterial
     (ids, materials)
 }
 
-/// Two members sign a message with their key packages; aggregation verifies every share
-/// and the signature under the group key.
 fn sign_together(a: &VaultMaterial, b: &VaultMaterial, rng: &mut StdRng) {
     let alpha = pallas::Scalar::from(7u64);
     let (ka, kb) = (a.key_package().unwrap(), b.key_package().unwrap());
@@ -121,8 +113,6 @@ fn sign_together(a: &VaultMaterial, b: &VaultMaterial, rng: &mut StdRng) {
         .expect("a valid signature from the two shares");
 }
 
-/// The safety check between a co-signer and the new phone, step by step as the two apps
-/// poll it: both end with the same words, which the co-signer then approves with.
 async fn compare_words(relay: &RelayClient, cosigner: &Identity, new: &Identity) -> String {
     let mut words = None;
     for _ in 0..4 {
@@ -146,7 +136,6 @@ async fn compare_words(relay: &RelayClient, cosigner: &Identity, new: &Identity)
     w
 }
 
-/// One helper's refresh as the app runs it: read the log, then do its part (no wait).
 async fn help(
     relay: &RelayClient,
     id: &Identity,
@@ -160,8 +149,6 @@ async fn help(
         .unwrap()
 }
 
-/// Someone who swaps the recovery code on the way (their own phone's code instead) can't
-/// make the co-signer's words appear on the real new phone.
 #[tokio::test]
 async fn a_swapped_recovery_code_shows_words_the_new_phone_does_not() {
     let relay = RelayClient::new(start_relay().await);
@@ -169,13 +156,10 @@ async fn a_swapped_recovery_code_shows_words_the_new_phone_does_not() {
     let mut rng = StdRng::seed_from_u64(73);
     let real = Identity::generate(&mut rng);
     let attacker = Identity::generate(&mut rng);
-    // The real phone has its screen open; the co-signer received the attacker's code.
     recovery_checks(&relay, &real, &pins()).await.unwrap();
     let words = compare_words(&relay, &ids[1], &attacker).await;
     let on_real = recovery_checks(&relay, &real, &pins()).await.unwrap();
     assert!(on_real.is_empty(), "the real phone was never challenged");
-    // Approving the attacker's phone needs the words the co-signer's phone shows for it;
-    // with any others it refuses.
     let old = ids[0].public().sig_pk;
     let request = RecoveryRequest {
         identity: *attacker.public(),
@@ -197,9 +181,6 @@ async fn a_swapped_recovery_code_shows_words_the_new_phone_does_not() {
     ));
 }
 
-/// The creator loses their phone. The other two approve moving the seat to a new device,
-/// repair the share, and the new device ends up with the same key share, signs with
-/// another member, and reads the vault log.
 #[tokio::test]
 async fn a_lost_seat_moves_to_a_new_device() {
     let relay = RelayClient::new(start_relay().await);
@@ -208,8 +189,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let mut rng = StdRng::seed_from_u64(71);
     let dir = std::env::temp_dir().join(format!("zafe-repair-{}", std::process::id()));
     let (dir_b, dir_c) = (dir.join("b"), dir.join("c"));
-    // A co-signer's seat link tells the new device where the vault is: its own relay (not
-    // the default given here) and the mailbox label there.
     let link =
         SeatLink::decode(&SeatLink::for_vault(b, "https://unused.example").encode()).unwrap();
     assert_eq!(link.relay_url, relay.base_url());
@@ -219,7 +198,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
         .await
         .unwrap();
 
-    // The new device makes a fresh identity and shares its request.
     let fresh = Identity::generate(&mut rng);
     let request = RecoveryRequest {
         identity: *fresh.public(),
@@ -230,7 +208,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let words_b = compare_words(&relay, &ids[1], &fresh).await;
     let words_c = compare_words(&relay, &ids[2], &fresh).await;
     assert_ne!(words_b, words_c, "each co-signer has its own words");
-    // The person taps "Words match" on the rows of the co-signers they compared with.
     let confirmed = [ids[1].public().sig_pk, ids[2].public().sig_pk];
     assert!(matches!(
         try_recover(&relay, &fresh, label, &confirmed)
@@ -239,7 +216,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
         RecoveryStatus::Waiting
     ));
 
-    // The lost member can't approve its own move, and one approval isn't enough.
     let old = ids[0].public().sig_pk;
     assert!(
         matches!(
@@ -258,7 +234,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
             .await
             .unwrap()
     );
-    // Approving twice changes nothing.
     assert!(matches!(
         approve_replacement(&relay, &ids[1], b, old, &request, &words_b, &mut rng).await,
         Err(NodeError::Invalid(_))
@@ -270,8 +245,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
         RecoveryStatus::Waiting
     ));
 
-    // The second approval makes the move pending: the old key still holds the seat (its
-    // owner could still keep it), and the relay lists the new key apart.
     assert!(
         approve_replacement(&relay, &ids[2], c, old, &request, &words_c, &mut rng)
             .await
@@ -295,8 +268,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
         RecoveryStatus::Pending
     ));
 
-    // The two helpers repair the share, whenever each of them runs (each reading the log
-    // first, as the app does). Each logs its part; the second one switches the seat.
     let first = help(&relay, &ids[1], b, &dir_b).await;
     assert_eq!(
         (
@@ -320,7 +291,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
         "Alice",
         "the name moves too"
     );
-    // One finish so far: the relay still has the old key until the threshold signs.
     let on_relay = relay.members(&ids[1], a.label()).await.unwrap();
     assert!(on_relay.members.iter().any(|m| m.sig_pk == old));
     let third = help(&relay, &ids[1], b, &dir_b).await;
@@ -332,7 +302,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
         load_state(&relay, &ids[0], a).await.is_err(),
         "the lost device is out"
     );
-    // Done: nothing more to do.
     let again = help(&relay, &ids[1], b, &dir_b).await;
     assert_eq!(again, Default::default());
 
@@ -357,7 +326,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
     assert_eq!(material.vault_secret, a.vault_secret);
     assert!(material.descriptor.member(&fresh.public().sig_pk).is_some());
 
-    // The new device signs with another member and reads the log like any member.
     sign_together(&material, c, &mut rng);
     let (_, mine) = load_state(&relay, &fresh, &material).await.unwrap();
     assert_eq!(mine.replacements.len(), 1);
@@ -367,14 +335,12 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let (_, state) = load_state(&relay, &ids[2], c).await.unwrap();
     assert_eq!(state.names[&fresh.public().sig_pk], "Alice (new phone)");
 
-    // The other members' stored material picks up the new key.
     let updated = current_material(b, &state).expect("membership changed");
     assert!(updated.descriptor.member(&fresh.public().sig_pk).is_some());
     assert_eq!(updated.key_package, b.key_package);
     assert!(current_material(&updated, &state).is_none());
     load_state(&relay, &ids[1], &updated).await.unwrap();
 
-    // The new device says it's done; the helpers stop.
     zafe_core::repair::mark_repair_done(&relay, &fresh, &material, &mut rng)
         .await
         .unwrap();
@@ -383,8 +349,6 @@ async fn a_lost_seat_moves_to_a_new_device() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// One helper never does its part. Another member takes over from it (a new attempt), the
-/// stalled attempt's messages are ignored, and the new device gets its key.
 #[tokio::test]
 async fn a_stalled_repair_is_taken_over_by_another_member() {
     let relay = RelayClient::new(start_relay().await);
@@ -404,7 +368,6 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     }
     let (chain, state) = load_state(&relay, &ids[1], &m[1]).await.unwrap();
     let index = state.replacements[0].index;
-    // Member 1 does its part; member 2 (the other helper) never does.
     let report = help_repairs(
         &relay,
         &ids[1],
@@ -419,7 +382,6 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     .unwrap();
     assert_eq!(report.waiting, 1);
 
-    // Only a member who isn't helping can take over, and only from a helper.
     let stalled = ids[2].public().sig_pk;
     let (helping, taker) = (ids[1].public().sig_pk, ids[3].public().sig_pk);
     assert!(
@@ -435,7 +397,6 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     retry_repair(&relay, &ids[3], &m[3], index, stalled, taker, &mut rng)
         .await
         .unwrap();
-    // One member's offer waits for the other helper to agree (rule 4).
     let (_, state) = load_state(&relay, &ids[1], &m[1]).await.unwrap();
     assert_eq!(state.replacements[0].attempt, 0);
     retry_repair(&relay, &ids[1], &m[1], index, stalled, taker, &mut rng)
@@ -449,7 +410,6 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
         vec![ids[1].public().sig_pk, ids[3].public().sig_pk]
     );
 
-    // The new attempt: member 1 starts over, member 3 joins, and the key arrives.
     for (i, sigmas) in [(1usize, 0usize), (3, 1), (1, 1)] {
         let (chain, state) = load_state(&relay, &ids[i], &m[i]).await.unwrap();
         let report = help_repairs(
@@ -480,9 +440,6 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Rule 1: a co-signer who challenges after the new phone revealed its value to another
-/// co-signer can't know the words the new phone will show it: each co-signer's check has
-/// its own secret.
 #[tokio::test]
 async fn a_late_challenger_cant_predict_the_new_phones_words() {
     use zafe_proto::relay::RecoveryValueKind;
@@ -530,9 +487,6 @@ async fn a_late_challenger_cant_predict_the_new_phones_words() {
     assert_ne!(shown.words, predicted);
 }
 
-/// Rule 1: once the new phone revealed its secret to a co-signer, the challenge it answered
-/// is pinned. A relay that serves that co-signer's challenge again with another value
-/// (chosen knowing the secret, to match words it wants) gets the row refused, not new words.
 #[tokio::test]
 async fn a_challenge_swapped_after_the_reveal_is_refused() {
     use zafe_proto::relay::{RecoveryPut, RecoveryValueKind, Signed};
@@ -576,9 +530,6 @@ async fn a_challenge_swapped_after_the_reveal_is_refused() {
     );
 }
 
-/// A 2-of-4 vault: member 0's seat moves to `fresh` (approved by 1 and 2, who both send
-/// their sigma), then the repair restarts with 3 in place of 2 and helpers 1 and 3 send
-/// theirs, with `log_key` in place of the vault's if given. Returns ids, materials, fresh.
 async fn restarted_repair(
     relay: &RelayClient,
     log_key: Option<[u8; 32]>,
@@ -597,7 +548,6 @@ async fn restarted_repair(
             .await
             .unwrap();
     }
-    // `sent` is the material whose vault data goes into the sigma.
     let help = |i: usize, sent: VaultMaterial| {
         let (id, dir, material) = (&ids[i], dir.join(i.to_string()), &m[i]);
         async move {
@@ -638,8 +588,6 @@ async fn restarted_repair(
     (ids, m, fresh)
 }
 
-/// Rule 2: the confirmed co-signer must have approved this seat move. Member 3 helps
-/// after a restart and sends a valid sigma, but never approved the move.
 #[tokio::test]
 async fn a_confirmed_helper_that_didnt_approve_the_move_is_refused() {
     let relay = RelayClient::new(start_relay().await);
@@ -651,9 +599,6 @@ async fn a_confirmed_helper_that_didnt_approve_the_move_is_refused() {
     assert!(matches!(err, NodeError::Verification(_)), "{err:?}");
 }
 
-/// Rule 2: the confirmed co-signer must still be a member. Member 2 approved the move and
-/// sent a valid sigma, then its own seat moved (the log switched it; the relay still lists
-/// its old key).
 #[tokio::test]
 async fn a_confirmed_cosigner_that_is_no_longer_a_member_is_refused() {
     use zafe_core::{node::append_event, vault::VaultEvent};
@@ -682,7 +627,6 @@ async fn a_confirmed_cosigner_that_is_no_longer_a_member_is_refused() {
         .await
         .unwrap();
     }
-    // Both helpers log their part (the move's sigmas never go anywhere here).
     for i in [1, 3] {
         let (mut chain, mut state) = load_state(&relay, &ids[i], &m[i]).await.unwrap();
         let r = state.pending_seat_move(&seat).unwrap();
@@ -705,8 +649,6 @@ async fn a_confirmed_cosigner_that_is_no_longer_a_member_is_refused() {
     assert!(matches!(err, NodeError::Verification(_)), "{err:?}");
 }
 
-/// The vault data comes from the confirmed co-signer: helpers a restart named (here both)
-/// can't hand the new phone another log key than the one that read the log.
 #[tokio::test]
 async fn helpers_with_another_log_key_than_the_confirmed_cosigner_are_refused() {
     let relay = RelayClient::new(start_relay().await);
@@ -716,7 +658,6 @@ async fn helpers_with_another_log_key_than_the_confirmed_cosigner_are_refused() 
         .await
         .unwrap_err();
     assert!(matches!(err, NodeError::Verification(_)), "{err:?}");
-    // With the vault's own key they agree, and the seat is recovered.
     let relay = RelayClient::new(start_relay().await);
     let (ids, m, fresh) = restarted_repair(&relay, None).await;
     let RecoveryStatus::Done { material, .. } =
@@ -729,9 +670,6 @@ async fn helpers_with_another_log_key_than_the_confirmed_cosigner_are_refused() 
     assert_eq!(material.log_key, m[1].log_key);
 }
 
-/// Rule 2: members of another vault (here, all of it) move a seat of theirs to the new
-/// phone, which answers anyone's safety check. The phone doesn't take that vault: the
-/// person compared words only with their own co-signer, who isn't in it.
 #[tokio::test]
 async fn a_vault_the_confirmed_cosigner_isnt_in_is_refused() {
     let relay = RelayClient::new(start_relay().await);
@@ -771,7 +709,6 @@ async fn a_vault_the_confirmed_cosigner_isnt_in_is_refused() {
             .unwrap(),
         RecoveryStatus::Done { .. }
     ));
-    // Only by confirming a member of that vault would the phone take it.
     let theirs = [ids[1].public().sig_pk];
     assert!(matches!(
         try_recover(&relay, &fresh, None, &theirs).await.unwrap(),
@@ -780,8 +717,6 @@ async fn a_vault_the_confirmed_cosigner_isnt_in_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
 fn member_dir(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -799,12 +734,10 @@ fn member_dir(
     ))
 }
 
-/// The key that seals one member's setup state (any fixed key per member will do).
 fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
     zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
 }
 
-/// One member's safety words for `invite`, polled from its setup state dir.
 async fn safety_words(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -821,8 +754,6 @@ async fn safety_words(
     .await
 }
 
-/// Where new phones in these tests keep their seat recovery pins (one file per identity
-/// and co-signer, so one directory serves every test).
 fn pins() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("zafe-recovery-pins-{}", std::process::id()))
 }

@@ -1,5 +1,3 @@
-//! Vault creation over a real HTTP relay with three concurrent members (spec §7.2).
-
 use std::time::Duration;
 
 use rand::{rngs::StdRng, SeedableRng};
@@ -18,8 +16,6 @@ use zafe_relay::{
     quota::Quotas,
 };
 
-/// A relay over HTTP with `limits` (the hosted defaults unless a test needs others, so
-/// these flows prove they fit in them).
 async fn start_relay(limits: Limits) -> String {
     start_relay_with(limits, Quotas::hosted()).await
 }
@@ -49,14 +45,12 @@ async fn setup() -> (RelayClient, Vec<Identity>, Invite, String) {
         .await
         .unwrap();
 
-    // The invite travels out of band as a string.
     let invite = Invite::decode(&invite.encode()).unwrap();
     for id in &ids[1..] {
         join_vault(&relay, id, &invite).await.unwrap();
     }
     seal(&relay, &ids[0], &invite).await.unwrap();
 
-    // Membership is locked; every member sees the same safety words once all values are in.
     let m = membership(
         &relay,
         &ids[0],
@@ -164,15 +158,12 @@ async fn three_members_create_a_vault_over_the_relay() {
         a.key_package, b.key_package,
         "each member has its own share"
     );
-    // Material round-trips into working keys.
     assert_eq!(
         a.vault_keys().unwrap().fvk().to_bytes(),
         c.vault_keys().unwrap().fvk().to_bytes()
     );
     assert_eq!(*a.key_package().unwrap().min_signers(), 2);
 
-    // Once the vault exists, a member's regular `respond` deletes its keygen messages
-    // from the relay; nothing is left to delete the next time.
     for (id, material) in ids.iter().zip([&a, &b, &c]) {
         let vault = material.label();
         assert!(!relay.inbox(id, vault, 0).await.unwrap().is_empty());
@@ -188,7 +179,6 @@ async fn three_members_create_a_vault_over_the_relay() {
         assert_eq!(again.acknowledged, 0);
     }
 
-    // Members share their names through the log; the others see them on replay.
     set_name(&relay, &ids[0], &a, "  Alice ", &mut r0)
         .await
         .unwrap();
@@ -197,7 +187,6 @@ async fn three_members_create_a_vault_over_the_relay() {
     assert_eq!(state.names[&ids[0].public().sig_pk], "Alice", "trimmed");
     assert_eq!(state.names[&ids[1].public().sig_pk], "Bob");
     assert!(!state.names.contains_key(&ids[2].public().sig_pk));
-    // Setting the same name again logs nothing; clearing it does.
     let entries = chain.len();
     set_name(&relay, &ids[1], &b, "Bob", &mut r1).await.unwrap();
     assert_eq!(
@@ -207,7 +196,6 @@ async fn three_members_create_a_vault_over_the_relay() {
     set_name(&relay, &ids[1], &b, "", &mut r1).await.unwrap();
     let (_, state) = load_state(&relay, &ids[0], &a).await.unwrap();
     assert!(!state.names.contains_key(&ids[1].public().sig_pk));
-    // Invalid names are refused before anything is logged.
     assert!(set_name(&relay, &ids[2], &c, &"x".repeat(33), &mut r2)
         .await
         .is_err());
@@ -223,7 +211,6 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
         StdRng::seed_from_u64(2),
         StdRng::seed_from_u64(3),
     );
-    // The creator picks a birthday far past the joiners' tip (100 + leeway).
     let (_, b, _) = tokio::join!(
         run_keygen(
             &relay,
@@ -283,8 +270,6 @@ async fn a_joiner_refuses_a_birthday_ahead_of_the_chain() {
     }
 }
 
-/// A member who never takes part is named when key generation gives up, so the others
-/// know whom to ask (or to abandon the setup).
 #[tokio::test]
 async fn keygen_names_the_member_who_never_took_part() {
     let (relay, ids, invite, number) = setup().await;
@@ -370,7 +355,6 @@ async fn keygen_refuses_an_unconfirmed_safety_number() {
 #[tokio::test]
 async fn a_rate_limited_client_gets_a_typed_error() {
     let relay = RelayClient::new(
-        // Creating a vault takes two requests (the mailbox, then its threshold).
         start_relay(Limits {
             per_key: Some(Rate::new(1, 2)),
             ..Limits::none()
@@ -440,9 +424,6 @@ async fn a_full_relay_gets_a_typed_error() {
     );
 }
 
-/// A device restored from a backup has no nonces: `top_up_pool(reset)` retires the pool the
-/// old device published and publishes a fresh one, so proposals are assigned commitments
-/// this device can sign with (found by the mainnet restore test).
 #[tokio::test]
 async fn a_restored_device_replaces_its_dead_pool() {
     use zafe_core::{
@@ -514,7 +495,6 @@ async fn a_restored_device_replaces_its_dead_pool() {
     let (material, _, _) = (a.unwrap(), b.unwrap(), c.unwrap());
     let me = ids[0].public().sig_pk;
 
-    // The original device publishes its pool.
     let mut rng = StdRng::seed_from_u64(5);
     let mut old_device = MemoryPoolStore::default();
     let published = top_up_pool(
@@ -533,8 +513,6 @@ async fn a_restored_device_replaces_its_dead_pool() {
     let old: Vec<Vec<u8>> = state.pools[&me].commitments.clone();
     assert_eq!(old.len(), published);
 
-    // The restored device has an empty store. Without a reset the log still counts the
-    // dead commitments as available, so nothing is published.
     let mut restored = MemoryPoolStore::default();
     assert_eq!(
         top_up_pool(
@@ -551,8 +529,6 @@ async fn a_restored_device_replaces_its_dead_pool() {
         0
     );
 
-    // With the reset, the old ones are retired and a full fresh pool follows, all of it
-    // signable here.
     let n = top_up_pool(
         &relay,
         &ids[0],
@@ -572,7 +548,6 @@ async fn a_restored_device_replaces_its_dead_pool() {
     assert!(pool.commitments.iter().all(|c| restored.contains(c)));
     assert!(state.ignored.is_empty());
 
-    // Running the reset again right away only retires and republishes: still a full pool.
     top_up_pool(
         &relay,
         &ids[0],
@@ -588,8 +563,6 @@ async fn a_restored_device_replaces_its_dead_pool() {
     assert_eq!(state.pools[&me].available(), published);
 }
 
-/// One member's setup state dir in this test's relay: the safety check and key generation
-/// share it (the safety value lives there).
 fn member_dir(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,
@@ -607,12 +580,10 @@ fn member_dir(
     ))
 }
 
-/// The key that seals one member's setup state (any fixed key per member will do).
 fn setup_key(id: &zafe_proto::Identity) -> zafe_core::nonce_store::NonceKey {
     zafe_core::nonce_store::NonceKey::derive(&id.public().sig_pk, b"setup")
 }
 
-/// One member's safety words for `invite`, polled from its setup state dir.
 async fn safety_words(
     relay: &zafe_core::relay_client::RelayClient,
     id: &zafe_proto::Identity,

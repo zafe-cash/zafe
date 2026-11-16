@@ -1,8 +1,5 @@
 import 'package:flutter/services.dart';
 
-/// Accepts decimal amounts within the configured precision and optional length.
-/// Committed leading-decimal edits gain a zero while preserving the selection.
-/// Invalid edits are rejected; active composing text is not rewritten.
 class DecimalAmountInputFormatter extends TextInputFormatter {
   const DecimalAmountInputFormatter({
     required this.maxFractionDigits,

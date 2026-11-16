@@ -1,10 +1,3 @@
-//! "Use Tor" (Settings): every relay request and lightwalletd connection goes through Tor,
-//! fail-closed. The route is process-wide (`zafe_core::tor`), shared by the app and any
-//! background check running in the same process.
-//!
-//! Order matters: with Tor on, call [`tor_request`] right after `RustLib.init()`, before
-//! any other call can open a connection, then [`tor_enable`] to bootstrap.
-
 use std::{path::PathBuf, time::Duration};
 
 use zafe_core::tor::{self, TorError, TorStatus};
@@ -16,13 +9,9 @@ use super::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TorState {
-    /// Tor is off: connections are direct.
     Off,
-    /// Tor is on and connecting: nothing is sent until it is.
     Connecting,
-    /// Tor is on and connected.
     Connected,
-    /// Tor is on but couldn't connect: nothing is sent until it does.
     Failed,
 }
 
@@ -37,21 +26,12 @@ impl From<TorStatus> for TorState {
     }
 }
 
-/// Switches the route to Tor at once (no bootstrap yet): from now on nothing connects
-/// directly, and direct connections already open are closed. Does nothing if Tor is
-/// already on.
 #[flutter_rust_bridge::frb(sync)]
 pub fn tor_request() {
     tor::request();
 }
 
-/// Turns Tor on and connects, giving up after `timeout_secs` (arti retries forever on a
-/// network that blocks Tor). Tor keeps its state (guards, directory cache) in `tor_dir`.
-/// Returns at once when Tor is already connected. On failure the route stays on Tor:
-/// requests keep failing (typed `TorFailed`) until it connects or is turned off.
 pub async fn tor_enable(tor_dir: String, timeout_secs: u32) -> Result<TorState, ZafeError> {
-    // On the bridge runtime: arti spawns its background tasks on the runtime it starts in,
-    // and every request runs there.
     let budget = Duration::from_secs(timeout_secs.into());
     runtime()
         .spawn(async move { tor::enable(&PathBuf::from(tor_dir), budget).await })
@@ -61,7 +41,6 @@ pub async fn tor_enable(tor_dir: String, timeout_secs: u32) -> Result<TorState, 
         .map_err(tor_error)
 }
 
-/// Switches back to direct connections.
 #[flutter_rust_bridge::frb(sync)]
 pub fn tor_disable() {
     tor::disable();
@@ -72,8 +51,6 @@ pub fn tor_state() -> TorState {
     tor::status().into()
 }
 
-/// The app went to the background (`true`) or came back: a dormant Tor stops its idle
-/// traffic. A request wakes it by itself, so background checks need nothing.
 #[flutter_rust_bridge::frb(sync)]
 pub fn tor_set_dormant(dormant: bool) {
     tor::set_dormant(dormant);

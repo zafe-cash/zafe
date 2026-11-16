@@ -6,7 +6,6 @@ import 'package:zafe/src/core/theme/app_theme.dart';
 import 'package:zafe/src/core/widgets/clipboard_countdown.dart';
 import 'package:zafe/src/features/backup/restore_screen.dart';
 
-/// The system clipboard as `Clipboard.getData` sees it.
 void _clipboard(WidgetTester tester, String? text) {
   tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
     SystemChannels.platform,

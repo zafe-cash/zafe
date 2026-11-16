@@ -13,7 +13,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `send_with_progress`
 
-/// Vault payments go to shielded (Orchard-receiver) unified addresses only.
 AddressCheck checkAddress({
   required String networkName,
   required String address,
@@ -22,9 +21,6 @@ AddressCheck checkAddress({
   address: address,
 );
 
-/// Reads a scanned or pasted payment target: a plain address, or a ZIP 321 `zcash:` URI
-/// (amount, memo, several recipients). Every address must be payable from a vault on
-/// `network_name` (see `check_address`).
 ScannedRequest parsePaymentRequest({
   required String networkName,
   required String text,
@@ -33,31 +29,18 @@ ScannedRequest parsePaymentRequest({
   text: text,
 );
 
-/// Parses a ZEC amount ("1.5", "0,25") to zatoshis. `None` if malformed or above 8 decimals.
 BigInt? parseZec({required String text}) =>
     RustLib.instance.api.crateApiProposalsParseZec(text: text);
 
-/// Bytes a memo takes (the limit is 512).
 int memoLength({required String memo}) =>
     RustLib.instance.api.crateApiProposalsMemoLength(memo: memo);
 
-/// The height of the NU7 network upgrade on `network` ("main", "test", "regtest"), when the
-/// Zcash libraries this build uses know it. Blocks come every 75 s before it and every 25 s
-/// from it on, which the app needs to turn a block count into a time.
 int? nu7ActivationHeight({required String network}) =>
     RustLib.instance.api.crateApiProposalsNu7ActivationHeight(network: network);
 
-/// A device restored from a backup has no signing nonces, so its next refresh retires the
-/// commitments the previous device published and publishes a fresh pool (see
-/// `node::top_up_pool`). The app calls this right after a restore; the marker lives in the
-/// vault's signing state directory, which backups never contain.
 Future<void> markPoolReset({required String stateDir}) =>
     RustLib.instance.api.crateApiProposalsMarkPoolReset(stateDir: stateDir);
 
-/// Every proposal in the vault log, newest first. Also keeps this device ready for
-/// one-tap signing: tops up its pre-published commitments when they run low, and deletes
-/// nonces of proposals that closed or expired (as of `tip_height`, the synced tip, when
-/// known).
 Future<ProposalList> listProposals({
   required String relayUrl,
   required String stateDir,
@@ -72,10 +55,6 @@ Future<ProposalList> listProposals({
   tipHeight: tipHeight,
 );
 
-/// Asks to restart rebuilding a moved seat's key with `taker_key_hex` in place of
-/// `stalled_key_hex`, a helper not doing its part: this member offering to help, or a
-/// helper agreeing to another member's offer. The restart starts once every new helper
-/// asked.
 Future<void> retryRepair({
   required String relayUrl,
   required List<int> seeds,
@@ -92,9 +71,6 @@ Future<void> retryRepair({
   takerKeyHex: takerKeyHex,
 );
 
-/// The exact network fee (zatoshis) proposing `payments` would pay now, from the wallet as
-/// last synced: the same note selection as `propose_payment`, nothing built or logged.
-/// Fails like a proposal would (e.g. not enough funds), so the review can say so first.
 Future<BigInt> estimateFee({
   required String lightwalletdUrl,
   required String dbDir,
@@ -109,8 +85,6 @@ Future<BigInt> estimateFee({
   payments: payments,
 );
 
-/// Syncs, builds the transaction from the vault's notes, and logs it as a proposal. Returns
-/// the proposal id.
 Future<String> proposePayment({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -131,9 +105,6 @@ Future<String> proposePayment({
   autoSend: autoSend,
 );
 
-/// Proposes `payments` and approves them as this member, in one call: the approval uses
-/// the log state the proposal left (one read of the log fewer, ~1.5 s over Tor). A
-/// failed approval is reported in the outcome, not as an error: the payment exists.
 Future<ProposeOutcome> proposeAndApprove({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -156,8 +127,6 @@ Future<ProposeOutcome> proposeAndApprove({
   autoSend: autoSend,
 );
 
-/// Proposer: cancels a proposal and proposes the same payments again with fresh one-tap
-/// commitments (see `ProposalInfo.needs_new_proposal`). Returns the new proposal's id.
 Future<String> proposeAgain({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -176,8 +145,6 @@ Future<String> proposeAgain({
   proposalId: proposalId,
 );
 
-/// Proposes spending a cancelled proposal's notes back to the vault, so the cancelled
-/// transaction can never be sent (see `node::invalidate`). Returns the new proposal id.
 Future<String> invalidateProposal({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -214,8 +181,6 @@ Future<ReviewInfo> reviewProposal({
   proposalId: proposalId,
 );
 
-/// Verifies the proposal on this device and, only if it passes, approves it. For one-tap
-/// proposals the approval also signs; see `ApproveResult`.
 Future<ApproveResult> approveProposal({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -236,8 +201,6 @@ Future<ApproveResult> approveProposal({
   proposalId: proposalId,
 );
 
-/// Rejects the proposal, unless this phone's signature for it may already be out
-/// (`ZafeErrorKind::AlreadySigned`: nothing is logged).
 Future<void> rejectProposal({
   required String relayUrl,
   required String stateDir,
@@ -252,8 +215,6 @@ Future<void> rejectProposal({
   proposalId: proposalId,
 );
 
-/// Sets this member's display name for the other members (empty clears it). Logged only
-/// when it changes.
 Future<void> setMyName({
   required String relayUrl,
   required List<int> seeds,
@@ -266,8 +227,6 @@ Future<void> setMyName({
   name: name,
 );
 
-/// Records in the vault log that this member saved a backup that opens (backup health).
-/// Logged once per key epoch.
 Future<void> attestBackup({
   required String relayUrl,
   required List<int> seeds,
@@ -278,7 +237,6 @@ Future<void> attestBackup({
   material: material,
 );
 
-/// Cancels a proposal this member authored (open or approved, not yet sent).
 Future<void> cancelProposal({
   required String relayUrl,
   required List<int> seeds,
@@ -291,24 +249,15 @@ Future<void> cancelProposal({
   proposalId: proposalId,
 );
 
-/// Leader: abandons this device's unfinished signing round for a proposal (a chosen
-/// signer never answered), so the next send starts a new one. Commitment sets the old
-/// round used stay recorded as used; signers who took part approve again for fresh ones.
 void restartSigning({required String stateDir, required String proposalId}) =>
     RustLib.instance.api.crateApiProposalsRestartSigning(
       stateDir: stateDir,
       proposalId: proposalId,
     );
 
-/// Builds the proving and verifying keys now (seconds on a phone, then kept for the
-/// process), so sending an approved payment starts proving at once. Returns when built.
 Future<void> prewarmProver() =>
     RustLib.instance.api.crateApiProposalsPrewarmProver();
 
-/// Answers signing requests for proposals this member approved (each is re-verified first)
-/// and lets the relay delete what this member has handled. Called on every poll.
-/// `tip_height` is the synced tip when the caller knows it (saves opening the wallet).
-/// Returns how many were answered.
 Future<int> answerSigningRequests({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -329,9 +278,6 @@ Future<int> answerSigningRequests({
   tipHeight: tipHeight,
 );
 
-/// Leader: asks the approvers for signatures (once per proposal on this device), signs its
-/// own part, collects the rest while proving, and broadcasts. On a timeout, call again: it
-/// resumes the same signing round.
 Stream<SendProgress> sendProposal({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -354,8 +300,6 @@ Stream<SendProgress> sendProposal({
 
 class AddressCheck {
   final bool valid;
-
-  /// Why the address can't be paid (empty when valid).
   final String reason;
 
   const AddressCheck({required this.valid, required this.reason});
@@ -373,13 +317,8 @@ class AddressCheck {
 }
 
 class ApproveResult {
-  /// The approval carried this member's signatures (one tap).
   final bool signed;
-
-  /// This approval completed the signatures: the proposal can be sent now.
   final bool completed;
-
-  /// The proposer asked for the completing member to send right away.
   final bool autoSend;
 
   const ApproveResult({
@@ -451,34 +390,16 @@ class PaymentInput {
           memo == other.memo;
 }
 
-/// A seat move with every approval: the old key still holds the seat until every helper
-/// waited 72 h (by its own clock) and logged its part.
 class PendingSeatMove {
-  /// The move (pass to `retry_repair`).
   final BigInt replacement;
-
-  /// The signer whose seat moves (hex key); this phone's own when it is the old phone.
   final String oldKeyHex;
-
-  /// The new phone's key (hex).
   final String newKeyHex;
-
-  /// The old phone can still keep the seat (first round only).
   final bool canKeep;
-
-  /// When the old phone said it still has this seat before this round, if it did.
   final BigInt? keptAt;
-
-  /// The members rebuilding the key (hex keys) and those of them whose part is logged.
   final List<String> helpers;
   final List<String> helped;
-
-  /// When this phone first saw the move with every approval (unix seconds; `None` until
-  /// its next refresh records it) and when its 72 h end from then.
   final BigInt? seenAt;
   final BigInt? completesAt;
-
-  /// Helpers who stopped helping this move (hex keys), for good.
   final List<String> stopped;
 
   const PendingSeatMove({
@@ -536,56 +457,19 @@ class ProposalInfo {
   final MyVote myVote;
   final int threshold;
   final int rejectionThreshold;
-
-  /// Proposer's clock (unix seconds, display only).
   final BigInt createdAt;
   final String? txid;
-
-  /// This device already sent a signing request for it (it can resume collecting).
   final bool signingStarted;
-
-  /// Signed at approval time (one tap): approvals carry the signatures.
   final bool oneTap;
-
-  /// Some signer group has every signature: any member can send it now, alone.
   final bool ready;
-
-  /// This member's approval completed the signatures (it sends when `auto_send`).
   final bool completedByMe;
-
-  /// The proposer asked for it to be sent as soon as the signatures are complete.
   final bool autoSend;
-
-  /// Last block the transaction can be mined in; after it the proposal is expired.
   final int expiryHeight;
-
-  /// This member must approve again before a signing round can include it: it approved
-  /// with signing commitments whose nonces are gone from this device (used in a round
-  /// that didn't finish, or restored from a backup), or it signed one tap and no signer
-  /// group can complete (another signer approved interactively).
   final bool needsReapproval;
-
-  /// Cancelled or rejected, but it may have been signed (it reached Approved, or a vote
-  /// carried signatures) and can still be mined: anyone holding the signed transaction
-  /// could send it until it expires (offer to make it unsendable). A new payment must
-  /// spend one of its notes.
   final bool stillSendable;
-
-  /// Cancelled or rejected after it was signed, and its transaction was mined anyway
-  /// (`stage` is `Sent`, `txid` that transaction's).
   final bool sentAnyway;
-
-  /// It reached Approved or a vote carried signatures: a signed transaction may exist
-  /// whatever was decided after (cancelling or rejecting can't take it back).
   final bool maybeSigned;
-
-  /// A live proposal (id) that spends this cancelled one's notes back to the vault, while
-  /// this one can still be sent (`still_sendable` before the sweep).
   final String? invalidatedBy;
-
-  /// One-tap, open, and no signer group can be completed any more (a member's phone
-  /// was restored or replaced while it was open): the proposer should propose it again
-  /// (`propose_again`), and everyone approves once more.
   final bool needsNewProposal;
 
   const ProposalInfo({
@@ -677,46 +561,16 @@ class ProposalInfo {
 }
 
 class ProposalList {
-  /// Newest first.
   final List<ProposalInfo> items;
-
-  /// Log entries written by a newer version of Zafe that this build skipped: other
-  /// members may see something this device can't, so the app asks to update.
   final int newerVersionEntries;
-
-  /// Names members gave themselves in the log (this member's included). The app shows
-  /// its own local label first, then these.
   final List<SignerName> sharedNames;
-
-  /// Members (hex signing keys) who attested a backup of their current keys
-  /// (backup health, spec §12.2).
   final List<String> backedUp;
-
-  /// This phone's seat switched to it in the log and the server is still finishing the
-  /// move: it reads but can't write yet (not an error; the next refresh tries again).
   final bool seatFinishing;
-
-  /// Seat moves waiting for approvals (a signer who lost their phone, spec §10.1).
   final List<SeatMove> seatMoves;
-
-  /// Seat moves with every approval, waiting for the helpers (72 h each) and for the old
-  /// phone, which can keep the seat in the first round.
   final List<PendingSeatMove> pendingSeatMoves;
-
-  /// Seats whose old phone said it still has them (`KeepSeat`): whoever approves moving
-  /// one again must call its owner first.
   final List<SeatKeep> seatKeeps;
-
-  /// Seat moves whose key isn't rebuilt yet, pending ones included (a helper may have
-  /// stalled; a restart works for either).
   final List<RepairInfo> repairs;
-
-  /// The vault's switches to other relays, in log order.
   final List<RelayMoveRecord> moves;
-
-  /// This member's vault material with the current membership, when a seat moved since
-  /// the stored copy, or on the vault's new relay after a move: save it in place of the
-  /// old one (and register push on the new relay).
   final Uint8List? updatedMaterial;
 
   const ProposalList({
@@ -765,28 +619,12 @@ class ProposalList {
           updatedMaterial == other.updatedMaterial;
 }
 
-enum ProposalStage {
-  /// Waiting for approvals.
-  open,
+enum ProposalStage { open, approved, rejected, cancelled, sent }
 
-  /// Enough approvals; waiting for a member to collect signatures and send.
-  approved,
-  rejected,
-  cancelled,
-  sent,
-}
-
-/// What [`propose_and_approve`] gets back.
 class ProposeOutcome {
   final String id;
-
-  /// This member's approval, given under the same unlock (`None` if it failed).
   final ApproveResult? approved;
-
-  /// Why the approval failed: the payment then stays open for this member's approval.
   final ZafeError? approveError;
-
-  /// The vault's proposals right after, so the app shows the new payment at once.
   final List<ProposalInfo> items;
 
   const ProposeOutcome({
@@ -811,12 +649,9 @@ class ProposeOutcome {
           items == other.items;
 }
 
-/// A switch of the vault to another relay, for Activity ("Grants moved to relay.dao.org").
 class RelayMoveRecord {
   final String relayUrl;
   final String host;
-
-  /// The switching phone's clock, unix seconds (display only).
   final BigInt at;
   final BigInt logIndex;
 
@@ -842,24 +677,12 @@ class RelayMoveRecord {
           logIndex == other.logIndex;
 }
 
-/// A seat move whose key the helpers are still rebuilding on the new phone.
 class RepairInfo {
-  /// The move (pass to `retry_repair`).
   final BigInt replacement;
-
-  /// The seat hasn't switched yet (see [`PendingSeatMove`]).
   final bool pending;
-
-  /// The new phone's key (hex).
   final String newKeyHex;
-
-  /// The members rebuilding it in the current attempt (hex keys).
   final List<String> helpers;
-
-  /// 0 for the approvers' attempt, +1 per restart.
   final int attempt;
-
-  /// Restarts asked for in this attempt: each starts once every helper it names asked.
   final List<RepairRestart> restarts;
 
   const RepairInfo({
@@ -893,12 +716,8 @@ class RepairInfo {
           restarts == other.restarts;
 }
 
-/// A restart of a key repair some members asked for.
 class RepairRestart {
-  /// The helpers it names (hex keys).
   final List<String> helpers;
-
-  /// Who asked so far (hex keys).
   final List<String> asked;
 
   const RepairRestart({required this.helpers, required this.asked});
@@ -915,10 +734,7 @@ class RepairRestart {
           asked == other.asked;
 }
 
-/// This device's independent check of a proposal (spec §9.3).
 class ReviewInfo {
-  /// Whether the transaction pays exactly the proposed payments, with change back to
-  /// the vault and the standard fee. If false, `problem` says why: do not approve.
   final bool verified;
   final String problem;
   final BigInt feeZat;
@@ -965,21 +781,11 @@ class ReviewInfo {
           tipHeight == other.tipHeight;
 }
 
-/// One payment read from a scanned QR code or pasted text.
 class ScannedPayment {
   final String address;
-
-  /// 0 when the request leaves the amount to the payer.
   final BigInt amountZat;
-
-  /// Text memo (empty if none or not text).
   final String memo;
-
-  /// What the link calls the recipient (ZIP 321 `label`; empty if none). Written by
-  /// whoever made the link: show it as the link's claim, never as verified.
   final String label;
-
-  /// The link's note to the payer (ZIP 321 `message`; empty if none). Same caveat.
   final String message;
 
   const ScannedPayment({
@@ -1011,10 +817,7 @@ class ScannedPayment {
 }
 
 class ScannedRequest {
-  /// Empty when `problem` is set.
   final List<ScannedPayment> payments;
-
-  /// Why it can't be paid from this vault (empty when fine).
   final String problem;
 
   const ScannedRequest({required this.payments, required this.problem});
@@ -1031,12 +834,8 @@ class ScannedRequest {
           problem == other.problem;
 }
 
-/// The last time a seat's old phone kept it.
 class SeatKeep {
-  /// The seat (hex key of the phone that kept it).
   final String oldKeyHex;
-
-  /// Its clock, unix seconds (display only).
   final BigInt at;
 
   const SeatKeep({required this.oldKeyHex, required this.at});
@@ -1053,23 +852,12 @@ class SeatKeep {
           at == other.at;
 }
 
-/// A signer moving to a new phone, waiting for approvals.
 class SeatMove {
-  /// The signer who lost their phone (hex key).
   final String oldKeyHex;
-
-  /// The new phone's key (hex).
   final String newKeyHex;
-
-  /// Members who approved so far (hex keys).
   final List<String> approvals;
   final int needed;
-
-  /// The recovery code, rebuilt from the log, for approving from this list.
   final String code;
-
-  /// When the old phone last said it still has this seat (`KeepSeat`, its clock, unix
-  /// seconds): approvers must call its owner first. `None` in the first round.
   final BigInt? keptAt;
 
   const SeatMove({
@@ -1138,11 +926,4 @@ class SendProgress {
           error == other.error;
 }
 
-enum SendStage {
-  /// Signing requests are out; the transaction proof is being built meanwhile.
-  collecting,
-  sent,
-
-  /// Not sent; `error` says why. Retrying resumes the same signing round.
-  failed,
-}
+enum SendStage { collecting, sent, failed }

@@ -20,8 +20,6 @@ void main() {
   ) async {
     await tester.pumpWidget(_nav(animated: true));
     expect(find.byType(ShaderMask), findsOneWidget);
-    // An AnimationController would keep a frame scheduled all the time (a redraw of the
-    // whole screen at the display's rate). Between timer ticks nothing is scheduled.
     expect(tester.hasRunningAnimations, isFalse);
     for (var i = 0; i < 40; i++) {
       await tester.pump(const Duration(milliseconds: 25));
@@ -51,7 +49,6 @@ void main() {
     expect(find.byType(ShaderMask), findsNothing);
     await tester.pump(const Duration(seconds: 5));
     expect(tester.binding.hasScheduledFrame, isFalse);
-    // The framework fails a test that ends with a timer still pending.
     await tester.pumpWidget(const SizedBox());
   });
 

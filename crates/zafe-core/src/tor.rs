@@ -1,20 +1,3 @@
-//! Optional Tor routing for every connection Zafe makes (the relay and lightwalletd).
-//!
-//! The route is a process-wide policy. Turning Tor on flips it **before** Tor has
-//! bootstrapped, so from that moment every relay request and every lightwalletd
-//! connection either goes through Tor or fails with [`Blocked`]; nothing ever falls back
-//! to a direct connection. Direct connections opened before the switch are cut: each one
-//! holds a [`DirectLease`] whose token the switch cancels, and its I/O then fails.
-//!
-//! Tor is embedded (arti, through `zcash_client_backend`'s `tor` feature); there is no
-//! separate tor process. The relay and lightwalletd use separate circuits (isolated
-//! clients), so an exit relay never sees both from one circuit.
-//!
-//! Bootstrapping is bounded ([`BOOTSTRAP_TIMEOUT`], or the caller's budget): arti itself
-//! retries forever on a network that blocks Tor. A failed or timed-out bootstrap leaves
-//! the route on Tor with status [`TorStatus::Failed`], so requests keep failing until Tor
-//! connects or the user turns it off.
-
 use std::{
     future::Future,
     io,
@@ -29,31 +12,20 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use zcash_client_backend::tor::{Client, DormantMode, Timeouts};
 
-/// Longest a foreground bootstrap may take. A first bootstrap on a slow link takes tens
-/// of seconds (it downloads the consensus); later ones reuse the cached directory.
 pub const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
-/// How long a request waits for a bootstrap in progress before failing with
-/// [`Blocked::Connecting`]. Short: the app polls again, and a sync waiting here holds the
-/// wallet lock.
 pub const ROUTE_WAIT: Duration = Duration::from_secs(20);
 
-/// How often a waiting bootstrap checks whether Tor was turned off meanwhile.
 const ABANDON_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TorStatus {
-    /// Tor is off: connections are direct.
     Off,
-    /// Tor is on and bootstrapping; connections wait or fail.
     Connecting,
-    /// Tor is on and connected; connections go through it.
     Ready,
-    /// Tor is on but could not connect; connections fail until it does.
     Failed,
 }
 
-/// Why a connection was refused: Tor is on but has no circuit to offer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Blocked {
     #[error("Tor is still connecting")]
@@ -64,10 +36,8 @@ pub enum Blocked {
 
 #[derive(Debug, thiserror::Error)]
 pub enum TorError {
-    /// Bootstrapping (or waiting for another bootstrap) took longer than allowed.
     #[error("Tor did not connect in time")]
     Timeout,
-    /// Tor was turned off while it was bootstrapping.
     #[error("Tor was turned off while it was connecting")]
     Abandoned,
     #[error("Tor data directory: {0}")]
@@ -76,12 +46,10 @@ pub enum TorError {
     Bootstrap(String),
 }
 
-/// What one kind of traffic uses. Each gets its own isolated circuits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Purpose {
     Relay,
     Lightwalletd,
-    /// The ZEC/USD price (`crate::price`).
     Price,
 }
 
@@ -113,13 +81,10 @@ impl Clients {
 }
 
 struct Policy {
-    /// The route the user chose: Tor or direct. Set before bootstrapping.
     tor: bool,
     status: TorStatus,
     clients: Option<Clients>,
-    /// Handed to every direct connection; cancelled (and replaced) when Tor is turned on.
     direct: CancellationToken,
-    /// The app is in the background: keep Tor dormant (less padding traffic, battery).
     dormant: bool,
 }
 
@@ -132,9 +97,7 @@ static POLICY: LazyLock<Mutex<Policy>> = LazyLock::new(|| {
         dormant: false,
     })
 });
-/// Signalled after every status change, so waiting requests re-check at once.
 static CHANGED: LazyLock<tokio::sync::Notify> = LazyLock::new(tokio::sync::Notify::new);
-/// One bootstrap at a time (a foreground switch and a background check can race).
 static BOOTSTRAP: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 fn policy() -> MutexGuard<'static, Policy> {
@@ -149,14 +112,10 @@ pub fn status() -> TorStatus {
     policy().status
 }
 
-/// Whether the route is Tor (whatever the bootstrap's state).
 pub fn is_on() -> bool {
     policy().tor
 }
 
-/// Switches the route to Tor at once, before any bootstrap, and cuts every direct
-/// connection. Call it before the first request when the user has Tor on. Does nothing
-/// when Tor is already on (a connected client is kept).
 pub fn request() {
     {
         let mut p = policy();
@@ -173,16 +132,10 @@ pub fn request() {
     tracing::info!("tor: requested; direct connections closed");
 }
 
-/// Turns Tor on and bootstraps it, within `budget` (waiting for another bootstrap in
-/// progress counts against it). Returns at once when Tor is already connected. On failure
-/// the route stays on Tor with status [`TorStatus::Failed`]: requests keep failing.
-/// Must run inside the tokio runtime that will carry Tor's traffic (arti spawns its
-/// background tasks there).
 pub async fn enable(dir: &Path, budget: Duration) -> Result<TorStatus, TorError> {
     request();
     let started = tokio::time::Instant::now();
     let Ok(_guard) = tokio::time::timeout(budget, BOOTSTRAP.lock()).await else {
-        // Another bootstrap holds the lock and owns the status.
         return Err(TorError::Timeout);
     };
     {
@@ -204,9 +157,6 @@ pub async fn enable(dir: &Path, budget: Duration) -> Result<TorStatus, TorError>
     let bootstrap = Client::create_with_timeouts(
         dir,
         |permissions| {
-            // arti refuses a data directory other users could reach. On Android and iOS
-            // the app sandbox is the boundary and the container's parents are group
-            // accessible, which it would reject.
             #[cfg(any(target_os = "android", target_os = "ios"))]
             permissions.dangerously_trust_everyone();
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -224,8 +174,6 @@ pub async fn enable(dir: &Path, budget: Duration) -> Result<TorStatus, TorError>
     }
 }
 
-/// Waits for a bootstrap for at most `budget`, and gives up as soon as Tor is turned off
-/// (dropping the future stops arti's work).
 async fn bounded<T, E: std::fmt::Display>(
     budget: Duration,
     bootstrap: impl Future<Output = Result<T, E>>,
@@ -245,7 +193,6 @@ async fn bounded<T, E: std::fmt::Display>(
     }
 }
 
-/// Publishes a bootstrapped client, unless Tor was turned off meanwhile.
 fn install(client: Client) -> TorStatus {
     let status = {
         let mut p = policy();
@@ -266,7 +213,6 @@ fn set_failed() {
     {
         let mut p = policy();
         p.clients = None;
-        // A route that went direct meanwhile keeps its status.
         if p.tor {
             p.status = TorStatus::Failed;
         }
@@ -274,7 +220,6 @@ fn set_failed() {
     changed();
 }
 
-/// Switches back to direct connections and drops the Tor client.
 pub fn disable() {
     {
         let mut p = policy();
@@ -294,9 +239,6 @@ fn dormant_mode(dormant: bool) -> DormantMode {
     }
 }
 
-/// Puts Tor to sleep while the app is in the background (arti otherwise keeps its guard
-/// connection busy), or wakes it. Remembered for a client that is still bootstrapping.
-/// A request made while dormant wakes it by itself.
 pub fn set_dormant(dormant: bool) {
     let mut p = policy();
     p.dormant = dormant;
@@ -305,13 +247,11 @@ pub fn set_dormant(dormant: bool) {
     }
 }
 
-/// How one connection goes out.
 pub(crate) enum Route {
     Direct(DirectLease),
     Tor(Box<Client>),
 }
 
-/// The route for the policy as it stands. Pure, so the fail-closed rules are unit-tested.
 fn decide(
     tor: bool,
     status: TorStatus,
@@ -334,9 +274,6 @@ fn current(purpose: Purpose) -> Result<Route, Blocked> {
     decide(p.tor, p.status, client, &p.direct)
 }
 
-/// The route for one connection. While Tor is bootstrapping this waits up to `wait`, then
-/// fails with [`Blocked::Connecting`]; a failed Tor fails at once. Never direct while
-/// Tor is on.
 pub(crate) async fn route(purpose: Purpose, wait: Duration) -> Result<Route, Blocked> {
     let deadline = tokio::time::Instant::now() + wait;
     loop {
@@ -358,7 +295,6 @@ pub(crate) async fn route(purpose: Purpose, wait: Duration) -> Result<Route, Blo
     }
 }
 
-/// Permission for one direct connection, revoked when Tor is turned on.
 #[derive(Clone)]
 pub(crate) struct DirectLease(CancellationToken);
 
@@ -367,7 +303,6 @@ impl DirectLease {
         self.0.is_cancelled()
     }
 
-    /// Runs `fut`, abandoning it (and its connection) if Tor is turned on meanwhile.
     pub(crate) async fn guard<T, E>(
         &self,
         fut: impl Future<Output = Result<T, E>>,
@@ -380,7 +315,6 @@ impl DirectLease {
         }
     }
 
-    /// Wraps a direct connection so its reads and writes fail once Tor is turned on.
     pub(crate) fn wrap<T>(&self, inner: T) -> DirectIo<T> {
         DirectIo {
             inner,
@@ -396,14 +330,12 @@ pub(crate) fn revoked_error() -> io::Error {
     )
 }
 
-/// A direct connection that stops working the moment Tor is turned on.
 pub(crate) struct DirectIo<T> {
     inner: T,
     revoked: Pin<Box<WaitForCancellationFutureOwned>>,
 }
 
 impl<T> DirectIo<T> {
-    /// Also registers the task to be woken when the lease is revoked.
     fn check(&mut self, cx: &mut Context<'_>) -> io::Result<()> {
         match self.revoked.as_mut().poll(cx) {
             Poll::Ready(()) => Err(revoked_error()),
@@ -439,7 +371,6 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for DirectIo<T> {
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        // Closing is always allowed.
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 
@@ -457,9 +388,6 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for DirectIo<T> {
     }
 }
 
-/// tonic connector for direct lightwalletd connections: plain TCP (tonic adds TLS on
-/// top), wrapped so the connection dies when Tor is turned on, and refusing to connect
-/// (also on tonic's reconnects) once it was.
 #[derive(Clone)]
 pub(crate) struct DirectConnector(pub(crate) DirectLease);
 
@@ -562,7 +490,6 @@ mod tests {
         let mut buf = [0u8; 2];
         io.read_exact(&mut buf).await.unwrap();
 
-        // A read waiting for data fails as soon as the lease is revoked.
         let reading = tokio::spawn(async move {
             let mut buf = [0u8; 1];
             io.read(&mut buf).await

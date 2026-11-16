@@ -1,6 +1,3 @@
-//! Labelled mailboxes (`docs/relay-move.md` §4.6), `/v1/push/forget`, `GET /v1/info` and
-//! the create token.
-
 use std::sync::{Arc, Mutex};
 
 use axum::{
@@ -23,11 +20,8 @@ use zafe_proto::{
 };
 use zafe_relay::{Notifier, Relay};
 
-/// The vault id the entries carry.
 const VAULT: MailboxId = [1; 16];
-/// This relay's label for the vault.
 const LABEL: MailboxId = [2; 16];
-/// Another vault's id.
 const OTHER_VAULT: MailboxId = [3; 16];
 const NOW: u64 = 1_790_000_000;
 const TOKEN: [u8; 32] = [4; 32];
@@ -63,7 +57,6 @@ fn relay() -> Relay {
     Relay::with_clock(Arc::new(|| NOW))
 }
 
-/// Posts `env` as its sender `who` (`/v1/envelope/send`).
 async fn post_env(app: &Router, who: &Identity, env: &Envelope) -> (StatusCode, Vec<u8>) {
     let envelope = env.to_bytes().unwrap();
     signed(app, "/v1/envelope/send", who, PostEnvelope { envelope }).await
@@ -74,8 +67,6 @@ fn ids(n: usize, seed: u64) -> Vec<Identity> {
     (0..n).map(|_| Identity::generate(&mut rng)).collect()
 }
 
-/// A sealed mailbox `label` with every `ids` as a member, set up through the existing
-/// routes (create, join, seal), which work with any label.
 async fn open_mailbox(app: &Router, label: MailboxId, ids: &[Identity]) {
     let create = CreateMailbox {
         mailbox: label,
@@ -106,7 +97,6 @@ async fn open_mailbox(app: &Router, label: MailboxId, ids: &[Identity]) {
     );
 }
 
-/// `n` chained entries of vault `vault`, authored in turn by `ids`.
 fn entries(vault: MailboxId, ids: &[Identity], n: u64, rng: &mut StdRng) -> Vec<LogEntry> {
     let key = LogKey::generate(0, rng);
     let mut head = [0; 32];
@@ -163,8 +153,6 @@ fn reseed_req(
     }
 }
 
-// --- Labels --------------------------------------------------------------------------------
-
 #[tokio::test]
 async fn a_labelled_mailbox_holds_one_vault_whatever_its_label() {
     let app = relay().router();
@@ -174,11 +162,9 @@ async fn a_labelled_mailbox_holds_one_vault_whatever_its_label() {
     let mut rng = StdRng::seed_from_u64(2);
     let log = entries(VAULT, members, 3, &mut rng);
 
-    // The old unsigned route (it filed by vault id) is retired.
     let (status, _) = call(&app, "/v1/log/append", log[0].to_bytes().unwrap()).await;
     assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
 
-    // Only the creator writes entry 0 (security review 2026-11, batch 4).
     assert_eq!(
         append_to(&app, &ids[1], LABEL, &log[0]).await,
         (StatusCode::FORBIDDEN, None)
@@ -187,7 +173,6 @@ async fn a_labelled_mailbox_holds_one_vault_whatever_its_label() {
         append_to(&app, &ids[0], LABEL, &log[0]).await,
         (StatusCode::OK, Some(AppendResult::Appended { index: 0 }))
     );
-    // Any member may post any member's later entry (catching up), once, in order.
     assert_eq!(
         append_to(&app, &ids[2], LABEL, &log[1]).await,
         (StatusCode::OK, Some(AppendResult::Appended { index: 1 }))
@@ -196,23 +181,19 @@ async fn a_labelled_mailbox_holds_one_vault_whatever_its_label() {
         append_to(&app, &ids[1], LABEL, &log[1]).await,
         (StatusCode::OK, Some(AppendResult::Conflict { len: 2 }))
     );
-    // An outsider can't post a member's entry, nor learn the log length.
     let (status, result) = append_to(&app, &ids[3], LABEL, &log[2]).await;
     assert_eq!((status, result), (StatusCode::FORBIDDEN, None));
-    // An entry of another vault is refused, even correctly chained and signed by a member.
     let key = LogKey::generate(0, &mut rng);
     let head = log[1].hash().unwrap();
     let foreign =
         LogEntry::create(&ids[1], &key, OTHER_VAULT, 2, head, b"other", &mut rng).unwrap();
     let (status, result) = append_to(&app, &ids[1], LABEL, &foreign).await;
     assert_eq!((status, result), (StatusCode::BAD_REQUEST, None));
-    // A request signed for another label doesn't verify for this one.
     let mut moved =
         Signed::new(&ids[1], LabelledAppend::new([9; 16], &log[2], NOW).unwrap()).unwrap();
     moved.payload.mailbox = LABEL;
     let (status, _) = call(&app, "/v1/log/append-labelled", moved.to_bytes().unwrap()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    // A stale request is refused.
     let old = LabelledAppend::new(LABEL, &log[2], NOW - 3600).unwrap();
     assert_eq!(
         signed(&app, "/v1/log/append-labelled", &ids[1], old)
@@ -226,22 +207,17 @@ async fn a_labelled_mailbox_holds_one_vault_whatever_its_label() {
     assert_eq!(read_log(&app, &ids[2], LABEL).await, log);
 }
 
-/// A mailbox made with the old routes (its id is the vault id) takes its vault id from its
-/// first entry too, so entries of two vaults can't mix there either.
 #[tokio::test]
 async fn a_mailbox_whose_entries_carry_two_vault_ids_is_refused() {
     let app = relay().router();
     let ids = ids(3, 3);
     open_mailbox(&app, VAULT, &ids).await;
     let mut rng = StdRng::seed_from_u64(4);
-    // The first entry, posted through the labelled route, is of another vault.
     let foreign = entries(OTHER_VAULT, &ids, 2, &mut rng);
     assert_eq!(
         append_to(&app, &ids[0], VAULT, &foreign[0]).await.0,
         StatusCode::OK
     );
-    // From then on the mailbox holds that vault: entries of the vault its id names are
-    // refused, wherever they would go in the chain.
     let own = entries(VAULT, &ids, 1, &mut rng);
     let next = entry_after(VAULT, &ids[1], 1, &foreign[0], &mut rng);
     for entry in [&next, &own[0]] {
@@ -255,7 +231,6 @@ async fn a_mailbox_whose_entries_carry_two_vault_ids_is_refused() {
         StatusCode::OK
     );
 
-    // A mailbox filed under its vault id takes the labelled route like any other.
     let app = relay().router();
     open_mailbox(&app, VAULT, &ids).await;
     let log = entries(VAULT, &ids, 2, &mut rng);
@@ -270,7 +245,6 @@ async fn a_mailbox_whose_entries_carry_two_vault_ids_is_refused() {
     }
 }
 
-/// An entry of `vault` at `index` after `prev`, correctly chained and signed by `author`.
 fn entry_after(
     vault: MailboxId,
     author: &Identity,
@@ -306,7 +280,6 @@ async fn a_reseed_takes_any_label_but_one_vault() {
         )
     };
 
-    // One request mixing two vaults' entries is refused whole.
     let mixed = [
         log[0].clone(),
         entry_after(OTHER_VAULT, &ids[1], 1, &log[0], &mut rng),
@@ -315,7 +288,6 @@ async fn a_reseed_takes_any_label_but_one_vault() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body, b"this mailbox holds another vault");
 
-    // Restored in two steps under a label: the second step's vault must be the first's.
     let (status, body) = reseed(0, &log[..2], false).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(decode_body::<ReseedResponse>(&body).unwrap().len, 2);
@@ -327,7 +299,6 @@ async fn a_reseed_takes_any_label_but_one_vault() {
     assert_eq!(status, StatusCode::OK);
     assert!(decode_body::<ReseedResponse>(&body).unwrap().open);
 
-    // Open: members append through the labelled route, and the vault is still enforced.
     let other = entry_after(OTHER_VAULT, &ids[1], 3, &log[2], &mut rng);
     assert_eq!(
         append_to(&app, &ids[1], LABEL, &other).await.0,
@@ -340,8 +311,6 @@ async fn a_reseed_takes_any_label_but_one_vault() {
     assert_eq!(read_log(&app, &ids[2], LABEL).await, log);
 }
 
-/// Every route that takes the mailbox from the request or the envelope header works with a
-/// label that isn't the vault id.
 #[tokio::test]
 async fn other_routes_work_with_labels_unchanged() {
     let app = relay().router();
@@ -422,8 +391,6 @@ async fn other_routes_work_with_labels_unchanged() {
     assert_eq!(read_log(&app, &ids[1], LABEL).await, log);
 }
 
-/// Envelopes name the label in their signed header, so one sent on the old relay can't be
-/// replayed into the vault's mailbox on another relay (`docs/relay-move.md` §8, T7).
 #[tokio::test]
 async fn an_envelope_with_an_old_label_fails_on_the_new_mailbox() {
     const OLD: MailboxId = [5; 16];
@@ -445,11 +412,9 @@ async fn an_envelope_with_an_old_label_fails_on_the_new_mailbox() {
     )
     .unwrap();
     assert_eq!(post_env(&old_relay, &ids[0], &env).await.0, StatusCode::OK);
-    // As sent: the new relay has no mailbox under the old label.
     let (status, body) = post_env(&new_relay, &ids[0], &env).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body, UNKNOWN_MAILBOX.as_bytes());
-    // Relabelled: the sender's signature covers the header.
     let mut relabelled = env.clone();
     relabelled.header.mailbox = NEW;
     assert_eq!(
@@ -467,8 +432,6 @@ async fn an_envelope_with_an_old_label_fails_on_the_new_mailbox() {
         .envelopes
         .is_empty());
 }
-
-// --- Push forget -----------------------------------------------------------------------------
 
 #[derive(Default)]
 struct Recorder(Mutex<Vec<String>>);
@@ -500,7 +463,6 @@ async fn a_member_forgets_its_own_push_token() {
         mailbox: LABEL,
         timestamp,
     };
-    // Stale requests are refused; a fresh one deletes only the signer's own token.
     assert_eq!(
         signed(&app, "/v1/push/forget", &ids[1], forget(NOW - 3600))
             .await
@@ -513,8 +475,6 @@ async fn a_member_forgets_its_own_push_token() {
             .0,
         StatusCode::OK
     );
-    // Again, from an outsider, or for a mailbox this relay doesn't have: nothing to do,
-    // never 404 (that means a relay without the route).
     assert_eq!(
         signed(&app, "/v1/push/forget", &ids[1], forget(NOW))
             .await
@@ -540,8 +500,6 @@ async fn a_member_forgets_its_own_push_token() {
     assert_eq!(post_env(&app, &ids[0], &env).await.0, StatusCode::OK);
     assert_eq!(*recorder.0.lock().unwrap(), vec!["token-C".to_owned()]);
 }
-
-// --- Info ----------------------------------------------------------------------------------
 
 async fn get(app: &Router, path: &str) -> (StatusCode, Vec<u8>) {
     send(app, Request::get(path).body(Body::empty()).unwrap()).await
@@ -584,14 +542,11 @@ async fn info_says_what_the_relay_allows_and_health_stays_plain() {
     assert_eq!(info.limits.delivery_retention_days, 30);
     assert_eq!(info.expiry.idle_days, Some(365));
     assert_eq!(info.expiry.unused_days, Some(30));
-    // Readers ignore fields they don't know and default the ones they miss.
     let partial: RelayInfo = serde_json::from_str(r#"{"push":true,"later":1}"#).unwrap();
     assert!(partial.push && !partial.create_token);
 
     assert_eq!(get(&app, "/health").await, (StatusCode::OK, b"ok".to_vec()));
 }
-
-// --- Create token --------------------------------------------------------------------------
 
 fn create_body(who: &Identity, mailbox: MailboxId) -> Vec<u8> {
     signed_body(
@@ -647,7 +602,6 @@ async fn a_private_relay_needs_its_create_token() {
     )
     .await;
     assert_eq!(created.status(), StatusCode::OK);
-    // Joining and everything after creation needs no token.
     let join = Join {
         mailbox: LABEL,
         join_token: TOKEN,
@@ -657,7 +611,6 @@ async fn a_private_relay_needs_its_create_token() {
         StatusCode::OK
     );
 
-    // Restoring creates a mailbox too: the first request needs the token, the rest don't.
     let mut rng = StdRng::seed_from_u64(14);
     let log = entries(VAULT, &ids[..3], 2, &mut rng);
     let reseed = |from, entries: &[LogEntry], finish| {
@@ -685,7 +638,6 @@ async fn a_private_relay_needs_its_create_token() {
     let finished =
         post_with_token(&app, "/v1/mailbox/reseed", reseed(1, &log[1..], true), None).await;
     assert_eq!(finished.status(), StatusCode::OK);
-    // Another member learning where the open log is needs none either.
     let lookup = signed_body(&ids[1], reseed_req([7; 16], &ids[..3], 0, &[], true));
     assert_eq!(
         post_with_token(&app, "/v1/mailbox/reseed", lookup, None)
@@ -717,7 +669,6 @@ async fn wrong_create_tokens_count_against_the_creation_limit() {
         .await;
         assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
     }
-    // The address used its allowance on wrong guesses: even the right token waits now.
     let limited = post_with_token(
         &app,
         "/v1/mailbox/create",
@@ -774,12 +725,6 @@ async fn mailboxes_have_at_most_64_members() {
     );
 }
 
-/// A seat move on a labelled mailbox: the approvals are signed over the vault id (the same
-/// signatures are in the vault log), the request names the label, and the relay checks the
-/// vault id it holds for that label. The approvals only add the new key as a pending
-/// member (it may read its inbox and receive envelopes, nothing else); the threshold of
-/// finishes from current members moves the seat; the old key alone can cancel a
-/// first-round move, after which that round is closed for good.
 #[tokio::test]
 async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
     use zafe_proto::relay::{
@@ -850,7 +795,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         approval: a,
         approvals: approvals(&a),
     };
-    // Approvals for another vault don't move a seat here.
     let other = SeatMoveApproval {
         vault_id: OTHER_VAULT,
         ..approval
@@ -866,7 +810,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         .0,
         StatusCode::BAD_REQUEST
     );
-    // One approval is below the threshold.
     let short = LabelledReplace {
         mailbox: LABEL,
         approval,
@@ -898,14 +841,12 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         assert_eq!(status, StatusCode::OK);
         decode_body::<MailboxInfo>(&body).unwrap()
     };
-    // Pending: the old key stays, the new key is listed apart.
     let now = info().await;
     assert!(now.members.iter().any(|m| m.sig_pk == old));
     assert!(!now.members.contains(fresh.public()));
     assert_eq!(now.pending.len(), 1);
     assert_eq!(now.pending[0].new, *fresh.public());
     assert_eq!(now.pending[0].move_id, approval.move_id());
-    // Repeating it (any member may push a move) succeeds and changes nothing.
     assert_eq!(
         signed(
             &app,
@@ -919,7 +860,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
     );
     assert_eq!(info().await.pending.len(), 1);
 
-    // The pending key receives envelopes and reads its inbox, nothing more.
     let to_new = Envelope::sealed(
         &ids[1],
         fresh.public(),
@@ -953,7 +893,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         StatusCode::FORBIDDEN,
         "nor send"
     );
-    // Nor push its own approvals, finish anything or register for pushes.
     assert_eq!(
         signed(
             &app,
@@ -978,7 +917,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         mailbox: LABEL,
         timestamp: NOW,
     };
-    // It reads the member list, the encrypted log and the mailboxes it is pending in.
     assert_eq!(
         signed(&app, "/v1/mailbox/members", fresh, members_read.clone())
             .await
@@ -1016,7 +954,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         };
         zafe_proto::relay::encode_body(&post).unwrap()
     };
-    // The old key can't finish its own move, and a finish for another label isn't one.
     assert_eq!(
         call(&app, "/v1/seat/finish", post_finish(&ids[0], finish))
             .await
@@ -1043,7 +980,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         .0,
         StatusCode::UNAUTHORIZED
     );
-    // One finish is below the threshold: still pending.
     assert_eq!(
         call(&app, "/v1/seat/finish", post_finish(&ids[1], finish))
             .await
@@ -1051,7 +987,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         StatusCode::OK
     );
     assert!(info().await.members.iter().any(|m| m.sig_pk == old));
-    // The second moves the seat.
     assert_eq!(
         call(&app, "/v1/seat/finish", post_finish(&ids[2], finish))
             .await
@@ -1065,7 +1000,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
     assert!(!members.iter().any(|m| m.sig_pk == old));
     assert!(info().await.pending.is_empty());
 
-    // Cancels: a second relay, a second move of member 1's seat.
     let app = relay().router();
     open_mailbox_with_threshold(&app, &ids).await;
     assert_eq!(
@@ -1113,7 +1047,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         new: fresh.public().sig_pk,
         at: NOW,
     };
-    // Only the old key's signature cancels (whoever posts it).
     assert_eq!(
         call(&app, "/v1/seat/cancel", cancel(&ids[0], first))
             .await
@@ -1130,7 +1063,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         pending_on(&app, &ids[0]).await.is_empty(),
         "the pending key is gone"
     );
-    // The signed cancel is shown, so any member can log the keep it is.
     let read = MembersRead {
         mailbox: LABEL,
         timestamp: NOW,
@@ -1140,8 +1072,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
     assert_eq!(shown.len(), 1);
     assert_eq!(shown[0].cancel, first);
     assert!(first.verify(ids[1].public(), &shown[0].signature).is_ok());
-    // The cancelled move can't come back; another first-round row of the seat is the relay's
-    // business only (the log refuses it after the keep), so it is taken.
     assert_eq!(
         signed(
             &app,
@@ -1168,7 +1098,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
         .0,
         StatusCode::OK
     );
-    // A second round is a different move, and the old key can't cancel it.
     assert_eq!(
         signed(
             &app,
@@ -1193,8 +1122,6 @@ async fn a_seat_move_on_a_labelled_mailbox_is_pending_until_finished() {
     assert_eq!(pending_on(&app, &ids[0]).await.len(), 2);
 }
 
-/// One sealed 2-of-3 mailbox with its first entry, for the seat-move tests below: the app,
-/// the members and an approval builder by members `by` for a move of `seat`.
 async fn seat_world(seed: u64) -> (Router, Vec<Identity>) {
     let app = relay().router();
     let ids = ids(3, seed);
@@ -1291,8 +1218,6 @@ async fn members_now(app: &Router, who: &Identity) -> Vec<[u8; 32]> {
         .collect()
 }
 
-/// A cancel touches only the move it names: a junk first-round row of the seat (Z) can be
-/// cancelled while the real move (X) keeps its row and finishes.
 #[tokio::test]
 async fn a_cancel_touches_only_the_move_it_names() {
     let (app, ids) = seat_world(94).await;
@@ -1323,9 +1248,6 @@ async fn a_cancel_touches_only_the_move_it_names() {
     assert!(members.contains(&x.public().sig_pk) && !members.contains(&seat));
 }
 
-/// Finishes count on a cancelled row too: a cancel posted after the log switched (by a
-/// thief with the old key) can't strand the seat. Still only t current members other than
-/// the old key finish it.
 #[tokio::test]
 async fn finishes_switch_a_cancelled_row_at_t() {
     let (app, ids) = seat_world(97).await;
@@ -1344,18 +1266,14 @@ async fn finishes_switch_a_cancelled_row_at_t() {
         pending_on(&app, &ids[0]).await.is_empty(),
         "no pending access"
     );
-    // The old key's finish never counts, nor a stranger's.
     assert_eq!(finish_on(&app, &ids[1], &a).await, StatusCode::FORBIDDEN);
     assert_eq!(finish_on(&app, &x, &a).await, StatusCode::FORBIDDEN);
     assert!(members_now(&app, &ids[0]).await.contains(&seat));
-    // The second current member's finish moves the seat.
     assert_eq!(finish_on(&app, &ids[2], &a).await, StatusCode::OK);
     let members = members_now(&app, &ids[0]).await;
     assert!(members.contains(&x.public().sig_pk) && !members.contains(&seat));
 }
 
-/// The pending cap is per seat: one seat's junk rows never block another seat's move, and a
-/// refusal at the cap says so (409, its own body), never a bare 403.
 #[tokio::test]
 async fn one_seats_junk_rows_dont_block_another_seat() {
     let (app, ids) = seat_world(99).await;
@@ -1382,7 +1300,6 @@ async fn one_seats_junk_rows_dont_block_another_seat() {
     );
 }
 
-/// The seat moves `LABEL` holds pending, read by `who`.
 async fn pending_on(app: &Router, who: &Identity) -> Vec<zafe_proto::relay::PendingSeat> {
     let read = MembersRead {
         mailbox: LABEL,
@@ -1392,7 +1309,6 @@ async fn pending_on(app: &Router, who: &Identity) -> Vec<zafe_proto::relay::Pend
     decode_body::<MailboxInfo>(&body).unwrap().pending
 }
 
-/// A sealed mailbox `LABEL` of `ids` with threshold 2.
 async fn open_mailbox_with_threshold(app: &Router, ids: &[Identity]) {
     use zafe_proto::relay::SetThreshold;
     let create = CreateMailbox {

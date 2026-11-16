@@ -1,0 +1,25 @@
+name: Rules
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: rules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  no-comments:
+    name: Code carries no comments
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 scripts/check_no_comments.py
+
+  no-silencing:
+    name: No lint silenced where it fires
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 scripts/check_no_silencing.py

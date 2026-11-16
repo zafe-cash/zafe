@@ -12,18 +12,12 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 IdentityInfo generateIdentity() =>
     RustLib.instance.api.crateApiVaultGenerateIdentity();
 
-/// The public key (hex) of an identity, e.g. to mark "You" in member lists.
 String identityPublicKey({required List<int> seeds}) =>
     RustLib.instance.api.crateApiVaultIdentityPublicKey(seeds: seeds);
 
 InviteInfo parseInvite({required String invite}) =>
     RustLib.instance.api.crateApiVaultParseInvite(invite: invite);
 
-/// Creates a vault mailbox on the relay at `relay_url` (the one picked for this vault) and
-/// returns the invite string to share. A private relay needs its `create_token`; keep it
-/// with the invite and pass it to every [`setup_step`]: the creator seals it to the members
-/// with the log key. Fails with `RelayOutdated` on a relay without labelled mailboxes and
-/// `CreateTokenRefused` when the token is missing or wrong.
 Future<String> createVault({
   required String relayUrl,
   required List<int> seeds,
@@ -40,8 +34,6 @@ Future<String> createVault({
   createToken: createToken,
 );
 
-/// Joins the vault on the invite's relay (`relay_url`, the default relay, only for an
-/// invite from an older app).
 Future<void> joinVault({
   required String relayUrl,
   required List<int> seeds,
@@ -52,15 +44,6 @@ Future<void> joinVault({
   invite: invite,
 );
 
-/// One step of a vault setup for this member; the setup screen and background checks
-/// call it repeatedly, so nobody has to be online at the same time. Locks membership when
-/// this member is the creator and every seat is taken. With `confirmed_safety_number`
-/// (the words the user compared), starts this member's part of key generation; later
-/// steps continue it from `state_dir` without it. The creator's birthday
-/// (`birthday_height`, else lightwalletd's tip + 1; the app passes `None`) and a joiner's
-/// birthday ceiling are fixed once, when key generation starts. The setup runs on the
-/// invite's relay (`relay_url` only for an invite from an older app). The creator passes
-/// the relay's `create_token` it created the vault with (`None` on an open relay).
 Future<SetupProgress> setupStep({
   required String relayUrl,
   required String lightwalletdUrl,
@@ -85,16 +68,9 @@ Future<SetupProgress> setupStep({
   createToken: createToken,
 );
 
-/// Deletes this member's key-generation state, once the vault's material is saved (or
-/// the setup was abandoned).
 Future<void> forgetKeygen({required String stateDir}) =>
     RustLib.instance.api.crateApiVaultForgetKeygen(stateDir: stateDir);
 
-/// Creator only, before membership is locked: deletes the setup on the relay so the
-/// invite stops working. `false` when the relay had nothing to delete (an older relay, or
-/// the setup is already gone); the app forgets the vault locally in every case.
-/// Creator only: the invite works for 72 more hours (until the setup locks). Called when
-/// the creator shares it again. `false`: the relay doesn't expire invites.
 Future<bool> renewInvite({
   required String relayUrl,
   required List<int> seeds,
@@ -118,29 +94,18 @@ Future<bool> cancelSetup({
 VaultSummary vaultSummary({required List<int> material}) =>
     RustLib.instance.api.crateApiVaultVaultSummary(material: material);
 
-/// The vault's unified full viewing key (for auditors): it reveals every past and future
-/// payment of the vault but can't spend. Derived from this member's material and checked
-/// against the descriptor every member signed.
 String vaultViewingKey({required List<int> material}) =>
     RustLib.instance.api.crateApiVaultVaultViewingKey(material: material);
 
-/// The vault's wallet database key (32 random bytes the app keeps in secure storage).
-/// The key that encrypts a vault's wallet database, derived from this device's identity
-/// seeds and the vault id. Nothing is stored (see `WalletKey::derive`).
 Uint8List walletDbKey({required List<int> seeds, required String vaultId}) =>
     RustLib.instance.api.crateApiVaultWalletDbKey(
       seeds: seeds,
       vaultId: vaultId,
     );
 
-/// The chain tip lightwalletd reports: one cheap call. The app runs `sync_vault` only
-/// when it moved since the last successful sync (or when something else changed).
 Future<int> chainTip({required String lightwalletdUrl}) => RustLib.instance.api
     .crateApiVaultChainTip(lightwalletdUrl: lightwalletdUrl);
 
-/// Syncs the vault wallet (creating its database under `db_dir` on first use), then holds
-/// back the notes that live proposals spend, so `spendable_zat` is what a new proposal can
-/// use. Holds are best effort: if the relay can't be reached, the previous ones stay.
 Future<Balance> syncVault({
   required String dbDir,
   required List<int> dbKey,
@@ -157,11 +122,6 @@ Future<Balance> syncVault({
   material: material,
 );
 
-/// Registers this device's push token (FCM on Android, APNs on iOS) for the vault, so the
-/// relay can wake it on vault activity. Pushes carry no content. On the vault's own relay
-/// and mailbox: from its `material`, else (during setup, so setup steps can be woken by
-/// pushes) from its `invite`; with neither, `vault_id` on `relay_url` (a vault from before
-/// labels).
 Future<void> registerPush({
   required String relayUrl,
   required List<int> seeds,
@@ -188,18 +148,12 @@ VaultRelaySettings vaultRelaySettings({
   defaultRelayUrl: defaultRelayUrl,
 );
 
-/// The vault's material with `token` stored as its relay's create token (`None` or blank
-/// clears it), e.g. typed in before restoring the vault on a private relay. Save the
-/// result in place of the material.
 Uint8List setVaultCreateToken({required List<int> material, String? token}) =>
     RustLib.instance.api.crateApiVaultSetVaultCreateToken(
       material: material,
       token: token,
     );
 
-/// A vault from before per-vault relays (no relay of its own) with `relay_url` saved as
-/// its relay: the app-wide relay setting is gone, so each such vault keeps the relay it
-/// used. `None` when the vault already has its own relay (nothing to save).
 Uint8List? pinVaultRelay({
   required List<int> material,
   required String relayUrl,
@@ -214,14 +168,8 @@ RelayStatusInfo vaultRelayStatus({required String vaultId}) =>
 class Balance {
   final int height;
   final BigInt spendableZat;
-
-  /// Held for open or sent payments until they're mined or expire.
   final BigInt lockedZat;
-
-  /// The vault's own change from a payment, waiting for confirmations.
   final BigInt changePendingZat;
-
-  /// Received money waiting for confirmations.
   final BigInt incomingPendingZat;
   final BigInt totalZat;
 
@@ -256,8 +204,6 @@ class Balance {
           totalZat == other.totalZat;
 }
 
-/// A new member identity. `seeds` (versioned, see `IdentitySeeds::to_bytes`) is secret:
-/// store it in secure storage.
 class IdentityInfo {
   final Uint8List seeds;
   final String publicKeyHex;
@@ -277,15 +223,11 @@ class IdentityInfo {
 }
 
 class InviteInfo {
-  /// The vault's id (hex), known from the invite onward; keys the vault on the device.
   final String vaultId;
   final String name;
   final int threshold;
   final int members;
   final String creatorHex;
-
-  /// The vault's relay (shown as a fact on the join screen). `None` for an invite from
-  /// an older app: the vault is on this phone's default relay.
   final String? relayUrl;
 
   const InviteInfo({
@@ -319,8 +261,6 @@ class InviteInfo {
           relayUrl == other.relayUrl;
 }
 
-/// When this phone last reached the vault's relay (Unix seconds), and since when it
-/// can't: for "Can't reach relay · since 09:14". Both `None` before the first request.
 class RelayStatusInfo {
   final BigInt? lastReached;
   final BigInt? unreachableSince;
@@ -339,30 +279,15 @@ class RelayStatusInfo {
           unreachableSince == other.unreachableSince;
 }
 
-/// Where a setup stands for this member, after one step of it ([`setup_step`]).
 class SetupProgress {
   final List<String> members;
   final bool sealed;
   final bool isCreator;
-
-  /// The safety words to compare (4 words), once membership is locked and every
-  /// member's part of the check arrived. `None` until then.
   final String? safetyNumber;
-
-  /// Members (key hex) whose part of the safety check hasn't arrived yet.
   final List<String> waitingFor;
-
-  /// This member confirmed the words: its keys are being made (steps go on in the
-  /// background).
   final bool started;
-
-  /// What key generation waits for (e.g. "round-1 packages"), and from whom (key hex):
-  /// before every member confirmed, the members who haven't.
   final String? keygenStage;
   final List<String> keygenWaitingFor;
-
-  /// Set once the vault exists: save it in secure storage, then call [`forget_keygen`].
-  /// Until then every step returns it again.
   final Uint8List? material;
 
   const SetupProgress({
@@ -405,18 +330,10 @@ class SetupProgress {
           material == other.material;
 }
 
-/// Where a vault lives (Settings: "Relay · everyone in Grants").
 class VaultRelaySettings {
-  /// The vault's relay (the app-wide one for a vault from before per-vault relays).
   final String url;
-
-  /// The vault has no relay of its own and follows the app-wide setting.
   final bool usesDefault;
-
-  /// The relay's mailbox id for the vault (hex); the vault id for older vaults.
   final String label;
-
-  /// A create token is stored for the vault's relay (the token itself stays here).
   final bool hasCreateToken;
 
   const VaultRelaySettings({

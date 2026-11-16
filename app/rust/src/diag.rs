@@ -1,13 +1,3 @@
-//! Notes for the local diagnostic report (Settings > Diagnostic report): panics and slow
-//! steps.
-//!
-//! The panic hook writes one line per panic to `<support>/diagnostics/rust-panics.log`:
-//! a UTC timestamp and the panic's `file:line:column`, **never the message or payload**
-//! (they can hold secrets). `Stopwatch` writes one line to `timings.log` for a slow call
-//! (or the first of its kind in this process): the call's name and how long each fixed
-//! step took, nothing else. Nothing is sent anywhere. The directory is learned from the
-//! first wallet call (`remember_support_dir`): until then nothing is written.
-
 use std::{
     io::Write,
     panic::PanicHookInfo,
@@ -18,15 +8,11 @@ use std::{
 
 const FILE_NAME: &str = "rust-panics.log";
 const TIMINGS_FILE: &str = "timings.log";
-/// A call at least this slow is noted (so is the first of each kind in a process).
 const SLOW: Duration = Duration::from_millis(1500);
-/// Past this size the file drops its older half, so it can't grow without bound. With Tor
-/// on most background calls are "slow", so the newest lines must survive a trim.
 const MAX_BYTES: u64 = 16 * 1024;
 
 static DIAG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// Installs the hook once, after whatever hook was set before (default: stderr message).
 pub(crate) fn install() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
@@ -38,8 +24,6 @@ pub(crate) fn install() {
     });
 }
 
-/// Remembers `<support>/diagnostics` from the wallet DB directory the app already passes
-/// to every wallet call (the support directory). The first call wins.
 pub(crate) fn remember_support_dir(db_dir: &str) {
     if db_dir.is_empty() {
         return;
@@ -48,7 +32,6 @@ pub(crate) fn remember_support_dir(db_dir: &str) {
 }
 
 fn note(info: &PanicHookInfo<'_>) {
-    // The hook must never panic itself.
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let Some(dir) = DIAG_DIR.get() else { return };
         let location = match info.location() {
@@ -66,16 +49,13 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// `<ISO-8601 UTC> panic at <file:line:col>`: the message is not included.
 fn line(secs: u64, location: &str) -> String {
     format!("{} panic at {location}", stamp(secs))
 }
 
-/// `2026-10-07T10:00:00Z` for a Unix time in seconds.
 fn stamp(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
-    // Civil-from-days (Howard Hinnant).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -93,9 +73,6 @@ fn stamp(secs: u64) -> String {
     )
 }
 
-/// Times a call step by step. `lap` names the step that just ended; `finish` writes one
-/// line (`<time> sync total=7120ms lock=2ms open=1200ms ...`) when the call was slow or
-/// is the first of its kind in this process. Only fixed step names and durations.
 pub(crate) struct Stopwatch {
     op: &'static str,
     start: Instant,
@@ -121,7 +98,6 @@ impl Stopwatch {
         self.last = now;
     }
 
-    /// Steps timed elsewhere (e.g. inside a core call) that ran since the last lap.
     pub(crate) fn steps(&mut self, steps: &[(&'static str, u128)]) {
         self.steps.extend_from_slice(steps);
         self.last = Instant::now();
@@ -146,7 +122,6 @@ impl Stopwatch {
     }
 }
 
-/// `<time> <op> total=<n>ms <step>=<n>ms ...`
 fn timing_text(secs: u64, op: &str, total_ms: u128, steps: &[(&str, u128)]) -> String {
     let mut text = format!("{} {op} total={total_ms}ms", stamp(secs));
     for (step, ms) in steps {
@@ -164,12 +139,9 @@ fn write_line(dir: &Path, file: &str, text: &str) -> std::io::Result<()> {
         keep_newest_half(&path);
     }
     let mut file = options.open(&path)?;
-    // One write call per line (append mode): safe next to the other threads' panics.
     file.write_all(format!("{text}\n").as_bytes())
 }
 
-/// Keeps the newer half of the file's lines (or nothing, if it can't be read). Two
-/// processes trimming at once can only lose lines.
 fn keep_newest_half(path: &Path) {
     let kept = std::fs::read(path).ok().and_then(|bytes| {
         let half = bytes.len() / 2;
@@ -193,7 +165,6 @@ mod tests {
 
     #[test]
     fn line_has_date_and_location_only() {
-        // 2026-10-07T10:00:00Z
         assert_eq!(
             line(1_791_367_200, "src/a.rs:1:2"),
             "2026-10-07T10:00:00Z panic at src/a.rs:1:2"

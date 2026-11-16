@@ -1,18 +1,11 @@
 ---
-// Every link to Google Play on the site. On a phone it opens the Play listing. With a mouse
-// (a computer), it opens a QR code of the same link to scan with the phone, in the browser's
-// own popover (no JavaScript: `popovertarget`). The QR is drawn at build time; presentation
-// attributes only, so the CSP holds. Default content: "Get it on Google Play"; `icon` is the
-// glyph alone; other content (the hero badge, the footer link) comes in the slot, with `class`.
 import QRCode from 'qrcode';
 import BrandIcon from './BrandIcon.astro';
 import { playUrl } from '../config';
 
 interface Props {
   id: string;
-  /** Icon only (the platform tab under the hero). */
   icon?: boolean;
-  /** Replaces the button styling (with slot content). */
   class?: string;
 }
 const { id, icon = false, class: className } = Astro.props;

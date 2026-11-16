@@ -10,7 +10,6 @@ VaultActivity event(
   bool inbox = false,
 }) => VaultActivity(kind: kind, inbox: inbox, retryInSecs: retry);
 
-/// A fake Rust side: one stream controller per started watch.
 class FakeRust {
   final started = <int, StreamController<VaultActivity>>{};
   final stopped = <int>[];
@@ -147,7 +146,6 @@ void main() {
         expect(second, greaterThan(first));
         expect(rust.stopped, [first]);
 
-        // The old stream's end doesn't touch the new watch.
         await rust.started[first]!.close();
         rust.started[second]!.add(event(VaultActivityKind.connected));
         await pumpEventQueue();

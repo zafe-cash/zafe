@@ -13,10 +13,6 @@ import '../widgets/app_icon.dart';
 import 'app_lock.dart';
 import 'device_auth.dart';
 
-/// Covers the whole app (routes, sheets, toasts) with [LockScreen] while
-/// `appLockedProvider` is set, and sets it when the app comes back after the "Lock
-/// app" delay. What's underneath stays mounted, so unlocking returns to the same
-/// screen, but gets no input, focus or semantics. Used as `MaterialApp.builder`.
 class AppLockGate extends ConsumerStatefulWidget {
   const AppLockGate({super.key, required this.child});
   final Widget child;
@@ -27,19 +23,14 @@ class AppLockGate extends ConsumerStatefulWidget {
 
 class _AppLockGateState extends ConsumerState<AppLockGate>
     with WidgetsBindingObserver {
-  /// When the app last left the foreground, and whether an unlock prompt was up then.
   DateTime? _awaySince;
   bool _awayDuringPrompt = false;
 
   bool _prompting = false;
   String? _message;
 
-  /// The app isn't in front (app switcher, notification shade, a system dialog): hide
-  /// the screen so the recent-apps card and anyone glancing at it see no balances.
   bool _covered = false;
 
-  /// Whether this activity is the top one (Android 10+, `xyz.zafe/privacy`); null
-  /// where the platform doesn't say.
   bool? _topResumed;
   AppLifecycleState _state = AppLifecycleState.resumed;
 
@@ -65,13 +56,17 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   }
 
   Future<void> _readTopResumed() async {
+    final bool? topResumed;
     try {
-      _topResumed = await _privacy.invokeMethod<bool>('isTopResumed');
+      topResumed = await _privacy.invokeMethod<bool>('isTopResumed');
     } on MissingPluginException {
-      // Tests, iOS: no answer, cover on any focus loss.
+      _updateCover();
+      return;
     } on PlatformException {
-      // Same.
+      _updateCover();
+      return;
     }
+    _topResumed = topResumed;
     _updateCover();
   }
 
@@ -95,9 +90,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Not for our own unlock prompt: it makes the app inactive for a moment, and the
-    // cover then showed for a frame as the prompt closed (before `resumed` arrived).
-    // The recent-apps card stays blank anyway (no recents screenshot, MainActivity).
     _state = state;
     _updateCover();
     switch (state) {
@@ -117,7 +109,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           duringPrompt: _awayDuringPrompt,
         );
         if (lock) _lock();
-        // Back from our own prompt (cancelled): wait for a tap instead of asking again.
         if (ref.read(appLockedProvider) && !_awayDuringPrompt) {
           unawaited(_unlock());
         }
@@ -147,7 +138,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
       _message = switch (outcome) {
         UnlockOutcome.unlocked ||
         UnlockOutcome.notRequired ||
-        // Nothing to unlock with: Settings warns about it permanently.
         UnlockOutcome.noScreenLock => null,
         UnlockOutcome.cancelled => null,
         UnlockOutcome.lockedOut => 'Too many attempts. Try again later',
@@ -182,9 +172,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   }
 }
 
-/// Shown while the app isn't in front: the window colour and the lock tile, nothing
-/// else. Android 13+ shows the running app live in the app switcher, which no window
-/// flag short of blocking screenshots hides.
 class PrivacyCover extends StatelessWidget {
   const PrivacyCover({super.key});
 
@@ -215,8 +202,6 @@ class _LockTile extends StatelessWidget {
   );
 }
 
-/// "Zafe is locked": shown over everything until the owner unlocks. Plain data, so it
-/// can be rendered without a device.
 class LockScreen extends StatelessWidget {
   const LockScreen({
     super.key,
@@ -228,7 +213,6 @@ class LockScreen extends StatelessWidget {
   final VoidCallback onUnlock;
   final bool busy;
 
-  /// Why the last attempt didn't unlock (null when there's nothing to say).
   final String? message;
 
   @override
@@ -236,7 +220,6 @@ class LockScreen extends StatelessWidget {
     final colors = context.colors;
     return Material(
       color: colors.background.window,
-      // Phone-width in a wide window, clear of a hinge; scrolls in a short one.
       child: AppColumn(
         child: SafeArea(
           child: LayoutBuilder(

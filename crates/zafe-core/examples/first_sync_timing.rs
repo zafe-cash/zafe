@@ -1,8 +1,3 @@
-//! Times the first sync of a brand-new vault wallet on a live lightwalletd (testnet by
-//! default), phase by phase: connect, create (tree state + encrypted DB + migrations +
-//! account import), then sync. A dev tool, not part of the product:
-//!   cargo run -p zafe-core --example first_sync_timing [lightwalletd url]
-
 use std::time::Instant;
 
 use orchard::keys::{FullViewingKey, SpendingKey};

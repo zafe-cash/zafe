@@ -15,7 +15,6 @@ Future<void> _pump(WidgetTester tester, Widget button) => tester.pumpWidget(
   ),
 );
 
-/// Every semantics node with `label` in the tree.
 List<SemanticsNode> _nodesWithLabel(WidgetTester tester, String label) {
   final out = <SemanticsNode>[];
   void visit(SemanticsNode node) {
@@ -52,7 +51,6 @@ void main() {
     expect(data.flagsCollection.isEnabled, Tristate.isTrue);
     expect(data.hasAction(SemanticsAction.tap), isTrue);
     expect(data.hasAction(SemanticsAction.focus), isTrue);
-    // No other node for the button (e.g. an unlabeled focusable one from `Focus`).
     final root = tester
         .binding
         .renderViews

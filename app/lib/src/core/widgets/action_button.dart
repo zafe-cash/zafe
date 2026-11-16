@@ -9,13 +9,6 @@ import 'app_button.dart';
 import 'app_icon.dart';
 import 'app_loading_icon.dart';
 
-/// A button for an action that takes a moment and can fail (approve, propose, save):
-/// it shows what is happening instead of a toast. Idle → working (a spinner inside the
-/// button, which keeps its size) → done (a check with [doneLabel], briefly, then
-/// [onDone]) or failed (a short shake and the error under the button, until the next
-/// try). [onPressed] throws to fail; its error is shown with [zafeErrorMessage]. It
-/// throws [ActionCancelled] when the member backed out (e.g. dismissed the unlock):
-/// back to idle, no message.
 class ActionButton extends StatefulWidget {
   const ActionButton({
     super.key,
@@ -35,18 +28,12 @@ class ActionButton extends StatefulWidget {
   final String label;
   final String? icon;
 
-  /// Shown with a check once [onPressed] completes; without it the button goes back to
-  /// idle at once.
   final String? doneLabel;
 
-  /// Shown while working, for steps slow enough to need words ("Decrypting...").
   final String? busyLabel;
 
-  /// Back to idle after "done" (the screen stays, e.g. "Copied"); otherwise it keeps
-  /// showing done while the screen leaves.
   final bool resetAfterDone;
 
-  /// Runs after the done state was shown (e.g. leave the screen).
   final VoidCallback? onDone;
   final Future<void> Function() onPressed;
   final String? errorFallback;
@@ -54,14 +41,12 @@ class ActionButton extends StatefulWidget {
   final AppButtonSize size;
   final bool enabled;
 
-  /// How long "done" shows before [onDone].
   static const doneHold = Duration(milliseconds: 650);
 
   @override
   State<ActionButton> createState() => _ActionButtonState();
 }
 
-/// Thrown by an [ActionButton]'s action when the member backed out: no error to show.
 class ActionCancelled implements Exception {
   const ActionCancelled();
 }
@@ -143,7 +128,6 @@ class _ActionButtonState extends State<ActionButton>
       children: [
         AnimatedBuilder(
           animation: _shake,
-          // Three damped swings, 8 px at most.
           builder: (context, child) => Transform.translate(
             offset: Offset(
               math.sin(_shake.value * math.pi * 6) * 8 * (1 - _shake.value),
@@ -163,8 +147,6 @@ class _ActionButtonState extends State<ActionButton>
                         ScaleTransition(scale: a, child: child),
                     child: KeyedSubtree(key: ValueKey(_phase), child: leading),
                   ),
-            // Working and done keep the enabled look (a disabled fill would read as
-            // "something's wrong"); extra taps do nothing.
             onPressed: !widget.enabled
                 ? null
                 : _phase == _Phase.idle

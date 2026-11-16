@@ -1,9 +1,3 @@
-//! The app's whole payment flow through the Flutter bridge API (what the Dart side calls),
-//! for three members on a live Ironwood regtest chain: create/join/seal, keygen, fund,
-//! sync, propose, review, approve, answer signing requests, and send.
-//!
-//! Needs Docker and `ths` (see `infra/regtest/up.sh`). `cargo test -p rust_lib_zafe --test bridge_e2e -- --ignored --nocapture`
-
 mod common;
 
 use std::{path::PathBuf, process::Command, thread, time::Duration};
@@ -18,14 +12,11 @@ use rust_lib_zafe::api::{
 };
 
 const NAME: &str = "zafe-bridge";
-// ths moves every port by this offset: Zakura RPC 48332, lightwalletd 39167.
 const PORT_OFFSET: u16 = 30100;
 const LWD_PORT: u16 = 9067 + PORT_OFFSET;
 const RELAY_PORT: u16 = 48887;
-/// 5 ZEC faucet notes the vault starts with.
 const FUND_NOTES: u32 = 6;
 
-/// A `ths` (thus-spoke-zakura) environment started by `infra/regtest/up.sh`.
 struct Regtest;
 
 impl Regtest {
@@ -45,7 +36,6 @@ impl Regtest {
         Self
     }
 
-    /// Several 5 ZEC faucet notes, confirmed.
     fn fund(&self, address: &str, notes: u32) {
         let status = Command::new(Self::script("fund.sh"))
             .args([address, &notes.to_string()])
@@ -77,7 +67,6 @@ impl Drop for Regtest {
     }
 }
 
-/// A throwaway regtest unified address that is not the vault's (as examples/vault_address).
 fn outside_address() -> String {
     use orchard::keys::{FullViewingKey, Scope, SpendingKey};
     use zafe_core::keys::{VaultKeys, VaultSecret};
@@ -126,25 +115,15 @@ fn payment_flow_through_bridge() {
     let relay = format!("http://127.0.0.1:{RELAY_PORT}");
     let lwd = format!("http://127.0.0.1:{LWD_PORT}");
     let tmp = std::env::temp_dir().join(format!("zafe-bridge-{}", std::process::id()));
-    // Each phone keeps a copy of the vault logs (the app does this at startup).
     rust_lib_zafe::api::app::init_log_cache(tmp.join("log").to_string_lossy().into_owned());
     start_relay();
 
-    // Setup: A creates a 2-of-3 vault, B and C join, A seals.
     let seeds: Vec<Vec<u8>> = (0..3).map(|_| vault::generate_identity().seeds).collect();
     let invite =
         vault::create_vault(relay.clone(), seeds[0].clone(), "Grants".into(), 2, 3, None).unwrap();
     for s in &seeds[1..] {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
-    // Key generation, the app's way: one step per member per round (A's first step locks
-    // membership; A picks birthday 2: regtest isn't up yet). A goes through the bridge,
-    // which publishes its one-tap pool at the end; B and C step `zafe_core` directly and
-    // publish none (as if they closed the app right after keygen). One-tap signing assigns
-    // every group whose members all have a pool (VAULT_EVENT 6), and with only A
-    // publishing none is covered, so the first payment falls back to interactive signing
-    // and this test covers that path. After the first payment everyone's pool is topped
-    // up and the second one is one-tap.
     let setups: Vec<Setup> = seeds
         .iter()
         .enumerate()
@@ -185,7 +164,6 @@ fn payment_flow_through_bridge() {
         })
         .collect();
 
-    // Fund the vault from the ths faucet: one note per proposal that holds notes at once.
     let chain = Regtest::start();
     chain.fund(&summary.address, FUND_NOTES);
     let sync = |m: &Member| {
@@ -215,14 +193,12 @@ fn payment_flow_through_bridge() {
     for m in &members[1..] {
         sync(m);
     }
-    // Wallet databases are encrypted at rest.
     let db_file =
         std::path::Path::new(&members[0].db_dir).join(format!("vault-{}.sqlite", summary.vault_id));
     assert!(!std::fs::read(&db_file)
         .unwrap()
         .starts_with(b"SQLite format 3"));
 
-    // The faucet payments show up as received payments (mined, with block times).
     let received_list = |m: &Member| {
         received::list_received(m.db_dir.clone(), m.db_key.clone(), m.material.clone()).unwrap()
     };
@@ -237,14 +213,12 @@ fn payment_flow_through_bridge() {
         .windows(2)
         .all(|w| w[0].mined_height >= w[1].mined_height));
 
-    // Inputs as the Dart screens validate them.
     let payee = outside_address();
     assert!(proposals::check_address("regtest".into(), payee.clone()).valid);
     assert_eq!(proposals::parse_zec("1.5".into()), Some(150_000_000));
     assert_eq!(proposals::parse_zec("0,00000001".into()), Some(1));
     assert_eq!(proposals::parse_zec("1.000000001".into()), None);
 
-    // Paying the vault itself is refused up front (every member's check would fail).
     let a0 = &members[0];
     let own = proposals::propose_payment(
         relay.clone(),
@@ -262,7 +236,6 @@ fn payment_flow_through_bridge() {
     );
     assert_eq!(own.err().map(|e| e.kind), Some(ZafeErrorKind::InvalidInput));
 
-    // A proposes 1 ZEC; the review screen's fee estimate is the fee the proposal pays.
     let b_before = sync(&members[1]);
     let a = &members[0];
     let estimated = proposals::estimate_fee(
@@ -304,9 +277,6 @@ fn payment_flow_through_bridge() {
         .unwrap()
         .items
     };
-    // A's own sync holds back the notes its open proposal spends: its spendable balance
-    // (what it could propose) drops, the total doesn't. Nobody else's does until a second
-    // member approves it (one member alone can't freeze funds, `VAULT_EVENT` 12).
     let a_after = sync(a);
     assert!(a_after.spendable_zat < b_before.spendable_zat);
     assert_eq!(a_after.total_zat, b_before.total_zat);
@@ -318,8 +288,6 @@ fn payment_flow_through_bridge() {
     assert_eq!(p.payments[0].memo, "grant #1");
     assert!(!p.is_mine);
 
-    // Approvals are asynchronous: let 300 blocks pass (the old 40-block wallet default would
-    // have expired the proposal after ~50 minutes; the vault window is 7 days).
     chain.mine(300);
     let before = balance.height;
     for m in &members {
@@ -334,8 +302,6 @@ fn payment_flow_through_bridge() {
         assert!(b.height >= before + 300, "member did not reach the new tip");
     }
 
-    // A (the proposer) and B review independently, then approve; C stays out. So the
-    // leader is one of the two signers and must sign its own part locally.
     for m in &members[..2] {
         let r = proposals::review_proposal(
             relay.clone(),
@@ -370,7 +336,6 @@ fn payment_flow_through_bridge() {
     let p = &list(&members[1])[0];
     assert_eq!(p.stage, ProposalStage::Approved);
     assert_eq!(p.my_vote, MyVote::Approved);
-    // Approved by a second member: every phone holds its notes now.
     let c_after = sync(&members[2]);
     assert!(c_after.spendable_zat < b_before.spendable_zat);
     assert_eq!(c_after.total_zat, b_before.total_zat);
@@ -379,7 +344,6 @@ fn payment_flow_through_bridge() {
         "no group is covered, so this one signs interactively"
     );
 
-    // Approving twice is a NotReady error, not a crash.
     let again = proposals::approve_proposal(
         relay.clone(),
         lwd.clone(),
@@ -392,7 +356,6 @@ fn payment_flow_through_bridge() {
     );
     assert!(matches!(again, Err(e) if e.kind == ZafeErrorKind::NotReady));
 
-    // The leader's send, on its own thread (it waits `secs` for signature shares).
     let start_send = |m: &Member, secs: u64| {
         let (relay, lwd, db, key, st, s, mat, id) = (
             relay.clone(),
@@ -426,13 +389,10 @@ fn payment_flow_through_bridge() {
     };
     let kind = |r: Result<_, rust_lib_zafe::api::error::ZafeError>| r.err().map(|e| e.kind);
 
-    // Round 1: A leads and signs its own part; B never answers, so it times out.
     let round1 = start_send(a, 5).join().unwrap();
     assert_eq!(kind(round1), Some(ZafeErrorKind::Timeout));
     assert!(list(a)[0].signing_started);
 
-    // A starts over. Its own signature went into round 1, so it must approve again; B
-    // still holds its nonces, but its commitments count as used, so C takes its place.
     proposals::restart_signing(a.state_dir.clone(), id.clone()).unwrap();
     let p = &list(a)[0];
     assert!(!p.signing_started && p.needs_reapproval);
@@ -454,7 +414,6 @@ fn payment_flow_through_bridge() {
     }
     assert!(!list(a)[0].needs_reapproval);
 
-    // Round 2: A and C. C answers on its next poll; A aggregates and broadcasts.
     let leader = start_send(a, 90);
     let mut answered = 0;
     for _ in 0..60 {
@@ -480,13 +439,11 @@ fn payment_flow_through_bridge() {
     let txid = txid.unwrap();
     println!("broadcast {txid}");
 
-    // The leader kept the raw transaction so it can resend it if it drops out of the
-    // mempool; it goes away once mined (checked after mining below).
     let sent_file = std::path::Path::new(&a.db_dir)
         .join(format!("sent-{}", summary.vault_id))
         .join(format!("{}.tx", {
             let mut b = hex::decode(&txid).unwrap();
-            b.reverse(); // display order -> protocol order
+            b.reverse();
             hex::encode(b)
         }));
     assert!(sent_file.exists(), "leader keeps {}", sent_file.display());
@@ -496,7 +453,6 @@ fn payment_flow_through_bridge() {
     assert_eq!(p.txid.as_deref(), Some(txid.as_str()));
     assert!(!p.signing_started);
 
-    // Mined: the vault's balance drops by amount + fee (unless it paid itself).
     chain.mine(1);
     thread::sleep(Duration::from_secs(3));
     let after = sync(&members[2]);
@@ -506,7 +462,6 @@ fn payment_flow_through_bridge() {
         !sent_file.exists(),
         "the kept transaction is deleted once mined"
     );
-    // The log accounts for the mined spend: nothing is flagged as unapproved.
     let flagged = rust_lib_zafe::api::spends::unapproved_spends(
         relay.clone(),
         a.db_dir.clone(),
@@ -519,15 +474,10 @@ fn payment_flow_through_bridge() {
         flagged.spends.is_empty() && flagged.from_copy_at.is_none(),
         "unexpected unapproved spends: {flagged:?}"
     );
-    // The vault's own payment (and its change) is not an incoming payment.
     let incoming_after = received_list(&members[2]);
     assert!(incoming_after.iter().all(|r| r.txid != txid));
     assert_eq!(incoming_after.len(), incoming.len());
 
-    // --- One tap. Every member refreshed its proposal list above, which published its
-    // commitments, so this proposal is signed at approval time: A and B each approve once,
-    // B's approval completes the signatures, and B sends alone (no request round, C and A
-    // don't need to be online).
     chain.mine(3);
     for m in &members {
         let h = after.height + 3;
@@ -541,7 +491,7 @@ fn payment_flow_through_bridge() {
         }
     }
     for m in &members {
-        list(m); // tops up pools
+        list(m);
     }
     let id2 = proposals::propose_payment(
         relay.clone(),
@@ -606,7 +556,6 @@ fn payment_flow_through_bridge() {
     assert_eq!(p.stage, ProposalStage::Sent);
     assert_eq!(p.txid.as_deref(), Some(txid2.as_str()));
 
-    // Cancel: only the author can; afterwards nobody can vote on it.
     let id3 = proposals::propose_payment(
         relay.clone(),
         lwd.clone(),
@@ -630,8 +579,6 @@ fn payment_flow_through_bridge() {
             id3.clone(),
         )
     };
-    // Signed before it is cancelled (one tap): it can still be sent, so the next payment
-    // must spend one of its notes (security review 2026-11, rule 5).
     for m in [a, &members[1]] {
         proposals::approve_proposal(
             relay.clone(),
@@ -682,8 +629,6 @@ fn payment_flow_through_bridge() {
         r.problem
     );
 
-    // Make the cancelled payment unsendable: a proposal with no payments spends its notes
-    // back to the vault. Every member's check accepts it (all outputs are the vault's).
     let sweep = proposals::invalidate_proposal(
         relay.clone(),
         lwd.clone(),
@@ -726,7 +671,6 @@ fn payment_flow_through_bridge() {
         )
         .unwrap();
     }
-    // One tap (pools are topped up) or interactive: B sends; A answers if asked.
     let sender = {
         let (relay, lwd, b) = (relay.clone(), lwd.clone(), b.clone());
         let sweep = sweep.clone();
@@ -774,8 +718,6 @@ fn payment_flow_through_bridge() {
         .find(|p| p.id == sweep)
         .unwrap();
     assert_eq!(s.stage, ProposalStage::Sent);
-    // Mined deep enough (10 blocks, scaled), the cancelled payment can't go out any more:
-    // no "being made unsendable" (that is only while the sweep is pending) and no button.
     let h = sync(b).height + 31;
     chain.mine(31);
     for _ in 0..60 {
@@ -792,8 +734,6 @@ fn payment_flow_through_bridge() {
         cancelled.still_sendable
     );
 
-    // History export (CSV): both sent payments with payee, amount, fee and memo, plus the
-    // faucet payments received. A signer named on this device shows as "Name (hexkey)".
     let a_key = rust_lib_zafe::api::vault::identity_public_key(a.seeds.clone()).unwrap();
     let csv = rust_lib_zafe::api::history::export_history_csv(
         relay.clone(),
@@ -824,9 +764,6 @@ fn payment_flow_through_bridge() {
         "{csv}"
     );
 
-    // --- Pending incoming payments. A second vault (2-of-2: D creates, E joins) is paid by
-    // the first one. E's app watches lightwalletd's mempool, so the payment is listed as
-    // received (unmined) before any block includes it.
     let seeds2: Vec<Vec<u8>> = (0..2).map(|_| vault::generate_identity().seeds).collect();
     let invite2 = vault::create_vault(
         relay.clone(),
@@ -848,7 +785,6 @@ fn payment_flow_through_bridge() {
         })
         .collect();
     let safety2 = common::safety_words(&relay, &lwd, &setups2, &invite2);
-    // The creator picks lightwalletd's tip + 1 as the birthday (as the app does).
     let materials2 = common::keygen(&relay, &lwd, &setups2, &invite2, &safety2, None);
     let summary2 = vault::vault_summary(materials2[1].clone()).unwrap();
     let e = {
@@ -864,10 +800,6 @@ fn payment_flow_through_bridge() {
         }
     };
 
-    // Past vault 2's birthday; everyone synced (vault 1's earlier sends mine here too),
-    // and the sweep deep enough that a reorg can't bring back the cancelled payment it
-    // made unsendable (10 blocks, 30 on regtest's 25 s blocks): until then every new
-    // payment would have to spend that payment's (swept) notes.
     chain.mine(33);
     let tip = after.height + 36;
     for m in members.iter().chain([&e]) {
@@ -883,7 +815,6 @@ fn payment_flow_through_bridge() {
     }
     assert!(received_list(&e).is_empty());
 
-    // E's watch, as the app runs it while in the foreground.
     let watch_id = rust_lib_zafe::api::mempool::begin_mempool_watch();
     let (events_tx, events) = std::sync::mpsc::channel();
     let watcher = {
@@ -908,10 +839,8 @@ fn payment_flow_through_bridge() {
         .expect("mempool watch never connected");
     assert_eq!(status, MempoolStatus::Connected);
 
-    // Vault 1 pays vault 2: A proposes, A and B approve, B sends (one tap, or interactive
-    // with A answering).
     for m in &members {
-        list(m); // tops up commitment pools
+        list(m);
     }
     let id4 = proposals::propose_payment(
         relay.clone(),
@@ -984,7 +913,6 @@ fn payment_flow_through_bridge() {
     let paid = sender.join().unwrap().expect("payment send").expect("txid");
     println!("payment to vault 2 broadcast {paid}");
 
-    // No block is mined: the watch alone must bring it in.
     let stored = (|| {
         let deadline = std::time::Instant::now() + Duration::from_secs(60);
         while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
@@ -1008,7 +936,6 @@ fn payment_flow_through_bridge() {
     assert_eq!(r.memo, "payroll top-up");
     assert!(!r.is_coinbase);
 
-    // Stopping ends the watch promptly.
     rust_lib_zafe::api::mempool::stop_mempool_watch();
     let stop_started = std::time::Instant::now();
     while !watcher.is_finished() && stop_started.elapsed() < Duration::from_secs(5) {
@@ -1017,7 +944,6 @@ fn payment_flow_through_bridge() {
     assert!(watcher.is_finished(), "the watch did not stop");
     watcher.join().unwrap().unwrap();
 
-    // Once mined, block sync gives it a height.
     chain.mine(1);
     let mut mined = None;
     for _ in 0..30 {
@@ -1032,9 +958,6 @@ fn payment_flow_through_bridge() {
     }
     assert_eq!(mined.expect("payment mined").confirmations, 1);
 
-    // Backup health: A exports a backup (checked to open) and attests it; every member
-    // sees it, and attesting again doesn't grow the log. Last, because listing proposals
-    // tops up the one-tap pools, which would change the signing flows above.
     let backed_up = |m: &Member| {
         proposals::list_proposals(
             relay.clone(),

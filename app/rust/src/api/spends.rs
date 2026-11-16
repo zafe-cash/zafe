@@ -1,5 +1,3 @@
-//! Unapproved-spend alert (spec §10.4.4): vault spends the log doesn't account for.
-
 use zafe_core::{
     node, spend_watch,
     wallet::{VaultWallet, WalletError},
@@ -13,31 +11,18 @@ use super::{
     },
 };
 
-/// A transaction that spent vault notes with no matching approved proposal in the log:
-/// keys were used outside Zafe (old shares, or compromised phones).
 #[derive(Clone, Debug)]
 pub struct UnapprovedSpendInfo {
-    /// Transaction id (hex, display order).
     pub txid: String,
-    /// 0 while unmined.
     pub mined_height: u32,
 }
 
-/// What the alert found, and what it was based on.
 #[derive(Clone, Debug)]
 pub struct UnapprovedSpends {
     pub spends: Vec<UnapprovedSpendInfo>,
-    /// Set when the relay couldn't be reached and the check ran on this phone's copy of
-    /// the vault history: when that copy last matched the relay (Unix seconds), for "based
-    /// on this phone's history from 09:14". A spend a newer entry would explain may show
-    /// until the relay is back.
     pub from_copy_at: Option<u64>,
 }
 
-/// The vault's spends the log doesn't account for (empty when all is well, or before the
-/// first sync). Reads the wallet database `sync_vault` keeps and the vault log; call it
-/// after a sync, so the wallet has seen the chain. Keeps working while the relay can't be
-/// reached, from this phone's log copy (`from_copy_at`).
 pub fn unapproved_spends(
     relay_url: String,
     db_dir: String,

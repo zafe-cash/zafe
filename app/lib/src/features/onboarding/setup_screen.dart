@@ -26,9 +26,6 @@ import '../../notifications/notification_primer.dart' show startWatchWithPrimer;
 import 'key_shards_art.dart';
 import 'onboarding_art.dart';
 
-/// Vault setup: invite, members joining, comparing the safety words, and key generation
-/// (spec §7.2). Every step also runs in background checks, so nobody has to keep this
-/// screen open: membership locks itself once full, and "They match" is the one tap.
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
 
@@ -41,11 +38,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   bool _leaving = false;
   bool _done = false;
 
-  /// The relay no longer has this setup: the creator cancelled it.
   bool _gone = false;
   String? _error;
 
-  /// The keys exist: the shards join, then the backup prompt opens.
   bool _keysReady = false;
 
   @override
@@ -53,12 +48,8 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.initState();
     _refresh();
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
-    // Background checks and pushes carry the setup on while Zafe is closed, and say
-    // when it's time to compare words; the primer comes first, once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(startWatchWithPrimer(context));
-      // The creator is looking at the invite: it gets another 3 days (a setup nobody
-      // returns to lets its invite lapse).
       if (mounted) unawaited(ref.read(vaultProvider.notifier).renewInvite());
     });
   }
@@ -69,17 +60,11 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
-  /// The poll's step running now: a poll skips while one runs (over Tor a step can take
-  /// longer than the poll interval). "They match" doesn't wait for it: two steps sending
-  /// at once is safe (the relay's out-of-order refusal is retried in Rust).
   Future<void>? _step;
 
-  /// The "They match" step running now: polls skip while it runs too.
   Future<void>? _tap;
   DateTime? _lastPoll;
 
-  /// While the words are on screen waiting for "They match", nothing changes but a
-  /// cancelled setup: check less often.
   static const _wordsPoll = Duration(seconds: 10);
 
   Future<void> _refresh({String? confirmed}) async {
@@ -120,8 +105,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
           .read(vaultProvider.notifier)
           .setupStep(confirmed: confirmed);
       if (p.material != null && mounted && !_done) {
-        // The vault exists: its key share now lives only on this phone. On the key
-        // screen the shards join first, then the backup prompt.
         _done = true;
         _poll?.cancel();
         if (ref.read(vaultProvider).membership?.started ?? false) {
@@ -140,7 +123,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     } catch (e) {
       if (!mounted || _leaving) return;
       if (e is ZafeError && e.kind == ZafeErrorKind.vaultNotOnRelay) {
-        // The relay answered, and the setup isn't there any more.
         setState(() {
           _gone = true;
           _error = null;
@@ -155,9 +137,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     }
   }
 
-  /// Backs out of the setup before membership is locked. The creator's setup is deleted
-  /// on the relay (the invite stops working) and the "New vault" form comes back filled
-  /// in; a joiner just leaves.
   Future<void> _cancel({required bool creator, bool confirm = true}) async {
     if (_leaving) return;
     if (confirm) {
@@ -178,19 +157,15 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     final result = await notifier.cancelSetup();
     if (!mounted) return;
     if (result.creator) {
-      // Back to "New vault", filled in. With other vaults on this device, the onboarding
-      // screens are shown the same way "Add vault" does.
       if (ref.read(vaultProvider).hasVault) notifier.beginAddVault();
       final router = GoRouter.of(context);
-      router.go('/welcome'); // so back from "New vault" lands on onboarding
+      router.go('/welcome');
       router.push('/create');
     } else {
       context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
     }
   }
 
-  /// After membership is locked: leaves the setup (a member never came back, the words
-  /// differ, or the group gave up). The creator's cancels it for everyone.
   Future<void> _abandon() async {
     if (_leaving) return;
     final go = await showAppConfirm(
@@ -208,20 +183,12 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     context.go(ref.read(vaultProvider).hasVault ? '/home' : '/welcome');
   }
 
-  /// "They match" was tapped: the key screen shows at once (the step takes 10-20 s over
-  /// Tor, and that screen is a wait anyway).
   bool _confirming = false;
 
-  /// Why the last "They match" failed (kept until the next tap; polls don't clear it).
   String? _tapError;
 
-  /// The safety check found a member list or value that changed after this phone took
-  /// part (another member left and opened the invite again, or the server swapped one):
-  /// nobody should make keys with this setup.
   bool _stopped = false;
 
-  /// "They match": starts this member's part of key generation. A failure brings the
-  /// words back with the reason.
   Future<void> _confirm(String words) async {
     setState(() {
       _confirming = true;
@@ -255,8 +222,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     final started = membership?.started ?? false;
     final words = membership?.safetyNumber;
 
-    // After "They match": the key shards while the keys are made, here or in the
-    // background (Zafe can be closed).
     if ((started && membership != null) || _keysReady || _confirming) {
       return CreatingKeysScreen(
         ready: _keysReady,
@@ -287,8 +252,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     }
 
     return PopScope(
-      // Android's back button backs out of the setup too (it asks first); once
-      // membership is locked there is no way back.
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && !sealed && !_gone) _cancel(creator: isCreator);
@@ -310,7 +273,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             _InviteCard(
               invite: vault.invite!,
               vaultName: info.name,
-              // Sharing it again gives it another 3 days.
               onShare: () =>
                   unawaited(ref.read(vaultProvider.notifier).renewInvite()),
             ),
@@ -355,7 +317,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
               expand: true,
               variant: AppButtonVariant.ghost,
               onPressed: _leaving ? null : _abandon,
-              // Different words: nobody should make keys with this setup.
               child: Text(
                 words != null && !_stopped
                     ? 'They don\'t match'
@@ -396,7 +357,6 @@ class _InviteCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    // The QR carries the link too, so a phone's own camera app can open Zafe with it.
     final link = inviteLink(invite);
     return MobileSurfaceCard(
       cornerRadius: AppRadii.large,
@@ -484,7 +444,6 @@ class _MembersCard extends StatelessWidget {
   final int threshold;
   final String? myKeyHex;
 
-  /// Members the setup is waiting for (their phone hasn't done its part yet).
   final List<String> waiting;
 
   @override
@@ -598,10 +557,8 @@ class SetupSafetyWordsCard extends StatelessWidget {
     required this.waiting,
   });
 
-  /// The four words, or `null` while members' parts of the check are still arriving.
   final String? words;
 
-  /// How many members haven't sent their part yet.
   final int waiting;
 
   @override
@@ -700,7 +657,6 @@ class _Hint extends StatelessWidget {
   }
 }
 
-/// Who key generation is waiting for (`missing`, key hex; this member left out).
 String waitingText(List<String> missing, {String? me}) {
   final who = missing.where((k) => k != me).map(shortKey).toList();
   final names = switch (who.length) {
@@ -711,8 +667,6 @@ String waitingText(List<String> missing, {String? me}) {
   return 'Waiting for $names.';
 }
 
-/// The vault's keys being made (after this member confirmed the words): the key shards,
-/// who it waits for, and a way out if someone never comes back.
 class CreatingKeysScreen extends StatelessWidget {
   const CreatingKeysScreen({
     super.key,
@@ -722,11 +676,9 @@ class CreatingKeysScreen extends StatelessWidget {
     this.onReady,
   });
 
-  /// The keys exist: the shards join into one key, then [onReady].
   final bool ready;
   final VoidCallback? onReady;
 
-  /// "Waiting for ..." when other members haven't done their part yet.
   final String? waiting;
   final VoidCallback? onAbandon;
 
@@ -744,7 +696,6 @@ class CreatingKeysScreen extends StatelessWidget {
             art: KeyShardsArt(assembled: ready, onAssembled: onReady),
           ),
           SafeArea(
-            // Scrolls on small phones with large text; otherwise sits at the bottom.
             child: LayoutBuilder(
               builder: (context, box) => SingleChildScrollView(
                 padding: const EdgeInsets.all(AppSpacing.sm),
@@ -754,7 +705,6 @@ class CreatingKeysScreen extends StatelessWidget {
                   ),
                   child: IntrinsicHeight(
                     child: Column(
-                      // At the bottom on a phone; right under the art in a large window.
                       mainAxisAlignment: large
                           ? MainAxisAlignment.start
                           : MainAxisAlignment.end,

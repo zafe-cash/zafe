@@ -1,20 +1,9 @@
-// A phone's screen on the GPU (world.js). The app's renders and the banners are textures
-// uploaded once; this shader composites them the way the app moves between them and draws
-// the motion on top, from uniforms set every frame. It replaces 2D-canvas drawing that
-// re-uploaded a 780 x 1688 texture on each change (~80 ms a time on an Intel UHD laptop).
-//
-// Compositing happens in sRGB, as a 2D canvas does (textures are read raw, constants are
-// sRGB), then converts to linear for three's output. Coordinates are canvas pixels with y
-// down (W x H), so the numbers match the app's layout (SPOT in story-screens.js).
-//
-// Layers, bottom to top: the base (one screen; a push from A to B; or B as a sheet over A),
-// C fading in over B, the sending screen's coins and spinner, two banners, a dim, two taps.
 import * as THREE from 'three';
 import { W, H, BANNER_PAD, BANNER_H, SPOT } from './story-screens.js';
 
 export const MODE = { single: 0, push: 1, sheet: 2 };
 
-const vertexShader = /* glsl */ `
+const vertexShader = `
 #include <fog_pars_vertex>
 varying vec2 vUv;
 void main() {
@@ -24,7 +13,7 @@ void main() {
   #include <fog_vertex>
 }`;
 
-const fragmentShader = /* glsl */ `
+const fragmentShader = `
 #include <fog_pars_fragment>
 uniform sampler2D uA, uB, uC, uBan1, uBan2;
 uniform int uMode;
@@ -150,9 +139,6 @@ void main() {
   #include <fog_fragment>
 }`;
 
-// Textures read raw (sRGB values; the shader composites in sRGB), mipmapped and sharp at
-// a glancing angle. Uploaded once, by `renderer.initTexture` at load. Canvases (the
-// banners, with transparent shadows) are premultiplied so filtering keeps clean edges.
 export function screenTexture(source, renderer) {
   const canvas = source instanceof HTMLCanvasElement;
   const t = canvas ? new THREE.CanvasTexture(source) : new THREE.Texture(source);
@@ -164,7 +150,6 @@ export function screenTexture(source, renderer) {
   return t;
 }
 
-// The sRGB background behind a screen (seen while one slides).
 export const bg = (hex) => new THREE.Vector3(...[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255));
 
 export function screenMaterial(blank) {

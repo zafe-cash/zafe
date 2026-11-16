@@ -34,11 +34,8 @@ zeroize.workspace = true
 zip321.workspace = true
 zcash_address.workspace = true
 tonic.workspace = true
-# Only to recognise TLS failures in transport errors (`net::NetFailure`); no provider.
 rustls = { version = "0.23", default-features = false }
 async-trait.workspace = true
-# SQLCipher for the encrypted wallet database, with OpenSSL built from source (static
-# libcrypto) so every target, Android included, needs no system crypto library.
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl", "array"] }
 rand.workspace = true
 rand10.workspace = true
@@ -49,8 +46,6 @@ chacha20poly1305.workspace = true
 zxcvbn = "3"
 bip0039 = "0.12"
 base64 = "0.22"
-# Tor (see src/tor.rs): arti comes in through zcash_client_backend's `tor` feature. These
-# carry the relay's HTTP over it and wrap direct connections so Tor can cut them.
 tracing.workspace = true
 tower.workspace = true
 tokio-util = "0.7"
@@ -64,15 +59,12 @@ serde_json.workspace = true
 zafe-relay = { path = "../zafe-relay" }
 axum.workspace = true
 tokio.workspace = true
-# Non-standard fees let tests model a malicious proposer overpaying the fee.
 zcash_primitives = { workspace = true, features = ["non-standard-fees"] }
 hex.workspace = true
 incrementalmerkletree.workspace = true
 shardtree.workspace = true
-# Local TLS server with a self-signed certificate (tests/tls.rs).
 rcgen = "0.13"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tempfile = "3"
 futures = "0.3"
-# Builds key packages from raw shares (tests/reshare.rs).
 frost-core = { workspace = true, features = ["internals"] }

@@ -1,30 +1,3 @@
-//! Encrypted vault backups (spec §12.2): export one vault's secrets from a device and
-//! restore them on another.
-//!
-//! Contents: the member's identity seeds, the vault material (FROST key package, vault
-//! secret `sk`, descriptor, log key, and since material version 2 the vault's relay URL,
-//! mailbox label and create token; `use_qsk` is part of the descriptor), the invite, (since
-//! version 2) the local names this member gave the other signers and (since version 3)
-//! this device's copy of the vault log, so a restore is anchored before it first talks to
-//! a relay (`node::install_log_copy`).
-//! **Never** FROST nonces or pre-published pool nonces: a restored device must never be
-//! able to reuse a nonce, so it starts with none and publishes a fresh pool.
-//!
-//! Format (all integers little-endian):
-//!
-//! ```text
-//! magic "ZAFEBAK" (7) | version u8 = version::BACKUP | m_cost_kib u32 | t_cost u32 | p_cost u32
-//! | salt (16) | nonce (24) | XChaCha20-Poly1305 ciphertext of postcard(Contents)
-//! ```
-//!
-//! The key is Argon2id(passphrase, salt) with the header's parameters (default 64 MiB,
-//! 3 passes, 1 lane); the whole header is the AEAD's associated data, so tampering with
-//! parameters or salt fails decryption. A text form (`zafe-backup-v1:` + base64url) carries
-//! the same bytes for password managers and copy/paste.
-//!
-//! Versions: 1 had no signer names; it still decrypts (its contents are migrated with
-//! no names). 2 adds `names`; it still decrypts (no log copy). 3 (current) adds `log`.
-
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
@@ -45,18 +18,13 @@ use crate::node::{NodeError, VaultMaterial};
 
 const MAGIC: &[u8; 7] = b"ZAFEBAK";
 const VERSION: u8 = version::BACKUP as u8;
-/// The first format (no signer names): still read, migrated to [`Contents`].
 const VERSION_1: u8 = 1;
-/// Signer names, no log copy: still read.
 const VERSION_2: u8 = 2;
-/// Longest signer name kept from a backup (the app caps names at 32 characters).
 const MAX_NAME_CHARS: usize = 64;
-/// Most names kept from a backup (vaults have far fewer members).
 const MAX_NAMES: usize = 256;
 const HEADER_LEN: usize = 7 + 1 + 4 * 3 + 16 + 24;
 const TEXT_PREFIX: &str = "zafe-backup-v1:";
 
-/// Argon2id cost: at least the spec's 64 MiB and 3 passes for real backups.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KdfParams {
     pub m_cost_kib: u32,
@@ -70,8 +38,6 @@ impl KdfParams {
         t_cost: 3,
         p_cost: 1,
     };
-    /// Minimum accepted on import (an attacker-supplied file can't make restoring weak
-    /// backups look normal, and can't request absurd costs either: see `MAX_M_COST_KIB`).
     const MIN_M_COST_KIB: u32 = 64 * 1024;
     const MIN_T_COST: u32 = 3;
     const MAX_M_COST_KIB: u32 = 1024 * 1024;
@@ -82,7 +48,6 @@ impl KdfParams {
 pub enum BackupError {
     #[error("not a Zafe vault backup")]
     NotABackup,
-    /// The backup, or the identity or material inside it, is in another version.
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
     #[error("wrong passphrase, or the backup is damaged")]
@@ -99,25 +64,16 @@ pub enum BackupError {
     Encoding(String),
 }
 
-/// What a backup holds.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Contents {
-    /// `IdentitySeeds::to_bytes` (versioned), as stored on the device.
     pub identity_seeds: Vec<u8>,
-    /// `VaultMaterial::to_bytes` (versioned), as stored on the device.
     pub material: Vec<u8>,
     pub invite: String,
-    /// Unix seconds when the backup was made (display only).
     pub created_at: u64,
-    /// Local names for the vault's signers (signing key hex → name), since version 2.
     pub names: BTreeMap<String, String>,
-    /// This device's copy of the vault log (`LogEntry::to_bytes` each, in order), since
-    /// version 3. Encrypted with the log key and signed, like on the relay; empty when the
-    /// device had none.
     pub log: Vec<Vec<u8>>,
 }
 
-/// Version 2 contents (no log copy).
 #[derive(Deserialize)]
 struct ContentsV2 {
     identity_seeds: Vec<u8>,
@@ -140,7 +96,6 @@ impl From<ContentsV2> for Contents {
     }
 }
 
-/// Version 1 contents (no names).
 #[derive(Deserialize)]
 struct ContentsV1 {
     identity_seeds: Vec<u8>,
@@ -162,7 +117,6 @@ impl From<ContentsV1> for Contents {
     }
 }
 
-/// Redacted: backups hold secrets, so they never go to logs.
 impl core::fmt::Debug for Contents {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Contents")
@@ -174,8 +128,6 @@ impl core::fmt::Debug for Contents {
 }
 
 impl Contents {
-    /// Checks that the contents are a usable vault: the material parses, the identity is
-    /// one of the vault's members and the vault's address is its viewing key's.
     pub fn validate(&self) -> Result<VaultMaterial, BackupError> {
         let material = VaultMaterial::from_bytes(&self.material).map_err(|e| match e {
             NodeError::UnsupportedVersion(v) => BackupError::UnsupportedVersion(v),
@@ -208,7 +160,6 @@ fn derive_key(
     Ok(key)
 }
 
-/// Encrypts `contents` under `passphrase` (checked with [`check_passphrase`] first).
 pub fn encrypt<R: RngCore + CryptoRng>(
     contents: &Contents,
     passphrase: &str,
@@ -223,7 +174,6 @@ pub fn encrypt<R: RngCore + CryptoRng>(
     seal(VERSION, &plain, passphrase, params, rng)
 }
 
-/// Encrypts already-encoded contents under a header with `version`.
 fn seal<R: RngCore + CryptoRng>(
     version: u8,
     plain: &[u8],
@@ -258,12 +208,10 @@ fn seal<R: RngCore + CryptoRng>(
     Ok(out)
 }
 
-/// Whether `bytes` look like a Zafe backup (before asking for the passphrase).
 pub fn is_backup(bytes: &[u8]) -> bool {
     bytes.len() > HEADER_LEN && bytes.starts_with(MAGIC)
 }
 
-/// Decrypts and validates a backup.
 pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Contents, BackupError> {
     if !is_backup(bytes) {
         return Err(BackupError::NotABackup);
@@ -313,7 +261,6 @@ pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Contents, BackupError> 
         _ => postcard::from_bytes(&plain).map_err(bad)?,
     };
     contents.validate()?;
-    // Names are display-only; drop anything a signer row couldn't show.
     contents.names.retain(|k, v| {
         !k.is_empty() && !v.trim().is_empty() && v.chars().count() <= MAX_NAME_CHARS
     });
@@ -326,7 +273,6 @@ pub fn decrypt(bytes: &[u8], passphrase: &str) -> Result<Contents, BackupError> 
     Ok(contents)
 }
 
-/// The text form of a backup (for password managers and copy/paste).
 pub fn to_text(bytes: &[u8]) -> String {
     use base64::Engine;
     format!(
@@ -335,7 +281,6 @@ pub fn to_text(bytes: &[u8]) -> String {
     )
 }
 
-/// Parses the text form (whitespace and line breaks are ignored).
 pub fn from_text(text: &str) -> Result<Vec<u8>, BackupError> {
     use base64::Engine;
     let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
@@ -347,8 +292,6 @@ pub fn from_text(text: &str) -> Result<Vec<u8>, BackupError> {
         .map_err(|_| BackupError::NotABackup)
 }
 
-/// A backup passphrase must be at least 12 words (e.g. a generated one) or rated
-/// "very strong" (zxcvbn score 4) (spec §12.2).
 pub fn check_passphrase(passphrase: &str) -> Result<(), BackupError> {
     let words = passphrase.split_whitespace().count();
     if words >= 12 {
@@ -367,7 +310,6 @@ pub fn check_passphrase(passphrase: &str) -> Result<(), BackupError> {
     Err(BackupError::WeakPassphrase(hint))
 }
 
-/// A strong generated passphrase: 12 random words from the BIP-39 English list (128 bits).
 pub fn suggest_passphrase<R: RngCore + CryptoRng>(rng: &mut R) -> String {
     let mut entropy = Zeroizing::new([0u8; 16]);
     rng.fill_bytes(entropy.as_mut());
@@ -396,7 +338,6 @@ mod tests {
         created_at: u64,
     }
 
-    /// Backups made by version 1 and 2 builds still restore (no names, no log copy).
     #[test]
     fn older_backups_migrate() {
         use orchard::keys::{FullViewingKey, SpendingKey};
@@ -465,7 +406,6 @@ mod tests {
         assert!(back.names.is_empty());
         assert!(back.log.is_empty());
 
-        // Version 2: names, no log copy.
         #[derive(Serialize)]
         struct V2<'a> {
             identity_seeds: &'a [u8],

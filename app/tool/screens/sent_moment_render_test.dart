@@ -1,11 +1,3 @@
-// Renders the sending screen through the "Sent!" moment, frame by frame, the whole
-// screen (art, badge, title and the coin fountain together), for review without a
-// device. Not part of `flutter test`; run it from app/:
-//
-//   flutter test tool/screens/sent_moment_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): sent_moment_<theme>_<ms>.png
-// (ms after "Sent!"; negative = while sending).
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -90,7 +82,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       await shot('-0000');
       await tester.pumpWidget(app(true));
-      // The fountain's coin pictures load off the test clock.
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 200)),
       );
@@ -106,7 +97,6 @@ void main() {
   });
 }
 
-// SCREEN_PREVIEW_SCALE renders larger (the store listing uses 3).
 final _scale = double.parse(
   Platform.environment['SCREEN_PREVIEW_SCALE'] ?? '2',
 );

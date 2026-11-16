@@ -10,18 +10,14 @@ import '../core/errors/zafe_error_copy.dart';
 import '../core/formatting/zec_amount.dart';
 import '../rust/api/price.dart' as rust;
 
-/// How often the price is fetched while the app is in the foreground.
 const kZecPriceRefresh = Duration(minutes: 3);
 
-/// How long a fetched price may be shown: a stale cache or failed refreshes hide it after.
 const kZecPriceTtl = Duration(hours: 1);
 
 const kZecPriceCacheKey = 'zafe_zec_usd_v1';
 
-/// Dollars only mean something on mainnet: test coins have no value.
 const kShowsFiat = kZafeNetwork == 'main';
 
-/// A ZEC/USD price and when it was fetched.
 class ZecPrice {
   const ZecPrice(this.usd, this.fetchedAt);
   final double usd;
@@ -53,7 +49,6 @@ class ZecPrice {
   }
 }
 
-/// "$1,234.56" for `zat` at `usdPerZec`; null without a price.
 String? fiatText(BigInt zat, double? usdPerZec) {
   if (usdPerZec == null) return null;
   final value = zat.toDouble() / zatoshiPerZec.toDouble() * usdPerZec;
@@ -68,9 +63,6 @@ String? fiatText(BigInt zat, double? usdPerZec) {
   return '\$$grouped.${parts.last}';
 }
 
-/// The ZEC/USD price to show, or null (not mainnet, never fetched, or older than
-/// [kZecPriceTtl]). Starts from the cached price, refreshes every [kZecPriceRefresh]
-/// while the app is in the foreground. Fetched in Rust, so it follows the Tor setting.
 class ZecPriceNotifier extends Notifier<double?> {
   Timer? _timer;
   ZecPrice? _last;
@@ -111,7 +103,6 @@ class ZecPriceNotifier extends Notifier<double?> {
       await prefs.setString(kZecPriceCacheKey, _last!.encode());
     } catch (e) {
       debugPrint('price failed: ${describeError(e)}');
-      // Keep showing the last price until it's too old to mean anything.
       if (!(_last?.freshAt(DateTime.now()) ?? false)) state = null;
     }
   }

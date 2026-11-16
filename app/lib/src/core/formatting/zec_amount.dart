@@ -76,19 +76,16 @@ int _adaptiveFractionDigits(
   return fractionDigits;
 }
 
-/// Formats a raw zatoshi value as decimal text without appending a denomination.
 String formatZecAmount(BigInt zatoshi, {int minFractionDigits = 0}) {
   return _formatZecAmount(zatoshi, minFractionDigits: minFractionDigits);
 }
 
-/// Parses user-entered Zcash amount text into raw zatoshi.
 BigInt? parseZecAmount(String input) {
   return ZecAmount.tryParse(input)?.zatoshi;
 }
 
 enum ZecDenomStyle { none, lower, upper }
 
-/// Typed wrapper for amounts stored in zatoshi, with UI-oriented presets.
 class ZecAmount {
   const ZecAmount.fromZatoshi(this.zatoshi);
 
@@ -122,8 +119,6 @@ class ZecAmount {
 
   ZecAmountPretty get balance => pretty(minFractionDigits: 2);
 
-  /// Headline wallet balances. Caps typical amounts at 4–5 fraction
-  /// digits so home totals do not show full zatoshi precision.
   ZecAmountPretty compactBalancePretty({
     int minFractionDigits = 2,
     int maxFractionDigits = 5,
@@ -209,7 +204,6 @@ class ZecAmount {
     final abs = zatoshi.abs();
     final whole = abs ~/ zatoshiPerZec;
     final fraction = abs % zatoshiPerZec;
-    // Activity rows show extra precision for non-zero values below 0.01.
     final showFullFraction =
         whole == BigInt.zero &&
         fraction > BigInt.zero &&
@@ -228,7 +222,6 @@ class ZecAmount {
   }
 }
 
-/// Immutable formatted Zcash amount; call [toString] for amount plus denom.
 class ZecAmountPretty {
   const ZecAmountPretty._(
     this._zatoshi, {

@@ -20,22 +20,16 @@ import '../../core/errors/sync_failure.dart';
 import '../home/home_screen.dart' show NoticeCard;
 import '../home/sync_status_screen.dart' show currentSyncFailure;
 
-/// "Grants switches when 3 of 4 have moved." (the move's m, which can be more than a
-/// payment's t: the move screens never show it as a payment threshold).
 String switchesWhenText(String vaultName, int needed, int members) =>
     '$vaultName switches when $needed of $members have moved.';
 
-/// "Payments resume when 1 more member moves to relay.dao.org." (old relay dead, fewer
-/// than m moved: nobody can pay until enough members move).
 String paymentsResumeText(int missing, String host) =>
     'Payments resume when $missing more ${missing == 1 ? 'member moves' : 'members move'} '
     'to $host.';
 
-/// "Grants moved to relay.dao.org. Move to continue."
 String movedToText(String vaultName, String host) =>
     '$vaultName moved to $host. Move to continue.';
 
-/// "Bob must update Zafe first." / "Bob and Carol must update Zafe first."
 String mustUpdateText(List<String> names) {
   final who = names.length <= 2
       ? names.join(' and ')
@@ -43,17 +37,13 @@ String mustUpdateText(List<String> names) {
   return '$who must update Zafe first.';
 }
 
-/// The server sends no notifications: only Zafe's own servers can (docs/relay-move.md §10).
 bool relayHasNoPush(String url) => relayPresetFor(url)?.operator != 'Zafe';
 
-/// A server that isn't on the built-in list learns this phone's IP address unless Tor is on.
 bool relaySeesIp(String url, {required bool tor}) =>
     !tor && relayPresetFor(url) == null;
 
-/// The move pages' title: short, so it fits one line; the sentence is the heading.
 const kRelayMoveTitle = 'Server';
 
-/// A move page's heading ("Move Grants to relay.dao.org?"), wrapping as needed.
 class MoveHeading extends StatelessWidget {
   const MoveHeading(this.text, {super.key});
   final String text;
@@ -70,7 +60,6 @@ class MoveHeading extends StatelessWidget {
   );
 }
 
-/// After the switch, for the mover.
 class MovedBody extends StatelessWidget {
   const MovedBody({super.key, required this.vaultName, required this.host});
   final String vaultName;
@@ -91,11 +80,9 @@ class MovedBody extends StatelessWidget {
   );
 }
 
-/// Following a move from its link. Nothing connects to the new server until Move.
 class FollowMoveScreen extends ConsumerWidget {
   const FollowMoveScreen({super.key, required this.link});
 
-  /// The move link (`https://zafe.cash/move#…`).
   final String link;
 
   @override
@@ -189,7 +176,6 @@ class FollowMoveScreen extends ConsumerWidget {
   }
 }
 
-/// The follow screen's text from plain data (rendered without Rust in previews).
 class FollowMoveBody extends StatelessWidget {
   const FollowMoveBody({
     super.key,
@@ -206,12 +192,10 @@ class FollowMoveBody extends StatelessWidget {
   final String vaultName;
   final String host;
 
-  /// Who started it, from the move notice; null for a link alone ("From a link").
   final String? mover;
   final int? arrived;
   final int? members;
 
-  /// The vault already switched there.
   final bool moved;
   final bool noPush;
   final bool seesIp;
@@ -259,9 +243,6 @@ class FollowMoveBody extends StatelessWidget {
   }
 }
 
-/// Home, under Needs you: this phone's own move while it runs ("Moving Grants to
-/// relay.dao.org · 1 of 3 moved", opens the Server screen), or two moves found. A move
-/// another member started is a Needs you card ([NeedsYou]).
 class RelayMoveCard extends ConsumerWidget {
   const RelayMoveCard({super.key, this.gap = AppSpacing.md});
   final double gap;
@@ -296,8 +277,6 @@ class RelayMoveCard extends ConsumerWidget {
   }
 }
 
-/// The payment screen's line while the vault's server is down and a move hasn't reached m
-/// yet: "Payments resume when 1 more member moves to relay.dao.org."
 class PaymentsResumeLine extends ConsumerWidget {
   const PaymentsResumeLine({super.key});
 

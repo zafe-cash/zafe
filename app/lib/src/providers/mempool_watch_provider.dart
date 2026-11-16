@@ -12,16 +12,11 @@ import 'received_provider.dart';
 import 'vault_provider.dart';
 import '../core/storage/wallet_key.dart';
 
-/// Watches lightwalletd's mempool for the active vault while the app is in the foreground,
-/// so an incoming payment shows as pending before it is mined (Rust stores it in the
-/// wallet database; this reloads the received payments). Kept alive by `ZafeApp`.
 final mempoolWatchProvider = Provider<MempoolWatchController>((ref) {
   StreamSubscription<rust.MempoolEvent>? subscription;
   var disposed = false;
 
   Future<void> start(MempoolWatchTarget target, void Function() onEnded) async {
-    // Taken first: a stop during the awaits below makes this id stale, and the watch
-    // then ends at once.
     final watchId = rust.beginMempoolWatch();
     final previous = subscription;
     subscription = null;
@@ -99,8 +94,6 @@ final mempoolWatchProvider = Provider<MempoolWatchController>((ref) {
 void _onEvent(Ref ref, MempoolWatchTarget target, rust.MempoolEvent event) {
   switch (event.status) {
     case rust.MempoolStatus.stored:
-      // A vault transaction is now in the wallet unmined: show it as pending, in the
-      // activity and in the balance (no block arrived, so the poll's sync would skip).
       if (ref.read(vaultProvider).activeId == target.vaultId) {
         unawaited(ref.read(receivedProvider.notifier).refresh());
         final vault = ref.read(vaultProvider.notifier)..markDirty();

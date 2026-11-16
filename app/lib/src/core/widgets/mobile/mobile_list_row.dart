@@ -5,10 +5,6 @@ import 'package:flutter/widgets.dart';
 import '../../theme/app_theme.dart';
 import '../app_icon.dart';
 
-/// Touch-sized list row used inside [MobileSurfaceCard]s — the Figma
-/// `Content Line` pattern (361 wide on a 52 px pitch): leading icon or
-/// avatar, label, optional trailing value, optional chevron or custom
-/// trailing widget.
 class MobileListRow extends StatelessWidget {
   const MobileListRow({
     required this.label,
@@ -33,43 +29,28 @@ class MobileListRow extends StatelessWidget {
   final Widget? leading;
   final String label;
 
-  /// Small badge rendered immediately after [label] (e.g. a "New" pill).
   final Widget? labelBadge;
 
-  /// Overrides the default label color (e.g. destructive menu rows).
   final Color? labelColor;
 
-  /// Overrides the default value color.
   final Color? valueColor;
 
-  /// Overrides the default chevron color for screen-specific Figma variants.
   final Color? chevronColor;
 
-  /// Minimum row height. The default is the generic touch row; dense Figma
-  /// lists can opt into their own pitch without changing every consumer.
   final double minRowHeight;
 
-  /// Base text style for the label. Color is applied by [labelColor] /
-  /// disabled state.
   final TextStyle? textStyle;
 
-  /// Right-aligned secondary value (e.g. current setting).
   final String? value;
 
-  /// Base text style for [value]. Color is applied by enabled state.
   final TextStyle? valueTextStyle;
 
-  /// Custom trailing widget; rendered after [value] and instead of the
-  /// chevron when provided.
   final Widget? trailing;
   final bool showChevron;
   final VoidCallback? onTap;
 
-  /// Disabled rows render muted and ignore taps — used for entries
-  /// whose mobile flow hasn't shipped yet.
   final bool enabled;
 
-  /// Label and value on two lines: system text at 1.5x or more.
   static bool _stacked(BuildContext context) =>
       MediaQuery.textScalerOf(context).scale(10) >= 15;
 
@@ -78,8 +59,6 @@ class MobileListRow extends StatelessWidget {
     if (value == null || _stacked(context)) {
       return _row(context, stacked: value != null);
     }
-    // Also stacked when the label leaves the value no room (a narrow window, e.g. a
-    // flip phone's cover screen): measured, so rows that fit keep their one line.
     return LayoutBuilder(
       builder: (context, box) =>
           _row(context, stacked: !_fitsOneLine(context, box.maxWidth)),
@@ -104,8 +83,6 @@ class MobileListRow extends StatelessWidget {
       value!,
       valueTextStyle ?? AppTypography.bodyMedium,
     );
-    // Room for the leading widget, the badge and the chevron or trailing widget is
-    // estimated; the value may ellipsize down to 40.
     final extras =
         (leading == null ? 0 : 36) +
         (labelBadge == null ? 0 : 28) +
@@ -133,15 +110,6 @@ class MobileListRow extends StatelessWidget {
             leading!,
             const SizedBox(width: AppSpacing.s),
           ],
-          // With a value, the value column owns the flexible space and
-          // right-aligns against the chevron (an Expanded label next to
-          // a loose Flexible value strands the value's unused allocation
-          // at the row end, pulling short values off the right edge).
-          // Rows with a value keep static labels; the label only gets
-          // the truncating Expanded when it is the sole text.
-          // Zafe: at large system text sizes there's no room for both on one
-          // line (the label would push the row off screen): the value goes under
-          // the label instead.
           if (value != null && stacked)
             Expanded(
               child: Column(

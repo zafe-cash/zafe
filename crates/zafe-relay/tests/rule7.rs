@@ -1,7 +1,3 @@
-//! Security review 2026-11, batch 4 (`docs/security-review-2026-11.md`, rule 7: "The relay
-//! verifies and bounds before it locks, and charges before it works"). Each test shows one
-//! finding and fails on the relay as it is; they are the target for the fixes.
-
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -29,12 +25,9 @@ use zafe_relay::{
     Notifier, Relay,
 };
 
-/// Vault id and label (the same here: a legacy-style mailbox).
 const VAULT: MailboxId = [1; 16];
 const NOW: u64 = 1_790_000_000;
 const TOKEN: [u8; 32] = [4; 32];
-/// The client reads at most this much per response (`zafe_core::relay_client::
-/// MAX_RESPONSE_BYTES`, not a dependency of this crate).
 const CLIENT_MAX_RESPONSE: usize = 64 * 1024 * 1024;
 
 async fn call(app: &Router, path: &str, body: Vec<u8>) -> (StatusCode, Vec<u8>) {
@@ -71,7 +64,6 @@ fn ids(n: usize, seed: u64) -> Vec<Identity> {
     (0..n).map(|_| Identity::generate(&mut rng)).collect()
 }
 
-/// A sealed mailbox `VAULT` of `ids` (ids[0] creates it), threshold 2.
 async fn open_mailbox(app: &Router, ids: &[Identity]) {
     let create = CreateMailbox {
         mailbox: VAULT,
@@ -112,7 +104,6 @@ async fn open_mailbox(app: &Router, ids: &[Identity]) {
     );
 }
 
-/// `n` chained entries of `VAULT` from index `from` on top of `head`, by `ids` in turn.
 fn chain(
     ids: &[Identity],
     from: u64,
@@ -137,7 +128,6 @@ async fn append(app: &Router, who: &Identity, entry: &LogEntry) -> (StatusCode, 
     signed(app, "/v1/log/append-labelled", who, req).await
 }
 
-/// A 2-of-3 mailbox with its first entry (by the creator).
 async fn seat_world(app: &Router, seed: u64) -> Vec<Identity> {
     let ids = ids(3, seed);
     open_mailbox(app, &ids).await;
@@ -159,12 +149,6 @@ fn reseed(ids: &[Identity], from: u64, entries: &[LogEntry], finish: bool) -> Re
     }
 }
 
-// --- 1. Seat-move approvals: deduplicated and capped before any signature is checked ------
-
-/// A member posts one approval 64 times (or more approvals than the vault has members): the
-/// relay verifies every copy inside its database lock today (`replace_in`). Honest clients
-/// send exactly t distinct approvals (replay refuses a repeated author), so the relay can
-/// refuse such a request before it checks anything.
 #[tokio::test]
 async fn seat_approvals_that_repeat_a_key_or_outnumber_the_members_are_refused() {
     let app = relay().router();
@@ -177,7 +161,6 @@ async fn seat_approvals_that_repeat_a_key_or_outnumber_the_members_are_refused()
         round: 0,
     };
     let by = |i: usize| (ids[i].public().sig_pk, a.sign(&ids[i]).unwrap());
-    // Two copies of one approval (fewer than the members) are refused as malformed.
     let twice = LabelledReplace {
         mailbox: VAULT,
         approval: a,
@@ -197,8 +180,6 @@ async fn seat_approvals_that_repeat_a_key_or_outnumber_the_members_are_refused()
         "64 copies of one approval are refused unread (today: each is verified under the lock)"
     );
 
-    // Two real approvals padded with strangers' (valid) signatures: more than the mailbox's
-    // three members.
     let strangers = self::ids(4, 3);
     let mut approvals = vec![by(0), by(2)];
     approvals.extend(
@@ -219,14 +200,8 @@ async fn seat_approvals_that_repeat_a_key_or_outnumber_the_members_are_refused()
     );
 }
 
-// --- 1b. Reseed: a per-request cap on the work done under the lock -------------------------
-
-/// What one reseed request may append (the proposed cap; clients continue from the `len`
-/// the relay answers, so a partial take is compatible).
 const RESEED_CAP: u64 = 512;
 
-/// A stranger restores a made-up vault in one request of thousands of tiny entries: the
-/// relay verifies, hashes and inserts every one while it holds the database lock.
 #[tokio::test]
 async fn a_reseed_takes_at_most_a_capped_batch_per_request() {
     let app = relay().router();
@@ -244,12 +219,6 @@ async fn a_reseed_takes_at_most_a_capped_batch_per_request() {
     );
 }
 
-// --- 1c. Appends count the whole log under the lock --------------------------------------
-
-/// `append_entry` (and reseed) find the log length with `SELECT COUNT(*)`, which walks every
-/// index entry of the mailbox, inside the lock, on every append, `Conflict` included. A
-/// stranger reseeds its own mailbox with ~2.7 M tiny entries (the 512 MiB log quota), then
-/// every request it sends holds the lock for that walk. The cost must not grow with the log.
 #[tokio::test]
 async fn an_append_does_not_cost_more_on_a_long_log() {
     async fn conflict_time(n: u64, seed: u64) -> Duration {
@@ -265,7 +234,6 @@ async fn an_append_does_not_cost_more_on_a_long_log() {
             assert_eq!(status, StatusCode::OK);
             from = decode_body::<ReseedResponse>(&body).unwrap().len;
         }
-        // A stale entry: the relay counts the log, then answers Conflict.
         let stale = &entries[0];
         let body = Signed::new(&ids[0], LabelledAppend::new(VAULT, stale, NOW).unwrap())
             .unwrap()
@@ -286,12 +254,6 @@ async fn an_append_does_not_cost_more_on_a_long_log() {
     );
 }
 
-// --- 2. Responses fit the client's read limit -------------------------------------------
-
-/// A dishonest member appends 70 entries of ~0.9 MB (well inside the 512 MiB log quota and
-/// the 1 MiB body limit): the relay answers one page of up to 500 of them, ~63 MB here, so
-/// every member that reads from before them gets `ResponseTooLarge` for good, and the relay
-/// builds the whole page in memory first.
 #[tokio::test]
 async fn a_log_page_fits_the_clients_read_limit() {
     let app = relay().router();
@@ -336,9 +298,6 @@ async fn a_log_page_fits_the_clients_read_limit() {
     );
 }
 
-/// The same through the inbox: 70 envelopes of ~0.9 MB to one member (inside the 256 MiB
-/// delivery quota) make its inbox unreadable for the 30 days they are kept; clients always
-/// read from cursor 0, so it can't ack them away either.
 #[tokio::test]
 async fn an_inbox_page_fits_the_clients_read_limit() {
     let app = relay().router();
@@ -380,8 +339,6 @@ async fn an_inbox_page_fits_the_clients_read_limit() {
     );
 }
 
-// --- 3. Pushes: a per-mailbox rate ------------------------------------------------------
-
 struct Recorder(Mutex<Vec<String>>);
 
 impl Notifier for Recorder {
@@ -390,12 +347,6 @@ impl Notifier for Recorder {
     }
 }
 
-/// One member's burst (20 envelopes and 20 log entries in the same second) sent 40 pushes
-/// to each other member's phone. FCM limits sends per target (`QUOTA_EXCEEDED`, "Sending
-/// limit exceeded for the message target"), so a member could spend another member's push
-/// allowance, e.g. while that phone's seat is being moved. Pushes share one collapse key and
-/// carry nothing, so the relay sends each token (one phone, all its vaults) at most one per
-/// window, plus one trailing push at the window's end when it held any back.
 #[tokio::test]
 async fn a_burst_of_activity_pushes_each_phone_once_per_window() {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -472,13 +423,6 @@ async fn a_burst_of_activity_pushes_each_phone_once_per_window() {
     assert_eq!(pushes(), 2, "nothing held back: no more pushes");
 }
 
-// --- 4. Charges: the requester, never the key that signed a relayed object --------------
-
-/// `/v1/seat/cancel` takes no request signature: anyone may post the old key's signed
-/// cancel, and every post charges the *old key's* rate (`limit_key(&old.sig_pk)`, before the
-/// "already cancelled" answer). The cancel is shown to every member and the pending key
-/// (`/v1/mailbox/info`), so the thief whose move was kept can replay it and lock the seat's
-/// owner out of the relay (429 on every request) while it tries again.
 #[tokio::test]
 async fn a_replayed_cancel_doesnt_spend_the_old_keys_rate() {
     let limits = Limits {
@@ -521,7 +465,6 @@ async fn a_replayed_cancel_doesnt_spend_the_old_keys_rate() {
         signature: cancel.sign(&ids[1]).unwrap(),
     })
     .unwrap();
-    // The owner keeps its seat; then someone else replays the same bytes.
     assert_eq!(
         call(&app, "/v1/seat/cancel", post.clone()).await.0,
         StatusCode::OK
@@ -541,12 +484,6 @@ async fn a_replayed_cancel_doesnt_spend_the_old_keys_rate() {
     );
 }
 
-// --- 5. Creator-only entry 0 ----------------------------------------------------------
-
-/// After the creator seals the setup, any member can append entry 0 first: its entry
-/// fixes the mailbox's vault id and takes index 0, so the creator's `Created` gets
-/// `OtherVault`/`Conflict`, the setup can't finish, and `/v1/mailbox/cancel` refuses
-/// (the log isn't empty): one member strands the setup and the creator's mailbox quota.
 #[tokio::test]
 async fn only_the_creator_appends_the_first_entry() {
     let app = relay().router();
@@ -562,12 +499,6 @@ async fn only_the_creator_appends_the_first_entry() {
     );
 }
 
-// --- Unbounded work in the hourly prune ---------------------------------------------------
-
-/// `prune` filters `deliveries` on `created_at`, which has no index and is stored after
-/// the envelope blob, so every hour it reads every stored envelope (overflow pages and all)
-/// while holding the database lock. Here 200 MB of fresh deliveries (nothing to prune):
-/// pruning must not cost like reading them all.
 #[tokio::test]
 async fn pruning_nothing_doesnt_read_every_delivery() {
     let dir = std::env::temp_dir().join(format!("zafe-relay-rule7-{}", std::process::id()));
@@ -612,18 +543,9 @@ async fn pruning_nothing_doesnt_read_every_delivery() {
     );
 }
 
-// --- Unbounded work in the per-recipient inbox cap ----------------------------------------
-
-/// `check_delivery_quotas` counted each recipient's undelivered envelopes by walking up to
-/// the per-recipient cap (10,000 hosted) index entries per recipient, inside the lock,
-/// so every broadcast into deep inboxes walked ~63 x depth entries (a refused one, nothing
-/// stored, could be sent again at once). It reads one counter row per recipient now: a
-/// broadcast into 64 inboxes holding ~6,200 envelopes each costs what one into empty ones
-/// does.
 #[tokio::test]
 async fn a_post_to_deep_inboxes_costs_no_more_than_one_to_empty_ones() {
     use zafe_relay::quota::Quotas;
-    /// Each of 63 senders' pair with an inbox: 100.
     const CAP: u64 = 100;
     async fn world(seed: u64) -> (Router, Vec<Identity>) {
         let quotas = Quotas {
@@ -666,12 +588,8 @@ async fn a_post_to_deep_inboxes_costs_no_more_than_one_to_empty_ones() {
     );
 }
 
-// --- 3b. FCM: bounded concurrency, failing tokens pruned ---------------------------------
-
 const TEST_KEY: &str = include_str!("fixtures/test-only-rsa.pem");
 
-/// A mock of Google's token endpoint and FCM that answers each send after `delay` with
-/// `answer`, and counts sends in flight (now and at most).
 async fn mock_fcm(
     delay: Duration,
     answer: (u16, serde_json::Value),
@@ -720,11 +638,8 @@ fn account(base: &str) -> zafe_relay::fcm::ServiceAccount {
     }
 }
 
-/// Every push is its own spawned task with no bound (`FcmNotifier::notify`), so a burst of
-/// activity across vaults opens as many connections to FCM at once.
 #[tokio::test]
 async fn pushes_in_flight_are_bounded() {
-    /// The proposed bound.
     const IN_FLIGHT: usize = 32;
     let ok = (
         200,
@@ -746,8 +661,6 @@ async fn pushes_in_flight_are_bounded() {
     assert!(most <= IN_FLIGHT, "{most} pushes in flight at once");
 }
 
-/// A token FCM says belongs to another sender (403 `SENDER_ID_MISMATCH`) never works for
-/// this relay, yet only `UNREGISTERED` is forgotten: every later activity sends to it again.
 #[tokio::test]
 async fn a_token_of_another_sender_is_forgotten() {
     let mismatch = (
@@ -776,10 +689,6 @@ async fn a_token_of_another_sender_is_forgotten() {
     assert_eq!(*gone.lock().unwrap(), vec!["other-project".to_owned()]);
 }
 
-/// FCM's `INVALID_ARGUMENT` is a gone token only when its `google.rpc.BadRequest` details
-/// name the token field ("An extension of type google.rpc.BadRequest is returned to specify
-/// which field was invalid", FCM v1 ErrorCode reference; "INVALID_ARGUMENT can also be
-/// returned in cases of issues in the message payload", FCM "Manage tokens").
 #[tokio::test]
 async fn an_invalid_token_is_forgotten_but_not_a_bad_payload() {
     let bad = |field: &str| {
@@ -819,11 +728,6 @@ async fn an_invalid_token_is_forgotten_but_not_a_bad_payload() {
     }
 }
 
-// --- NEW 6 (bytes): one sender can't fill the mailbox's delivery bytes for everyone ------
-
-/// The byte quota was per mailbox: one member's large envelopes (kept 30 days when the
-/// recipient never acks their kind) made every send in the vault 507. Each sender may use
-/// half of the bytes, so the others still deliver.
 #[tokio::test]
 async fn one_member_cant_fill_the_vaults_delivery_bytes() {
     use zafe_relay::quota::Quotas;
@@ -843,7 +747,6 @@ async fn one_member_cant_fill_the_vaults_delivery_bytes() {
     .to_bytes()
     .unwrap()
     .len() as u64;
-    // Exactly 30 such envelopes fill the vault's bytes.
     let relay = relay().with_quotas(Quotas {
         delivery_bytes: Some(30 * len),
         ..Quotas::none()
@@ -903,12 +806,6 @@ async fn one_member_cant_fill_the_vaults_delivery_bytes() {
     }
 }
 
-// --- 2b. A global storage cap -------------------------------------------------------------
-
-/// Quotas were per mailbox only and mailboxes are cheap (20 a day per IP), so one address
-/// could fill the disk the testnet and mainnet relays share. `Quotas::db_bytes` caps the
-/// database (`PRAGMA max_page_count`): a write past it is 507, and creations stop at 90% so
-/// existing vaults keep room.
 #[tokio::test]
 async fn the_database_has_a_global_cap() {
     use zafe_relay::quota::Quotas;
@@ -948,7 +845,6 @@ async fn the_database_has_a_global_cap() {
     let (status, body) = full.expect("8 MiB never filled");
     assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
     assert!(body.contains("relay is full"), "{body}");
-    // Reads still work.
     let read = InboxRead {
         mailbox: VAULT,
         after: 0,
@@ -958,7 +854,6 @@ async fn the_database_has_a_global_cap() {
         signed(&app, "/v1/inbox", &ids[1], read).await.0,
         StatusCode::OK
     );
-    // No new vault on a relay this full.
     let create = CreateMailbox {
         mailbox: [5; 16],
         join_token_hash: join_token_hash(&TOKEN),

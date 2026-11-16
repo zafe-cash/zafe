@@ -7,11 +7,8 @@ import '../../feedback/app_haptics.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_icon.dart';
 
-/// Height of [AppMobileTabBar] — Figma `Mobile Nav` (node 4394:88550):
-/// 56px items inside 4px padding.
 const double kMobileTabBarHeight = 64;
 
-/// One destination in the floating mobile tab bar.
 class AppMobileTabItem {
   const AppMobileTabItem({
     required this.iconName,
@@ -19,32 +16,13 @@ class AppMobileTabItem {
     this.badge = false,
   });
 
-  /// `AppIcons` name rendered at 28px.
   final String iconName;
 
-  /// Accessibility label; the bar itself is icon-only.
   final String label;
 
-  /// A dot on the icon: something on that tab waits for you.
   final bool badge;
 }
 
-/// Floating pill-shaped bottom tab bar — Figma `Mobile Nav`
-/// (node 4394:88550).
-///
-/// Shares the glass recipe of the desktop sidebar (17.5px backdrop blur
-/// over `macosUtility.navPanel`, thin hairline shadow ring). Items are
-/// equal-width; the active one is tinted with the nav panel active
-/// tokens. Figma gives the active item a slightly wider fixed width
-/// (100px vs flex) — equal widths keep the widget tree shape constant
-/// across selection changes and read the same at this size.
-///
-/// The resting states match the Figma frame exactly; only transitions
-/// move. One shared highlight pill slides between items (instead of
-/// fading out/in per item), the icon tint crossfades on the same curve,
-/// the newly active icon does a one-shot pop, and pressing an item
-/// scales its icon down with a light haptic. All of it collapses to
-/// instant switches under reduced motion.
 class AppMobileTabBar extends StatelessWidget {
   const AppMobileTabBar({
     required this.items,
@@ -61,11 +39,6 @@ class AppMobileTabBar extends StatelessWidget {
   static const _itemHeight = 56.0;
   static const _iconSize = 28.0;
 
-  /// Selection transition — shared by the sliding pill and the icon
-  /// tint so they read as one move. The curve is easeOutBack
-  /// (cubic(0.34, 1.56, 0.64, 1)) with its back overshoot halved by
-  /// lowering the second control point: ~5% past the target instead of
-  /// the stock ~10%, which read as too springy.
   static const selectDuration = Duration(milliseconds: 240);
   static const _selectCurve = Cubic(0.34, 1.40, 0.64, 1.0);
 
@@ -175,8 +148,6 @@ class _TabBarItem extends StatefulWidget {
 
 class _TabBarItemState extends State<_TabBarItem>
     with SingleTickerProviderStateMixin {
-  /// One-shot pop when this item becomes the active one — a small
-  /// bounce timed to land with the arriving pill.
   late final AnimationController _pop = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 250),
@@ -222,8 +193,6 @@ class _TabBarItemState extends State<_TabBarItem>
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    // Inactive items use the muted decorative tint per the Figma nav
-    // (grey, not the max-contrast accent).
     final iconColor = widget.active
         ? colors.navPanel.activeIcon
         : colors.icon.muted;
@@ -264,7 +233,6 @@ class _TabBarItemState extends State<_TabBarItem>
                         widget.item.iconName,
                         size: AppMobileTabBar._iconSize,
                         color: color ?? iconColor,
-                        // Patina: solid for the current tab, two-tone otherwise.
                         active: widget.active,
                       ),
                       Positioned(

@@ -1,23 +1,8 @@
-"""Shared toolkit for Zafe's illustrations (original work; see docs/illustrations.md).
-
-Style: ink-engraving line art with hatch and stipple texture, a muted neutral stone
-palette, verdigris brand accents and Zcash-gold highlights. Every scene is a function
-`scene(p) -> str` that takes one of PALETTES and returns a complete SVG document.
-
-Texture fills (`fill="url(#hatch)"`, `hatch2`, `dots`, `fine`, `grit`) are written like
-SVG patterns for readability, but `svg()` bakes them into clipped geometry because
-flutter_svg renders <pattern> fills wrongly (vertical stripes over the whole shape).
-Path elements using a texture need a `bb="x0 y0 x1 y1"` bounding box attribute.
-"""
 import math
 import random
 import re
 
 PALETTES = {
-    # "Verdigris" (docs/brand.md §3): values follow app/lib/src/core/theme (neutral
-    # ladder tinted ~1% toward hue 188, verdigris brand, Zcash gold kept for keys and
-    # coins). sky1 = background.window, exactly. Light mode uses the deep verdigris
-    # family (#00736C) for contrast on pale grounds.
     "dark": dict(
         sky0="#111515", sky1="#080B0B", stone="#1E2323", stone2="#272E2D",
         stone3="#161B1B", light="#4E5857", hi="#737F7D", ink="#020404",
@@ -44,7 +29,6 @@ def pts(points):
 
 
 def line_d(points):
-    """Path data for an open polyline (flutter_svg ignores <polyline>/<line>; use <path>)."""
     return "M" + "L".join(f"{f(x)} {f(y)}" for x, y in points)
 
 
@@ -111,7 +95,6 @@ def _texture(kind, box, ink, rnd):
 
 
 def detexture(body, ink):
-    """flutter_svg renders <pattern> fills unreliably, so bake every texture into clipped geometry."""
     rnd = random.Random(1234)
     _tex_n[0] = 0
 
@@ -140,10 +123,6 @@ def svg(w, h, body, ink='#000'):
 
 
 def stone_wall(p, rnd, x0, y0, x1, y1, row_h=62, blk=(120, 210), stroke=3, hole=None):
-    """Irregular ashlar courses: ink outlines, shadow bands, highlights and cracks, merged per layer.
-
-    `hole` = (cx, cy, r) skips stones hidden behind a round object.
-    """
     fills = {k: [] for k in ("stone", "stone2", "stone3")}
     shade, hil, cracks = [], [], []
     y = y0
@@ -189,11 +168,6 @@ def coin(p, cx, cy, rx, ry, rot=0):
 
 
 def dial(p, cx, cy, r, ticks=60, major=5, color=None, width=2.5, op=".5", rings=(0, 34)):
-    """The vault-dial motif (as on the home screen): concentric rings with tick marks.
-
-    Rings at `r - k` for k in `rings`; minor ticks every 360/ticks degrees, a long one every
-    `major` ticks. One <path> for the ticks, so it stays cheap.
-    """
     c = color or (p["hi"] if p["dark"] else p["ink"])
     out = [f'<g fill="none" stroke="{c}" opacity="{op}">']
     for k in rings:
@@ -209,10 +183,6 @@ def dial(p, cx, cy, r, ticks=60, major=5, color=None, width=2.5, op=".5", rings=
 
 
 def key(p, x, y, s=1.0, rot=0, gem=True, ghost=False):
-    """A small gold key (a member's key share): bow on the left at (x, y), pointing right.
-
-    `ghost` draws only a dashed outline (True: neutral, or a colour string).
-    """
     ink = p["ink"]
     if ghost:
         fill, extra, sw = "none", ' stroke-dasharray="7 9"', 3
@@ -235,7 +205,6 @@ def key(p, x, y, s=1.0, rot=0, gem=True, ghost=False):
 
 
 def sparks(p, rnd, n, x0, y0, x1, y1, lo=4, hi_=10, color=None, avoid=None):
-    """Four-point gold glints, merged into one path. `avoid` = (cx, cy, r) keeps an area clear."""
     d = []
     while n > 0:
         x, y = rnd.uniform(x0, x1), rnd.uniform(y0, y1)

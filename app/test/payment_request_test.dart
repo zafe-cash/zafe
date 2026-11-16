@@ -33,7 +33,6 @@ const _grants = PayFromVault(
   members: 5,
 );
 
-/// The view with its state held by the test.
 class _Harness extends StatefulWidget {
   const _Harness({
     required this.vaults,
@@ -69,7 +68,6 @@ class _HarnessState extends State<_Harness> {
 }
 
 Future<void> _pump(WidgetTester tester, Widget child) async {
-  // The test font (Ahem) is wider than the app's, so give it room.
   tester.view.physicalSize = const Size(900, 2400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -122,7 +120,6 @@ void main() {
     await tester.pump();
     expect(paidFrom, isNull, reason: 'not before the owner confirms');
 
-    // Only the chosen vault is on the page; the others are behind "Change".
     expect(find.text('Grants'), findsNothing);
     await tester.tap(find.text('Change'));
     await tester.pumpAndSettle();
@@ -153,7 +150,6 @@ void main() {
     expect(_text('Name in the link (not verified)'), findsOneWidget);
     expect(_text('"Coffee shop"'), findsOneWidget);
     expect(_text('Message in the link (not verified)'), findsOneWidget);
-    // One vault: shown, nothing to change.
     expect(find.text('Treasury'), findsOneWidget);
     expect(find.bySemanticsLabel('Change vault'), findsNothing);
   });
@@ -181,7 +177,6 @@ void main() {
         requestedZat: z(125000000),
         recipients: 1,
         spendableZat: need - z(1),
-        // A larger total doesn't help: part of it is held or unconfirmed.
         totalZat: need * z(2),
       );
       expect(short.check, FundsCheck.short);
@@ -234,7 +229,6 @@ void main() {
       tester,
       _Harness(vaults: [_treasury, poor], onContinue: (id) => paidFrom = id),
     );
-    // The page shows the chosen vault only; the sheet marks the one that's short.
     expect(_text('Not enough funds'), findsNothing);
     await tester.tap(find.text('Change'));
     await tester.pumpAndSettle();

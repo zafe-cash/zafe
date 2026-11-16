@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- background.window (light); the dark value is in values-night. -->
     <color name="zafe_window">#F1F5F5</color>
-    <!-- Adaptive icon background: the deep verdigris tile (scripts/brand/brand.py TILE). -->
     <color name="zafe_icon_tile">#004A46</color>
-    <!-- Notification accent (the light-mode brand accent; readable on both shades). -->
     <color name="zafe_notification">#00736C</color>
 </resources>

@@ -12,8 +12,6 @@ import '../../providers/vault_provider.dart';
 import 'vault_actions.dart';
 import 'vault_switcher_sheet.dart';
 
-/// Every vault on this phone: the open one, then the others; each row's ⋯ holds that
-/// vault's actions (rename, back up, viewing key, how it's protected, remove).
 class ManageVaultsScreen extends ConsumerWidget {
   const ManageVaultsScreen({super.key});
 

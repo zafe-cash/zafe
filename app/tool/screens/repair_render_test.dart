@@ -1,10 +1,3 @@
-// Renders the lost-phone flow without a device: the new phone's recovery screen (waiting,
-// repairing, checking the vault), a co-signer's safety-code check, and the Signers tab's
-// pending move and key-rebuild cards, in both themes. Not part of `flutter test`; run it explicitly (from app/):
-//
-//   flutter test tool/screens/repair_render_test.dart
-//
-// Output (SCREEN_PREVIEW_OUT, default build/screen_preview/): repair_<state>_<theme>.png.
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -220,8 +213,7 @@ void main() {
         });
         final path = '${out.path}/repair_${name}_$theme.png';
         File(path).writeAsBytesSync(bytes!);
-        // ignore: avoid_print
-        print(path);
+        stdout.writeln(path);
       }
     }
   });

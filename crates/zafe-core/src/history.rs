@@ -1,7 +1,3 @@
-//! Vault history as CSV (spec §11.3), built on the device from the vault log (payments
-//! the vault sent) and the wallet database (payments it received). Nothing is sent to a
-//! server.
-
 use std::collections::BTreeMap;
 
 use crate::{
@@ -15,35 +11,21 @@ pub enum Direction {
     Sent,
 }
 
-/// One CSV row: a received transaction, or one payment of a sent proposal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HistoryRow {
-    /// Unix seconds: the mining block's time when known, else the proposer's clock (sent)
-    /// or unknown (unmined receipts).
     pub date: Option<u64>,
-    /// Display order (byte-reversed hex), like block explorers.
     pub txid: String,
     pub direction: Direction,
-    /// Recipient address for sent payments; empty for receipts (a shielded sender is
-    /// unknowable).
     pub counterparty: String,
-    /// Contact name for the counterparty (no address book yet: always empty).
     pub contact: String,
-    /// Positive for received, negative for sent.
     pub amount_zat: i128,
-    /// The transaction fee, on the first row of a sent transaction only.
     pub fee_zat: Option<u64>,
     pub memo: String,
-    /// Hex proposal id (sent only).
     pub proposal: String,
-    /// The proposer (sent only): hex signing key, or "Name (hex)" when this device named
-    /// that signer.
     pub proposer: String,
-    /// The approvers (sent only), each like `proposer`.
     pub approvers: Vec<String>,
 }
 
-/// ZIP 317 fee of a transaction with `actions` Ironwood actions (what members enforce).
 fn zip317_fee(actions: usize) -> u64 {
     5_000 * actions.max(2) as u64
 }
@@ -54,7 +36,6 @@ fn display_txid(txid: &[u8; 32]) -> String {
     hex::encode(t)
 }
 
-/// "Name (hex)" when `names` (signing key hex → local name) has a name, else the hex.
 fn member_label(key: &[u8; 32], names: &BTreeMap<String, String>) -> String {
     let hex = hex::encode(key);
     match names.get(&hex).map(|n| n.trim()) {
@@ -63,9 +44,6 @@ fn member_label(key: &[u8; 32], names: &BTreeMap<String, String>) -> String {
     }
 }
 
-/// Rows for every proposal the vault broadcast, one per payment. `mined_time` gives the
-/// mining block's time for a txid (protocol byte order) when the wallet has it; `names`
-/// are this device's local signer names (signing key hex → name).
 pub fn sent_rows(
     state: &VaultState,
     names: &BTreeMap<String, String>,
@@ -96,7 +74,6 @@ pub fn sent_rows(
     rows
 }
 
-/// Rows for received payments (from `VaultWallet::received_payments`).
 pub fn received_rows(received: &[ReceivedPayment]) -> Vec<HistoryRow> {
     received
         .iter()
@@ -119,7 +96,6 @@ pub fn received_rows(received: &[ReceivedPayment]) -> Vec<HistoryRow> {
 pub const CSV_HEADER: &str =
     "date,txid,direction,counterparty,contact,amount_zec,fee_zec,memo,proposal_id,proposer,approvers";
 
-/// The CSV text: a header, then rows oldest first (undated rows last), RFC 4180 quoting.
 pub fn to_csv(mut rows: Vec<HistoryRow>) -> String {
     rows.sort_by_key(|r| (r.date.is_none(), r.date));
     let mut out = String::from(CSV_HEADER);
@@ -148,16 +124,12 @@ pub fn to_csv(mut rows: Vec<HistoryRow>) -> String {
     out
 }
 
-/// "-1.50000000": exact decimal ZEC (8 places), so spreadsheets don't round.
 fn zec(zat: i128) -> String {
     let sign = if zat < 0 { "-" } else { "" };
     let abs = zat.unsigned_abs();
     format!("{sign}{}.{:08}", abs / 100_000_000, abs % 100_000_000)
 }
 
-/// Quotes a field when it holds a comma, quote or line break. A leading `=`, `+`, `-` or
-/// `@` in text (not our numbers) is prefixed with `'` so spreadsheets don't run it as a
-/// formula: memos are written by other people.
 fn quote(field: &str) -> String {
     let is_number = field.parse::<f64>().is_ok();
     let field = if !is_number && field.starts_with(['=', '+', '-', '@']) {
@@ -172,11 +144,9 @@ fn quote(field: &str) -> String {
     }
 }
 
-/// "2026-09-30T16:11:05Z" (UTC).
 fn iso8601(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
-    // Civil from days (Howard Hinnant's algorithm).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -256,7 +226,6 @@ mod tests {
         ]);
         let lines: Vec<&str> = csv.split("\r\n").collect();
         assert_eq!(lines[0], CSV_HEADER);
-        // Oldest first, undated last.
         assert!(lines[1].starts_with("1970-01-01T00:00:05Z,ab,received,,,0.00000001,,plain"));
         assert!(lines[2].contains(",-0.00000005,,\"'=HYPERLINK(\"\"x\"\")\","));
         assert!(csv.contains(",0.00000007,,\"a, \"\"b\"\"\nc\","));

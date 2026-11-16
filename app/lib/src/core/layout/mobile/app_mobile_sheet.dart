@@ -14,30 +14,6 @@ import '../app_column.dart';
 import 'mobile_modal_corners.dart';
 import 'prepared_modal_sheet_route.dart';
 
-/// Shows a mobile modal as a floating card — the Figma modal base
-/// (`_Modal Type`, e.g. 4600:50437). It still rises from the bottom, but
-/// the designer reworked the base so the card is inset from the screen
-/// sides, lifted off the bottom, and rounded on all four corners:
-///
-/// - 16px side margins ([AppSpacing.sm]) — card x=16, width=361 on the
-///   393-wide artboard.
-/// - 16px bottom gap ([AppSpacing.sm]) to match the side margins. On iOS
-///   this gap includes the home-indicator clearance without adding the
-///   bottom safe-area inset. Android adds its device-dependent navigation
-///   inset to the same visual gap.
-/// - iOS continuous corners: fixed 32 at the top; at least 32 at the bottom,
-///   adapted to the display when native geometry is available. Other hosts
-///   keep the all-corner radius of [AppRadii.xLarge] (radii/L = 32) on a
-///   `background.base` surface with the Figma shadow overlay.
-/// - When the software keyboard is open the card floats 16px above it
-///   (Figma `Review Add Memo`, 4638:74505), so text-entry modals like the
-///   send memo no longer need a separate top-pinned presentation.
-///
-/// This is the mobile counterpart of the desktop pane modal overlay —
-/// account switching, pickers, and confirmations present as sheets on
-/// mobile. Content widgets supply only their own internal padding; the
-/// outer margins, bottom safe area, keyboard avoidance, and card surface
-/// all live here.
 Future<T?> showAppMobileSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -92,15 +68,9 @@ Future<T?> showAppMobileSheet<T>({
     enableDrag: enableDrag,
     isScrollControlled: true,
     useSafeArea: true,
-    // Root navigator so the sheet and its scrim cover the floating tab
-    // bar (the shell's bottomNavigationBar sits outside the branch
-    // navigators) — the Figma modals always overlay the nav.
     useRootNavigator: true,
-    // The card draws its own surface, radius and shadow, so the sheet
-    // itself is transparent with no default elevation shadow or shape.
     backgroundColor: const Color(0x00000000),
     elevation: 0,
-    // As wide as a page's column in a wide window.
     constraints: const BoxConstraints(maxWidth: kMaxContentWidth),
     barrierColor: colors.background.neutralScrim,
     builder: (sheetContext) => wrapSheet(
@@ -114,16 +84,6 @@ Future<T?> showAppMobileSheet<T>({
   );
 }
 
-/// The floating-card frame for mobile modals: side margins, the
-/// keyboard/safe-area-aware bottom gap, and (unless [transparentBackground])
-/// the rounded base surface with the modal shadow.
-///
-/// [showAppMobileSheet] wraps every sheet body in this. It is also reused
-/// by the swap modal route (a custom multi-surface dialog), which
-/// bottom-anchors it inside its own page — so the swap modals share the
-/// exact base chrome. When used outside a bottom sheet, place it at the
-/// bottom of a full-height column with `crossAxisAlignment.stretch` so it
-/// fills the width and hugs its content height.
 class MobileModalCard extends StatelessWidget {
   const MobileModalCard({
     required this.child,
@@ -135,36 +95,22 @@ class MobileModalCard extends StatelessWidget {
 
   final Widget child;
 
-  /// For content that is already its own card (e.g. the birthday calendar
-  /// panel): only the outer margins are applied, not the base surface.
   final bool transparentBackground;
 
-  /// Centered dialogs own their outer insets and pass [EdgeInsets.zero].
-  /// Bottom sheets retain the default side and safe-area-aware bottom gaps.
   final EdgeInsets? margin;
 
-  /// Only bottom-anchored sheets adapt to the display. Centered dialogs still
-  /// use iOS continuous corners, with the original fixed radius.
   final bool followsScreenCorners;
 
-  /// Default bottom clearance shared by the card and content that sizes
-  /// itself to the space above it. Explicit [margin] overrides this gap.
   static double bottomGapFor(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
     final keyboardInset = mediaQuery.viewInsets.bottom;
 
     final double bottomGap;
     if (keyboardInset > 0) {
-      // Figma `Review Add Memo` (4638:74505): 16px between the card and
-      // the software keyboard.
       bottomGap = keyboardInset + AppSpacing.sm;
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-      // The home indicator floats inside the 16px gap; do not stack the
-      // safe-area inset on top of it.
       bottomGap = AppSpacing.sm;
     } else {
-      // Android nav bars vary per device and occupy real space — keep the
-      // 16px visual gap above whatever inset the device reports.
       bottomGap = AppSpacing.sm + mediaQuery.viewPadding.bottom;
     }
     return bottomGap;
@@ -202,9 +148,6 @@ class MobileModalCard extends StatelessWidget {
           )
         : surface(const BorderRadius.all(Radius.circular(AppRadii.xLarge)));
 
-    // The card carries the Figma 16px side margins. Transparent content
-    // is already its own card and owns its horizontal sizing, so only the
-    // bottom gap applies there.
     final double sideMargin = transparentBackground ? 0 : AppSpacing.sm;
     return Padding(
       padding:
@@ -219,13 +162,6 @@ class MobileModalCard extends StatelessWidget {
   }
 }
 
-/// Shared inline presentation for deterministic previews and full-screen
-/// routes that need the standard floating mobile modal without pushing a
-/// second route.
-///
-/// The scrim, bottom anchoring, side inset, safe-area gap, surface, radius and
-/// shadow stay owned by the same primitives as [showAppMobileSheet]. Callers
-/// provide only the obscured [background] and modal [child].
 class MobileModalOverlay extends StatelessWidget {
   const MobileModalOverlay({
     required this.background,
@@ -252,8 +188,6 @@ class MobileModalOverlay extends StatelessWidget {
   }
 }
 
-/// Figma `Shadow Overlay` inner shadow (#FFFFFF26, blur radius 2) — a
-/// soft rim that separates the card from the scrim without a hard stroke.
 class _ModalInnerHighlightPainter extends CustomPainter {
   const _ModalInnerHighlightPainter(this.shape);
 
@@ -275,30 +209,12 @@ class _ModalInnerHighlightPainter extends CustomPainter {
       oldDelegate.shape != shape;
 }
 
-/// Figma `Shadow Overlay` — a soft, mostly-downward elevation behind the
-/// modal card. The black layers are subtle over the dark scrim; the card
-/// surface and the rim highlight do most of the visual separation.
 const List<BoxShadow> _modalShadow = [
   BoxShadow(color: Color(0x14000000), offset: Offset(0, 14), blurRadius: 28),
   BoxShadow(color: Color(0x08000000), offset: Offset(0, -6), blurRadius: 12),
   BoxShadow(color: Color(0x0F000000), offset: Offset(0, 2), blurRadius: 8),
 ];
 
-/// The shared `_Modal Type` content layout (Figma 4697:102962) for sheets
-/// shown inside a [MobileModalCard]: the common header (title top-left, a
-/// 32×32 circular close pinned top-right) plus the standard content padding,
-/// so every mobile modal lines its title, close button and body up the same
-/// way.
-///
-/// - Padding: top 32 ([AppSpacing.base]) / bottom 24 ([AppSpacing.md]) /
-///   horizontal 16 ([AppSpacing.sm]); a 16px gap between the title line and
-///   the body. The body ([child]) owns its own internal spacing.
-/// - Title: Body L SemiBold in `text.accent`, kept clear of the close button.
-///   Title-less sheets set [showTitle] to false and keep the same outer
-///   padding + pinned close button without reserving the title row.
-/// - Close: absolutely pinned to the top-right (right 16, top 15.5) so it sits
-///   above the title line, exactly as the Figma component does — not vertically
-///   centered in the title row.
 class MobileModalScaffold extends StatelessWidget {
   const MobileModalScaffold({
     required this.title,
@@ -319,7 +235,6 @@ class MobileModalScaffold extends StatelessWidget {
   final VoidCallback onClose;
   final Widget child;
 
-  /// Keeps a scrollable body within the height left below the fixed header.
   final bool constrainBody;
   final Widget? leading;
   final TextStyle? titleStyle;
@@ -327,14 +242,8 @@ class MobileModalScaffold extends StatelessWidget {
   final bool showTitle;
   final bool showClose;
 
-  /// Gap between the title and the body. Defaults to 16; the asset picker
-  /// (whose body is a fixed-height scrolling list filling to the card edge)
-  /// passes 8 to match its `_Modal Type` variant. Ignored when [showTitle] is
-  /// false.
   final double bodyGap;
 
-  /// Bottom inset below the body. Defaults to 24; the asset picker passes 0 so
-  /// its list fills to the card edge.
   final double bottomPadding;
 
   @override
@@ -357,8 +266,6 @@ class MobileModalScaffold extends StatelessWidget {
                 ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 26),
                   child: Padding(
-                    // Clear the absolute 32px close (+ an 8px gap) so long
-                    // titles wrap/ellipsize instead of sliding under it.
                     padding: const EdgeInsets.only(right: 40),
                     child: Row(
                       children: [
@@ -385,8 +292,6 @@ class MobileModalScaffold extends StatelessWidget {
                 ),
                 SizedBox(height: bodyGap),
               ],
-              // A body that doesn't scroll by itself scrolls once the sheet runs out
-              // of height (a short window: landscape, a flip phone's cover screen).
               Flexible(
                 child: constrainBody
                     ? child
@@ -406,10 +311,6 @@ class MobileModalScaffold extends StatelessWidget {
   }
 }
 
-/// The pinned modal close — a 32×32 secondary-surface circle that picks up the
-/// desktop hover tint (`button.secondary.bgHover`) on pointer devices. Mobile
-/// is touch-only, but the form factor previews on desktop / Widgetbook, so the
-/// hover state matches the desktop modals.
 class _ModalCloseButton extends StatefulWidget {
   const _ModalCloseButton({required this.onTap});
 
@@ -427,8 +328,6 @@ class _ModalCloseButtonState extends State<_ModalCloseButton> {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final secondary = colors.button.secondary;
-    // Fill priority pressed > hover > default — mirrors AppButton, so a tap
-    // (touch) shows the pressed tint even with no pointer hover.
     final fill = _pressed
         ? secondary.bgPressed
         : _hovered

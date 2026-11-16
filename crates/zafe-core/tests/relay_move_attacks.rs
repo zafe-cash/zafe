@@ -1,8 +1,3 @@
-//! Relay moves against a dishonest member (security review 2026-11, findings C and D).
-//! Each test fails on the code at 6ce79d6 and states the outcome a fix must give.
-
-#![allow(dead_code, unused_imports)]
-
 use std::{
     path::PathBuf,
     sync::{
@@ -15,18 +10,17 @@ use std::{
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::{
     log_cache::LogCache,
-    moves::{MoveLink, MoveMessage, MoveTarget},
+    moves::{MoveLink, MoveMessage},
     node::{
-        self, create_vault, followed_relay_in, install_log_copy, join_vault, load_state,
-        run_keygen, seal, set_name, Invite, KeygenOptions, MoveStatus, NodeError, VaultMaterial,
+        self, create_vault, followed_relay_in, join_vault, load_state, run_keygen, seal, set_name,
+        Invite, KeygenOptions, MoveStatus, NodeError, VaultMaterial,
     },
     relay_client::RelayClient,
-    wallet::regtest_network,
 };
 use zafe_proto::{Envelope, Identity, Kind, MailboxId};
 use zcash_protocol::memo::MemoBytes;
 
-mod common;
+pub mod common;
 use common::{
     build_pczt, nu6_3_network, receive_ironwood_note,
     relay_vault::{member_dir, safety_words, setup_key},
@@ -38,7 +32,6 @@ async fn serve(relay: Relay) -> String {
     serve_counting(relay).await.0
 }
 
-/// A relay and the number of requests it has answered.
 async fn serve_counting(relay: Relay) -> (String, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -61,7 +54,6 @@ async fn serve_counting(relay: Relay) -> (String, Arc<AtomicUsize>) {
 
 struct World {
     dir: tempfile::TempDir,
-    /// The relay the vault was made on.
     old: String,
     ids: Vec<Identity>,
     material: Vec<VaultMaterial>,
@@ -72,7 +64,6 @@ impl World {
         self.dir.path().join(format!("copy-{i}"))
     }
 
-    /// Member `i`'s client for `url`, with its own copy of the log.
     fn client(&self, i: usize, url: &str) -> RelayClient {
         RelayClient::new(url).with_log_cache(Some(LogCache::in_dir(self.cache_dir(i))))
     }
@@ -81,8 +72,6 @@ impl World {
         self.client(i, &self.old)
     }
 
-    /// Member `i`'s material as its app would hold it: following the new relay once this
-    /// phone verified the switch.
     fn material(&self, i: usize) -> VaultMaterial {
         let mut m = self.material[i].clone();
         if let Some(relay) = followed_relay_in(&self.cache_dir(i), &m) {
@@ -91,7 +80,6 @@ impl World {
         m
     }
 
-    /// Member `i`'s client for wherever its vault lives now.
     fn here(&self, i: usize) -> RelayClient {
         let m = self.material(i);
         self.client(i, m.relay.url.as_deref().unwrap_or(&self.old))
@@ -105,7 +93,6 @@ impl World {
             .len()
     }
 
-    /// The old relay's log length, read as a new phone would (no copy, no move state).
     async fn old_len(&self) -> u64 {
         let bare = RelayClient::new(&self.old).with_log_cache(None);
         load_state(&bare, &self.ids[1], &self.material[1])
@@ -133,8 +120,6 @@ impl World {
         .await
     }
 
-    /// Every member's app writes the current event version once (as each app does on its
-    /// first refresh after an update).
     async fn announce_all(&self) {
         for i in 0..self.ids.len() {
             self.announce(i).await;
@@ -180,17 +165,6 @@ impl World {
         .await
     }
 
-    async fn progress(&self, i: usize) -> Option<MoveStatus> {
-        node::move_progress(
-            &self.old(i),
-            &self.ids[i],
-            &self.material(i),
-            &mut StdRng::seed_from_u64(600 + i as u64),
-        )
-        .await
-        .unwrap()
-    }
-
     async fn notice(&self, i: usize) -> Result<Option<node::MoveNotice>, NodeError> {
         node::move_notice(&self.old(i), &self.ids[i], &self.material[i]).await
     }
@@ -204,13 +178,10 @@ fn opts(creator: bool) -> KeygenOptions {
     }
 }
 
-/// `n` members make a `t`-of-`n` vault on a fresh relay; every member loads the log once
-/// (so each phone holds a copy).
 async fn world(t: u16, n: u16, seed: u64) -> World {
     world_on(t, n, seed, serve(Relay::new()).await).await
 }
 
-/// [`world`] on the relay at `old`.
 async fn world_on(t: u16, n: u16, seed: u64, old: String) -> World {
     let dir = tempfile::tempdir().unwrap();
     let relay = RelayClient::new(&old).with_log_cache(None);
@@ -264,15 +235,6 @@ async fn world_on(t: u16, n: u16, seed: u64, old: String) -> World {
     w
 }
 
-/// T1, finding C. 2-of-4, so m = max(t, n - t + 1) = 3 members must move. Mallory starts
-/// a move to her relay; Bob taps Move, then changes his mind and cancels; Carol taps Move.
-/// Only Mallory and Carol still want the move (2 < 3). Mallory's relay withholds Bob's
-/// cancel from Carol, so today Carol's phone counts Bob's withdrawn arrival and switches,
-/// and Bob's next write follows the switch to Mallory's relay without a new tap
-/// (`own_move_target` skips `cancelled` once a moved notice was seen).
-///
-/// Wanted: Bob's cancel also reaches Carol on the old relay, so Carol doesn't switch; and a
-/// phone that withdrew its arrival is never moved without a fresh tap.
 #[tokio::test]
 async fn a_withdrawn_arrival_never_moves_its_phone() {
     let w = world(2, 4, 21).await;
@@ -289,7 +251,6 @@ async fn a_withdrawn_arrival_never_moves_its_phone() {
     .await
     .unwrap();
 
-    // Mallory's relay withholds Bob's cancel from Carol.
     withhold(
         &new,
         &w.ids[2],
@@ -317,10 +278,6 @@ async fn a_withdrawn_arrival_never_moves_its_phone() {
     );
 }
 
-/// T2, finding C with both relays withholding Bob's cancel from Carol (or the old relay
-/// down): Carol may switch, since she can't know. Bob's phone must then stop writing
-/// (`VaultMoved`: "Move to continue"), never follow on its own and never write to the old
-/// relay; his tap follows.
 #[tokio::test]
 async fn a_withdrawn_phone_stops_and_follows_only_on_a_tap() {
     let w = world(2, 4, 22).await;
@@ -368,16 +325,11 @@ async fn a_withdrawn_phone_stops_and_follows_only_on_a_tap() {
         old_len,
         "nothing written to the old relay"
     );
-    // His tap follows the switch.
     assert!(w.follow(1, &started.link).await.unwrap().switched);
     w.name(1, "Bob").await.unwrap();
     assert_eq!(w.here(1).base_url(), new);
 }
 
-/// T3a. The mover cancels and the new relay withholds the cancel from Carol. The mover's
-/// cancel is on the old relay too, so Carol must not switch with the mover's withdrawn
-/// arrival. (`relay_move.rs::a_cancel_withheld_from_one_phone_still_leaves_one_history`
-/// asserts today's opposite and must change with the fix.)
 #[tokio::test]
 async fn a_movers_cancel_on_the_old_relay_stops_the_switch() {
     let w = world(2, 3, 23).await;
@@ -407,9 +359,6 @@ async fn a_movers_cancel_on_the_old_relay_stops_the_switch() {
     );
 }
 
-/// T3b. The mover cancels and both relays withhold the cancel from Carol, who switches.
-/// The mover's phone (cancelled) must stop with `VaultMoved` on its next write, not follow
-/// on its own; its tap follows.
 #[tokio::test]
 async fn a_mover_that_cancelled_follows_only_on_a_tap() {
     let w = world(2, 3, 24).await;
@@ -456,14 +405,6 @@ async fn a_mover_that_cancelled_follows_only_on_a_tap() {
     assert_eq!(w.here(0).base_url(), new);
 }
 
-/// T4a, finding C (who is the mover). 2-of-4 (m = 3). Alice moves and Bob taps. The new
-/// relay serves Bob's arrival to Dave and Carol before Alice's (Alice moved first). Alice
-/// then cancels. Today the mover is whoever's arrival comes first, so Dave and Carol take
-/// Bob for the mover, Alice's cancel only withdraws her arrival, and Bob + Dave + Carol
-/// switch to the relay Alice chose and called off.
-///
-/// Wanted: the mover is named by the signed target; the mover's cancel ends the move
-/// whatever order the relay serves arrivals in.
 #[tokio::test]
 async fn the_movers_cancel_ends_the_move_whatever_the_arrival_order() {
     let w = world(2, 4, 25).await;
@@ -471,7 +412,6 @@ async fn the_movers_cancel_ends_the_move_whatever_the_arrival_order() {
     let new = serve(Relay::new()).await;
     let started = w.move_to(0, &new).await.unwrap();
     assert!(!w.follow(1, &started.link).await.unwrap().switched);
-    // Alice's arrival now comes after Bob's in Carol's and Dave's inboxes.
     let label = started.target.label;
     let alice = Some(w.ids[0].public().sig_pk);
     let arrival = MoveMessage::Arrival {
@@ -505,13 +445,6 @@ async fn the_movers_cancel_ends_the_move_whatever_the_arrival_order() {
     );
 }
 
-/// T4b, finding C (who is the mover, on the old relay). Mallory sends Bob a move notice
-/// for Alice's move naming herself the mover, and then a cancel. Today the first notice
-/// for a target decides the mover, so if Mallory's arrives first, her cancel hides the
-/// move from Bob.
-///
-/// Wanted: a notice counts only from the mover the signed target names; Bob still sees
-/// Alice's move.
 #[tokio::test]
 async fn a_member_cant_claim_another_members_move() {
     let w = world(2, 3, 26).await;
@@ -520,7 +453,6 @@ async fn a_member_cant_claim_another_members_move() {
     let started = w.move_to(0, &new).await.unwrap();
     let label = w.material[0].label();
     let alice = Some(w.ids[0].public().sig_pk);
-    // Mallory's notice reaches Bob first (Alice's arrives later, e.g. her retry).
     assert_eq!(
         withhold(&w.old, &w.ids[1], label, Kind::MoveNotice, alice).await,
         1
@@ -578,7 +510,6 @@ async fn a_member_cant_claim_another_members_move() {
     );
 }
 
-/// T5a. A phone that cancelled its arrival can't arrive again in the same move.
 #[tokio::test]
 async fn a_cancelled_phone_cant_arrive_again() {
     let w = world(2, 4, 27).await;
@@ -601,10 +532,6 @@ async fn a_cancelled_phone_cant_arrive_again() {
     );
 }
 
-/// T5b. 2-of-4 (m = 3). Bob arrives, then cancels. The new relay serves Carol his arrival
-/// after his cancel. Today the later arrival counts again, and Alice + Bob + Carol switch.
-///
-/// Wanted: an arrival from a member who cancelled that move never counts, whatever order.
 #[tokio::test]
 async fn an_arrival_served_after_its_cancel_doesnt_count() {
     let w = world(2, 4, 28).await;
@@ -640,12 +567,6 @@ async fn an_arrival_served_after_its_cancel_doesnt_count() {
     );
 }
 
-/// T6, rule 6 (R6b). Bob arrived (2-of-5: no switch yet) and the new relay goes down.
-/// Today his write goes to the old relay anyway, which forks the history he must follow
-/// from if the vault switched meanwhile.
-///
-/// Wanted: the write is refused (he can't tell where the vault lives), nothing reaches
-/// the old relay; after he cancels his move, writes go to the old relay again.
 #[tokio::test]
 async fn an_arrived_phone_doesnt_write_while_its_new_relay_is_down() {
     let w = world(2, 5, 29).await;
@@ -676,11 +597,6 @@ async fn an_arrived_phone_doesnt_write_while_its_new_relay_is_down() {
     );
 }
 
-/// T7, rule 6 (R6a). The current relay's inbox can't be read (move notices unknown).
-/// Today the write goes ahead after a warning, though a notice there might say the vault
-/// moved.
-///
-/// Wanted: the write is refused, nothing new on the relay.
 #[tokio::test]
 async fn a_write_waits_until_the_move_notices_can_be_read() {
     let (old, inbox_down) = serve_breakable(Relay::new(), "/v1/inbox").await;
@@ -694,12 +610,6 @@ async fn a_write_waits_until_the_move_notices_can_be_read() {
     assert_eq!(w.old_len().await, old_len);
 }
 
-/// T8, rule 6 (R6c). The vault switched; the old relay withheld the moved notice from
-/// Carol, who wrote a name there after the switch's base. Today her tap fails with
-/// `RelayForked`, so she can only leave through the manual "follow this server" path.
-///
-/// Wanted: following drops her entries after the base (void by rule), and her copy is the
-/// new relay's history.
 #[tokio::test]
 async fn a_phone_that_wrote_after_the_switch_can_still_follow() {
     let w = world(2, 3, 33).await;
@@ -739,11 +649,6 @@ async fn a_phone_that_wrote_after_the_switch_can_still_follow() {
     );
 }
 
-/// T8 variant (a guard: passes today, must keep passing). As T8, but the part after the
-/// base holds a payment that may be signed: Carol proposed and approved, and Bob (a
-/// switcher, dishonest) approved on the old relay too, so it reached Approved. Dropping it
-/// would forget a payment that can still mine (rule 5), so following refuses
-/// (`RelayForked`) and Carol's copy is untouched.
 #[tokio::test]
 async fn a_dropped_part_with_a_possibly_signed_payment_is_never_dropped() {
     let w = world(2, 3, 34).await;
@@ -762,7 +667,6 @@ async fn a_dropped_part_with_a_possibly_signed_payment_is_never_dropped() {
 
     let id = propose(&w.old(2), &w.ids[2], &w.material[2], 7).await;
     approve_on(&w.old(2), &w.ids[2], &w.material[2], id, 2).await;
-    // Bob writes to the old relay from a phone with no copy and no move state.
     let bob_old = RelayClient::new(&w.old)
         .with_log_cache(Some(LogCache::in_dir(w.dir.path().join("bob-old"))));
     approve_on(&bob_old, &w.ids[1], &w.material[1], id, 1).await;
@@ -787,9 +691,6 @@ async fn a_dropped_part_with_a_possibly_signed_payment_is_never_dropped() {
     assert_eq!(after, before, "Carol's copy is untouched");
 }
 
-/// A garbage move message from a member on the current relay must not stop writes (with
-/// rule 6 a move-notice read error refuses the write, so a member must never be able to
-/// cause one). Passes today; a guard for the fix.
 #[tokio::test]
 async fn a_members_garbage_move_messages_dont_stop_writes() {
     let w = world(2, 3, 35).await;
@@ -811,16 +712,6 @@ async fn a_members_garbage_move_messages_dont_stop_writes() {
     w.name(1, "Bob").await.unwrap();
 }
 
-/// Finding D1. 2-of-3 (m = 2). Alice starts a move to a new relay. Before the switch,
-/// Mallory writes one entry to the new relay (her app has no move state, so nothing stops
-/// it) and another one at the same index on the old relay. Bob loads the old relay's entry
-/// into his copy, then taps Move. Today he gets `RelayForked` (the "follow this server"
-/// escape, which is wrong here: the old relay is fine).
-///
-/// Decided (batch 5, option B): while the old relay answers, a new relay holding an entry
-/// past the base that conflicts with the old relay's is refused with `MoveConflict`
-/// ("Start the move again"), and the vault keeps working where it is. Residual: one member
-/// (or a forking old relay) can block a move while the old relay answers.
 #[tokio::test]
 async fn an_early_write_to_the_new_relay_is_a_move_conflict() {
     let w = world(2, 3, 31).await;
@@ -828,7 +719,6 @@ async fn an_early_write_to_the_new_relay_is_a_move_conflict() {
     let new = serve(Relay::new()).await;
     let started = w.move_to(0, &new).await.unwrap();
 
-    // Mallory points her app at the new relay and writes there first.
     let mut m = w.material(2);
     m.relay.url = Some(started.target.relay.clone());
     m.relay.label = started.target.label;
@@ -843,7 +733,6 @@ async fn an_early_write_to_the_new_relay_is_a_move_conflict() {
     )
     .await
     .expect("nothing stops a member without a move from writing to the new relay");
-    // And an ordinary write on the old relay.
     w.name(2, "M-old").await.unwrap();
 
     let status = w.follow(1, &started.link).await;
@@ -865,14 +754,6 @@ async fn an_early_write_to_the_new_relay_is_a_move_conflict() {
     assert_eq!(w.here(1).base_url(), w.old);
 }
 
-/// Finding D2. 2-of-5 (m = 4), so one tap doesn't switch. Mallory writes an
-/// entry to the new relay before the switch. Bob taps Move: `new_relay_history` takes the
-/// longer new-relay history and saves it into Bob's copy, so his copy now holds an entry
-/// the old relay never had. Until the move finishes (it may never), every load of the old
-/// relay refuses it (`RelayRolledBack`), and Bob's phone can't sign or write at all.
-///
-/// Wanted: following a move never puts an entry past the base into this phone's copy before
-/// the switch; Bob keeps working on the old relay.
 #[tokio::test]
 async fn a_tap_on_move_doesnt_take_a_new_relay_entry_into_the_copy() {
     let w = world(2, 5, 32).await;
@@ -913,10 +794,6 @@ async fn a_tap_on_move_doesnt_take_a_new_relay_entry_into_the_copy() {
         .expect("Bob can still write on the old relay");
 }
 
-/// Point 4 with expiry (a guard: passes today, must keep passing). Bob arrived in a move
-/// (2-of-5: no switch) whose new relay then stays down. Once the move expires, his writes
-/// go to the old relay again: the move is over, so his phone knows where the vault lives.
-/// (The move is re-signed by Alice with a 3 s lifetime so the test needn't wait 14 days.)
 #[tokio::test]
 async fn an_arrived_phone_writes_here_again_once_its_move_expires() {
     let w = world(2, 5, 36).await;
@@ -949,7 +826,6 @@ async fn an_arrived_phone_writes_here_again_once_its_move_expires() {
     assert_eq!(w.old_len().await, old_len + 1);
 }
 
-/// Now in microseconds (a fresh envelope seq).
 fn micros() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -957,8 +833,6 @@ fn micros() -> u64 {
         .as_micros() as u64
 }
 
-/// Seals `msg` from `from` to `to` in mailbox `label` on the relay at `url` (a phone's
-/// retry, or a dishonest member's message).
 async fn send_move(
     url: &str,
     from: &Identity,
@@ -967,8 +841,6 @@ async fn send_move(
     kind: Kind,
     msg: &MoveMessage,
 ) {
-    // The seq is the clock, which steps back about a second under WSL: a seq below the
-    // sender's last one is refused (409), so wait for the clock to pass it again.
     for _ in 0..20 {
         let env = Envelope::sealed(
             from,
@@ -995,8 +867,6 @@ async fn send_move(
     panic!("the relay kept refusing the seq");
 }
 
-/// The relay at `url` withholds from `who` every envelope of `kind` in mailbox `label`
-/// (from `sender` only, if given): simulated by acknowledging them. Returns how many.
 async fn withhold(
     url: &str,
     who: &Identity,
@@ -1017,7 +887,6 @@ async fn withhold(
     cursors.len()
 }
 
-/// A relay whose requests under `path` answer 503 while the flag is set.
 async fn serve_breakable(relay: Relay, path: &'static str) -> (String, Arc<AtomicBool>) {
     use axum::response::IntoResponse;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1043,7 +912,6 @@ async fn serve_breakable(relay: Relay, path: &'static str) -> (String, Arc<Atomi
 
 const TIP: u32 = TARGET_HEIGHT - 1;
 
-/// Logs (as `author`) a proposal spending a fresh vault note back to the vault.
 async fn propose(relay: &RelayClient, author: &Identity, m: &VaultMaterial, id: u8) -> [u8; 16] {
     use orchard::keys::Scope;
     let fvk = m.vault_keys().unwrap().fvk().clone();
@@ -1086,7 +954,6 @@ async fn propose(relay: &RelayClient, author: &Identity, m: &VaultMaterial, id: 
     [id; 16]
 }
 
-/// `me`'s interactive approval of `proposal` through `relay`.
 async fn approve_on(
     relay: &RelayClient,
     me: &Identity,
@@ -1113,12 +980,6 @@ async fn approve_on(
     .unwrap();
 }
 
-/// Batch 5 review, M1. As D1: Mallory's early write makes the move a `MoveConflict`. Alice,
-/// the mover, has arrived; her next write reads the new relay, which shows no switch. A
-/// pending move whose new relay answers and shows no switch is the ordinary case where
-/// writes go to the old relay (the switch, if it ever comes, voids them by rule). Refusing
-/// here instead would let one member freeze every phone that already tapped Move, until
-/// each one cancels, for every move.
 #[tokio::test]
 async fn a_move_conflict_doesnt_stop_an_arrived_phones_writes() {
     let w = world(2, 3, 37).await;
@@ -1151,9 +1012,6 @@ async fn a_move_conflict_doesnt_stop_an_arrived_phones_writes() {
     assert_eq!(w.old_len().await, old_len + 1);
 }
 
-/// `droppable`'s whitelist: as T8, but Carol's entry after the base is a `PoolReset` (no
-/// proposal involved). Dropping it would bring dead pool commitments back, so following
-/// refuses (`RelayForked`) and her copy is untouched.
 #[tokio::test]
 async fn a_dropped_part_that_isnt_intent_only_is_never_dropped() {
     let w = world(2, 3, 38).await;
@@ -1197,9 +1055,6 @@ async fn a_dropped_part_that_isnt_intent_only_is_never_dropped() {
     assert_eq!(after.len(), before.len(), "the copy is untouched");
 }
 
-/// Toggle gap 2 (order alone). As T5b, but the old relay withholds Bob's cancel too, so
-/// only the new relay's order decides: it serves Bob's arrival after his cancel. A cancel
-/// is final whatever the order, so Carol must not count him.
 #[tokio::test]
 async fn a_cancel_counts_before_an_arrival_served_after_it() {
     let w = world(2, 4, 40).await;
@@ -1243,13 +1098,6 @@ async fn a_cancel_counts_before_an_arrival_served_after_it() {
     );
 }
 
-/// Toggle gap 1 (switch_relay's check). 2-of-4 (m = 3). Alice moves and Bob taps. Later
-/// Carol names herself on the old relay (Y) and Mallory (Dave) writes her own entry at the
-/// same index on the new relay (X), then sends Bob her arrival there. Bob's next refresh
-/// counts three arrivals with a copy that never loaded Y: his new-relay view holds X and
-/// no conflict. Only switch_relay's last read of the old relay sees Y; without that check
-/// the switch lands after X, and every member holding Y must drop it (or, when Y is
-/// evidence, is left on a forked history).
 #[tokio::test]
 async fn a_switch_checks_the_old_relay_one_last_time() {
     let w = world(2, 4, 39).await;

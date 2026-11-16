@@ -1,4 +1,3 @@
-/* Zafe site. Colours from docs/brand.md (Verdigris); fonts from the app (assets.py), served from public/assets/fonts. */
 @font-face {
   font-family: "DM Sans";
   src: url("/assets/fonts/DMSans-Regular.woff2") format("woff2");
@@ -159,10 +158,6 @@ footer {
 
 code { font-size: 0.95em; }
 
-/* Landing page (index.html): body.home. Laid out after vizor.cash, in Zafe's Verdigris
-   palette and type (Space Grotesk display, DM Sans text). The feature panel, closing card
-   and footer stay dark in both themes. */
-
 @font-face {
   font-family: "JetBrains Mono";
   src: url("/assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
@@ -194,7 +189,6 @@ code { font-size: 0.95em; }
 .home a { color: inherit; }
 .home .icon { width: 18px; height: 18px; flex: none; }
 
-/* Pill button and tag. */
 .pill {
   display: inline-block;
   padding: 16px 44px;
@@ -219,7 +213,6 @@ code { font-size: 0.95em; }
 .tag.dark { background: rgba(81, 221, 210, 0.12); color: #51DDD2; }
 .tag.plain.dark { background: none; }
 
-/* Nav: links either side of the mark, the mark exactly centred (the intro lands on it). */
 .nav {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -235,7 +228,6 @@ code { font-size: 0.95em; }
 .nav a:hover { color: var(--text); }
 .nav-logo .mark { display: block; width: 44px; height: 44px; }
 
-/* Hero. */
 .hero {
   text-align: center;
   padding: 104px 16px 72px;
@@ -254,16 +246,10 @@ code { font-size: 0.95em; }
   margin: 0 auto 36px;
 }
 
-/* The world (src/scripts/world.js): one fixed canvas behind the page. The hero and the
-   story section are transparent over it; later sections are opaque. html.world-on is
-   set when it runs; html.world-off once the story has scrolled away. */
 .world { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; display: none; pointer-events: none; }
 html.world-on .world { display: block; }
 html.world-off .world { visibility: hidden; }
 .home .nav, .home main, .home .foot { position: relative; z-index: 1; }
-/* With the world running, the hero is asymmetric: the headline on the left, the diorama
-   framed to the right (world.js frameX); on phones the world sits below the text. The
-   same box before story.js decides, so the page doesn't shift (CLS) when it does. */
 .home .hero {
   min-height: calc(100vh - 80px);
   max-width: 76rem;
@@ -281,7 +267,6 @@ html.world-off .world { visibility: hidden; }
 }
 html.world-on .home .faq { background: var(--window); max-width: none; padding-left: max(16px, calc((100vw - var(--width)) / 2)); padding-right: max(16px, calc((100vw - var(--width)) / 2)); }
 
-/* The call to action over the world seen from above. */
 .cta-pin { display: grid; place-items: center; padding: 120px 16px; }
 .cta-card {
   text-align: center;
@@ -300,14 +285,11 @@ html.world-on .cta-pin { position: sticky; top: 0; height: 100vh; padding: 0 16p
   .cta-card { padding: 32px 24px 36px; }
 }
 
-/* Lenis (from lenis/dist/lenis.css). */
 html.lenis, html.lenis body { height: auto; }
 .lenis:not(.lenis-autoToggle).lenis-stopped { overflow: clip; }
 .lenis [data-lenis-prevent] { overscroll-behavior: contain; }
 .lenis.lenis-smooth iframe { pointer-events: none; }
 
-/* The story: tall and pinned over the world; captions follow data-beat. Without the
-   world: a still of the ending. */
 .story { position: relative; }
 .story-pin { position: relative; height: 100vh; min-height: 620px; overflow: hidden; }
 html.world-on .story { height: 1140vh; }
@@ -351,7 +333,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
   .cap { font-size: 13px; }
 }
 
-/* The idea. */
 .vision {
   text-align: center;
   padding: 136px 16px 152px;
@@ -364,7 +345,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
   line-height: 1.12;
 }
 
-/* Feature panel. */
 .panel {
   max-width: calc(var(--width) + 10rem);
   margin: 0 auto;
@@ -464,7 +444,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 .chain .hidden { color: var(--ink-muted); }
 .chain .hidden::before { content: "\2022\2022\2022\2022\2022\2022  "; letter-spacing: 1px; }
 
-/* FAQ. */
 .faq {
   display: grid;
   grid-template-columns: 1fr 1.3fr;
@@ -499,7 +478,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 .qa .more { color: var(--text-tertiary); font-size: 15px; padding: 20px 0 0 32px; border-top: 1px solid var(--line); }
 .qa .more a { color: var(--brand); }
 
-/* Closing card over the vault door. */
 .closing {
   position: relative;
   max-width: var(--width);
@@ -526,16 +504,11 @@ html.world-on .story-pin { position: sticky; top: 0; }
   mask-image: linear-gradient(to right, transparent 0, #000 35%);
 }
 
-/* Footer: dark, with the page's rounded bottom edge above it. */
 .foot {
   position: relative;
-  /* The first 2px are paper: the footer clips its lip (::before), so without them its dark
-     top edge shows as a hairline above the lip at fractional zoom. */
   background: linear-gradient(var(--window) 0 2px, #0A0E0E 2px);
   color: var(--ink-muted);
   margin-top: 0;
-  /* The page draws under the phone's gesture bar (viewport-fit=cover in Base.astro): the
-     dark footer runs to the bottom edge, its content stays above the bar. */
   padding: 96px 16px env(safe-area-inset-bottom, 0px);
   border: 0;
   font-size: 15px;
@@ -562,14 +535,12 @@ html.world-on .story-pin { position: sticky; top: 0; }
 .foot-brand { display: flex; align-items: center; gap: 20px; }
 .foot-brand span { font-size: 30px; line-height: 1.1; color: var(--ink-text); }
 .foot ul { list-style: none; padding: 0; margin: 0; }
-.foot a { color: inherit; text-decoration: none; } /* on every page, not only .home ones */
+.foot a { color: inherit; text-decoration: none; }
 .foot a:hover { color: var(--ink-text); }
 .foot-bottom { padding-top: 80px; }
 .ghost {
   max-width: var(--width);
   margin: 24px auto 0 !important;
-  /* The tight line box puts the letters' feet below it; the padding keeps them inside
-     the footer (which clips) so the whole word shows. */
   padding-bottom: 0.1em;
   font-size: clamp(120px, 24vw, 340px);
   line-height: 0.74;
@@ -589,8 +560,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 }
 
 @media (max-width: 600px) {
-  /* Phones: the mark on the left (the intro lands there), then the links marked
-     `mobile` (Nav.astro) on the right. */
   .nav { display: flex; align-items: center; gap: 20px; padding: 24px 20px 0; font-size: 15px; }
   .nav-logo { order: -1; margin-right: auto; }
   .nav-side { gap: 20px; }
@@ -605,23 +574,17 @@ html.world-on .story-pin { position: sticky; top: 0; }
   * { transition: none !important; }
 }
 
-/* Intro (CSS only). The whole screen is the mark's tile: its two pieces lock together in
-   the middle, then the tile collapses in a circle up into the nav logo (the ripple) while
-   the pieces fly with it; the nav logo takes over, rings pulse out from it, and the page
-   rises in. */
 :root {
-  /* Centre of .nav-logo: the grid centres it in the page, which excludes a classic
-     scrollbar, so it's 50% of the fixed intro layer (not 50vw, which includes it). */
   --land-x: 50%;
-  --lift-x: 0px;   /* from the landing point to the screen's centre, horizontally */
-  --land-y: 58px;  /* nav padding-top 36 + half of 44 */
-  --big: 9;        /* the mark's size on arrival, as a multiple of 44 px */
-  --tile: #004A46; /* the mark's tile colour (public/assets/zafe.svg) */
+  --lift-x: 0px;
+  --land-y: 58px;
+  --big: 9;
+  --tile: #004A46;
   --ease: cubic-bezier(0.7, 0, 0.2, 1);
   --rise: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 @media (max-width: 600px) {
-  :root { --land-x: 42px; --lift-x: calc(50vw - 42px); --land-y: 46px; --big: 6; }  /* padding 20/24 + 22 */
+  :root { --land-x: 42px; --lift-x: calc(50vw - 42px); --land-y: 46px; --big: 6; }
 }
 
 .intro {
@@ -652,7 +615,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 }
 .intro-mark .mark { display: block; width: 44px; height: 44px; animation: mark-in 0.5s var(--rise) both; }
 .intro-mark .mark-upper, .intro-mark .mark-lower { transform-box: fill-box; }
-/* On the teal field the tile is invisible; it fades in as the field shrinks onto it. */
 .intro-mark .mark-tile { animation: tile-in 0.3s ease 1.5s both; }
 .intro-mark .mark-upper { animation: upper-in 0.65s var(--rise) 0.15s both; }
 .intro-mark .mark-lower { animation: lower-in 0.65s var(--rise) 0.15s both; }
@@ -664,7 +626,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 }
 .intro-ring.second { animation-delay: 2s; }
 
-/* Only where the intro plays (the home page): the nav waits for it. */
 .home:has(.intro) .nav-logo { animation: appear 0s linear 1.8s both; }
 .home:has(.intro) .nav-side { animation: fade 0.6s ease 1.5s both; }
 .home .hero > * { animation: rise 0.8s var(--rise) both; }
@@ -686,10 +647,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(28px); } }
 
-/* More motion. Loops run everywhere; scroll-driven reveals only where the browser has
-   animation-timeline (elsewhere everything is simply shown). All off with reduced motion. */
-
-/* Buttons and links. */
 .pill { transition: transform 0.2s var(--rise), box-shadow 0.2s ease, filter 0.2s ease; }
 .pill:hover { transform: translateY(-2px); box-shadow: 0 12px 24px -12px rgba(0, 115, 108, 0.6); }
 .nav-side a { position: relative; }
@@ -706,7 +663,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 }
 .nav-side a:hover::after { transform: scaleX(1); }
 
-/* Live cards in the feature panel. */
 .dots i:nth-child(2) { animation: vote 3.2s ease infinite; }
 @keyframes vote { 0%, 45% { background: transparent; border-color: var(--ink-text); } 55%, 90% { background: #51DDD2; border-color: #51DDD2; } 100% { background: transparent; border-color: var(--ink-text); } }
 .votes .approve { animation: glow 3.2s ease infinite; }
@@ -736,7 +692,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
 @supports (animation-timeline: view()) {
 
 
-  /* The idea fills with ink as it scrolls past. */
   .statement {
     background: linear-gradient(90deg, var(--text) 50%, #C3CCCB 50%);
     background-size: 200% 100%;
@@ -748,25 +703,19 @@ html.world-on .story-pin { position: sticky; top: 0; }
     animation-range: entry 60% cover 55%;
   }
 
-  /* The feature panel grows into place; each block's copy and card meet in the middle. */
   .panel { animation: grow both var(--rise); animation-timeline: view(); animation-range: entry 0% entry 60%; }
   .feature .copy { animation: from-left both var(--rise); animation-timeline: view(); animation-range: entry 10% cover 35%; }
   .feature .widget { animation: from-right both var(--rise); animation-timeline: view(); animation-range: entry 10% cover 35%; }
   .feature.flip .copy { animation-name: from-right; }
   .feature.flip .widget { animation-name: from-left; }
 
-  /* The FAQ cascades in. */
   .faq h2, .qa details, .qa .more { animation: rise-in both var(--rise); animation-timeline: view(); animation-range: entry 0% cover 25%; }
 
-  /* The closing card: copy rises, the vault drifts. */
   .closing-copy { animation: rise-in both var(--rise); animation-timeline: view(); animation-range: entry 10% cover 40%; }
   @media (min-width: 901px) {
     .closing-art { animation: drift both linear; animation-timeline: view(); }
   }
 
-  /* The ghost wordmark rises out of the footer. It ends the page, so the rise must finish
-     by the time it is fully in view (entry 100%): a later end is never reached on short
-     screens and leaves the word half sunk. */
   .ghost { animation: ghost both var(--rise); animation-timeline: view(); animation-range: entry 0% entry 100%; }
 }
 
@@ -780,9 +729,6 @@ html.world-on .story-pin { position: sticky; top: 0; }
   .pill, .nav-side a::after { transition: none; }
 }
 
-/* Pointer (fine pointers): a tilted dart (scenes/cursor.py) the OS draws itself, so it
-   never lags behind a busy page as a script-drawn cursor does; ink, teal over anything
-   clickable. Text fields keep the text cursor. */
 @media (pointer: fine) {
   html {
     cursor: url(/assets/ui/cursor.png) 3 2, auto;
@@ -795,11 +741,9 @@ html.world-on .story-pin { position: sticky; top: 0; }
   input, textarea, select { cursor: text; }
 }
 
-/* Words rising from a mask (ui.js splits headings into .w > .wi). */
 .w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: 0.08em; margin-bottom: -0.08em; }
 .wi { display: inline-block; }
 
-/* The approvals counter in the story: rolls 0 -> 1 -> 2 as the shards seat. */
 .threshold {
   position: absolute;
   left: max(16px, calc((100vw - 76rem) / 2 + 40px));
@@ -827,8 +771,6 @@ html.world-on .story:is([data-beat="4"], [data-beat="5"], [data-beat="6"], [data
 .th-col span { display: block; }
 @media (max-width: 760px) { .threshold { top: 84px; left: 12px; padding: 10px 16px 8px 14px; } .th-label { font-size: 12px; } }
 
-/* What the chain sees, at "Sent": the real testnet payment, where the counter was and
-   in its style. */
 .chain-card {
   position: absolute;
   left: max(16px, calc((100vw - 76rem) / 2 + 40px));
@@ -853,24 +795,17 @@ html.world-on .story[data-beat="10"] .chain-card { opacity: 1; transform: none; 
 .chain-note { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
 @media (max-width: 760px) { .chain-card { top: 84px; left: 12px; padding: 12px 16px 10px; } }
 
-/* Capture mode for stills.sh (/?still): only the world. */
 html.still-capture .home .nav,
 html.still-capture .home main,
 html.still-capture .home .foot,
 html.still-capture .intro { visibility: hidden !important; }
 html.still-page .home .nav-side { visibility: hidden !important; }
 
-/* The static fallback (no GPU, reduced motion, no JavaScript): stills rendered from the
-   world (stills.sh) in the same layout. html.js (boot.js) hides them until story.js
-   decides; html.stills shows them. Lazy images that stay hidden are never fetched. */
 .still { display: none; }
 :is(html:not(.js), html.stills) .still { display: block; }
 :is(html:not(.js), html.stills) :is(.story-captions, .threshold, .chain-card) { display: none; }
 
 .hero-still { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; min-height: 560px; }
-/* The hero still is also the poster while the world loads (seconds on a phone: three.js,
-   the app screens, shader compilation), so the page never sits empty; it fades out as
-   the world fades in over the same view (html.world-on). Small: 17 KB on phones. */
 html.js:not(.stills) .hero-still { display: block; transition: opacity 1.4s ease; }
 html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .hero-still img { width: 100%; height: 100%; object-fit: cover; object-position: 100% 50%; }
@@ -899,8 +834,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   margin: 0 0 48px;
 }
 .story-beats { list-style: none; margin: 0 auto; padding: 0; max-width: 1040px; gap: 64px; }
-/* After .still's display rules, and only for the fallback: otherwise it would show (and
-   fetch its pictures) with the world running. */
 :is(html:not(.js), html.stills) .story-beats { display: grid; }
 .story-beats img {
   display: block;
@@ -910,7 +843,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   background: #EEF2F1;
   box-shadow: 0 40px 80px -48px rgba(0, 40, 38, 0.45), 0 0 0 1px rgba(9, 14, 14, 0.05);
 }
-/* Each caption sits on its picture's lower edge, like the world's caption pill. */
 .story-beats p {
   position: relative;
   width: fit-content;
@@ -935,11 +867,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   .story-beats p { font-size: 14px; padding: 12px 18px; margin-top: -22px; }
 }
 
-/* Home page (index.astro, body.home.landing): one centred column. The headline and the two
-   ways to install, the film (infra/site/film: one payment, start to finish), the one-tap
-   close, questions. Light paper; teal only for actions, gold only for amounts and "sent".
-   No JavaScript: the films are muted, looping <video>s; with reduced motion a still. */
-
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .foot .foot-social { display: flex; gap: 4px; align-items: center; margin: -12px 0; }
 .foot-social a { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; color: inherit; opacity: 0.75; transition: opacity 0.2s ease; }
@@ -953,9 +880,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .landing h1, .landing h2 { font-weight: 500; letter-spacing: -0.035em; text-wrap: balance; }
 .landing h2 { font-size: clamp(38px, 5vw, 64px); line-height: 1.02; margin: 0; }
 
-/* Nav: the mark in the middle, two items either side; Get Zafe is the one button. */
-
-/* Install actions: Google Play (PlayButton) and the iPhone waitlist (IphoneButton). */
 .hx-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
 .hx-play {
   display: inline-flex;
@@ -978,9 +902,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .hx-status { font-size: 15px; color: var(--text-secondary); }
 .hx-status a { color: inherit; }
 
-/* Hero: centred, then the film right under it. */
-/* The first screen is the hero: it fills the viewport below the nav (80px) up to 700px, and
-   the band's platform tab (62px) sits a little above the bottom edge as the cue to scroll. */
 .hc-hero {
   max-width: 60rem;
   margin: 0 auto;
@@ -993,7 +914,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   box-sizing: border-box;
 }
 .hc-hero h1 { font-size: clamp(44px, 6vw, 92px); line-height: 1.02; margin: 0 auto 24px; max-width: 10.5em; }
-/* The badge over the headline: what you can do today, linking straight to Google Play. */
 .hc-badge {
   align-self: center;
   display: inline-flex;
@@ -1025,14 +945,11 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .hc-sub { font-size: 18px; line-height: 1.55; color: var(--text-secondary); max-width: 24em; margin: 0 auto 32px !important; }
 .hc-hero .hx-status { margin-top: 20px !important; }
 
-/* The story: four steps, each a heading, a line and an illustrated loop (Loop.astro). */
 .hc-step { max-width: 100rem; margin: 0 auto; padding: 160px 0 0; text-align: center; }
 .hc-step > h2, .hc-step > p { padding: 0 24px; }
 .hc-step > p { color: var(--text-secondary); font-size: 18px; margin: 16px 0 0 !important; }
 .hc-band .hc-step { padding-top: 160px; }
 
-/* A loop: the scene and its card, 16:9 (9:16 on phones). The paper grain lies over the
-   illustration only: its mask (film/export.sh) cuts out the card so the UI stays crisp. */
 .hc-loop { max-width: 100rem; margin: 0 auto; padding: 48px 24px 0; }
 .hc-frame { position: relative; border-radius: 32px; overflow: hidden; background: var(--window); box-shadow: 0 30px 60px -45px rgba(0, 40, 38, 0.35); }
 .hc-frame video, .hc-frame img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
@@ -1054,7 +971,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .loop-live { --loop-mask: url(/assets/ui/mask-live.svg); }
 .hc-loop figcaption { margin-top: 20px; text-align: center; font-size: 15px; color: var(--text-secondary); }
 .hc-loop figcaption a { color: inherit; }
-/* Pause / play (loops.js shows it). */
 .loop-toggle {
   position: absolute;
   right: 16px;
@@ -1077,8 +993,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .loop-toggle .play, .loop-toggle[aria-pressed="true"] .pause { display: none; }
 .loop-toggle[aria-pressed="true"] .play { display: block; }
 @media (hover: hover) and (pointer: fine) { .loop-toggle:hover { background: #fff; } }
-/* The tall cut: phones, and portrait tablets (a 16:9 loop there makes the card's UI tiny).
-   It never grows taller than the screen. */
 @media (max-width: 700px), (orientation: portrait) and (max-width: 1100px) {
   .hc-frame { border-radius: 24px; max-width: calc(88svh * 9 / 16); margin: 0 auto; }
   .hc-frame video, .hc-frame img { aspect-ratio: 9 / 16; }
@@ -1092,17 +1006,14 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   .hc-frame .hc-still { display: block; }
 }
 
-/* The features under the last loop: shipped features, plain lines with the app's icons. */
 .hc-live { max-width: 56rem; margin: 0 auto; padding: 64px 24px 0; text-align: center; }
 .hc-live ul { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 32px; text-align: left; }
 .hc-live li { display: flex; align-items: center; gap: 12px; font-size: 17px; }
 .hc-live .icon { width: 22px; height: 22px; flex: none; color: var(--text-secondary); }
 
-/* The close: install. */
 .hc-close { max-width: 60rem; margin: 0 auto; padding: 152px 24px 0; text-align: center; }
 .hc-close p { color: var(--text-secondary); font-size: 18px; margin: 12px 0 32px !important; }
 
-/* Questions: one centred column. */
 .hx-faq { max-width: 44rem; margin: 0 auto; padding: 160px 24px 0; }
 .hx-faq h2 { text-align: center; margin-bottom: 40px; }
 .hx-faq .qa details, .hx-faq-list .qa details { padding: 6px 0; }
@@ -1110,7 +1021,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .hx-faq .qa details p, .hx-faq-list .qa details p { padding: 4px 0 14px 32px; }
 .landing main { padding-bottom: 72px; }
 
-/* The iPhone waitlist form. */
 .waitlist { margin-top: 48px; max-width: 30rem; }
 .waitlist > label { display: block; font-weight: 500; margin-bottom: 12px; }
 .waitlist-row { display: flex; gap: 8px; }
@@ -1145,7 +1055,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .waitlist-note { font-size: 14px; color: var(--text-secondary); margin-top: 10px !important; }
 .waitlist-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 
-/* The hero arrives as the intro hands over (the intro ends ~1.8 s; see .intro). */
 .landing .hc-hero > * , .landing .hc-band .hc-step { animation: rise 0.8s var(--rise) both; }
 .landing .hc-hero > :nth-child(1) { animation-delay: 1.45s; }
 .landing .hc-hero > :nth-child(2) { animation-delay: 1.55s; }
@@ -1174,8 +1083,6 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
   .foot .foot-social { margin: 0 0 0 -12px; }
 }
 
-/* Showcase (showcase.astro, body.home.showcase): its own experience, not the home page.
-   No logo intro; a light fixed nav; a title card over the world; a slim footer. */
 .nav-light {
   position: fixed !important;
   top: 0;
@@ -1192,11 +1099,8 @@ html.world-on .hero-still { opacity: 0; pointer-events: none; }
 .nav-back .icon { width: 16px !important; height: 16px !important; }
 .showcase .nav-logo, .showcase .nav-side { animation: fade 0.8s ease 0.2s both; }
 
-/* The world fades up from the paper. */
 html.world-on .showcase .world { animation: fade 1.4s ease both; }
 
-/* The title card: bottom left, large, with a scroll cue. Same box in every state (world,
-   stills, no JS, and before story.js decides), so the page doesn't shift when it decides. */
 .showcase .hero {
   min-height: 100vh;
   justify-content: flex-end;
@@ -1250,7 +1154,7 @@ html.world-on .showcase .world { animation: fade 1.4s ease both; }
 .foot-slim-home { display: inline-flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 600; font-size: 16px; color: var(--text) !important; }
 .foot-slim-links { display: flex; flex-wrap: wrap; gap: 4px 24px; }
 .foot-slim-links a { display: inline-flex; align-items: center; min-height: 44px; }
-.foot-slim .foot-slim-note { margin: 0 0 0 auto; } /* beats .home p */
+.foot-slim .foot-slim-note { margin: 0 0 0 auto; }
 .foot-slim .foot-social { display: flex; gap: 0; align-items: center; list-style: none; padding: 0; margin: -12px -12px -12px -16px; }
 html.world-on .foot-slim { background: var(--window); max-width: none; padding-left: max(40px, calc((100vw - 76rem) / 2 + 40px)); padding-right: max(40px, calc((100vw - 76rem) / 2 + 40px)); }
 
@@ -1277,8 +1181,6 @@ html.world-on .foot-slim { background: var(--window); max-width: none; padding-l
 }
 .nowrap { white-space: nowrap; }
 
-/* 404 (404.astro): one calm line and the way home. */
-/* Privacy policy (and any other long-form page): one readable column. */
 .legal { max-width: 44rem; margin: 0 auto; padding: 140px 20px 96px; }
 .legal h1 { font-size: clamp(36px, 5vw, 56px); line-height: 1.05; margin: 0 0 8px; }
 .legal-date { color: var(--text-secondary); margin: 0 0 40px; }
@@ -1293,7 +1195,6 @@ html.world-on .foot-slim { background: var(--window); max-width: none; padding-l
 .nf h1 { font-size: clamp(40px, 5vw, 64px); line-height: 1.02; margin: 24px 0 16px; text-wrap: balance; }
 .nf .sub { font-size: 18px; color: var(--text-secondary); margin-bottom: 32px; }
 
-/* Download (download.astro): every way to install, one column. */
 .home main.dl { max-width: 44rem; margin: 0 auto; padding: 96px 24px 120px; }
 .dl h1 { font-size: clamp(44px, 6vw, 76px); line-height: 1; margin: 0 0 20px; }
 .dl-lead { font-size: 19px; color: var(--text-secondary); max-width: 30em; }
@@ -1322,7 +1223,6 @@ html.world-on .foot-slim { background: var(--window); max-width: none; padding-l
 .dl-contact span { color: var(--text-secondary); font-size: 15px; }
 .hx-faq .qa details + details, .hx-faq-list .qa details + details { border-top: 0; }
 
-/* Disclosure marker: the app's plus (Patina line icon), turned to an x when open. */
 .hx-faq .qa summary::before, .hx-faq-list .qa summary::before, .dl-verify summary::before {
   content: "";
   width: 16px;
@@ -1338,7 +1238,6 @@ html.world-on .foot-slim { background: var(--window); max-width: none; padding-l
 .dl-verify[open] summary::before { transform: rotate(45deg); }
 .foot-top, .foot-bottom { padding-left: 24px; padding-right: 24px; }
 
-/* Google Play: phones follow the link; with a mouse the button opens a QR to scan. */
 button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 .play-open { display: none; }
 @media (hover: hover) and (pointer: fine) {
@@ -1368,7 +1267,6 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .play-pop-links a:hover, .play-pop-links button:hover { color: var(--text); } }
 @media (prefers-reduced-motion: reduce) { .play-pop { transition: none; } }
 
-/* The second action beside Google Play (iPhone waitlist): outlined, same size. */
 .hx-alt {
   display: inline-flex;
   align-items: center;
@@ -1394,7 +1292,6 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 @media (max-width: 600px) { .hx-alt { width: 100%; justify-content: center; } }
 .ios-pop .waitlist > label { font-weight: 400; color: var(--text-secondary); }
 
-/* Support (support.astro): centred; ways to reach us first, then the fixes, all visible. */
 .home main.sp { max-width: 46rem; margin: 0 auto; padding: 96px 24px 120px; text-align: center; }
 .sp h1 { font-size: clamp(40px, 6vw, 72px); line-height: 1; margin: 0 0 48px; }
 .sp-contact { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -1411,12 +1308,10 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 .sp-fixes dd { margin: 4px 0 0; color: var(--text-secondary); }
 @media (max-width: 700px) { .sp-contact { grid-template-columns: minmax(0, 1fr); } }
 
-/* The band the film sits on: a shade darker than the paper, with a paper tab hanging into
-   it from the hero, holding the platforms (Android now, iPhone soon). */
 .hc-band { position: relative; background: #E6ECEB; }
 .hc-tab {
   position: absolute;
-  z-index: 2; /* above the film, whose entrance animation makes its own layer */
+  z-index: 2;
   left: 50%;
   top: 0;
   translate: -50% 0;
@@ -1455,7 +1350,6 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .tab-icon:hover { color: var(--text); background: var(--raised); } }
 .hx-get-zafe { padding: 0 40px; }
 
-/* Questions: the first is open; the markers are the one accent on the list. */
 .hx-faq .qa summary::before { background: var(--brand); }
 .foot-bottom a { color: inherit; text-decoration: underline; text-underline-offset: 0.2em; }
 .tab-icon.play-open { display: none; }
@@ -1464,13 +1358,10 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
   .tab-icon.play-open { display: inline-flex; }
 }
 
-/* Footer: the brand, then three short link columns (get it, the project, help); a quiet
-   bottom row; the wordmark large and cut by the page's bottom edge. */
 .foot-links { display: flex; gap: 56px; }
 .foot-links ul { display: grid; grid-template-columns: 1fr; gap: 14px; align-content: start; }
 .foot-links a { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .foot-links .brand-icon { width: 15px; height: 15px; opacity: 0.8; }
-/* "Zafe for Android" is a PlayButton (QR on a computer): the button looks like its links. */
 .foot-links .foot-play { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: inherit; text-decoration: none; }
 .foot-links button.foot-play { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
 .foot-links button.foot-play:hover { color: var(--ink-text); }
@@ -1484,9 +1375,6 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 .foot-end { display: flex; align-items: center; gap: 20px; }
 .foot .ghost { font-size: clamp(140px, 30vw, 460px); line-height: 0.74; margin-top: 56px !important; margin-bottom: -0.16em !important; padding-bottom: 0; }
 @media (max-width: 700px) {
-  /* Phones: one column close to the edges (20px), links one under another, then the small
-     print, socials left and the year right. Inset 40px and split in columns it read as
-     squeezed. */
   .foot-top, .foot-bottom, .foot .ghost { padding-left: 4px; padding-right: 4px; }
   .foot-top { gap: 40px; }
   .foot-links { display: flex; flex-direction: column; gap: 20px; width: 100%; }
@@ -1497,8 +1385,7 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
   .foot .foot-social { margin: 0 0 0 -12px; }
 }
 
-/* Review fixes (2026-10-23). */
-.dl-option .hx-actions { justify-content: flex-start; } /* /download is left-aligned */
+.dl-option .hx-actions { justify-content: flex-start; }
 .waitlist-note a { color: inherit; text-decoration: underline; text-underline-offset: 0.18em; }
 .nav:not(.nav-light) .nav-get { padding: 8px 16px; border-radius: 10px; background: var(--brand); color: var(--brand-label); font-weight: 500; }
 @media (hover: hover) and (pointer: fine) { .nav:not(.nav-light) .nav-get:hover { background: #005F59; color: var(--brand-label); } }
@@ -1512,9 +1399,6 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
   .hc-live ul { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
 }
 
-/* Docs (/docs and /docs/<slug>, layouts/Doc.astro): the sidebar on wide screens and one
-   reading column (44rem). No script: on phones the sidebar goes, the breadcrumb is the
-   way back, and Related plus "All docs" end each page. Teal only on links you follow. */
 .docs { display: grid; grid-template-columns: 13.5rem minmax(0, 44rem); gap: 72px; justify-content: center; max-width: 76rem; margin: 0 auto; padding: 88px 24px 120px; }
 .docs-page main.doc { max-width: 44rem; min-width: 0; margin: 0; padding: 0; }
 .docs-page main.docs-index { margin: 0 auto; padding: 88px 24px 120px; }
@@ -1547,18 +1431,15 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 .doc pre { margin: 12px 0 18px; padding: 14px 16px; border-radius: 12px; background: var(--ground); overflow-x: auto; font-size: 14px; line-height: 1.55; }
 .doc pre code { padding: 0; background: none; font-size: inherit; overflow-wrap: normal; }
 
-/* Numbered steps: the number in a quiet disc, the real button names in bold. */
 .doc-steps { list-style: none; counter-reset: step; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .doc-steps > li { counter-increment: step; position: relative; padding-left: 44px; margin: 0; }
 .doc-steps > li::before { content: counter(step); position: absolute; left: 0; top: 0.05em; width: 28px; height: 28px; border-radius: 999px; background: var(--raised); color: var(--text); font: 500 15px/28px var(--display); text-align: center; }
 .doc-steps pre { margin-top: 10px; }
 
-/* "If it goes wrong" and other question/answer lists. */
 .doc-fixes { margin: 8px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 .doc-fixes dt { font-weight: 600; font-size: 17px; }
 .doc-fixes dd { margin: 4px 0 0; color: var(--text-secondary); }
 .doc-fixes dd p { margin: 6px 0 0; }
-/* Settings reference (run-a-server). */
 .doc-vars { margin: 8px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .doc-vars dt code { font-size: 14px; }
 .doc-vars dd { margin: 4px 0 0; color: var(--text-secondary); font-size: 16px; }
@@ -1577,7 +1458,6 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
 .doc-all a { color: var(--text); font-weight: 500; }
 .doc .doc-checked { margin: 40px 0 0; font-size: 14px; color: var(--text-secondary); }
 
-/* /docs: the sections as plain lists, title and one line each. */
 .docs-index section { scroll-margin-top: 24px; }
 .docs-list { list-style: none; margin: 0; padding: 0; }
 .docs-list li { border-top: 1px solid var(--line); }
@@ -1596,13 +1476,11 @@ button.hx-play { font: inherit; font-weight: 500; border: 0; cursor: pointer; }
   .doc .doc-sum { font-size: 18px; }
   .doc h2 { margin-top: 44px; }
 }
-/* Troubleshooting: the problems on the page, as jump links. */
 .docs-toc { list-style: none; margin: 24px 0 0; padding: 0; columns: 2; column-gap: 32px; }
 .docs-toc li { break-inside: avoid; }
 .docs-toc a { display: inline-flex; align-items: center; min-height: 44px; }
 .doc h2[id] { scroll-margin-top: 24px; }
 @media (max-width: 600px) { .docs-toc { columns: 1; } }
-/* Support's quick fixes: links into /docs/troubleshooting. */
 .sp-links { list-style: none; margin: 0 auto; padding: 0; max-width: 34rem; }
 .sp-links li { border-top: 1px solid var(--line); }
 .sp-links li:last-child { border-bottom: 1px solid var(--line); }

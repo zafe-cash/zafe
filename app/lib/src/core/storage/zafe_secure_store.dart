@@ -4,8 +4,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// One vault's secrets on this device. Each vault has its own member identity, so the relay
-/// can't link one person's memberships across vaults.
 class StoredVault {
   const StoredVault({
     required this.id,
@@ -14,28 +12,21 @@ class StoredVault {
     this.material,
   });
 
-  /// The vault id (hex), from the invite onward.
   final String id;
   final Uint8List? identity;
   final String? invite;
 
-  /// FROST share, vault secret, log key and descriptor; set after key generation.
   final Uint8List? material;
 
   bool get ready => material != null;
 }
 
-/// Platform secure storage (iOS Keychain / Android Keystore) for Zafe's secrets, per vault:
-/// identity seeds, the invite (not secret, kept so setup can resume), the vault material and
-/// the wallet database key.
-/// `zafe_vaults` lists the vault ids in the order they were added.
 class ZafeSecureStore {
   ZafeSecureStore._();
   static final instance = ZafeSecureStore._();
 
   static const _registryKey = 'zafe_vaults';
 
-  // The single-vault layout before multiple vaults (migrated on first read).
   static const _legacyIdentityKey = 'zafe_identity_seeds';
   static const _legacyInviteKey = 'zafe_invite';
   static const _legacyMaterialKey = 'zafe_vault_material';
@@ -73,14 +64,10 @@ class ZafeSecureStore {
     material: await _readBytes(_key(id, 'material')),
   );
 
-  /// Every vault on this device, in the order added.
   Future<List<StoredVault>> readAll() async => [
     for (final id in await vaultIds()) await read(id),
   ];
 
-  /// Adds a vault (identity and invite; material comes after key generation). The
-  /// creator of a vault on a private relay keeps its `createToken` with the invite until
-  /// the material (which then holds it) is saved: every setup step needs it.
   Future<void> add({
     required String id,
     required List<int> identity,
@@ -99,19 +86,14 @@ class ZafeSecureStore {
   Future<void> writeMaterial(String id, List<int> material) =>
       _writeBytes(_key(id, 'material'), material);
 
-  /// The create token the creator made vault `id` with (see [add]); null on an open relay
-  /// and for joiners.
   Future<String?> setupCreateToken(String id) =>
       _storage.read(key: _key(id, 'createToken'));
 
-  /// The vault's material holds the token now.
   Future<void> forgetSetupCreateToken(String id) =>
       _storage.delete(key: _key(id, 'createToken'));
 
   static const _recoveryKey = 'zafe_recovery_identity';
 
-  /// The identity a new phone made to take over a lost signer's seat, kept until the
-  /// seat has moved and the vault is saved (spec §10.1).
   Future<Uint8List?> readRecoveryIdentity() => _readBytes(_recoveryKey);
 
   Future<void> writeRecoveryIdentity(List<int> seeds) =>
@@ -125,8 +107,6 @@ class ZafeSecureStore {
 
   static const _recoveryConfirmedKey = 'zafe_recovery_confirmed';
 
-  /// Co-signers (hex keys) whose safety words the person confirmed on the recovering
-  /// phone: the vault is taken only through one of them. Kept with the recovery identity.
   Future<List<String>> readRecoveryConfirmed() async {
     final raw = await _storage.read(key: _recoveryConfirmedKey);
     return raw == null || raw.isEmpty ? const [] : raw.split(',');
@@ -137,16 +117,12 @@ class ZafeSecureStore {
 
   static const _recoveryLinkKey = 'zafe_recovery_seat_link';
 
-  /// The vault link (`zafe-seat-v1:...`) a co-signer gave the recovering phone: which
-  /// relay and mailbox to recover on. Kept with the recovery identity.
   Future<String?> readRecoveryLink() => _storage.read(key: _recoveryLinkKey);
 
   Future<void> writeRecoveryLink(String? link) => link == null
       ? _storage.delete(key: _recoveryLinkKey)
       : _storage.write(key: _recoveryLinkKey, value: link);
 
-  /// Last known balance in zatoshis, for the vault switcher (kept here rather than in
-  /// the summary file so it isn't readable outside the keystore-backed storage).
   Future<BigInt?> balance(String id) async {
     final raw = await _storage.read(key: _key(id, 'balance'));
     return raw == null ? null : BigInt.tryParse(raw);
@@ -155,7 +131,6 @@ class ZafeSecureStore {
   Future<void> writeBalance(String id, BigInt zat) =>
       _storage.write(key: _key(id, 'balance'), value: zat.toString());
 
-  /// Removes a vault's secrets from this device (it stays a member on the relay).
   Future<void> remove(String id) async {
     for (final field in [
       'identity',
@@ -173,8 +148,6 @@ class ZafeSecureStore {
     ]);
   }
 
-  /// Moves the pre-multi-vault single slot into the registry under `id` (the invite's vault
-  /// id, which the caller parses). Returns the migrated vault, or null if there was none.
   Future<StoredVault?> migrateLegacy(
     String Function(String invite) vaultIdOf,
   ) async {
@@ -196,11 +169,6 @@ class ZafeSecureStore {
   }
 }
 
-/// `FlutterSecureStorage` with a timeout and one retry per call. On Android a call can
-/// occasionally get no reply at all: seen right after key generation, while a background
-/// check's engine used the same storage (its plugin instance logged "decryption failed"
-/// at the same moment). The first sync then waited forever on `walletKey`; a second call
-/// answered at once. So a lost reply costs [_timeout] instead of hanging the caller.
 class _PatientStorage {
   const _PatientStorage(this._inner);
   final FlutterSecureStorage _inner;

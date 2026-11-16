@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Starts a disposable Ironwood regtest network with `ths` (thus-spoke-zakura): a Zakura node,
-# lightwalletd and ths's own wallet, which mines and runs the faucet. Fund addresses with
-# fund.sh; mine with `ths --name <name> mine N`.
-#   infra/regtest/up.sh
-# Env: ZAFE_REGTEST_NAME (default zafe-regtest), ZAFE_REGTEST_PORT_OFFSET (default 0, a
-#      multiple of 10, at most 32730): Zakura RPC on 18232 + offset, lightwalletd on
-#      9067 + offset, ths's dashboard on 32805 + offset. Everything binds to 127.0.0.1.
-#      THS (default `ths` on PATH) must be version THS_VERSION below.
 set -euo pipefail
 THS_VERSION=0.4.0
 THS=${THS:-ths}
@@ -25,12 +17,9 @@ fi
 "$DIR/down.sh" >/dev/null 2>&1 || true
 mkdir -p "$STATE"
 LOG="$STATE/$NAME.log"
-# `ths start` stays in the foreground and deletes the environment when interrupted; run it
-# in its own session so it outlives this script, and keep its pid for down.sh.
 setsid nohup "$THS" --name "$NAME" start --no-open --port-offset "$OFFSET" > "$LOG" 2>&1 < /dev/null &
 echo $! > "$STATE/$NAME.pid"
 
-# The first start pulls the runtime images.
 for _ in $(seq 600); do
   grep -q "is ready" "$LOG" && break
   if ! kill -0 "$(cat "$STATE/$NAME.pid")" 2>/dev/null; then

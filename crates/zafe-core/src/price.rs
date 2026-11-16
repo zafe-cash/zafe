@@ -1,20 +1,10 @@
-//! The ZEC/USD price, for showing balances in dollars (mainnet only; the app decides).
-//!
-//! Follows the route policy ([`crate::tor`]) like every other connection. Through Tor it
-//! asks several exchanges and takes their consensus (`zcash_client_backend`'s cryptex,
-//! Gemini trusted, as Zashi does), on a circuit of its own. Direct, it makes one request
-//! to CoinGecko (what Vizor does): cheaper, and the user chose not to hide their IP.
-
 use std::time::Duration;
 
 use crate::tor::{self, Purpose, Route};
 
-/// CoinGecko's simple price endpoint for ZEC in USD.
 pub const COINGECKO_URL: &str =
     "https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd";
-/// The whole request, direct.
 pub const DIRECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// The whole query through Tor (several exchanges, a new stream each).
 pub const TOR_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, thiserror::Error)]
@@ -35,7 +25,6 @@ fn network(e: impl std::error::Error + 'static) -> PriceError {
     }
 }
 
-/// The latest price of 1 ZEC in USD.
 pub async fn zec_usd() -> Result<f64, PriceError> {
     let route = tor::route(Purpose::Price, tor::ROUTE_WAIT)
         .await
@@ -73,8 +62,6 @@ pub async fn zec_usd() -> Result<f64, PriceError> {
 async fn direct() -> Result<f64, PriceError> {
     let body = reqwest::Client::builder()
         .timeout(DIRECT_TIMEOUT)
-        // CoinGecko answers 403 to requests without one. Generic: no version, nothing
-        // that tells this user apart from other Zafe users.
         .user_agent("Zafe")
         .build()
         .map_err(network)?
@@ -90,7 +77,6 @@ async fn direct() -> Result<f64, PriceError> {
     coingecko_price(&body)
 }
 
-/// `{"zcash":{"usd":123.45}}` → 123.45.
 fn coingecko_price(body: &[u8]) -> Result<f64, PriceError> {
     let bad = || PriceError::BadResponse(String::from_utf8_lossy(body).chars().take(120).collect());
     let json: serde_json::Value = serde_json::from_slice(body).map_err(|_| bad())?;
@@ -140,7 +126,6 @@ mod tests {
         assert!(parse_rate("NaN").is_err());
     }
 
-    /// Live: CoinGecko answers with a plausible price (direct route).
     #[tokio::test]
     #[ignore]
     async fn live_direct_price() {

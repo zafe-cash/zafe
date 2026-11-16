@@ -9,10 +9,8 @@ import '../../core/widgets/app_tappable.dart';
 import '../../rust/api/received.dart' as rust;
 import '../proposals/proposal_status.dart' show formatTimestamp;
 
-/// Coinbase outputs can be spent after this many confirmations.
 const kCoinbaseMaturity = 100;
 
-/// "Pending", "Maturing (12 of 100)" or "Confirmed", for a received payment.
 String receivedStatus(rust.ReceivedInfo r) {
   if (r.minedHeight == 0) return 'Pending';
   if (r.isCoinbase && r.confirmations < kCoinbaseMaturity) {
@@ -21,7 +19,6 @@ String receivedStatus(rust.ReceivedInfo r) {
   return 'Confirmed';
 }
 
-/// "+1.5 TAZ" (or the privacy mask).
 String receivedAmountText(
   rust.ReceivedInfo r, {
   required bool hide,
@@ -35,7 +32,6 @@ String receivedAmountText(
   );
 }
 
-/// 44px activity row for money the vault received.
 class ReceivedRow extends StatelessWidget {
   const ReceivedRow({
     super.key,
@@ -59,7 +55,6 @@ class ReceivedRow extends StatelessWidget {
     return AppTappable(
       onTap: onTap,
       semanticsLabel: 'Received payment',
-      // A minimum: with large system text the two lines need more than 44.
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 44),
         child: Padding(
@@ -69,7 +64,6 @@ class ReceivedRow extends StatelessWidget {
               Container(
                 width: 40,
                 height: 40,
-                // Money arriving: the value colour (Zcash gold).
                 decoration: BoxDecoration(
                   color: colors.background.valueAlpha,
                   shape: BoxShape.circle,
@@ -108,7 +102,6 @@ class ReceivedRow extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 128),
                 child: RowAmount(
                   receivedAmountText(r, hide: hideAmount),
-                  // Money in: the value colour once mined, grey while confirming.
                   color: r.minedHeight == 0
                       ? colors.text.secondary
                       : colors.text.value,

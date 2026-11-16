@@ -36,17 +36,12 @@ import 'check_lock.dart';
 import 'vault_updates.dart';
 import '../core/storage/wallet_key.dart';
 
-/// Vault notifications (spec §6.1). The relay is blind: a push (FCM) or a periodic
-/// background check (WorkManager) only wakes the app; it then reads the encrypted vault
-/// log itself and shows local notifications for what changed since it last looked.
-
 const kVaultCheckTask = 'zafe.vault_check';
 const _channelId = 'vault_activity';
 const _channelName = 'Vault activity';
 
 final _notifications = FlutterLocalNotificationsPlugin();
 
-/// Proposal ids from tapped notifications, for the router to open.
 final notificationTaps = ValueNotifier<String?>(null);
 
 @pragma('vm:entry-point')
@@ -78,8 +73,6 @@ Future<void> _initNotifications() async {
   );
 }
 
-/// Main isolate, before the first frame: notification tap handling and the proposal a
-/// tapped notification launched the app with.
 Future<void> initVaultNotifications() async {
   await _initNotifications();
   final launch = await _notifications.getNotificationAppLaunchDetails();
@@ -88,7 +81,6 @@ Future<void> initVaultNotifications() async {
   }
 }
 
-/// Whether this app may show notifications (always true where it can't tell).
 Future<bool> notificationsEnabled() async =>
     await _notifications
         .resolvePlatformSpecificImplementation<
@@ -97,8 +89,6 @@ Future<bool> notificationsEnabled() async =>
         ?.areNotificationsEnabled() ??
     true;
 
-/// Shows the system's notification permission prompt (Android 13+). Returns whether
-/// notifications are on afterwards.
 Future<bool> requestNotifications() async {
   await _notifications
       .resolvePlatformSpecificImplementation<
@@ -108,9 +98,6 @@ Future<bool> requestNotifications() async {
   return notificationsEnabled();
 }
 
-/// Once a vault exists: schedule the periodic background check and register for pushes
-/// when Firebase is configured. [askPermission]: show the system prompt first (only after
-/// the app's own primer said why).
 Future<void> startVaultWatch({bool askPermission = true}) async {
   if (askPermission) await requestNotifications();
   if (Platform.isAndroid) {
@@ -126,8 +113,6 @@ Future<void> startVaultWatch({bool askPermission = true}) async {
   await _registerPush(askPermission: askPermission);
 }
 
-/// When the app goes to the background: check again soon, so a proposal made while the
-/// member just looked away still gets announced without waiting for the periodic check.
 Future<void> scheduleSoonCheck() async {
   if (!Platform.isAndroid) return;
   await Workmanager().registerOneOffTask(
@@ -139,8 +124,6 @@ Future<void> scheduleSoonCheck() async {
   );
 }
 
-/// FCM: only when the app was built with a Firebase config (google-services.json).
-/// Push registration runs again on a relay change: listen in the foreground once.
 bool _listeningInForeground = false;
 
 Future<void> _registerPush({bool askPermission = true}) async {
@@ -152,9 +135,6 @@ Future<void> _registerPush({bool askPermission = true}) async {
   }
   final messaging = FirebaseMessaging.instance;
   FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
-  // A push while the app is open: the open vault refreshes live (its relay watch), but
-  // the others had nothing (no notification, no dot in the vault switcher) until the app
-  // went to the background. Check them; the open one is the app's.
   if (!_listeningInForeground) {
     _listeningInForeground = true;
     FirebaseMessaging.onMessage.listen((_) async {
@@ -166,13 +146,6 @@ Future<void> _registerPush({bool askPermission = true}) async {
   await _registerInstallation(messaging);
 }
 
-/// FCM targets this app by its Firebase Installation ID (FID): FCM deprecated
-/// registration tokens (firebase_messaging 17, `register()`/`onRegistered`; the relay
-/// sends FIDs in FCM v1's `fid` field). `register()` fires [FirebaseMessaging.onRegistered]
-/// with the current FID every time it is called (also when already registered), and FCM
-/// fires it by itself when the FID is refreshed, so one listener sends it to the relay.
-/// Needs `firebase_messaging_installation_id_enabled` in the manifest; in that mode the
-/// old token calls throw.
 bool _listeningForRegistration = false;
 
 Future<void> _registerInstallation(FirebaseMessaging messaging) async {
@@ -183,13 +156,10 @@ Future<void> _registerInstallation(FirebaseMessaging messaging) async {
   await messaging.register();
 }
 
-/// Registers this app's FCM installation ID for every vault on this device (each with its
-/// own member identity) with the relay currently configured.
 Future<void> _registerToken(String token) async {
   final relayUrl = (await ZafeEndpoints.load(reload: true)).relayUrl;
   final platform = Platform.isIOS ? 'apns' : 'fcm-fid';
   var registered = 0;
-  // Vaults still being set up too: their setup steps run in background checks.
   for (final v in await ZafeSecureStore.instance.readAll()) {
     if (v.identity == null) continue;
     try {
@@ -207,12 +177,9 @@ Future<void> _registerToken(String token) async {
       debugPrint('push: register failed for ${v.id}: ${describeError(e)}');
     }
   }
-  // Which kind of target the relay accepted, and for how many vaults (never the ID).
   debugPrint('push: registered $platform for $registered vault(s)');
 }
 
-/// After the relay URL changed or a vault was added: register this app's installation ID
-/// with the current relay for every vault (`register()` re-sends the current FID).
 Future<void> reregisterPush() async {
   try {
     if (Firebase.apps.isEmpty) return;
@@ -235,13 +202,8 @@ Future<SeenSnapshot?> _readSeen(String vaultId) async {
   }
 }
 
-/// Serializes snapshot writes in this isolate (proposals and received payments are
-/// recorded separately, and each write merges with the file).
 Future<void> _seenWrites = Future.value();
 
-/// Records what this device has seen of a vault (also called by the app on every refresh,
-/// so things seen in the app are never announced again from the background). A `null`
-/// list keeps what was recorded for that kind.
 Future<void> recordSeen(
   String vaultId,
   List<rust.ProposalInfo>? proposals, {
@@ -275,7 +237,6 @@ Future<void> recordSeen(
   return write;
 }
 
-/// Notification payloads carry both ids, so a tap can switch to the right vault.
 String notificationPayload(String vaultId, String proposalId) =>
     '$vaultId:$proposalId';
 
@@ -290,22 +251,13 @@ Future<void> _ensureRust() async {
   if (_rustReady) return;
   try {
     await RustLib.init();
-  } catch (_) {
-    // Already initialized on this isolate (one-off tasks can run on the main engine).
-  }
-  // Every isolate that talks to the relay checks it against this phone's log copy.
+  } catch (_) {}
   initLogCache(dir: (await ZafePaths.get()).logDir);
   _rustReady = true;
 }
 
-/// The background check: sync, read the vault log, answer interactive signing requests,
-/// finish an auto-send this member owes, and notify about changes. Never throws.
-/// [skipVaultId]: a vault the app shows live right now (a push while the app is open),
-/// left to the app so nothing on screen is also announced.
 Future<void> checkVaultAndNotify({String? skipVaultId}) async {
   await installBackgroundCrashLog();
-  // One check at a time (the periodic task, the one-off after backgrounding and a push can
-  // fire together, seen on the emulator); one that arrives meanwhile makes it run again.
   final dir = Directory(
     '${(await getApplicationSupportDirectory()).path}/notifications',
   );
@@ -318,9 +270,6 @@ Future<void> checkVaultAndNotify({String? skipVaultId}) async {
   });
 }
 
-/// Background engines are separate isolates with their own memory: install the scrubbed
-/// local log there too (its own file, `crashes-bg.log`; the app's report merges both).
-/// A check that runs on the main engine keeps the app's log. Never throws.
 Future<void> installBackgroundCrashLog() async {
   if (CrashLog.instance != null) return;
   try {
@@ -338,8 +287,6 @@ Future<void> _logBackgroundError(
   StackTrace stack,
 ) async {
   debugPrint('vault check $source failed: ${describeError(error)}');
-  // Offline, a timeout or Tor still connecting is routine for a check that runs at any
-  // time: not logged, so it can't push real errors out of the 20-entry log.
   if (error is ZafeError &&
       const {
         ZafeErrorKind.network,
@@ -358,8 +305,6 @@ Future<void> _check(String? skipVaultId) async {
   final vaults = await ZafeSecureStore.instance.readAll();
   final prefs = await SharedPreferences.getInstance();
   await prefs.reload();
-  // "Use Tor" (read after the reload): nothing may connect before the route is Tor, and
-  // a Tor that can't connect in time ends this check (the next one tries again).
   if (!await ensureTorForBackground(
     useTor: prefs.getBool(kUseTorKey) ?? false,
     request: torRequest,
@@ -376,7 +321,6 @@ Future<void> _check(String? skipVaultId) async {
     return;
   }
   final hideAmounts = prefs.getBool(kPrivacyModeKey) ?? false;
-  // The URLs the user set in Settings (read after the reload: prefs cache per isolate).
   final endpoints = ZafeEndpoints.fromPrefs(prefs);
   for (final v in vaults) {
     if (v.id == skipVaultId) continue;
@@ -388,14 +332,9 @@ Future<void> _check(String? skipVaultId) async {
   }
 }
 
-/// Payload of the "compare safety words" and "vault ready" notifications.
 const kSetupPayload = 'setup';
 const kVaultReadyPayload = 'ready';
 
-/// A vault still being set up: one setup step (it can lock membership, send this
-/// member's part of the safety check, continue key generation, and save the vault once
-/// it exists). Two notifications only, the moments that need the member: the words are
-/// there to compare, and the vault is ready to back up.
 Future<void> _checkSetup(
   StoredVault v,
   SharedPreferences prefs,
@@ -459,8 +398,6 @@ Future<void> _notifySetup(
   payload: notificationPayload(vaultId, what),
 );
 
-/// One vault: sync, read the log, answer interactive signing requests, finish an auto-send
-/// this member owes, update the switcher summary, and notify about changes.
 Future<void> _checkVault(
   StoredVault v,
   bool hideAmounts,
@@ -491,7 +428,7 @@ Future<void> _checkVault(
         balanceZat: balance.totalZat,
         syncedAt: DateTime.now(),
       );
-    } catch (_) {} // offline is routine: not logged
+    } catch (_) {}
     List<rust_received.ReceivedInfo>? received;
     try {
       received = await rust_received.listReceived(
@@ -527,7 +464,6 @@ Future<void> _checkVault(
         tipHeight: height,
       );
     } catch (_) {
-      // The relay is down: the spend alert still runs, from this phone's history.
       final alerts = vaultUpdates(
         previous: await _readSeen(v.id),
         proposals: const [],
@@ -545,7 +481,6 @@ Future<void> _checkVault(
       rethrow;
     }
     var proposals = list.items;
-    // A signer's seat moved: keep this device's copy of the membership current.
     if (list.updatedMaterial case final updated?) {
       await ZafeSecureStore.instance.writeMaterial(v.id, updated);
     }
@@ -562,8 +497,6 @@ Future<void> _checkVault(
       );
     } catch (_) {}
 
-    // An approval this member made completed the signatures, but the app closed before
-    // sending: send now.
     for (final p in proposals) {
       if (p.stage == rust.ProposalStage.approved &&
           p.ready &&
@@ -610,7 +543,6 @@ Future<void> _checkVault(
       unapprovedSpends: unapproved ?? const [],
       unapprovedFromCopyAt: unapprovedFromCopyAt,
       me: rust_vault.identityPublicKey(seeds: seeds),
-      // Read here: this may run in a background isolate without the app's providers.
       names: MemberNames.merge({
         for (final n in list.sharedNames) n.keyHex: n.name,
       }, await MemberNames.read(v.id)),
@@ -628,11 +560,8 @@ Future<void> _checkVault(
                 'Payments that need you, payments sent or rejected, and money received',
             importance: Importance.high,
             priority: Priority.high,
-            // The Z from the app icon (scripts/brand/brand.py), tinted brand verdigris.
             icon: 'ic_notification',
             color: Color(0xFF00736C),
-            // Amounts and recipients stay off the lock screen (Android shows the app
-            // name and "Contents hidden" until the phone is unlocked).
             visibility: NotificationVisibility.private,
           ),
           iOS: DarwinNotificationDetails(),

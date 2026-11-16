@@ -28,10 +28,6 @@ import '../../core/widgets/line_icon.dart';
 import 'backup_prompt_screen.dart' show backupStatusProvider;
 import '../../rust/api/backup.dart' as rust;
 
-/// Export this device's copy of the vault as a passphrase-encrypted backup (spec §12.2).
-/// The passphrase is always generated: 12 words the member saves, then proves by typing
-/// three of them back (choosing one was left to people, and "Suggest" filled both
-/// fields, so nothing ever checked the words were written down).
 class ExportScreen extends ConsumerStatefulWidget {
   const ExportScreen({super.key});
 
@@ -40,14 +36,12 @@ class ExportScreen extends ConsumerStatefulWidget {
 }
 
 class _ExportScreenState extends ConsumerState<ExportScreen> {
-  /// The 12 words, made once per visit.
   late final List<String> _words = rust
       .suggestBackupPassphrase()
       .split(' ')
       .where((w) => w.isNotEmpty)
       .toList();
 
-  /// Which three words (0-based) the check asks for, in order.
   late final List<int> _asked = () {
     final rng = math.Random.secure();
     final picked = <int>{};
@@ -59,10 +53,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   final _answers = [for (var i = 0; i < 3; i++) TextEditingController()];
   final _focus = [for (var i = 0; i < 3; i++) FocusNode()];
 
-  /// The words are on screen (false: the check).
   bool _showWords = true;
   rust.ExportedBackup? _done;
-  // When the words / the backup text were last copied: the countdown under the button.
   DateTime? _wordsCopiedAt;
   DateTime? _textCopiedAt;
 
@@ -107,8 +99,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     return 'Zafe-$safe-${d.year}-${two(d.month)}-${two(d.day)}.zafebackup';
   }
 
-  /// The backup left the app (saved or sent): stop the reminder and tell the other
-  /// members (the next refresh attests it in the vault log).
   Future<void> _saved() async {
     await VaultSummaries.write(
       ref.read(vaultProvider).activeId!,
@@ -126,13 +116,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final result = await SharePlus.instance.share(
       ShareParams(files: [XFile(file.path)], fileNameOverrides: [_fileName]),
     );
-    // `unavailable`: the platform can't tell whether a target was picked.
     if (result.status != ShareResultStatus.dismissed) {
       await _saved();
-      // Saved somewhere: nothing left to do here.
       if (mounted) context.go('/home');
     }
-    // The share sheet has copied or sent it; don't leave the backup lying in the cache.
     try {
       await file.delete();
     } catch (_) {}
@@ -270,7 +257,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 }
 
-/// The backup words, numbered: two columns, one with large text (two wrapped them).
 class BackupWordGrid extends StatelessWidget {
   const BackupWordGrid({super.key, required this.words});
   final List<String> words;

@@ -16,7 +16,6 @@ void main() {
     await run.run(true, (_) async => fail('must not run concurrently'));
     gate.complete();
     await first;
-    // The second pass is forced because one of the requests asked for it.
     expect(runs, [false, true]);
     expect(run.busy, isFalse);
   });

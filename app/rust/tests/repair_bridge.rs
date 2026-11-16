@@ -1,7 +1,3 @@
-//! A lost phone's seat moves to a new phone through the Flutter bridge API (what the Dart
-//! side calls): recovery code, co-signers' approvals, the helpers' repair inside their
-//! regular refresh, and the new phone collecting its key. No chain needed.
-
 mod common;
 
 use common::Setup;
@@ -36,7 +32,6 @@ fn start_relay() -> String {
 
 #[test]
 fn a_lost_phone_is_replaced_through_the_bridge() {
-    // The helpers' 72 h wait is tested in zafe-core; here the flow after it.
     rust_lib_zafe::testing::set_seat_move_wait(std::time::Duration::ZERO);
     let relay = start_relay();
     let tmp = std::env::temp_dir().join(format!("zafe-repair-bridge-{}", std::process::id()));
@@ -47,8 +42,6 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     for s in &seeds[1..] {
         vault::join_vault(relay.clone(), s.clone(), invite.clone()).unwrap();
     }
-    // The same dirs `state_dir(i)` returns below. No lightwalletd: the creator passes
-    // birthday 2 and joiners skip the ceiling when the server can't be reached.
     let lwd = "http://127.0.0.1:1";
     let setups: Vec<Setup> = seeds
         .iter()
@@ -77,8 +70,6 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         .unwrap()
     };
 
-    // Member 0 loses their phone; the new phone shows its codes, and a co-signer sends it
-    // the vault's seat link (its relay and mailbox; not the default relay given here).
     let link = repair::seat_link(materials[1].clone(), "https://unused.example".into()).unwrap();
     let link = repair::parse_seat_link(format!("Open this: {link}")).unwrap();
     assert_eq!(link.relay_url, relay);
@@ -102,11 +93,8 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         RecoveryStage::Waiting
     ));
 
-    // A co-signer and the new phone run the safety check (both screens poll it) and see
-    // the same words.
     let words_of = |i: usize, code: &str| {
         for _ in 0..4 {
-            // The new phone's poll: commit, then reveal once challenged.
             repair::check_recovery(
                 seat_relay.clone(),
                 fresh.seeds.clone(),
@@ -141,7 +129,6 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         panic!("the safety check didn't finish");
     };
 
-    // Member 1 approves after comparing words; the others see the pending move.
     let old = vault::identity_public_key(seeds[0].clone()).unwrap();
     let words_1 = words_of(1, &code.code);
     assert!(!repair::approve_seat_move(
@@ -158,8 +145,6 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
     assert_eq!(pending[0].old_key_hex, old);
     assert_eq!((pending[0].approvals.len(), pending[0].needed), (1, 2));
 
-    // Member 2 approves from the move's code, with its own words: every approval is in,
-    // and the move is pending. The old phone (member 0) sees it and could keep its seat.
     let words_2 = words_of(2, &pending[0].code);
     assert!(repair::approve_seat_move(
         relay.clone(),
@@ -180,8 +165,6 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         "its refresh recorded when it saw it"
     );
 
-    // The helpers' regular refreshes repair the key; their material picks up the move.
-    // The new phone takes the vault only once the person tapped "Words match" on a row.
     let confirmed: Vec<String> = [1, 2]
         .iter()
         .map(|&i| vault::identity_public_key(seeds[i].clone()).unwrap())
@@ -234,13 +217,11 @@ fn a_lost_phone_is_replaced_through_the_bridge() {
         assert_eq!(s.address, summary.address);
     }
 
-    // Until the new phone checks in, members see the repair in progress.
     let repairs = list(1, &seeds[1], &updated[0]).repairs;
     assert_eq!(repairs.len(), 1);
     assert_eq!(repairs[0].new_key_hex, fresh.public_key_hex);
     assert_eq!((repairs[0].helpers.len(), repairs[0].attempt), (2, 0));
 
-    // The new phone works like any member; its first refresh marks the repair done.
     let mine = list(3, &fresh.seeds, &done.material);
     assert!(mine.updated_material.is_none());
     assert!(mine.repairs.is_empty());

@@ -1,5 +1,3 @@
-//! Vault-log replay rules (spec §6.3, §9.6).
-
 use rand::{rngs::StdRng, SeedableRng};
 use zafe_core::node;
 use zafe_core::vault::{
@@ -11,7 +9,7 @@ use zafe_proto::{
     Chain, Identity, LogEntry, LogKey,
 };
 
-mod common;
+pub mod common;
 
 const MAILBOX: [u8; 16] = [4; 16];
 
@@ -24,7 +22,6 @@ struct Log {
 }
 
 impl Log {
-    /// A 1-of-3 vault: one approval signs.
     fn one_of_three() -> Self {
         Self {
             threshold: 1,
@@ -34,7 +31,6 @@ impl Log {
 
     fn new() -> Self {
         let mut rng = StdRng::seed_from_u64(8);
-        // Members are 0..3; 3..6 are outsiders (new phones in seat moves).
         let ids = (0..6).map(|_| Identity::generate(&mut rng)).collect();
         let key = LogKey::generate(0, &mut rng);
         Self {
@@ -91,23 +87,16 @@ impl Log {
         }
     }
 
-    /// Appends an event authored by member `author` (the relay only accepts members, but
-    /// replay must not rely on that, so the chain here is checked against all 4 ids).
-    ///
-    /// Written as version 8: these fixtures use fake PCZTs, which version 9 proposals may
-    /// not carry. Version 9 rules have their own tests (`push_v`).
     fn push(&mut self, author: usize, event: &VaultEvent) {
         self.push_v(author, event, 8);
     }
 
-    /// Appends `event` tagged with event `version`.
     fn push_v(&mut self, author: usize, event: &VaultEvent, version: u16) {
         let mut bytes = event.to_bytes().unwrap();
         bytes[..2].copy_from_slice(&version.to_le_bytes());
         self.push_raw(author, &bytes);
     }
 
-    /// Appends an entry whose plaintext is `bytes` as is.
     fn push_raw(&mut self, author: usize, bytes: &[u8]) {
         let entry = LogEntry::create(
             &self.ids[author],
@@ -206,7 +195,7 @@ fn a_member_changing_their_vote_counts_once() {
     log.push(0, &log.created(&[0, 1, 2]));
     log.push(0, &proposal(1));
     log.push(1, &vote(1, true));
-    log.push(1, &vote(1, true)); // re-approval with fresh commitments
+    log.push(1, &vote(1, true));
     assert_eq!(log.replay().unwrap().proposals[&[1; 16]].approvals.len(), 1);
     log.push(1, &vote(1, false));
     let p = &log.replay().unwrap().proposals[&[1; 16]];
@@ -231,11 +220,10 @@ fn log_must_start_with_creation() {
     assert_eq!(log.replay().unwrap_err(), VaultError::NotCreatedFirst);
 }
 
-/// Invalid entries are skipped by every member instead of making the log unreadable.
 #[test]
 fn invalid_entries_are_ignored_not_fatal() {
     let cases: Vec<(usize, VaultEvent, VaultError)> = vec![
-        (3, proposal(2), VaultError::NotAMember(2)), // id 3 is not in the descriptor
+        (3, proposal(2), VaultError::NotAMember(2)),
         (
             1,
             VaultEvent::Vote {
@@ -267,7 +255,7 @@ fn invalid_entries_are_ignored_not_fatal() {
         log.push(0, &log.created(&[0, 1, 2]));
         log.push(0, &proposal(1));
         log.push(author, &bad);
-        log.push(1, &vote(1, true)); // entries after the bad one still apply
+        log.push(1, &vote(1, true));
         let state = log.replay().expect("log stays readable");
         assert_eq!(state.ignored, vec![(2, expected)]);
         assert_eq!(state.proposals.len(), 1);
@@ -276,8 +264,6 @@ fn invalid_entries_are_ignored_not_fatal() {
     }
 }
 
-/// An event from a newer version of Zafe after creation is skipped deterministically (and
-/// counted, so the app can ask to update); the same at creation is fatal.
 #[test]
 fn unknown_event_versions_are_ignored_after_creation() {
     let newer = |event: &VaultEvent| {
@@ -319,8 +305,6 @@ fn name(name: &str) -> VaultEvent {
     VaultEvent::Name { name: name.into() }
 }
 
-/// Members name themselves; the latest name per author wins, empty clears it, and an
-/// invalid name is ignored like any other invalid entry.
 #[test]
 fn members_share_their_names() {
     let mut log = Log::new();
@@ -332,7 +316,7 @@ fn members_share_their_names() {
     log.push(2, &name(" padded "));
     log.push(2, &name(&"x".repeat(33)));
     log.push(2, &name("tab\there"));
-    log.push(3, &name("Mallory")); // not a member
+    log.push(3, &name("Mallory"));
     let state = log.replay().unwrap();
     let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
     assert_eq!(state.names.len(), 1);
@@ -346,13 +330,10 @@ fn members_share_their_names() {
             (8, VaultError::NotAMember(8)),
         ]
     );
-    // 32 characters (not bytes) is the limit.
     log.push(2, &name(&"桜".repeat(32)));
     assert_eq!(log.replay().unwrap().names[&pk[2]], "桜".repeat(32));
 }
 
-/// Members attest their backups; the latest attestation per member wins, one for another
-/// key epoch is ignored, and non-members can't attest.
 #[test]
 fn members_attest_backups() {
     let mut log = Log::new();
@@ -361,8 +342,8 @@ fn members_attest_backups() {
     log.push(0, &attest(0, 100));
     log.push(1, &attest(0, 200));
     log.push(0, &attest(0, 300));
-    log.push(2, &attest(1, 400)); // a future epoch
-    log.push(3, &attest(0, 500)); // not a member
+    log.push(2, &attest(1, 400));
+    log.push(3, &attest(0, 500));
     let state = log.replay().unwrap();
     let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
     assert_eq!(state.backups.len(), 2);
@@ -378,7 +359,6 @@ fn members_attest_backups() {
 }
 
 impl Log {
-    /// Version 12: member `author` approves moving `old`'s seat to `ids[new]` in `round`.
     fn approve(&mut self, author: usize, old: usize, new: usize, round: u32) {
         let approval = zafe_proto::relay::SeatMoveApproval {
             vault_id: MAILBOX,
@@ -394,7 +374,6 @@ impl Log {
         self.push_v(author, &event, 12);
     }
 
-    /// Version 12: `author` logs its part in the move at `replacement`, attempt `attempt`.
     fn helped(&mut self, author: usize, replacement: u64, attempt: u32) {
         let event = VaultEvent::RepairHelped {
             replacement,
@@ -403,8 +382,6 @@ impl Log {
         self.push_v(author, &event, 12);
     }
 
-    /// Version 12: `author` logs a keep of the move at `replacement` signed by `signer`
-    /// (the old key's signature over the move's `SeatCancel`, whoever logs it).
     fn keep_by(&mut self, author: usize, signer: usize, replacement: u64) {
         let state = self.replay().unwrap();
         let r = state
@@ -413,7 +390,7 @@ impl Log {
             .find(|r| r.index == replacement)
             .expect("a move to keep");
         let cancel = zafe_proto::relay::SeatCancel {
-            mailbox: [9; 16], // any label: the log keeps the one it was signed for
+            mailbox: [9; 16],
             vault_id: MAILBOX,
             move_id: r.move_id(&MAILBOX).unwrap(),
             old: r.old,
@@ -429,7 +406,6 @@ impl Log {
         self.push_v(author, &event, 12);
     }
 
-    /// The old key keeps its own seat.
     fn keep(&mut self, author: usize, replacement: u64) {
         self.keep_by(author, author, replacement);
     }
@@ -438,7 +414,6 @@ impl Log {
         self.ids[i].public().sig_pk
     }
 
-    /// Old format (versions 4-11): member `author` approves moving `old`'s seat to `ids[new]`.
     fn replace(&mut self, author: usize, old: usize, new: usize) {
         let approval = zafe_proto::relay::ReplaceApproval {
             mailbox: MAILBOX,
@@ -454,21 +429,18 @@ impl Log {
     }
 }
 
-/// A seat moves at the threshold of approvals from other members; the seat keeps its
-/// votes, name and FROST identifier under the new key, the old key is out, and invalid
-/// approvals are ignored.
 #[test]
 fn a_seat_moves_at_the_threshold() {
     let mut log = Log::new();
     log.push(0, &log.created(&[0, 1, 2]));
     log.push(0, &name("Alice"));
     log.push(0, &proposal(1));
-    log.push(0, &vote(1, true)); // one-tap style: no commitments
+    log.push(0, &vote(1, true));
     log.push(0, &VaultEvent::BackupVerified { epoch: 0, at: 1 });
     let pk: Vec<_> = log.ids.iter().map(|i| i.public().sig_pk).collect();
 
-    log.replace(0, 0, 3); // the lost member can't approve its own move
-    log.replace(1, 1, 1); // nor can a member move to a key that is already a member
+    log.replace(0, 0, 3);
+    log.replace(1, 1, 1);
     let mut forged = VaultEvent::ReplaceApproval {
         old: pk[0],
         new: *log.ids[3].public(),
@@ -476,7 +448,7 @@ fn a_seat_moves_at_the_threshold() {
     };
     log.push(1, &forged);
     log.replace(1, 0, 3);
-    log.replace(1, 0, 3); // twice from the same member counts once
+    log.replace(1, 0, 3);
     let state = log.replay().unwrap();
     assert!(state.replacements.is_empty());
     assert_eq!(state.pending_replacements.len(), 1);
@@ -500,7 +472,6 @@ fn a_seat_moves_at_the_threshold() {
     assert_eq!(p.author, pk[3]);
     assert!(p.approvals.contains_key(&pk[3]));
 
-    // The old key is out; the new one is a member.
     log.push(0, &name("Mallory"));
     log.push(3, &name("Alice 2"));
     let state = log.replay().unwrap();
@@ -510,9 +481,6 @@ fn a_seat_moves_at_the_threshold() {
     );
     assert_eq!(state.names[&pk[3]], "Alice 2");
 
-    // Devices verify the chain against the membership as of each entry. The old key's
-    // entry after the move (a stolen phone racing the relay's member update) must not
-    // stop the chain for everyone: it chains as a former member's and replay ignores it.
     let entries = log.chain.entries();
     let mut state = VaultState::replay(&entries[..1], &log.key).unwrap();
     let mut chain = Chain::new(MAILBOX);
@@ -527,7 +495,6 @@ fn a_seat_moves_at_the_threshold() {
     assert_eq!(state.former_members, vec![*log.ids[0].public()]);
     assert!(state.ignored.contains(&(11, VaultError::NotAMember(11))));
 
-    // An approval that arrives after the move is moot.
     forged = VaultEvent::Name { name: "x".into() };
     log.push(3, &forged);
     log.replace(1, 0, 3);
@@ -537,9 +504,6 @@ fn a_seat_moves_at_the_threshold() {
     ));
 }
 
-/// After a seat moves, any member can restart its key repair with other helpers (the
-/// threshold of current members, itself among them, never the new key), and only the new
-/// key can mark it done; nothing changes a finished repair.
 #[test]
 fn a_stalled_repair_restarts_and_finishes() {
     let mut log = Log::new();
@@ -556,13 +520,13 @@ fn a_stalled_repair_restarts_and_finishes() {
     };
     let done = VaultEvent::RepairDone { replacement: index };
 
-    log.push(3, &retry(vec![pk[3], pk[1]])); // 3: the new key can't help itself
-    log.push(1, &retry(vec![pk[1], pk[0]])); // 4: the old key isn't a member
-    log.push(1, &retry(vec![pk[1]])); // 5: one helper short
-    log.push(1, &retry(vec![pk[2], pk[3]])); // 6: the author must help
-    log.push(1, &retry(vec![pk[1], pk[1]])); // 7: twice the same helper
-    log.push(2, &retry(vec![pk[2], pk[1]])); // 8: valid
-    log.push(1, &done); // 9: only the new key says it's done
+    log.push(3, &retry(vec![pk[3], pk[1]]));
+    log.push(1, &retry(vec![pk[1], pk[0]]));
+    log.push(1, &retry(vec![pk[1]]));
+    log.push(1, &retry(vec![pk[2], pk[3]]));
+    log.push(1, &retry(vec![pk[1], pk[1]]));
+    log.push(2, &retry(vec![pk[2], pk[1]]));
+    log.push(1, &done);
     let state = log.replay().unwrap();
     let r = &state.replacements[0];
     assert_eq!(
@@ -575,8 +539,8 @@ fn a_stalled_repair_restarts_and_finishes() {
     );
 
     log.push(3, &done);
-    log.push(2, &retry(vec![pk[2], pk[1]])); // 11: too late
-    log.push(3, &done); // 12: once
+    log.push(2, &retry(vec![pk[2], pk[1]]));
+    log.push(3, &done);
     let state = log.replay().unwrap();
     assert!(state.replacements[0].done);
     assert_eq!(state.replacements[0].attempt, 1);
@@ -592,9 +556,6 @@ fn a_stalled_repair_restarts_and_finishes() {
     );
 }
 
-/// Rule 4: from version 11 a repair restarts only once every helper it names (the
-/// threshold of current members) logged the same restart: one member alone can't restart
-/// it. A restart tagged with an older version after a version 11 event counts the same way.
 #[test]
 fn a_repair_restart_needs_every_named_helper() {
     let mut log = Log::new();
@@ -626,9 +587,6 @@ fn a_repair_restart_needs_every_named_helper() {
     assert_eq!(attempt(&log), 1, "an older tag doesn't skip the rule");
 }
 
-/// A former member's phone (its entries still chain) can't change which rules apply: from
-/// version 11 its entries raise neither the version floor nor `member_versions`, and a
-/// future tag from it isn't counted as "update Zafe". A current member's future tag is.
 #[test]
 fn a_former_members_future_tag_changes_nothing() {
     let mut log = Log::new();
@@ -650,8 +608,6 @@ fn a_former_members_future_tag_changes_nothing() {
     assert_eq!(log.replay().unwrap().newer_version_entries(), 1);
 }
 
-/// A log written before version 11 replays as before: there a former member's entry still
-/// raised the floor and its `member_versions` (here to 10).
 #[test]
 fn a_former_members_entry_before_version_11_replays_as_before() {
     let mut log = Log::new();
@@ -671,8 +627,6 @@ fn a_former_members_entry_before_version_11_replays_as_before() {
     ));
 }
 
-/// Interactive approvals of the lost device carry commitments whose nonces were on it:
-/// the move voids them, so a proposal approved at exactly the threshold reopens.
 #[test]
 fn a_seat_move_voids_interactive_approvals() {
     let mut log = Log::new();
@@ -697,7 +651,6 @@ fn a_seat_move_voids_interactive_approvals() {
     let p = &state.proposals[&[1; 16]];
     assert_eq!(p.status, ProposalStatus::Open);
     assert_eq!(p.approvals.len(), 1);
-    // The new device approves again.
     log.push(3, &interactive(1));
     assert_eq!(
         log.replay().unwrap().proposals[&[1; 16]].status,
@@ -705,7 +658,6 @@ fn a_seat_move_voids_interactive_approvals() {
     );
 }
 
-/// Version 2 only appended `Name`: a log written by version 1 still replays the same.
 #[test]
 fn version_1_events_still_replay() {
     let v1 = |event: &VaultEvent| {
@@ -722,7 +674,6 @@ fn version_1_events_still_replay() {
     let state = log.replay().expect("version 1 log replays");
     assert!(state.ignored.is_empty());
     assert_eq!(state.proposals[&[1; 16]].status, ProposalStatus::Approved);
-    // Version 0 never existed.
     let mut zero = proposal(2).to_bytes().unwrap();
     zero[..2].copy_from_slice(&0u16.to_le_bytes());
     log.push_raw(0, &zero);
@@ -732,7 +683,6 @@ fn version_1_events_still_replay() {
     ));
 }
 
-/// A descriptor from another version is fatal even when every member signed it.
 #[test]
 fn unknown_descriptor_version_is_fatal() {
     let mut log = Log::new();
@@ -755,7 +705,6 @@ fn unknown_descriptor_version_is_fatal() {
     ));
 }
 
-/// The descriptor's version is covered by the members' signatures.
 #[test]
 fn descriptor_version_is_signed() {
     let log = Log::new();
@@ -765,7 +714,6 @@ fn descriptor_version_is_signed() {
     assert_ne!(d.signing_message().unwrap(), signed);
 }
 
-/// The race from the code review: the author cancels while the leader broadcasts.
 #[test]
 fn broadcast_racing_a_cancel_does_not_brick_the_log() {
     let mut log = Log::new();
@@ -785,7 +733,6 @@ fn broadcast_racing_a_cancel_does_not_brick_the_log() {
     assert_eq!(state.proposals[&[1; 16]].status, ProposalStatus::Cancelled);
     assert_eq!(state.ignored, vec![(5, VaultError::ProposalClosed(5))]);
 
-    // `check` lets a writer see this before appending.
     let err = state.check(
         log.ids[1].public().sig_pk,
         &VaultEvent::Broadcast {
@@ -796,11 +743,8 @@ fn broadcast_racing_a_cancel_does_not_brick_the_log() {
     assert_eq!(err, Err(VaultError::ProposalClosed(6)));
 }
 
-// --- One-tap signing: commitment pools and share votes ---------------------------------
-
 fn commitments(rng: &mut StdRng, n: usize) -> VaultEvent {
     use reddsa::frost::redpallas::{keys::SigningShare, round1};
-    // Any valid signing share will do: replay only checks that commitments decode.
     let mut scalar = [0u8; 32];
     scalar[0] = 7;
     let share = SigningShare::deserialize(&scalar).unwrap();
@@ -827,7 +771,6 @@ fn share_vote(id: u8, groups: &[u16]) -> VaultEvent {
     }
 }
 
-/// A 2-of-3 vault whose three members each published `per_member` commitments.
 fn pooled_log(per_member: usize) -> Log {
     let mut log = Log::new();
     log.push(0, &log.created(&[0, 1, 2]));
@@ -848,7 +791,6 @@ fn proposals_get_disjoint_commitments_in_log_order() {
         s.proposals[&[1; 16]].preprocessed.as_ref().unwrap(),
         s.proposals[&[2; 16]].preprocessed.as_ref().unwrap(),
     );
-    // 2-of-3: three groups, each with one commitment per member per spend.
     assert_eq!(p1.subsets.len(), 3);
     let all: Vec<&Vec<u8>> = [p1, p2]
         .iter()
@@ -857,11 +799,9 @@ fn proposals_get_disjoint_commitments_in_log_order() {
     let unique: std::collections::BTreeSet<_> = all.iter().collect();
     assert_eq!(all.len(), 12);
     assert_eq!(unique.len(), 12, "a commitment is never assigned twice");
-    // Each member used 2 per proposal: 4 published, 0 left.
     for m in 0..3 {
         assert_eq!(s.pools[&log.ids[m].public().sig_pk].available(), 0);
     }
-    // Replay is deterministic.
     let again = log.replay().unwrap();
     assert_eq!(
         again.proposals[&[2; 16]].preprocessed,
@@ -869,7 +809,6 @@ fn proposals_get_disjoint_commitments_in_log_order() {
     );
 }
 
-/// A proposal written by an app on `version` (the tag is the author's `VAULT_EVENT`).
 fn proposal_v(id: u8, version: u16) -> Vec<u8> {
     let mut bytes = proposal(id).to_bytes().unwrap();
     bytes[..2].copy_from_slice(&version.to_le_bytes());
@@ -878,7 +817,6 @@ fn proposal_v(id: u8, version: u16) -> Vec<u8> {
 
 #[test]
 fn version_5_proposals_keep_the_all_or_nothing_rule() {
-    // Each member needs 2 per proposal; one has 1: the whole proposal is interactive.
     let mut log = pooled_log(1);
     log.push_raw(0, &proposal_v(1, 5));
     let s = log.replay().unwrap();
@@ -886,7 +824,6 @@ fn version_5_proposals_keep_the_all_or_nothing_rule() {
     for m in 0..3 {
         assert_eq!(s.pools[&log.ids[m].public().sig_pk].available(), 1);
     }
-    // A member with no pool at all: the same, for every group.
     let mut log = Log::new();
     log.push(0, &log.created(&[0, 1, 2]));
     let mut rng = StdRng::seed_from_u64(5);
@@ -901,11 +838,10 @@ fn version_5_proposals_keep_the_all_or_nothing_rule() {
 
 #[test]
 fn short_pools_assign_only_the_groups_they_cover() {
-    let mut log = pooled_log(1); // each member needs 2 for all groups, has 1
+    let mut log = pooled_log(1);
     log.push(0, &proposal(1));
     let s = log.replay().unwrap();
     let pre = s.proposals[&[1; 16]].preprocessed.as_ref().unwrap();
-    // Group order {0,1}, {0,2}, {1,2}: the first takes m0's and m1's only commitment.
     assert_eq!(pre.subsets.len(), 1);
     assert_eq!(
         pre.subsets[0],
@@ -914,10 +850,8 @@ fn short_pools_assign_only_the_groups_they_cover() {
     for m in 0..2 {
         assert_eq!(s.pools[&log.ids[m].public().sig_pk].available(), 0);
     }
-    // The member outside every assigned group keeps its commitment.
     assert_eq!(s.pools[&log.ids[2].public().sig_pk].available(), 1);
     assert!(pre.groups_of(&log.ids[2].public().sig_pk).is_empty());
-    // Nothing left for the next proposal: interactive.
     log.push(0, &proposal(2));
     let s = log.replay().unwrap();
     assert!(s.proposals[&[2; 16]].preprocessed.is_none());
@@ -934,24 +868,20 @@ fn a_member_without_a_pool_does_not_take_one_tap_from_the_others() {
     log.push(0, &proposal(1));
     let s = log.replay().unwrap();
     let pre = s.proposals[&[1; 16]].preprocessed.as_ref().unwrap();
-    // Only {m0, m1} can sign one-tap.
     assert_eq!(pre.subsets.len(), 1);
     assert_eq!(pre.groups_of(&log.ids[0].public().sig_pk), vec![0]);
     assert!(pre.groups_of(&log.ids[2].public().sig_pk).is_empty());
-    // Their shares complete the group; the third member isn't needed.
     log.push(0, &share_vote(1, &[0]));
     log.push(1, &share_vote(1, &[0]));
     let s = log.replay().unwrap();
     let p = &s.proposals[&[1; 16]];
     assert_eq!(p.ready_group, Some(0));
     assert_eq!(p.status, ProposalStatus::Approved);
-    // A share vote for a group the member isn't in is still refused.
     log.push(2, &share_vote(1, &[0]));
     assert!(log.replay().unwrap().ignored.iter().any(|(_, e)| matches!(
         e,
         VaultError::BadShares(_) | VaultError::ProposalClosed(_) | VaultError::VoteFinal(_)
     )));
-    // Nobody has a pool: interactive.
     let mut bare = Log::new();
     bare.push(0, &bare.created(&[0, 1, 2]));
     bare.push(0, &proposal(1));
@@ -960,7 +890,6 @@ fn a_member_without_a_pool_does_not_take_one_tap_from_the_others() {
         .is_none());
 }
 
-/// The assignment is a function of the log, whoever replays it.
 #[test]
 fn partial_assignment_is_deterministic() {
     let mut log = pooled_log(3);
@@ -979,7 +908,6 @@ fn partial_assignment_is_deterministic() {
 fn share_votes_complete_a_group_and_are_final() {
     let mut log = pooled_log(2);
     log.push(0, &proposal(1));
-    // Groups: 0 = {m0,m1}, 1 = {m0,m2}, 2 = {m1,m2} (descriptor order).
     log.push(0, &share_vote(1, &[0, 1]));
     let s = log.replay().unwrap();
     assert_eq!(s.proposals[&[1; 16]].ready_group, None);
@@ -989,7 +917,6 @@ fn share_votes_complete_a_group_and_are_final() {
     assert_eq!(p.status, ProposalStatus::Approved);
     assert_eq!(p.ready_group, Some(1));
     assert_eq!(p.completed_by, Some(log.ids[2].public().sig_pk));
-    // Member 2 can no longer withdraw: the shares are out.
     log.push(2, &vote(1, false));
     let s = log.replay().unwrap();
     assert!(s
@@ -1003,9 +930,9 @@ fn share_votes_complete_a_group_and_are_final() {
 fn invalid_share_votes_are_ignored() {
     let mut log = pooled_log(2);
     log.push(0, &proposal(1));
-    log.push(0, &share_vote(1, &[2])); // member 0 is not in group 2 = {m1,m2}
-    log.push(0, &share_vote(1, &[0, 0])); // the same group twice
-    log.push(0, &share_vote(1, &[7])); // no such group
+    log.push(0, &share_vote(1, &[2]));
+    log.push(0, &share_vote(1, &[0, 0]));
+    log.push(0, &share_vote(1, &[7]));
     let s = log.replay().unwrap();
     assert_eq!(
         s.ignored
@@ -1032,7 +959,6 @@ fn garbage_commitments_are_rejected() {
     assert!(s.pools.is_empty() || s.pools.values().all(|p| p.commitments.is_empty()));
 }
 
-/// A proposal event carrying a real PCZT, built on `tip`.
 fn proposal_with(id: u8, pczt: &pczt::Pczt, tip: u32) -> VaultEvent {
     VaultEvent::Proposal {
         id: [id; 16],
@@ -1062,7 +988,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
             vec![Out {
                 ovk: None,
                 recipient: outside_address(9),
-                // The whole note minus the ZIP 317 fee (2 actions): no change output.
                 value: 990_000,
                 memo: zcash_protocol::memo::MemoBytes::empty(),
             }],
@@ -1081,8 +1006,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     let state = log.replay().unwrap();
     assert_eq!(state.proposals[&[1; 16]].expiry_height, expiry);
     assert!(!state.proposals[&[1; 16]].nullifiers.is_empty());
-    // Members check before appending, so a raced proposal is caught before it's written:
-    // from version 12 once a second member approved the first (`proposal_rules`).
     let mut approved = log.replay().unwrap();
     approved
         .apply(2, log.ids[2].public().sig_pk, vote(1, true))
@@ -1092,8 +1015,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
         Err(VaultError::NotesInUse(_))
     ));
 
-    // Written anyway (two members raced): everyone ignores the second (these entries are
-    // version 8, whose rule reserved at once).
     log.push(1, &proposal_with(2, &a2, tip));
     log.push(1, &proposal_with(3, &b, tip));
     let state = log.replay().unwrap();
@@ -1101,11 +1022,9 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     assert!(state.proposals.contains_key(&[3; 16]));
     assert_eq!(state.ignored, vec![(2, VaultError::NotesInUse(2))]);
 
-    // Past the earlier proposal's expiry its notes are free again.
     log.push(2, &proposal_with(4, &b, expiry));
     assert!(log.replay().unwrap().proposals.contains_key(&[4; 16]));
 
-    // Wallet holds: live proposals in log order; a dropped broadcast releases its notes.
     log.push(0, &vote(3, true));
     log.push(2, &vote(3, true));
     log.push(
@@ -1117,7 +1036,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     );
     let state = log.replay().unwrap();
     assert_eq!(state.proposals[&[3; 16]].status, ProposalStatus::Broadcast);
-    // Member 0's phone holds its own lone proposal 1, not member 2's lone proposal 4.
     let owners = |dropped: &[u8]| {
         let dropped = dropped.iter().map(|d| [*d; 16]).collect();
         node::note_holds(&state, &dropped, &log.ids[0].public().sig_pk)
@@ -1126,8 +1044,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
             .collect::<Vec<_>>()
     };
     assert_eq!(owners(&[]), vec![1, 3]);
-    // A dropped broadcast may still be sent by anyone with the signed bytes: held past its
-    // expiry by the reorg margin, like a signed cancelled one.
     assert_eq!(owners(&[3]), vec![1, 3]);
     let until = |dropped: &[u8]| {
         let dropped = dropped.iter().map(|d| [*d; 16]).collect();
@@ -1135,7 +1051,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     };
     assert_eq!(until(&[3]), until(&[]) + state.reorg_margin(until(&[])));
 
-    // A cancelled proposal that may not be signed holds nothing: its notes can be respent.
     log.push(0, &VaultEvent::Cancelled { proposal: [1; 16] });
     log.push(1, &proposal_with(5, &a2, tip));
     let state = log.replay().unwrap();
@@ -1147,7 +1062,6 @@ fn a_proposal_respending_notes_of_a_live_one_is_ignored() {
     );
 }
 
-/// Counts the nonces `forget_closed` deletes (every commitment counts as held here).
 #[derive(Default)]
 struct CountingPool(usize);
 
@@ -1203,10 +1117,8 @@ fn nonces_of_expired_one_tap_proposals_are_forgotten() {
     };
     assert_eq!(forgotten(None), 0, "tip unknown: keep");
     assert_eq!(forgotten(Some(expiry - 1)), 0, "still open");
-    // Member 0 is in two of the three 2-of-3 groups, one spend each.
     assert_eq!(forgotten(Some(expiry)), 2);
 
-    // Interactive nonces for the same proposal go too, once it expired.
     use zafe_core::session::{MemoryNonceStore, NonceStore};
     let mut store = MemoryNonceStore::default();
     let p = &state.proposals[&[1; 16]];
@@ -1226,17 +1138,13 @@ fn nonces_of_expired_one_tap_proposals_are_forgotten() {
 #[test]
 fn expiry_heights_are_rounded_up_to_the_grid() {
     use zafe_core::vault::{expiry_height, EXPIRY_ROUNDING_BLOCKS as R};
-    // Proposals built a few blocks apart share one expiry: it doesn't date the proposal.
     let a = expiry_height(1_000_001, 8064);
     let b = expiry_height(1_000_050, 8064);
     assert_eq!(a, b);
     assert_eq!(a % R, 0);
     assert!((1_000_001 + 8064..1_000_001 + 8064 + R).contains(&a));
-    // Already on the grid: unchanged.
     assert_eq!(expiry_height(R * 10, R), R * 11);
 }
-
-// --- Unapproved-spend alert ---------------------------------------------------------------
 
 mod spend_watch_tests {
     use super::*;
@@ -1245,7 +1153,6 @@ mod spend_watch_tests {
         wallet::VaultSpend,
     };
 
-    /// An approved proposal (so possibly signed) whose PCZT fixes txid 5.
     fn state_with_proposal(nfs: &[[u8; 32]], txid: Option<[u8; 32]>) -> VaultState {
         let mut log = Log::new();
         log.push(0, &log.created(&[0, 1, 2]));
@@ -1274,7 +1181,6 @@ mod spend_watch_tests {
     #[test]
     fn a_spend_logged_as_sent_is_accounted_for_whenever_it_mined() {
         let s = state_with_proposal(&[A, B], Some([7; 32]));
-        // The log says this proposal's transaction was sent (a version 7-11 entry).
         assert!(unapproved_spends(&s, &[spend(7, Some(10), &[A, B])]).is_empty());
     }
 
@@ -1290,14 +1196,9 @@ mod spend_watch_tests {
                 mined_height: None
             }]
         );
-        // Spending a proposal's notes isn't enough: it must be that proposal's transaction.
         assert_eq!(unapproved_spends(&s, &[spend(9, Some(99), &[A])]).len(), 1);
     }
 
-    /// A payment signed before it was cancelled, rejected or withdrawn, and mined anyway,
-    /// is the transaction members verified (its txid is fixed by the PCZT): never "keys
-    /// used outside Zafe", however long ago it mined. In the first batch-3 draft it was
-    /// flagged once its 24-block grace ended.
     #[test]
     fn a_signed_payment_mined_after_cancel_is_never_flagged() {
         for status in [
@@ -1310,7 +1211,6 @@ mod spend_watch_tests {
             s.proposals.get_mut(&[1; 16]).unwrap().status = status;
             let mined = [spend(5, Some(100), &[A, B])];
             assert!(unapproved_spends(&s, &mined).is_empty(), "{status:?}");
-            // Shown as sent when it was cancelled or rejected.
             let anyway = sent_anyway(&s, &mined);
             assert_eq!(
                 anyway.get(&[1; 16]),
@@ -1318,13 +1218,10 @@ mod spend_watch_tests {
                     .then_some(&[5; 32]),
                 "{status:?}"
             );
-            // Not yet mined: not sent yet.
             assert!(sent_anyway(&s, &[spend(5, None, &[A, B])]).is_empty());
         }
     }
 
-    /// Nobody can have signed a proposal that never reached Approved and got no shares:
-    /// its transaction mined means keys used outside Zafe.
     #[test]
     fn a_proposal_nobody_signed_explains_nothing() {
         let mut s = state_with_proposal(&[A], None);
@@ -1338,7 +1235,6 @@ mod spend_watch_tests {
     #[test]
     fn rows_of_one_transaction_are_one_spend() {
         let s = state_with_proposal(&[A, B], None);
-        // The wallet reports one row per spent note.
         assert!(unapproved_spends(&s, &[spend(5, None, &[A]), spend(5, None, &[B])]).is_empty());
         assert_eq!(
             unapproved_spends(&s, &[spend(9, None, &[A]), spend(9, None, &[B])]).len(),
@@ -1347,8 +1243,6 @@ mod spend_watch_tests {
     }
 }
 
-/// A version 7 `Broadcast` must carry the txid the PCZT determines; older ones replay as
-/// before. A wrong txid is ignored (the proposal stays Approved, notes stay reserved).
 #[test]
 fn broadcast_txid_must_match_the_pczt() {
     use common::{build_pczt, outside_address, receive_ironwood_note, witness, Out};
@@ -1403,7 +1297,6 @@ fn broadcast_txid_must_match_the_pczt() {
     assert_eq!(s.proposals[&[1; 16]].status, ProposalStatus::Broadcast);
     assert_eq!(s.proposals[&[1; 16]].txid, Some(txid));
 
-    // Entries written before version 7 are not checked: old logs replay unchanged.
     let mut old = base();
     old.push_raw(2, &broadcast([7; 32], 6));
     let s = old.replay().unwrap();
@@ -1411,9 +1304,6 @@ fn broadcast_txid_must_match_the_pczt() {
     assert!(s.ignored.is_empty());
 }
 
-// --- Pool reset (VAULT_EVENT 8): a restored device retires its dead commitments ----------
-
-/// The commitments of a `commitments(..)` event.
 fn batch_of(event: &VaultEvent) -> Vec<Vec<u8>> {
     match event {
         VaultEvent::Commitments { batch } => batch.clone(),
@@ -1431,13 +1321,11 @@ fn a_pool_reset_retires_only_the_unassigned_commitments() {
     let assigned = before.pools[&m1].next;
     assert!(assigned > 0, "the proposal took some of m1's commitments");
 
-    // m1's device is restored from a backup: it has no nonces, so it retires the rest.
     log.push(1, &VaultEvent::PoolReset);
     let after = log.replay().unwrap();
     assert!(after.ignored.is_empty());
     assert_eq!(after.pools[&m1].commitments.len(), assigned);
     assert_eq!(after.pools[&m1].available(), 0);
-    // Proposals already assigned keep their commitments; other members' pools are untouched.
     assert_eq!(
         after.proposals[&[1; 16]].preprocessed,
         before.proposals[&[1; 16]].preprocessed
@@ -1447,7 +1335,6 @@ fn a_pool_reset_retires_only_the_unassigned_commitments() {
         assert_eq!(after.pools[&pk], before.pools[&pk]);
     }
 
-    // With no pool, m1 is in no assigned group (it signs interactively) ...
     log.push(0, &proposal(2));
     let s = log.replay().unwrap();
     let pre = s.proposals[&[2; 16]].preprocessed.as_ref().unwrap();
@@ -1457,7 +1344,6 @@ fn a_pool_reset_retires_only_the_unassigned_commitments() {
     );
     assert_eq!(pre.subsets.len(), 1, "only the group without m1 is one-tap");
 
-    // ... and the fresh pool it publishes next is what gets assigned, not the old one.
     let mut rng = StdRng::seed_from_u64(1234);
     let fresh = commitments(&mut rng, 4);
     log.push(1, &fresh);
@@ -1479,7 +1365,6 @@ fn a_pool_reset_is_only_valid_in_a_version_8_event() {
     let m1 = log.ids[1].public().sig_pk;
     let mut bytes = VaultEvent::PoolReset.to_bytes().unwrap();
     assert_eq!(&bytes[..2], &version::VAULT_EVENT.to_le_bytes());
-    // The same event under an older tag (a forged or corrupted entry) is ignored.
     bytes[..2].copy_from_slice(&7u16.to_le_bytes());
     log.push_raw(1, &bytes);
     let s = log.replay().unwrap();
@@ -1500,11 +1385,8 @@ fn a_pool_reset_without_a_pool_is_harmless() {
         .is_none_or(|p| p.available() == 0));
 }
 
-/// Version 9: once a version 9 event is in the log, an author can't dodge a newer rule by
-/// tagging an event with an older version; before one, old logs keep their meaning.
 #[test]
 fn versions_only_go_up_after_version_9() {
-    // An old log: a version 5 proposal with a fake PCZT replays as it always did.
     let mut old = Log::new();
     old.push(0, &old.created(&[0, 1, 2]));
     old.push_raw(0, &proposal_v(1, 5));
@@ -1512,8 +1394,6 @@ fn versions_only_go_up_after_version_9() {
     assert!(state.proposals.contains_key(&[1; 16]));
     assert_eq!(state.max_event_version, 5);
 
-    // After a version 9 event, the same entry is replayed under version 9 rules (here:
-    // a proposal must carry a usable PCZT), whatever version it claims.
     let mut log = Log::new();
     log.push(0, &log.created(&[0, 1, 2]));
     log.push_v(1, &name("Bob"), 9);
@@ -1524,8 +1404,6 @@ fn versions_only_go_up_after_version_9() {
     assert_eq!(state.max_event_version, 9);
 }
 
-/// Version 9: a proposal whose PCZT doesn't parse is ignored instead of taking one-tap
-/// commitments from every member's pool.
 #[test]
 fn version_9_proposals_need_a_usable_pczt() {
     let mut log = pooled_log(4);
@@ -1564,28 +1442,21 @@ fn moved(log: &Log, target: &zafe_core::moves::MoveTarget, signers: &[usize]) ->
     }
 }
 
-/// `VaultMoved` switches the vault only with m = max(t, n − t + 1) distinct current
-/// members' arrivals for one move, from a point of this log, after the last switch.
 #[test]
 fn a_switch_needs_m_current_members_arrivals() {
     let mut log = Log::new();
     log.push_v(0, &log.created(&[0, 1, 2]), 10);
     log.push_v(1, &name("Bob"), 10);
     let target = move_target(&log, 1, 1);
-    // m − 1 arrivals (2-of-3: m = 2).
     log.push_v(0, &moved(&log, &target, &[0]), 10);
-    // A non-member's arrival in place of a member's.
     log.push_v(0, &moved(&log, &target, &[0, 3]), 10);
-    // The same member twice.
     log.push_v(0, &moved(&log, &target, &[0, 0]), 10);
-    // A signature over another target.
     let other = move_target(&log, 1, 2);
     let mut forged = moved(&log, &target, &[0, 1]);
     if let VaultEvent::VaultMoved { arrivals, .. } = &mut forged {
         arrivals[1].1 = other.sign(&log.ids[1]);
     }
     log.push_v(0, &forged, 10);
-    // A point that isn't in this log.
     let mut elsewhere = move_target(&log, 1, 3);
     elsewhere.base_hash = [0; 32];
     log.push_v(0, &moved(&log, &elsewhere, &[0, 1]), 10);
@@ -1599,7 +1470,6 @@ fn a_switch_needs_m_current_members_arrivals() {
         state.ignored.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
         vec![2, 3, 4, 5, 6]
     );
-    // An older tag (in a log with no version 10 event yet) is no switch either.
     let mut old = Log::new();
     old.push_v(0, &old.created(&[0, 1, 2]), 9);
     let t = move_target(&old, 0, 1);
@@ -1607,13 +1477,11 @@ fn a_switch_needs_m_current_members_arrivals() {
     assert_eq!(old.replay().unwrap().moved(), None);
     log.push_v(0, &name("Alice"), 10);
 
-    // m valid arrivals: the vault lives on the new relay from here on.
     log.push_v(1, &moved(&log, &target, &[0, 1]), 10);
     let state = log.replay().unwrap();
     let m = state.moved().expect("switched");
     assert_eq!((m.index, &m.target), (8, &target));
     assert_eq!(state.switch_threshold(), 2);
-    // The same move again, or one from before the switch, is ignored.
     log.push_v(1, &moved(&log, &target, &[0, 1]), 10);
     let older = move_target(&log, 1, 4);
     log.push_v(1, &moved(&log, &older, &[0, 1]), 10);
@@ -1628,8 +1496,6 @@ fn a_switch_needs_m_current_members_arrivals() {
     );
 }
 
-/// Each author's app version is known from the events it wrote; moving waits for every
-/// current member's app to have written a version 10 event.
 #[test]
 fn members_needing_an_update_are_the_ones_without_a_version_10_event() {
     let mut log = Log::new();
@@ -1644,9 +1510,6 @@ fn members_needing_an_update_are_the_ones_without_a_version_10_event() {
     assert_eq!(behind, want);
 }
 
-/// Version 12 (finding A): the threshold of approvals leaves the move pending; the seat
-/// switches only once every helper of the current attempt logged `RepairHelped`. Nobody
-/// else's word (the old key, the new key, a helper twice or for another attempt) counts.
 #[test]
 fn a_seat_move_is_pending_until_every_helper_helped() {
     let mut log = Log::new();
@@ -1672,8 +1535,8 @@ fn a_seat_move_is_pending_until_every_helper_helped() {
     assert!(state.pending_replacements.is_empty());
 
     let at = log.chain.len();
-    log.helped(0, r.index, 0); // the old key isn't a helper
-    log.helped(3, r.index, 0); // nor the new key (not a member)
+    log.helped(0, r.index, 0);
+    log.helped(3, r.index, 0);
     log.push_v(
         3,
         &VaultEvent::RepairDone {
@@ -1681,10 +1544,10 @@ fn a_seat_move_is_pending_until_every_helper_helped() {
         },
         12,
     );
-    log.helped(1, r.index, 1); // another attempt
-    log.helped(1, r.index + 1, 0); // another move
-    log.helped(1, r.index, 0); // valid
-    log.helped(1, r.index, 0); // twice
+    log.helped(1, r.index, 1);
+    log.helped(1, r.index + 1, 0);
+    log.helped(1, r.index, 0);
+    log.helped(1, r.index, 0);
     let state = log.replay().unwrap();
     let ignored: Vec<u64> = state.ignored.iter().map(|(i, _)| *i).collect();
     assert_eq!(ignored, vec![at, at + 1, at + 2, at + 3, at + 4, at + 6]);
@@ -1705,7 +1568,6 @@ fn a_seat_move_is_pending_until_every_helper_helped() {
     assert_eq!(state.names[&log.pk(3)], "Alice");
     let moved = state.replacement_to(&log.pk(3)).unwrap();
     assert!(moved.switched && moved.index == r.index);
-    // Now the new key can say it's done.
     log.push_v(
         3,
         &VaultEvent::RepairDone {
@@ -1716,9 +1578,6 @@ fn a_seat_move_is_pending_until_every_helper_helped() {
     assert!(log.replay().unwrap().replacements[0].done);
 }
 
-/// Version 12: only the old key's `KeepSeat` voids a pending move, and only a first-round
-/// one. Its ordinary entries don't; afterwards a second round of approvals (signed for
-/// round 1) may move the seat, and that round can't be kept.
 #[test]
 fn only_the_old_key_keeps_its_seat_and_only_once() {
     let mut log = Log::new();
@@ -1726,8 +1585,8 @@ fn only_the_old_key_keeps_its_seat_and_only_once() {
     log.approve(1, 0, 3, 0);
     log.approve(2, 0, 3, 0);
     let index = log.replay().unwrap().replacements[0].index;
-    log.push_v(0, &name("Still here"), 12); // an ordinary entry doesn't void it
-    log.keep(1, index); // another member can't
+    log.push_v(0, &name("Still here"), 12);
+    log.keep(1, index);
     let state = log.replay().unwrap();
     assert!(state.pending_seat_move(&log.pk(0)).is_some());
     assert!(matches!(
@@ -1742,13 +1601,11 @@ fn only_the_old_key_keeps_its_seat_and_only_once() {
     assert!(state.descriptor.member(&log.pk(0)).is_some());
     assert_eq!(state.seat_round(&log.pk(0)), 1);
     assert_eq!(state.seat_keeps[&log.pk(0)][0].replacement, index);
-    // The first round's approvals are spent: signed for round 0, they don't count again.
     log.approve(1, 0, 3, 0);
     assert!(matches!(
         log.replay().unwrap().ignored.last(),
         Some((_, VaultError::BadReplacement(_)))
     ));
-    // A second round, even to the same key, is a new move the old key can't keep.
     log.approve(1, 0, 3, 1);
     log.approve(2, 0, 3, 1);
     let state = log.replay().unwrap();
@@ -1773,8 +1630,6 @@ fn only_the_old_key_keeps_its_seat_and_only_once() {
         .is_some());
 }
 
-/// Version 12: one pending move per seat and per new key, and the old key can't be a
-/// helper of its own seat (it is still a member while the move is pending).
 #[test]
 fn one_pending_move_per_seat_and_the_old_key_never_helps() {
     let mut log = Log::new();
@@ -1783,13 +1638,13 @@ fn one_pending_move_per_seat_and_the_old_key_never_helps() {
     log.approve(2, 0, 3, 0);
     let index = log.replay().unwrap().replacements[0].index;
     let at = log.chain.len();
-    log.approve(1, 0, 4, 0); // the same seat to another key, while pending
-    log.approve(0, 1, 3, 0); // another seat to the same new key
+    log.approve(1, 0, 4, 0);
+    log.approve(0, 1, 3, 0);
     let retry = VaultEvent::RepairRetry {
         replacement: index,
         helpers: vec![log.pk(1), log.pk(0)],
     };
-    log.push_v(1, &retry, 12); // the old key as a helper of its own seat
+    log.push_v(1, &retry, 12);
     let state = log.replay().unwrap();
     assert_eq!(
         state.ignored,
@@ -1802,14 +1657,10 @@ fn one_pending_move_per_seat_and_the_old_key_never_helps() {
     assert_eq!(state.replacements.len(), 1);
 }
 
-/// Finding E, in the log: a helper's seat switching gives every other unfinished repair it
-/// helps with a new attempt under the helper's new key, with no restarts or parts carried
-/// over from the old attempt.
 #[test]
 fn a_helpers_seat_switching_restarts_the_repair_it_helps() {
     let mut log = Log::new();
     log.push(0, &log.created(&[0, 1, 2]));
-    // Seat 2 moves to 3: helpers 0 and 1. Helper 0 logs its part; a restart is asked.
     log.approve(0, 2, 3, 0);
     log.approve(1, 2, 3, 0);
     let carol = log.replay().unwrap().replacements[0].index;
@@ -1821,7 +1672,6 @@ fn a_helpers_seat_switching_restarts_the_repair_it_helps() {
     log.push_v(0, &retry, 12);
     let r = log.replay().unwrap().replacements[0].clone();
     assert_eq!((r.attempt, r.helped.len(), r.retries.len()), (0, 1, 1));
-    // Seat 1 (a helper of that repair) moves to 4 and switches.
     log.approve(0, 1, 4, 0);
     log.approve(2, 1, 4, 0);
     let bob = log.replay().unwrap().replacements[1].index;
@@ -1836,9 +1686,6 @@ fn a_helpers_seat_switching_restarts_the_repair_it_helps() {
     assert!(r.is_pending());
 }
 
-/// Version 12 rules apply from the first current member's version 12 entry on: an
-/// approval tagged 11 after it is checked as a version 12 one, so an old-format signature
-/// doesn't count (an older app's approvals can't move a seat at once).
 #[test]
 fn after_a_version_12_entry_old_format_approvals_dont_count() {
     let mut log = Log::new();
@@ -1863,9 +1710,6 @@ fn after_a_version_12_entry_old_format_approvals_dont_count() {
     assert_eq!(state.ignored.len(), 2);
 }
 
-/// Coordinator item 6: a helper stops helping a pending move for good. Its `RepairHelped`
-/// no longer counts, no restart may name it (nor its new key once its own seat moves), and
-/// only a helper of a pending move can stop (never after the switch).
 #[test]
 fn a_helper_that_stopped_stays_stopped() {
     let mut log = Log::new();
@@ -1875,14 +1719,14 @@ fn a_helper_that_stopped_stays_stopped() {
     let index = log.replay().unwrap().replacements[0].index;
     let stop = VaultEvent::StopHelping { replacement: index };
     let at = log.chain.len();
-    log.push_v(0, &stop, 12); // the old key isn't a helper
-    log.push_v(2, &stop, 12); // valid
-    log.helped(2, index, 0); // its part no longer counts
+    log.push_v(0, &stop, 12);
+    log.push_v(2, &stop, 12);
+    log.helped(2, index, 0);
     let retry = |helpers: Vec<[u8; 32]>| VaultEvent::RepairRetry {
         replacement: index,
         helpers,
     };
-    log.push_v(1, &retry(vec![log.pk(1), log.pk(2)]), 12); // names the stopped helper
+    log.push_v(1, &retry(vec![log.pk(1), log.pk(2)]), 12);
     log.helped(1, index, 0);
     let state = log.replay().unwrap();
     let ignored: Vec<u64> = state.ignored.iter().map(|(i, _)| *i).collect();
@@ -1892,18 +1736,14 @@ fn a_helper_that_stopped_stays_stopped() {
     assert_eq!(r.helped, vec![log.pk(1)]);
 }
 
-/// Item 6 with seat moves: a stopped helper's own seat moving keeps its new key stopped for
-/// that move, and a stop after the switch is ignored.
 #[test]
 fn a_stopped_helpers_new_key_stays_stopped() {
     let mut log = Log::new();
     log.push(0, &log.created(&[0, 1, 2]));
-    // Seat 0 -> 3 (helpers 1, 2); helper 2 stops.
     log.approve(1, 0, 3, 0);
     log.approve(2, 0, 3, 0);
     let first = log.replay().unwrap().replacements[0].index;
     log.push_v(2, &VaultEvent::StopHelping { replacement: first }, 12);
-    // Seat 2 -> 4 (helpers 0, 1) switches.
     log.approve(0, 2, 4, 0);
     log.approve(1, 2, 4, 0);
     let second = log.replay().unwrap().replacements[1].index;
@@ -1914,7 +1754,7 @@ fn a_stopped_helpers_new_key_stays_stopped() {
     let r = &state.replacements[0];
     assert_eq!(r.stopped, vec![log.pk(4)], "the new key is stopped too");
     let at = log.chain.len();
-    log.helped(4, first, r.attempt); // the new key's part doesn't count
+    log.helped(4, first, r.attempt);
     log.push_v(
         1,
         &VaultEvent::RepairRetry {
@@ -1929,7 +1769,7 @@ fn a_stopped_helpers_new_key_stays_stopped() {
             replacement: second,
         },
         12,
-    ); // after the switch
+    );
     let ignored: Vec<u64> = log
         .replay()
         .unwrap()
@@ -1939,8 +1779,6 @@ fn a_stopped_helpers_new_key_stays_stopped() {
         .collect();
     assert!(ignored.ends_with(&[at, at + 1, at + 2]), "{ignored:?}");
 }
-
-// --- Proposal rules (VAULT_EVENT 12, security review 2026-11 "Proposals") ---------------
 
 mod proposal_rules {
     use super::*;
@@ -1963,7 +1801,6 @@ mod proposal_rules {
         receive_ironwood_note(&fvk, fvk.address_at(i, Scope::External), 1_000_000)
     }
 
-    /// Spends `note` whole (minus the fee) back to the vault's change address.
     fn sweep(note: orchard::Note) -> pczt::Pczt {
         let fvk = fvk();
         let (anchor, path) = witness(&note);
@@ -1989,9 +1826,6 @@ mod proposal_rules {
         log.ids[i].public().sig_pk
     }
 
-    /// A proposal reserves its notes only once a member other than its author approved
-    /// it, or it may be signed (rule 4). On 4b5ae0e a proposal reserved from the moment it
-    /// was logged: one member alone could freeze any note.
     #[test]
     fn a_lone_proposal_reserves_nothing() {
         let a = note(0);
@@ -2008,7 +1842,6 @@ mod proposal_rules {
             "its author's approval is still one member"
         );
 
-        // A second member's approval reserves, until it is withdrawn.
         let mut second = Log::new();
         second.push(0, &second.created(&[0, 1, 2]));
         second.push_v(0, &proposal_with(1, &sweep(a), TIP), 12);
@@ -2017,9 +1850,6 @@ mod proposal_rules {
         second.push_v(1, &vote(1, false), 12);
         assert_eq!(check(&second), Ok(()));
 
-        // Once it reached Approved it may be signed, but in the log it reserves only while
-        // a second member approves: when that one withdraws, the author's word is alone
-        // again. Phones still hold its notes (`note_holds`: possibly signed).
         log.push_v(1, &vote(1, true), 12);
         log.push_v(1, &vote(1, false), 12);
         let s = log.replay().unwrap();
@@ -2030,10 +1860,8 @@ mod proposal_rules {
             .iter()
             .any(|h| h.owner == [1; 32]));
 
-        // A second member's one-tap vote is its approval (no commitments): it reserves.
         let mut one_tap = pooled_log(2);
         one_tap.push_v(0, &proposal_with(1, &sweep(a), TIP), 12);
-        // Groups: 0 = {m0,m1}, 1 = {m0,m2}, 2 = {m1,m2}; member 1 is in 0 and 2.
         one_tap.push_v(1, &share_vote(1, &[0, 2]), 12);
         let s = one_tap.replay().unwrap();
         assert!(s.ignored.is_empty(), "{:?}", s.ignored);
@@ -2043,8 +1871,6 @@ mod proposal_rules {
         ));
     }
 
-    /// With one signer the author's approval signs: no member other than the author ever
-    /// approves, and the proposal reserves at once because it may be signed.
     #[test]
     fn with_one_signer_the_authors_approval_reserves() {
         let a = note(0);
@@ -2064,15 +1890,11 @@ mod proposal_rules {
         ));
     }
 
-    /// The tip a proposal claims is its author's word: its reservation never runs past the
-    /// vault's window from that tip, even when its expiry is later. On 4b5ae0e the expiry
-    /// alone bounded it.
     #[test]
     fn a_reservation_ends_at_the_window_from_its_tip() {
         let a = note(0);
         let p1 = sweep(a);
         let expiry = *p1.global().expiry_height();
-        // Regtest counts 25 s blocks: the 75 s window, slack and rounding times 3.
         let window = 3 * (8064 + 96 + 144);
         let claimed = expiry - window - 20;
         let mut log = Log::new();
@@ -2090,9 +1912,6 @@ mod proposal_rules {
         );
     }
 
-    /// From version 12 a member whose vote carried shares may add interactive commitments
-    /// (its shares stay); it still can't reject or post other shares. Version 11 logs
-    /// replay as before.
     #[test]
     fn a_member_who_signed_one_tap_may_add_commitments() {
         let commit = VaultEvent::Vote {
@@ -2131,8 +1950,6 @@ mod proposal_rules {
         );
     }
 
-    /// Signs every vault spend of `pczt` with the vault key, proves, and extracts: the
-    /// bytes a broadcast sends.
     fn signed_tx(pczt: &pczt::Pczt) -> Vec<u8> {
         use pczt::roles::{prover::Prover, signer::Signer, tx_extractor::TransactionExtractor};
         let ask = orchard::keys::SpendAuthorizingKey::from(&sk());
@@ -2155,9 +1972,6 @@ mod proposal_rules {
         raw
     }
 
-    /// From version 12 "sent" needs proof: the signed transaction, every spend's signature
-    /// valid over the PCZT's sighash. On 4b5ae0e a txid alone (which the PCZT fixes, and
-    /// every member knows) closed the proposal for everyone.
     #[test]
     fn a_broadcast_needs_the_signed_transaction() {
         let fvk = fvk();
@@ -2199,9 +2013,6 @@ mod proposal_rules {
             },
             12,
         );
-        // A signature that doesn't verify: signatures aren't in the txid, so flipping a
-        // byte of one keeps the transaction and its txid (the binding signature and the
-        // proof, last in the bundle, aren't checked: those flips still pass).
         let mut tampered = None;
         for i in (0..raw.len()).rev() {
             let mut t = raw.clone();
@@ -2248,10 +2059,6 @@ mod proposal_rules {
         assert_eq!(p.signed_tx.as_deref(), Some(&raw[..]));
     }
 
-    /// A cancelled payment that may be signed stays sendable until its notes are spent
-    /// deep enough that a reorg won't undo it, or it is past its expiry by that margin;
-    /// until then members approve a new payment only if it spends one of its notes
-    /// (rule 5). On 4b5ae0e nothing tied the two: both could mine.
     #[test]
     fn a_cancelled_signed_payment_must_be_respent() {
         let (a, b) = (note(0), note(1));
@@ -2266,7 +2073,7 @@ mod proposal_rules {
         log.push_v(2, &proposal_with(2, &sweep(b), TIP), 12);
         log.push_v(2, &proposal_with(3, &sweep(a), TIP), 12);
         let s = log.replay().unwrap();
-        let margin = 30; // 10 blocks, regtest's 25 s blocks
+        let margin = 30;
         assert_eq!(s.reorg_margin(TIP), margin);
         let view = |tip, spends| ChainView {
             tip,
@@ -2286,7 +2093,6 @@ mod proposal_rules {
         ));
         node::check_vote(&s, &[3; 16], &view(TIP, vec![])).unwrap();
 
-        // Dead once a spend of its note is `margin` deep; a shallower one can be undone.
         let spent = |confirmations: u32| {
             vec![VaultSpend {
                 txid: [7; 32],
@@ -2297,12 +2103,9 @@ mod proposal_rules {
         assert_eq!(live(&view(TIP, spent(margin - 1))), vec![1]);
         assert!(live(&view(TIP, spent(margin))).is_empty());
         node::check_vote(&s, &[2; 16], &view(TIP, spent(margin))).unwrap();
-        // Or past its expiry by the margin.
         assert_eq!(live(&view(expiry + margin - 1, vec![])), vec![1]);
         assert!(live(&view(expiry + margin, vec![])).is_empty());
 
-        // Its notes stay held while it can mine, under its own owner (the next proposal
-        // draws on them first), and so do a proposal's own author's.
         let holds = node::note_holds(&s, &Default::default(), &pk(&log, 2));
         let held = |id: u8| holds.iter().find(|h| h.owner == [id; 32]);
         assert_eq!(held(1).unwrap().expiry_height, expiry + margin);
@@ -2317,8 +2120,6 @@ mod proposal_rules {
         );
     }
 
-    /// A proposal's claimed tip must be near this member's: far ahead means this phone
-    /// should sync first; far behind, it reserved notes on a tip nobody had.
     #[test]
     fn a_vote_checks_the_claimed_tip() {
         let mut log = Log::new();
@@ -2336,7 +2137,6 @@ mod proposal_rules {
                 },
             )
         };
-        // Regtest: 10 blocks are 30, the window 3 x 8064.
         at(TIP - 30).unwrap();
         assert!(matches!(at(TIP - 31), Err(node::NodeError::NotReady(_))));
         at(TIP + 3 * 8064).unwrap();
@@ -2347,8 +2147,6 @@ mod proposal_rules {
     }
 }
 
-/// Attacks on the proposal rules (batch 3 review). Each test states what an attacker does
-/// and asserts what an honest member must see.
 mod proposal_attacks {
     use super::*;
     use common::{build_pczt, outside_address, receive_ironwood_note, witness, Out, TARGET_HEIGHT};
@@ -2421,10 +2219,6 @@ mod proposal_attacks {
         log.ids[i].public().sig_pk
     }
 
-    /// Replay doesn't verify one-tap shares, and one member's shares are enough for
-    /// `possibly_signed`. So member 0, alone, proposes spending note `a`, posts garbage
-    /// "shares" for its own one-tap groups, and the proposal reserves `a`: rule 4 says one
-    /// member alone can't freeze funds.
     #[test]
     fn a_lone_members_own_shares_dont_reserve_notes() {
         let a = note(0);
@@ -2446,12 +2240,6 @@ mod proposal_attacks {
         );
     }
 
-    /// The same lone member then cancels: its proposal is a "still sendable" payment (one
-    /// honest share-poster plus t - 1 dishonest members can sign it, so it can't be
-    /// dropped). It must not stall the others: it blocks no proposal logged before it (a
-    /// sweep waiting for approvals included), and a later payment that spends one of its
-    /// notes is approved (`propose` spends one of each such payment's notes; the wallet test
-    /// is in `regtest_e2e`). Before the fix it blocked the earlier proposal too.
     #[test]
     fn a_lone_members_cancelled_shares_dont_block_other_payments() {
         let (a, b) = (note(0), note(1));
@@ -2482,19 +2270,11 @@ mod proposal_attacks {
         );
     }
 
-    /// A malicious member logs the payment's `SignedBroadcast` with valid spend signatures
-    /// and a broken proof (not checked), and never sends a valid copy. Every phone's resend
-    /// fails, so `reserve_notes` drops it and releases its notes, and nothing makes the
-    /// next payment respend them. The attacker sends a valid copy (any member can prove)
-    /// once the members paid again with other notes: both mine.
     #[test]
     fn a_dropped_broadcast_still_holds_its_notes() {
         let (a, b) = (note(0), note(1));
         let pczt = pay(a);
         let mut raw = signed_tx(&pczt);
-        // Break the proof: the last byte of the bundle is the binding signature's; the proof
-        // sits just before. Flip bytes until check_signed still passes but it isn't the
-        // valid transaction.
         let valid = raw.clone();
         let mut broke = false;
         for i in (0..raw.len()).rev().skip(64) {
@@ -2540,8 +2320,6 @@ mod proposal_attacks {
             node::check_vote(&s, &[2; 16], &view).is_err(),
             "a payment that doesn't respend a dropped signed one: both can mine"
         );
-        // While it is in the mempool (or mined) it is going out: nobody pays it again, and
-        // the next payment may use other notes.
         let pending = ChainView {
             dropped: vec![],
             ..view.clone()

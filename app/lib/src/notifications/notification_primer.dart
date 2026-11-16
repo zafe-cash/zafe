@@ -9,18 +9,12 @@ import '../core/theme/app_theme.dart';
 import '../core/widgets/app_button.dart';
 import 'vault_watch.dart';
 
-/// Set once the primer was shown: the app never asks on its own again (Home keeps a
-/// "Notifications are off" card instead).
 const kNotificationsPrimedKey = 'zafe_notifications_primed';
 
-/// Whether this app may show notifications. Re-read on resume (the owner may have
-/// changed it in the system settings).
 final notificationsEnabledProvider = FutureProvider.autoDispose<bool>(
   (ref) => notificationsEnabled(),
 );
 
-/// Says why before the system's permission prompt (a cold system prompt is easy to
-/// deny). Returns whether the member wants notifications.
 Future<bool> showNotificationPrimer(BuildContext context) async {
   final yes = await showAppMobileSheet<bool>(
     context: context,
@@ -29,7 +23,6 @@ Future<bool> showNotificationPrimer(BuildContext context) async {
   return yes == true;
 }
 
-/// The primer's content: pops `true` for "Turn on".
 class NotificationPrimerSheet extends StatelessWidget {
   const NotificationPrimerSheet({super.key});
 
@@ -71,9 +64,6 @@ class NotificationPrimerSheet extends StatelessWidget {
   }
 }
 
-/// Background checks and pushes; the first time, the primer before the system's
-/// permission prompt (never the prompt on its own, and never again after). From Home once
-/// a vault exists, and from the setup screen (setup steps run in background checks too).
 Future<void> startWatchWithPrimer(BuildContext context) async {
   final prefs = await SharedPreferences.getInstance();
   var ask = false;
@@ -87,8 +77,6 @@ Future<void> startWatchWithPrimer(BuildContext context) async {
   await startVaultWatch(askPermission: ask);
 }
 
-/// "Turn on" from the Home card: the system prompt if Android still offers it, else the
-/// app's notification settings.
 Future<void> enableNotifications(WidgetRef ref) async {
   if (!await requestNotifications()) await openAppSettings();
   ref.invalidate(notificationsEnabledProvider);

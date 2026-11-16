@@ -7,8 +7,6 @@ import '../../core/widgets/app_icon.dart';
 import '../../providers/vault_provider.dart';
 import '../../core/widgets/line_icon.dart';
 
-/// What the vault's keys protect against and what they don't (spec §2.3, §12.1): the
-/// approval rule, full view access, losing too many keys, and quantum computers.
 class VaultProtectionScreen extends ConsumerWidget {
   const VaultProtectionScreen({super.key});
 
@@ -28,7 +26,6 @@ class VaultProtectionScreen extends ConsumerWidget {
   }
 }
 
-/// The page's content from plain data, so it can be rendered without Rust.
 class VaultProtectionBody extends StatelessWidget {
   const VaultProtectionBody({
     super.key,

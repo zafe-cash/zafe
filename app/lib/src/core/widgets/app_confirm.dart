@@ -6,10 +6,6 @@ import '../theme/app_theme.dart';
 import 'app_button.dart';
 import 'app_icon.dart';
 
-/// Asks before something that can't be undone (remove a vault, cancel a payment, drop
-/// this phone's history): a centred card with the question, what happens, and two
-/// buttons. True only for [confirmLabel]; Back, a tap outside and [cancelLabel] are
-/// false. The one surface allowed over a sheet or a screen (sheets never stack).
 Future<bool> showAppConfirm(
   BuildContext context, {
   required String title,
@@ -49,7 +45,6 @@ Future<bool> showAppConfirm(
   return ok ?? false;
 }
 
-/// The confirm dialog's card from plain data (rendered without a route in previews).
 class AppConfirmCard extends StatelessWidget {
   const AppConfirmCard({
     super.key,

@@ -1,31 +1,12 @@
 #!/usr/bin/env bash
-# Device-testing harness for the app: a relay and headless CLI members (B, C, ...) on this
-# machine; the app on a phone/emulator is the last member. `adb reverse` lets the device
-# reach the relay (8787) and lightwalletd (9067) at 127.0.0.1, matching the app defaults.
-#
-#   scripts/app-harness.sh start          relay + B creates a vault (ZAFE_THRESHOLD of
-#                                         ZAFE_MEMBERS, default 2 of 3); prints the invite
-#   scripts/app-harness.sh join-all       the other CLI members (C, D, ...) join; alias join-c
-#   scripts/app-harness.sh seal           B seals (after the app joined); shows the members
-#   scripts/app-harness.sh keygen         CLI members run keygen in the background (app joins in)
-#   scripts/app-harness.sh each ARGS      run the zafe CLI as every CLI member in turn
-#   scripts/app-harness.sh fund           regtest up (ths), faucet notes to the vault
-#   scripts/app-harness.sh mine N         mine N blocks
-#   scripts/app-harness.sh resume         after a restart: relay, adb reverse, and a fresh
-#                                         ths chain, funded again (ths never keeps a chain)
-#   scripts/app-harness.sh cli WHO ARGS   run the zafe CLI as one member (sync, approve, respond, ...)
-#   scripts/app-harness.sh stop           stop everything and delete the state
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# Outside /tmp so a machine restart keeps the relay DB and the CLI members.
 WORK=${ZAFE_HARNESS_DIR:-$HOME/.cache/zafe-harness}
 export ZAFE_RELAY=http://127.0.0.1:8787 ZAFE_LIGHTWALLETD=http://127.0.0.1:9067
 ZAFE="$ROOT/target/debug/zafe"
 member() { local who=$1; shift; "$ZAFE" --home "$WORK/$who" "$@"; }
-# CLI members: B plus the others that join (ZAFE_MEMBERS - 1 in total; the app is the last seat).
 others() { cat "$WORK/others"; }
-# ths environment `zafe-regtest` on its default ports (lightwalletd 9067).
 mine() { "${THS:-ths}" --name zafe-regtest mine "$1" >/dev/null; }
 fund() {
   local addr
@@ -57,7 +38,6 @@ case "${1:-}" in
   join-c|join-all) for who in $(others); do member "$who" vault join "$(cat "$WORK/invite")"; done ;;
   seal) member B vault seal; member B vault members ;;
   keygen)
-    # The safety check needs every member at once (the app: keep its setup screen open).
     pids=()
     for who in B $(others); do
       member "$who" vault members --wait > "$WORK/m$who" 2>&1 & pids+=($!)
@@ -72,10 +52,6 @@ case "${1:-}" in
     ;;
   fund) fund ;;
   resume)
-    # After a machine or emulator restart: same relay DB and members. ths always starts a
-    # new chain, so the vault is funded again and the CLI members' wallets start over. The
-    # app's wallet still holds the old chain: if it doesn't recover, remove and restore the
-    # vault on the device (untested).
     cargo build -q -p zafe-cli -p zafe-relay
     relay_up
     if [[ -f "$WORK/B/vault.bin" ]]; then

@@ -27,7 +27,6 @@ import 'payment_link.dart';
 import '../../core/widgets/line_icon.dart';
 import 'send_screen.dart' show SendPrefill, kMaxRecipients;
 
-/// A vault the request could be paid from.
 class PayFromVault {
   const PayFromVault({
     required this.id,
@@ -42,21 +41,14 @@ class PayFromVault {
   final int threshold;
   final int members;
 
-  /// Last known balance (null before the first sync).
   final BigInt? balanceZat;
 
-  /// Spendable now (only for vaults synced in this session).
   final BigInt? spendableZat;
 }
 
-/// What [payments] ask for in total.
 BigInt requestedTotal(List<rust.ScannedPayment> payments) =>
     payments.fold(BigInt.zero, (sum, p) => sum + p.amountZat);
 
-/// Opened by a `zcash:` payment link from another app or website. Shows what the link
-/// asks for, warns that anyone can make one, lets the owner pick the vault to pay from,
-/// and needs an explicit "I know who sent this" before the send flow opens with the
-/// details filled in. Nothing is proposed from here.
 class PaymentRequestScreen extends ConsumerStatefulWidget {
   const PaymentRequestScreen({super.key, required this.link});
   final PendingPaymentLink link;
@@ -73,7 +65,6 @@ class _PaymentRequestScreenState extends ConsumerState<PaymentRequestScreen> {
   );
   String? _vaultId;
 
-  /// The owner tapped a vault (otherwise the default may move to one that can pay).
   bool _picked = false;
   bool _confirmed = false;
   bool _busy = false;
@@ -145,7 +136,6 @@ class _PaymentRequestScreenState extends ConsumerState<PaymentRequestScreen> {
           );
         }(),
     ];
-    // Default to a vault that can pay when the first choice can't.
     final requested = requestedTotal(_request.payments);
     bool short(PayFromVault v) =>
         checkFunds(
@@ -181,7 +171,6 @@ class _PaymentRequestScreenState extends ConsumerState<PaymentRequestScreen> {
   }
 }
 
-/// The payment request page, from plain data (renders without Rust).
 class PaymentRequestView extends StatelessWidget {
   const PaymentRequestView({
     super.key,
@@ -200,7 +189,6 @@ class PaymentRequestView extends StatelessWidget {
 
   final List<rust.ScannedPayment> payments;
 
-  /// Why the link can't be paid (empty when it can).
   final String problem;
   final List<PayFromVault> vaults;
   final String? selectedId;
@@ -212,7 +200,6 @@ class PaymentRequestView extends StatelessWidget {
   final bool hideBalances;
   final bool busy;
 
-  /// Every vault in a sheet; one that can't pay is shown but can't be picked.
   Future<void> _pickVault(
     BuildContext context,
     ({FundsCheck check, BigInt shortByZat}) Function(PayFromVault) funds,
@@ -321,7 +308,6 @@ class PaymentRequestView extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         Text('Pay from', style: sectionStyle),
         const SizedBox(height: AppSpacing.xs),
-        // Only the chosen vault; "Change" opens the others in a sheet.
         if (selected != null)
           MobileSurfaceCard(
             cornerRadius: AppRadii.large,
@@ -382,7 +368,6 @@ class PaymentRequestView extends StatelessWidget {
   }
 }
 
-/// Warning box: a title and a few sentences, in the warning colour.
 class _Callout extends StatelessWidget {
   const _Callout({required this.title, required this.body});
   final String title;
@@ -439,8 +424,6 @@ class _Callout extends StatelessWidget {
   }
 }
 
-/// One payment the link asks for: amount, the full address, memo, and what the link
-/// says about itself (marked as unverified).
 class _RequestedPayment extends StatelessWidget {
   const _RequestedPayment({required this.payment});
   final rust.ScannedPayment payment;
@@ -477,7 +460,6 @@ class _RequestedPayment extends StatelessWidget {
             hasAmount
                 ? amountWithTicker(
                     ZecAmount.fromZatoshi(payment.amountZat).receipt.amountText,
-                    // The owner has to check the amount, so it's never masked.
                     hide: false,
                   )
                 : 'Not set: you\'ll enter it next',
@@ -608,7 +590,6 @@ class _Radio extends StatelessWidget {
   }
 }
 
-/// The owner's explicit "I checked": Continue stays off until it's ticked.
 class _ConfirmBox extends StatelessWidget {
   const _ConfirmBox({
     required this.checked,

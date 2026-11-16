@@ -57,15 +57,26 @@ docs follow `main` (the site deploys on push to Cloudflare Workers; `infra/site/
 `python3 scripts/check_md_links.py` (Docs workflow) fails on a relative Markdown link to a
 missing file or heading: rename a doc or heading, fix its links in the same change.
 
+**Code carries no comments.** `python3 scripts/check_no_comments.py` (CI, every push)
+tokenizes every file we write (Rust, Dart, Python, shell, YAML run blocks, TOML, JS/TS,
+Astro, CSS, XML, Kotlin, Gradle, Docker, Caddy, ignore files) and fails on any comment,
+doc comment or docstring; only generated files (by their generator's header) and the
+vendored `app/rust_builder/` are exempt, and a new file type fails until the check knows
+its syntax. Meaning lives in names, types and tests; reasons live in `docs/`. No lint or
+check is silenced where it fires (`#[allow]`, `// ignore`): fix the code, or change the
+rule once, centrally (`clippy.toml`, `analysis_options.yaml`, the check script).
+
 Type: `python3 scripts/check_typography.py` (CI) fails on a `fontSize`/`fontFamily`
-outside `app_typography.dart`, a mobile size under 14, the no-op `lnum`/`case` features,
-or a font name that isn't bundled. Use the roles (`hero`, `title`, `heading`, `amount`,
-`amountTicker`, `mono`, body/label styles) and `copyWith` only for colour or weight.
-Exceptions carry `// type: <why>`. Rules and research: `docs/brand.md` "Type".
+outside `app_typography.dart` and `material_theme.dart`, a size under 14, the no-op
+`lnum`/`case` features, or a font name that isn't bundled. Use the roles (`hero`, `title`,
+`heading`, `amount`, `amountTicker`, `mono`, body/label styles) and `copyWith` only for
+colour or weight. The app is mobile only (no desktop token set). Research: `docs/brand.md`
+"Type".
 
 Theme colours: `python3 scripts/check_theme_pairs.py` (CI) flags a token whose dark and
-light values differ in ramp, read grey in one theme, or differ in hue; mark a deliberate
-pair with `// theme-pair: <why>`.
+light values differ in ramp, read grey in one theme, or differ in hue. A label on its own
+fill (a set with `bg`) is checked instead for WCAG contrast 4.5 against that fill in each
+theme; disabled sets keep the pairing rule (WCAG 1.4.3 exempts inactive controls).
 
 App (from `app/`, after `source ~/android/env.sh`): `flutter_rust_bridge_codegen generate` after
 changing `app/rust/src/api`; `flutter analyze lib test` (must be clean; a fresh worktree needs
@@ -582,7 +593,7 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 
 - Flutter (fvm, **3.47.7**) + `flutter_rust_bridge` 2.11.1 + Riverpod + go_router, built on
   Vizor (chainapsis/vizor-wallet, Apache-2.0) with **Zafe's own look**: keep attribution in
-  `app/NOTICE`; no Vizor references in code comments; never copy Vizor's art, name or IDs.
+  `app/NOTICE`; no Vizor references in code; never copy Vizor's art, name or IDs.
 - FRB: write `Result<T, ZafeError>` in public signatures (a type alias becomes anyhow and drops
   the typed error). Streams report failures as events, not `Err`.
 - New in-vault routes go in the `inVault` list in `app.dart`'s redirect. Switch tabs with
@@ -661,16 +672,15 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 ## Fixing a bug
 
 Learned from the 0.1.20 double count (a diagnosis from our own stale comment shipped a fix that
-counted a payment twice):
+counted a payment twice; the code has no comments since):
 - Write down at least two causes that fit what you saw, and find the observation that tells
   them apart.
 - A dependency's behaviour comes from its pinned source (`~/.cargo/registry/src/*/<crate>-<ver>/`,
-  `~/.pub-cache/hosted/pub.dev/<pkg>-<ver>/`) or a call to it, never from names, our comments or
+  `~/.pub-cache/hosted/pub.dev/<pkg>-<ver>/`) or a call to it, never from names or
   memory. Quote file:line in the commit.
 - Test the outcome the user sees through the real dependency, and make the test fail on the
   broken code first.
 - See it work (phone, emulator or harness) before tagging a user-facing fix.
-- Fix wrong comments in the same change.
 
 ## User preferences
 

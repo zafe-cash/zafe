@@ -7,13 +7,6 @@ import '../frb_generated.dart';
 import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Restores the vault's log on the relay from this phone's copy: recreates the vault
-/// after a wiped relay, or appends the entries a rewound relay lost. Returns how many log
-/// entries were put back (0: the relay already had everything this phone has). Refuses a
-/// relay whose history differs from this phone's copy (`RelayForked`). Messages that were
-/// in flight (signing requests) are not restored: members are asked again. Re-register
-/// the push token afterwards. Runs on the vault's own relay, under its label, with its
-/// create token (a private relay refuses a restore without it: `CreateTokenRefused`).
 Future<int> restoreRelay({
   required String relayUrl,
   required List<int> seeds,
@@ -24,10 +17,6 @@ Future<int> restoreRelay({
   material: material,
 );
 
-/// Leaves a fork (spec §6.3): after `RelayForked`, discards this phone's copy of the vault
-/// log and follows the relay's history instead. The relay's whole log is verified first;
-/// entries that only this phone's copy has are dropped. Returns how many. Refuses when the
-/// relay does not actually show another history. Ask the user to confirm first.
 Future<int> followRelay({
   required String relayUrl,
   required List<int> seeds,

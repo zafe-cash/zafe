@@ -55,7 +55,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   Timer? _poll;
 
-  /// Other members' activity as it happens (relay long poll); the poll is the fallback.
   late final LiveVaultWatch _live = LiveVaultWatch(
     onRefresh: () => ref.read(proposalsProvider.notifier).refreshSoon(),
     onInbox: () =>
@@ -71,15 +70,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Vaults from before per-vault relays keep the relay they use (the app-wide setting
-    // is gone).
     Future.microtask(() => pinLegacyRelays(ref));
     Future.microtask(_refresh);
     _startPoll();
-    // A vault exists from here on: notifications, background checks, push.
     unawaited(_startWatch());
     Future.microtask(_startLive);
-    // Another vault or default relay: watch that one instead.
     ref.listenManual(
       vaultProvider.select((v) => v.activeId),
       (_, _) => _startLive(),
@@ -88,21 +83,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       endpointsProvider.select((e) => e.relayUrl),
       (_, _) => _startLive(),
     );
-    // The vault moved to another server: watch that one (the old watch kept reaching
-    // the old server and marked the vault's server reachable).
     ref.listenManual(
       activeVaultRelayProvider.select((r) => (r?.url, r?.label)),
       (_, _) => _startLive(),
     );
   }
 
-  /// (Re)starts the poll at the interval the live watch allows.
   void _startPoll() {
     _poll?.cancel();
     _poll = Timer.periodic(_live.pollInterval, (_) => _refresh());
   }
 
-  /// Watches the active vault while the app is in the foreground.
   void _startLive() {
     if (!mounted) return;
     final vault = ref.read(vaultProvider);
@@ -121,8 +112,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  /// Background checks and pushes; the first time, the notifications primer before the
-  /// system's permission prompt (never the prompt on its own, and never again after).
   Future<void> _startWatch() async {
     await startWatchWithPrimer(context);
     if (mounted) ref.invalidate(notificationsEnabledProvider);
@@ -131,15 +120,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      // Stop polling and watching while in the background (the process may stay alive):
-      // background checks and pushes take over, and only they may announce new activity.
       _live.stop();
       _poll?.cancel();
       _poll = null;
       unawaited(scheduleSoonCheck());
     }
     if (state == AppLifecycleState.resumed) {
-      // The owner may have turned notifications on in the system settings.
       ref.invalidate(notificationsEnabledProvider);
       if (_poll == null) _startPoll();
       if (!_live.running) _startLive();
@@ -147,13 +133,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  /// The poll: proposals, then the wallet only if the chain tip moved (or proposals
-  /// changed); `force` syncs regardless (resume, first open).
   Future<void> _refresh({bool force = false}) async {
-    // Proposals first: answering signing requests needs the synced tip, which the
-    // previous sync already stored.
-    // Both read before the first await: Home can be gone when the refresh ends (a
-    // vault removed or switched), and `ref` must not be used after that.
     final proposals = ref.read(proposalsProvider.notifier);
     final vault = ref.read(vaultProvider.notifier);
     await proposals.refresh();
@@ -180,10 +160,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final funded = (vault.balance?.totalZat ?? BigInt.zero) > BigInt.zero;
     final unapproved = ref.watch(unapprovedSpendsProvider);
 
-    // A failure stays on screen while the next attempt runs, so the status doesn't
-    // flicker between "Syncing..." and the error on every poll.
     final failure = currentSyncFailure(ref);
-    // "Use Tor" while Tor isn't connected: nothing syncs, say why.
     final tor = ref.watch(torProvider);
     final torLabel = tor.homeLabel;
     final failing =
@@ -193,7 +170,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (torLabel != null) {
       syncLabel = torLabel;
     } else if (failure != null) {
-      // Just what failed; since when is on the Status screen ("Down since").
       syncLabel = failure.statusLabel;
     } else if (vault.syncing) {
       syncLabel = vault.firstSync ? 'First sync...' : 'Syncing...';
@@ -212,13 +188,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             MobileTopNav.account(
               accountName: ref.watch(activeVaultNameProvider) ?? summary.name,
               syncLabel: syncLabel,
-              // Green when in sync, orange (text and bar) when something failed.
               syncLabelColor: failing
                   ? colors.sync.textError
                   : tor.enabled
                   ? colors.sync.torText
                   : colors.sync.text,
-              // Tor's purple while Tor is on, so the status line shows it.
               syncIndicatorColor: failing
                   ? colors.sync.glowError
                   : tor.enabled
@@ -233,8 +207,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 clipBehavior: Clip.none,
                 children: [
                   VaultEmblem(vaultId: vault.activeId!),
-                  // Another vault has a payment waiting for you (the switcher shows
-                  // which).
                   if (ref.watch(otherVaultsWaitingProvider).value ?? false)
                     Positioned(
                       right: -2,
@@ -260,7 +232,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
             Expanded(
               child: MobileTopScrollFade(
-                // Pull down to check for news and sync now.
                 child: RefreshIndicator(
                   color: colors.text.brand,
                   backgroundColor: colors.background.base,
@@ -273,8 +244,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         value: vault.balance?.totalZat,
                         builder: (shown) => BalanceCard(
                           totalZat: shown,
-                          // The total includes money still confirming: what's pending
-                          // shows in the activity rows, not on the card.
                           fiatText: vault.balance == null
                               ? null
                               : fiatText(
@@ -295,8 +264,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                       ),
                       const SizedBox(height: AppSpacing.s),
-                      // Only once the balance is known: while it loads, a vault with
-                      // history would flash the first-deposit prompt.
                       if (vault.balance?.totalZat == BigInt.zero)
                         AppButton(
                           expand: true,
@@ -346,17 +313,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                         const SizedBox(height: AppSpacing.md),
                       ],
-                      // What the group is waiting on this member for, before any notice.
                       NeedsYou(height: vault.balance?.height),
-                      // This phone's own move while it runs, or two moves found (a
-                      // move another member started is a Needs you card).
                       const RelayMoveCard(),
-                      // Things that happened on their own (a link expired, the server
-                      // changed): tap to dismiss.
                       const AppNoticeCards(gap: AppSpacing.md),
-                      // Once the vault holds money, a missing backup outranks every
-                      // other notice (a lost phone could cost the group its funds).
-                      // An empty vault leaves it to the Signers tab's backup card.
                       if (needsBackup && funded) ...[
                         NoticeCard(
                           title: 'Back up this vault',
@@ -383,8 +342,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ],
                       if (ref.watch(appUpdateProvider) ==
                           AppUpdateState.ready) ...[
-                        // Never in the middle of sending a payment: the card says so
-                        // and waits.
                         if (ref
                             .watch(proposalsProvider)
                             .sends
@@ -435,9 +392,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 }
 
-/// Rolls a balance up to its new value when it grows (money arrived): 900 ms, easing
-/// out, from the old value. Decreases and the first value show at once, as does
-/// everything with reduced motion.
 class CountUp extends StatefulWidget {
   const CountUp({super.key, required this.value, required this.builder});
   final BigInt? value;
@@ -488,9 +442,6 @@ class _CountUpState extends State<CountUp> with SingleTickerProviderStateMixin {
   );
 }
 
-/// Home's balance card: the plain card surface (`colors.vaultCard`), a grey Zcash mark
-/// and "Vault balance", the balance in [AppTypography.hero] (shrinks to fit, never cut),
-/// and the approval rule as signer dots along the bottom (docs/brand.md "Vault card").
 class BalanceCard extends StatelessWidget {
   const BalanceCard({
     super.key,
@@ -503,10 +454,8 @@ class BalanceCard extends StatelessWidget {
     required this.members,
   });
 
-  /// The total in dollars ("$1,234.56"); null off mainnet or without a price.
   final String? fiatText;
 
-  /// Money in the total that can't be spent yet ("0.001 ZEC confirming"); null when none.
   final String? confirmingText;
   final BigInt? totalZat;
   final bool hidden;
@@ -523,11 +472,9 @@ class BalanceCard extends StatelessWidget {
         : ZecAmount.fromZatoshi(total).compactBalance.amountText;
     final card = colors.vaultCard;
 
-    // Taller with large system text (amount, label and lines grow; it overflowed).
     final grow = (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 40);
     return Container(
       height: 216 + grow * 4,
-      // Plain, like every other card: no dial, no border.
       decoration: BoxDecoration(
         color: card.background,
         borderRadius: BorderRadius.circular(AppRadii.large),
@@ -542,8 +489,6 @@ class BalanceCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    // The label takes what it needs and ellipsizes only when the
-                    // card is too narrow (narrow phones, large system text).
                     AppIcon(
                       AppIcons.zcashCurrency,
                       size: 18,
@@ -582,8 +527,6 @@ class BalanceCard extends StatelessWidget {
                   ],
                 ),
                 const Spacer(),
-                // Shrinks to fit, never cut: the exact balance must stay readable at
-                // large text sizes.
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
@@ -638,7 +581,6 @@ class BalanceCard extends StatelessWidget {
   }
 }
 
-/// The approval rule as dots: [threshold] filled accent dots out of [members].
 class _ThresholdStrip extends StatelessWidget {
   const _ThresholdStrip({required this.threshold, required this.members});
   final int threshold;
@@ -677,11 +619,8 @@ class _ThresholdStrip extends StatelessWidget {
   }
 }
 
-/// Rows shown on Home; everything else is one tap away under "See all".
 const kRecentActivityLimit = 4;
 
-/// "Recent activity": header with "See all", the newest [kRecentActivityLimit] rows 12
-/// apart, and the empty state.
 class _Payments extends StatelessWidget {
   const _Payments({
     required this.proposals,
@@ -695,13 +634,11 @@ class _Payments extends StatelessWidget {
   final bool hideAmounts;
   final int? height;
 
-  /// The vault holds money: the empty state suggests a payment, else receiving first.
   final bool funded;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    // Payments that need this member are listed above, under "Needs you".
     final items = mergeActivity([
       for (final p in proposals.items)
         if (!needsMyAction(p, height: height)) p,
@@ -796,8 +733,6 @@ class _Payments extends StatelessWidget {
   }
 }
 
-/// The app's notices ([appNoticesProvider]) as cards, each followed by [gap]; tapping
-/// one dismisses it.
 class AppNoticeCards extends ConsumerWidget {
   const AppNoticeCards({super.key, this.gap = AppSpacing.s});
   final double gap;
@@ -819,8 +754,6 @@ class AppNoticeCards extends ConsumerWidget {
   );
 }
 
-/// Until this device's copy of the vault is backed up (spec §12.2 "backup health").
-/// Home entry card (backup reminder, update notice); a chevron when it opens a page.
 class NoticeCard extends StatelessWidget {
   const NoticeCard({
     super.key,
@@ -833,14 +766,11 @@ class NoticeCard extends StatelessWidget {
   final String body;
   final VoidCallback? onTap;
 
-  /// A warning (backup reminder) or good news (an update is ready).
   final bool warning;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    // Home entry card: ground, radius 24, 1.5px
-    // white @ 7% border, icon + title/chevron + body.
     return AppTappable(
       onTap: onTap,
       semanticsLabel: title,
@@ -926,8 +856,6 @@ class NoticeCard extends StatelessWidget {
   }
 }
 
-/// "0.001 ZEC confirming" for money in the total that can't be spent yet (received funds
-/// and the vault's own change wait for confirmations); null when there is none.
 String? _confirmingText(Balance? balance, {required bool hide}) {
   if (balance == null) return null;
   final pending = balance.incomingPendingZat + balance.changePendingZat;

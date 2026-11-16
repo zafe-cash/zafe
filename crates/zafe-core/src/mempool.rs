@@ -1,20 +1,3 @@
-//! Pending vault transactions from lightwalletd's mempool.
-//!
-//! Block sync only learns of a transaction once it is mined. While the app is open, this
-//! watcher reads lightwalletd's `GetMempoolStream`, trial-decrypts every transaction with
-//! the vault's viewing key and hands the vault's own to a `store` callback (the app stores
-//! them unmined in the wallet database, so an incoming payment shows as pending right
-//! away). Privacy: the whole mempool is streamed; no transaction is ever looked up by id.
-//!
-//! lightwalletd closes the stream whenever a block is mined: that is normal, and the
-//! watcher reconnects after [`BLOCK_RECONNECT`]. Real failures back off along
-//! [`Backoff`] (1 s doubling to 30 s). Cancellation is polled every [`CANCEL_POLL`], also
-//! while connecting, reading or waiting, so a stop takes effect within that time.
-//!
-//! Trial decryption needs only the viewing key, so the wallet database is touched only
-//! for the vault's own transactions: callers take their wallet lock inside `store`, never
-//! while the stream is idle.
-
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
@@ -28,30 +11,26 @@ use zcash_protocol::consensus::{BlockHeight, BranchId, Parameters};
 
 use crate::wallet::{connect, latest_height, WalletError};
 
-/// Delay before reconnecting after lightwalletd closed the stream (a new block).
 pub const BLOCK_RECONNECT: Duration = Duration::from_secs(1);
-/// How often a running watch checks whether it was cancelled.
 pub const CANCEL_POLL: Duration = Duration::from_millis(100);
-/// Transactions remembered as already handled (the stream resends the whole mempool after
-/// every reconnect).
 const SEEN_CAPACITY: usize = 4096;
 
 #[derive(Debug)]
 pub enum MempoolEvent {
-    /// The stream is open (after every (re)connect).
     Connected,
-    /// A vault transaction from the mempool was handed to `store` successfully.
-    Stored { txid: TxId },
-    /// `store` failed for a vault transaction; it is tried again after the next reconnect.
-    StoreFailed { txid: TxId, error: WalletError },
-    /// Connecting or reading failed; the watch retries after `retry_in`.
+    Stored {
+        txid: TxId,
+    },
+    StoreFailed {
+        txid: TxId,
+        error: WalletError,
+    },
     Disconnected {
         error: WalletError,
         retry_in: Duration,
     },
 }
 
-/// Delays between retries after consecutive failures: 1 s, doubling, capped at 30 s.
 #[derive(Debug, Default)]
 pub struct Backoff {
     failures: u32,
@@ -61,7 +40,6 @@ impl Backoff {
     pub const FIRST: Duration = Duration::from_secs(1);
     pub const MAX: Duration = Duration::from_secs(30);
 
-    /// Records a failure and returns how long to wait before the next attempt.
     pub fn failed(&mut self) -> Duration {
         let delay = Self::FIRST
             .saturating_mul(1u32 << self.failures.min(16))
@@ -70,13 +48,11 @@ impl Backoff {
         delay
     }
 
-    /// The connection worked: the next failure starts the ladder again.
     pub fn reset(&mut self) {
         self.failures = 0;
     }
 }
 
-/// A bounded set of txids, forgetting the oldest first.
 #[derive(Debug)]
 struct SeenTxids {
     capacity: usize,
@@ -110,14 +86,11 @@ impl SeenTxids {
     }
 }
 
-/// Parses a mempool transaction as it would be mined in the block after `tip`.
 pub fn parse_mempool_tx<P: Parameters>(params: &P, tip: u32, data: &[u8]) -> Option<Transaction> {
     let branch = BranchId::for_height(params, BlockHeight::from_u32(tip.saturating_add(1)));
     Transaction::read(data, branch).ok()
 }
 
-/// Whether any output of `tx` decrypts with the vault's viewing key (a payment to the
-/// vault, or one the vault sent, recovered with its outgoing key).
 pub fn is_vault_tx<P: Parameters>(
     params: &P,
     tip: u32,
@@ -129,14 +102,12 @@ pub fn is_vault_tx<P: Parameters>(
         .has_decrypted_outputs()
 }
 
-/// Resolves once `cancelled()` returns true.
 async fn until_cancelled(cancelled: &impl Fn() -> bool) {
     while !cancelled() {
         tokio::time::sleep(CANCEL_POLL).await;
     }
 }
 
-/// Sleeps for `delay`; false if cancelled meanwhile.
 async fn sleep_unless_cancelled(delay: Duration, cancelled: &impl Fn() -> bool) -> bool {
     tokio::select! {
         biased;
@@ -145,9 +116,6 @@ async fn sleep_unless_cancelled(delay: Duration, cancelled: &impl Fn() -> bool) 
     }
 }
 
-/// Watches lightwalletd's mempool at `endpoint` until `cancelled()` returns true, calling
-/// `store` (on a blocking thread) for each new transaction of the vault with viewing key
-/// `ufvk`, and `emit` for every [`MempoolEvent`]. Network errors never end the watch.
 pub async fn watch<P, C, S, E>(
     endpoint: &str,
     params: &P,
@@ -170,7 +138,6 @@ pub async fn watch<P, C, S, E>(
         }
         let open = async {
             let mut client = connect(endpoint).await?;
-            // Mempool transactions are decrypted as if mined in the next block.
             let tip = latest_height(&mut client).await?;
             let stream = client
                 .get_mempool_stream(service::Empty {})
@@ -208,7 +175,6 @@ pub async fn watch<P, C, S, E>(
                 Ok(None) => break Ok(()),
                 Err(s) => break Err(crate::wallet::status_error(&s)),
             };
-            // A stream that delivers works: only failures in a row back off further.
             backoff.reset();
             let Some(tx) = parse_mempool_tx(params, tip, &raw.data) else {
                 continue;
@@ -232,7 +198,6 @@ pub async fn watch<P, C, S, E>(
                     seen.insert(txid);
                     emit(MempoolEvent::Stored { txid });
                 }
-                // Not remembered: the stream resends it after the next reconnect.
                 Ok(Err(error)) => emit(MempoolEvent::StoreFailed { txid, error }),
                 Err(e) => emit(MempoolEvent::StoreFailed {
                     txid,
@@ -242,7 +207,6 @@ pub async fn watch<P, C, S, E>(
         };
         drop(stream);
         let delay = match ended {
-            // Closed by lightwalletd: a new block was mined.
             Ok(()) => {
                 backoff.reset();
                 BLOCK_RECONNECT
@@ -276,7 +240,6 @@ mod tests {
         assert_eq!(secs, [1, 2, 4, 8, 16, 30, 30, 30]);
         b.reset();
         assert_eq!(b.failed(), Backoff::FIRST);
-        // Many failures never overflow.
         for _ in 0..100 {
             assert!(b.failed() <= Backoff::MAX);
         }
@@ -327,7 +290,6 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut retries = Vec::new();
         let started = Instant::now();
-        // Nothing listens on port 1: the connection is refused at once.
         watch(
             "http://127.0.0.1:1",
             &zcash_protocol::consensus::Network::TestNetwork,
@@ -337,7 +299,6 @@ mod tests {
             |e| match e {
                 MempoolEvent::Disconnected { retry_in, .. } => {
                     retries.push(retry_in);
-                    // Stop during the second wait (2 s): it must not be waited out.
                     if retries.len() == 2 {
                         cancel.store(true, Ordering::Relaxed);
                     }
@@ -347,7 +308,6 @@ mod tests {
         )
         .await;
         assert_eq!(retries, [Duration::from_secs(1), Duration::from_secs(2)]);
-        // 1 s of backoff plus two refused connections; the 2 s wait was cut short.
         assert!(started.elapsed() < Duration::from_millis(2500));
     }
 }

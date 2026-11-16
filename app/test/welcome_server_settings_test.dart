@@ -46,7 +46,6 @@ void main() {
       ),
     );
     await tester.pump();
-    // The server for a new vault is picked in Create, not here.
     expect(find.textContaining('No relay set'), findsNothing);
     await tester.tap(find.bySemanticsLabel('Zcash server'));
     await tester.pumpAndSettle();

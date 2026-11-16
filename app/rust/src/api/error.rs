@@ -1,6 +1,3 @@
-//! Typed errors for the Dart side (no substring matching): Dart switches on
-//! `kind` for copy and recovery actions, and shows `message` only as detail.
-
 use zafe_core::{
     net::NetFailure, node::NodeError, price::PriceError, relay_client::RelayClientError,
     wallet::WalletError,
@@ -9,103 +6,49 @@ use zafe_proto::UnsupportedVersion;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZafeErrorKind {
-    /// The relay or lightwalletd could not be reached (`endpoint` says which).
     Network,
-    /// Waiting on other members or on sync; try again later.
     NotReady,
-    /// Other members did not answer in time; safe to retry.
     Timeout,
-    /// This device's independent check failed: never approve or sign.
     Verification,
-    /// The vault cannot cover the amount plus the fee.
     InsufficientFunds,
-    /// The vault holds enough, but part of it is held by open proposals.
     FundsReserved,
-    /// Bad address, amount, memo or invite.
     InvalidInput,
-    /// Data, a message or the relay comes from a newer version of Zafe: update the app.
     UpdateRequired,
-    /// The relay is older than this app and must be updated by whoever runs it.
     RelayOutdated,
-    /// The relay's storage quota for this vault's messages is full; it frees up as old
-    /// messages expire (30 days), or whoever runs the relay raises it.
     RelayStorageFull,
-    /// The vault's history (the log, kept for good) is at this relay's cap, or this
-    /// member's half of it: only a relay with more room helps.
     RelayLogFull,
-    /// The relay's whole database is full (or nearly, for a vault new on it).
     RelayFull,
-    /// The server already holds the most open moves it takes for this seat.
     TooManySeatMoves,
-    /// The relay has fewer log entries than this device saw: it lost data or was rewound
-    /// to an older backup. Nothing it says about the vault can be trusted until a member
-    /// restores the log on it from a device copy.
     RelayRolledBack,
-    /// The relay serves another history than this device saw (a fork of the log). Do not
-    /// trust it; members compare notes outside Zafe.
     RelayForked,
-    /// This device's own copy of the vault history doesn't verify. The member can follow
-    /// the relay's history instead, after checking with the others.
     LogCopyInvalid,
-    /// The relay's member list or threshold differs from the vault's (someone seeded it
-    /// wrongly when restoring it): do not trust it; funds are not at risk.
     RelayMembership,
-    /// The relay no longer knows this vault (wiped), though this device has its log: a
-    /// member can restore it from the device copy.
     RelayLostVault,
-    /// The TLS handshake with `endpoint` failed (certificate untrusted, expired or for
-    /// another host, or a server that doesn't speak TLS).
     Tls,
-    /// `endpoint` accepted the connection but didn't answer in time.
     NetworkTimeout,
-    /// lightwalletd's chain is behind blocks this wallet already has.
     ServerBehind,
-    /// lightwalletd serves another network than the vault's.
     WrongNetwork,
-    /// This device's wallet database failed (it is a cache: it resyncs if deleted).
     WalletDatabase,
-    /// "Use Tor" is on and Tor is still connecting: nothing was sent (never direct).
     TorConnecting,
-    /// "Use Tor" is on but Tor couldn't connect: nothing was sent (never direct).
     TorFailed,
-    /// The relay answered 404 "unknown mailbox": this vault isn't on the relay used.
     VaultNotOnRelay,
     Other,
-    /// Key generation timed out because some members never took part (`members`).
     KeygenIncomplete,
-    /// The invite is past its 72 hours and the creator hasn't shared it again (HTTP 410).
     InviteExpired,
-    /// The relay is private: creating or restoring a vault there needs its create token,
-    /// and none or the wrong one was given (ask whoever runs it).
     CreateTokenRefused,
-    /// The vault moved to another relay and this phone hasn't followed: "Grants moved to
-    /// relay.dao.org. Move to continue." (`message` names the relay URL.)
     VaultMoved,
-    /// This phone already takes part in another relay move.
     MoveInProgress,
-    /// Moving needs every member's app to support it; `members` must update first.
     MembersMustUpdate,
-    /// No member's arrival for this move on that relay (a bad link, or cancelled).
     MoveNotFound,
-    /// The move is past its 14 days.
     MoveExpired,
-    /// The move is older than the vault's last move.
     MoveStale,
-    /// Two moves switched from the same history: "Two moves found: ask your group."
     TwoMoves,
-    /// This phone's signature for the payment may already be out, so it can't decline it
-    /// (nothing was logged); its proposer can cancel it.
     AlreadySigned,
-    /// This phone cancelled this move: a cancel is final.
     MoveCancelled,
-    /// This phone can't tell whether the vault moved, so it writes nowhere (`message` names
-    /// the relay it can't read): try again, or cancel the move to stay.
     MoveUnconfirmed,
-    /// The new relay's history doesn't match the vault's: start the move again.
     MoveConflict,
 }
 
-/// Which server an error came from, when it came from one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZafeEndpoint {
     None,
@@ -118,8 +61,6 @@ pub struct ZafeError {
     pub kind: ZafeErrorKind,
     pub message: String,
     pub endpoint: ZafeEndpoint,
-    /// Members the error is about (signing keys, hex): `KeygenIncomplete` lists those
-    /// who never took part. Empty otherwise.
     pub members: Vec<String>,
 }
 
@@ -162,8 +103,6 @@ fn net_kind(failure: NetFailure) -> ZafeErrorKind {
     }
 }
 
-/// Newer data means "update the app"; older data this build no longer reads is `Other`
-/// (pre-release formats have no migrations: reset or restore).
 fn version_kind(v: &UnsupportedVersion) -> ZafeErrorKind {
     if v.is_newer() {
         ZafeErrorKind::UpdateRequired
@@ -202,7 +141,6 @@ impl From<NodeError> for ZafeError {
                 }
             }
             NodeError::Relay(RelayClientError::Transport { failure, .. }) => net_kind(*failure),
-            // A relay without a route this app needs: whoever runs it must update it.
             NodeError::Relay(RelayClientError::RelayTooOld { .. }) => ZafeErrorKind::RelayOutdated,
             NodeError::Relay(RelayClientError::CreateTokenRefused) => {
                 ZafeErrorKind::CreateTokenRefused
@@ -261,7 +199,6 @@ impl From<NodeError> for ZafeError {
             _ => Vec::new(),
         };
         let message = match &e {
-            // The relay the vault moved to, for the "Move to continue" screen.
             NodeError::VaultMoved { url } | NodeError::MoveUnconfirmed { url } => url.clone(),
             e => e.to_string(),
         };
@@ -304,7 +241,6 @@ impl From<WalletError> for ZafeError {
             WalletError::Db(_) | WalletError::WrongKey => ZafeErrorKind::WalletDatabase,
             WalletError::Payment(_) => ZafeErrorKind::InvalidInput,
             WalletError::FundsReserved => ZafeErrorKind::FundsReserved,
-            // zcash_client_backend's error is only available as text here.
             WalletError::Proposal(m) if m.contains("InsufficientFunds") => {
                 ZafeErrorKind::InsufficientFunds
             }

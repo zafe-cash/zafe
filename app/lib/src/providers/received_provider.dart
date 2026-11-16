@@ -15,7 +15,6 @@ import '../core/storage/wallet_key.dart';
 class ReceivedState {
   const ReceivedState({this.items = const [], this.loaded = false});
 
-  /// Newest first; unmined ones first of all.
   final List<rust.ReceivedInfo> items;
   final bool loaded;
 
@@ -27,9 +26,6 @@ class ReceivedState {
   }
 }
 
-/// Money the active vault received, read from its local wallet database. Reloads after
-/// every wallet sync (a new balance or height), when another vault becomes active, and
-/// when the mempool watch stores a pending transaction.
 class ReceivedNotifier extends Notifier<ReceivedState> {
   bool _loading = false;
   bool _again = false;
@@ -51,7 +47,6 @@ class ReceivedNotifier extends Notifier<ReceivedState> {
     final vaultId = vault.activeId;
     if (material == null || vaultId == null) return;
     if (_loading) {
-      // Read again once the current read ends: it may predate what triggered this call.
       _again = true;
       return;
     }
@@ -63,16 +58,11 @@ class ReceivedNotifier extends Notifier<ReceivedState> {
         dbKey: walletKeyFor(ref.read(vaultProvider).identity!, vaultId),
         material: material,
       );
-      // The vault may have changed while reading.
       if (ref.read(vaultProvider).activeId == vaultId) {
         final previous = state.loaded ? state.items.map((r) => r.txid) : null;
         state = ReceivedState(items: items, loaded: true);
-        // Seen on screen: never announced from the background (foreground only, so a
-        // refresh running in the background doesn't swallow news).
         if (WidgetsBinding.instance.lifecycleState ==
             AppLifecycleState.resumed) {
-          // Money arriving while the app is open: pending, or just mined (not history
-          // found by a long sync).
           final fresh = items
               .where((r) => r.minedHeight == 0 || r.confirmations <= 2)
               .map((r) => r.txid);

@@ -1,5 +1,3 @@
-//! SQLite persistence, retention pruning and push hooks.
-
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -53,13 +51,11 @@ async fn signed<T: serde::Serialize + serde::de::DeserializeOwned>(
     .await
 }
 
-/// Posts `env` as its sender `who` (`/v1/envelope/send`).
 async fn post_env(app: &Router, who: &Identity, env: &Envelope) -> (StatusCode, Vec<u8>) {
     let envelope = env.to_bytes().unwrap();
     signed(app, "/v1/envelope/send", who, PostEnvelope { envelope }).await
 }
 
-/// Appends `entry` through its author (`/v1/log/append-labelled`, at `T0`).
 async fn append(app: &Router, who: &Identity, entry: &LogEntry) -> (StatusCode, Vec<u8>) {
     let request = LabelledAppend::new(MAILBOX, entry, T0).unwrap();
     signed(app, "/v1/log/append-labelled", who, request).await
@@ -70,13 +66,10 @@ fn clock(now: &Arc<AtomicU64>) -> Arc<dyn Fn() -> u64 + Send + Sync> {
     Arc::new(move || now.load(Ordering::SeqCst))
 }
 
-/// Creates a sealed 2-member mailbox with one envelope and one log entry.
 async fn populate(app: &Router, ids: &[Identity], rng: &mut StdRng) -> LogKey {
     populate_with_head(app, ids, rng).await.0
 }
 
-/// Creates the mailbox with all `ids` as members, sends one envelope and appends the
-/// first log entry. Returns the log key and the first entry's hash (the log head).
 async fn populate_with_head(
     app: &Router,
     ids: &[Identity],
@@ -174,7 +167,7 @@ async fn state_survives_a_restart() {
     let key = {
         let app = Relay::open_with_clock(&path, clock(&now)).unwrap().router();
         populate(&app, &ids, &mut rng).await
-    }; // relay dropped: connection closed
+    };
 
     let app = Relay::open_with_clock(&path, clock(&now)).unwrap().router();
     let (_, body) = signed(
@@ -210,7 +203,6 @@ async fn state_survives_a_restart() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].decrypt(&key).unwrap(), b"created");
 
-    // Replay protection survives too: the same envelope seq is still refused.
     let replay = Envelope::sealed(
         &ids[0],
         ids[1].public(),
@@ -225,7 +217,6 @@ async fn state_survives_a_restart() {
         post_env(&app, &ids[0], &replay).await.0,
         StatusCode::CONFLICT
     );
-    // And the log head: appending at index 0 again conflicts.
     let dup = LogEntry::create(&ids[1], &key, MAILBOX, 0, [0; 32], b"x", &mut rng).unwrap();
     let (_, body) = append(&app, &ids[1], &dup).await;
     assert_eq!(
@@ -287,7 +278,6 @@ async fn deliveries_push_to_registered_recipients_only() {
         "no tokens registered yet"
     );
 
-    // Only members can register; an outsider is refused.
     let outsider = RegisterPush {
         mailbox: MAILBOX,
         platform: PushPlatform::Fcm,
@@ -314,7 +304,6 @@ async fn deliveries_push_to_registered_recipients_only() {
         );
     }
 
-    // A sealed envelope to member 1 pushes to member 1 only, with no content.
     let env = Envelope::sealed(
         &ids[0],
         ids[1].public(),
@@ -332,8 +321,6 @@ async fn deliveries_push_to_registered_recipients_only() {
     );
 }
 
-/// An app moving to FCM installation IDs re-registers: the FID replaces its old token
-/// (one target per member), so it is pushed once, as `FcmFid` (sent in FCM's `fid` field).
 #[tokio::test]
 async fn an_installation_id_replaces_the_old_token() {
     let now = Arc::new(AtomicU64::new(T0));
@@ -416,10 +403,8 @@ async fn log_appends_push_every_other_member() {
         "author is not pushed"
     );
 
-    // A token FCM reported as unregistered is forgotten: no more pushes to it.
     assert_eq!(relay.forget_push_token("tok-0").unwrap(), 1);
     recorder.0.lock().unwrap().clear();
-    // (A window later: a token gets at most one push per window.)
     now.store(T0 + zafe_relay::PUSH_WINDOW_SECS, Ordering::SeqCst);
     let next = LogEntry::create(
         &ids[1],
@@ -438,8 +423,6 @@ async fn log_appends_push_every_other_member() {
     );
 }
 
-/// The database records its schema version; one written by a newer relay is refused
-/// instead of being misread.
 #[test]
 fn database_schema_is_versioned() {
     use zafe_proto::version;
@@ -464,7 +447,6 @@ fn database_schema_is_versioned() {
         Err(zafe_relay::RelayError::UnsupportedVersion(v)) if v.is_newer()
     ));
 
-    // A database from before versioning (tables, no version) is refused too.
     let old = dir.join("old.sqlite");
     let _ = std::fs::remove_file(&old);
     rusqlite::Connection::open(&old)

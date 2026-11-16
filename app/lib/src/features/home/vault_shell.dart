@@ -9,16 +9,12 @@ import '../../providers/proposals_provider.dart';
 import '../../providers/vault_provider.dart';
 import '../backup/backup_prompt_screen.dart' show backupStatusProvider;
 
-/// The vault's tabs (Home, Activity, Signers, Settings) under the floating tab bar.
-/// Pushed pages (a payment, Send, Receive...) cover the bar.
 class VaultShell extends ConsumerWidget {
   const VaultShell({required this.shell, super.key});
   final StatefulNavigationShell shell;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // A dot on Signers only for what waits on you there: a seat move to approve, this
-    // phone's own seat moving, or this phone's own backup.
     final me = ref.watch(vaultProvider).myKeyHex;
     final proposals = ref.watch(proposalsProvider);
     final moves = proposals.seatMoves;
@@ -40,7 +36,6 @@ class VaultShell extends ConsumerWidget {
           const AppMobileTabItem(iconName: AppIcons.cog, label: 'Settings'),
         ],
         currentIndex: shell.currentIndex,
-        // Selecting the current tab again goes back to its root.
         onSelect: (i) =>
             shell.goBranch(i, initialLocation: i == shell.currentIndex),
       ),

@@ -9,7 +9,6 @@ import 'package:zafe/src/providers/tor_provider.dart';
 import 'package:zafe/src/providers/vault_provider.dart';
 import 'package:zafe/src/rust/api/error.dart';
 
-/// Records what the notifier asks of Rust, in order.
 class FakeTorRuntime implements TorRuntime {
   final calls = <String>[];
   TorConnection current = TorConnection.off;
@@ -81,7 +80,6 @@ void main() {
       expect(failed.statusLabel, 'Failed');
       expect(failed.homeLabel, 'Tor couldn\'t connect');
       expect(failed.failed, isTrue);
-      // A choice that is on but whose runtime hasn't started still reads as connecting.
       expect(
         const TorSetting(
           enabled: true,
@@ -133,7 +131,6 @@ void main() {
         isFalse,
       );
       expect(reported, isA<ZafeError>());
-      // Turned off meanwhile (another isolate): skip this run too.
       expect(
         await ensureTorForBackground(
           useTor: true,

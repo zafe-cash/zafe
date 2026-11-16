@@ -1,8 +1,3 @@
-//! Member orchestration over the relay (spec §7, §9): what one member's device does.
-//!
-//! Transport-level steps are async functions over a [`RelayClient`]. They are written so a
-//! CLI can run each step as a separate command, and so the mobile app can reuse them.
-
 use std::{
     collections::BTreeMap,
     fs,
@@ -48,108 +43,57 @@ pub enum NodeError {
     EchoMismatch,
     #[error("timed out waiting for {0}")]
     Timeout(&'static str),
-    /// Key generation gave up waiting for `stage` from these members (they never opened
-    /// the setup, or left it): a screen names them, offers to try again or abandon.
     #[error("key generation timed out waiting for {stage} from {} member(s)", missing.len())]
     KeygenStalled {
         stage: &'static str,
         missing: Vec<[u8; 32]>,
     },
-    /// This member's independent check of a proposal failed: do not approve or sign it.
     #[error("verification failed: {0}")]
     Verification(String),
-    /// This phone may already have released its signature for the proposal (a one-tap
-    /// vote, a reply to a signing request, or one being made): a reject would claim
-    /// otherwise, so none is logged. Its author can cancel it and move its funds.
     #[error("your signature for this payment is already out")]
     AlreadySigned,
-    /// Signature shares from these signers didn't verify: the round can't complete with
-    /// them (they're asked last from now on, `SilentSigners`).
     #[error("{} signer(s) sent invalid signatures", .0.len())]
     InvalidShares(Vec<Identifier>),
     #[error("protocol: {0}")]
     Protocol(String),
-    /// This phone's own setup state couldn't be read or written.
     #[error("this phone's setup state: {0}")]
     Io(String),
     #[error(transparent)]
     Wallet(#[from] crate::wallet::WalletError),
-    /// The event is not valid on top of the current log (every member would ignore it).
     #[error("event no longer valid: {0}")]
     Invalid(crate::vault::VaultError),
-    /// The relay has fewer log entries than this device already saw (an older database
-    /// restored, or lost data): `local_len` entries are saved here. Nothing it says about
-    /// the vault can be trusted until a member restores the log from a device copy.
     #[error("the relay lost part of the vault log: this device has {local_len} entries")]
     RelayRolledBack { local_len: u64 },
-    /// The relay served another entry than the one this device saved at `index`: the log
-    /// it shows has forked from the history this device has seen.
     #[error("the relay's vault log differs from this device's copy at entry {index}")]
     RelayForked { index: u64 },
-    /// This device's own copy of the vault log no longer verifies (damaged, or written by
-    /// a broken build). It used to be dropped silently and the relay trusted as on a first
-    /// load; now the member decides, by following the relay ([`follow_relay`]) after
-    /// checking with the others (audit L9).
     #[error("this device's copy of the vault history doesn't verify: {0}")]
     LogCopyInvalid(String),
-    /// The relay doesn't know this vault any more (wiped database) although this device
-    /// saved `local_len` entries of its log.
     #[error("the relay no longer has this vault: this device has {local_len} log entries")]
     RelayLostVault { local_len: u64 },
-    /// The relay's member list or threshold differs from the membership the vault log
-    /// ends with: it was seeded by someone else's idea of the vault (a malicious restore).
-    /// Funds are not at risk (membership comes from the log) but the relay would lock
-    /// members out or move seats on fewer approvals: move to another relay.
     #[error("the relay's member list doesn't match the vault: {0}")]
     RelayMembership(String),
-    /// This device's copy of the log can't be read or written.
     #[error(transparent)]
     LogCopy(#[from] crate::log_cache::LogCacheError),
-    /// Data or a message in a version this build doesn't read (see
-    /// [`UnsupportedVersion::is_newer`]: newer means "update the app").
     #[error(transparent)]
     UnsupportedVersion(#[from] UnsupportedVersion),
-    /// The vault moved to the relay at `url` (`docs/relay-move.md` §4.5): this phone hasn't
-    /// followed, so it no longer writes to its old relay. "Grants moved to relay.dao.org.
-    /// Move to continue."
     #[error("the vault moved to {url}: move to continue")]
     VaultMoved { url: String },
-    /// This phone already takes part in another relay move (one at a time per phone): it
-    /// can start or follow another once that one switched, expired or was cancelled.
     #[error("this phone is already moving the vault to another relay")]
     MoveInProgress,
-    /// A relay move needs every member's app to support it: these members (signing keys)
-    /// must update Zafe first.
     #[error("{} member(s) must update Zafe before the vault can move", .0.len())]
     MembersMustUpdate(Vec<[u8; 32]>),
-    /// The new relay holds no current member's arrival for this move (a link alone, or a
-    /// forged one, is never enough), or the move was cancelled.
     #[error("no member has moved to that relay with this link")]
     MoveNotFound,
-    /// The move is past its 14 days.
     #[error("this move expired")]
     MoveExpired,
-    /// The move is older than this vault's last switch of relay (a replayed link).
     #[error("this move is older than the vault's last move")]
     MoveStale,
-    /// Two different moves from the same point of the history both switched (a member
-    /// signed both): neither is followed. "Two moves found: ask your group."
     #[error("two moves found for the same history: ask your group")]
     TwoMoves,
-    /// This phone left the move (a cancel is final: the others count no arrival of a member
-    /// who cancelled, on either relay, whatever order they arrive in). "You left this move.
-    /// Ask for a new one."
     #[error("you left this move: ask for a new one")]
     MoveCancelled,
-    /// This phone can't tell where the vault lives, so it writes nowhere (rule 6): the
-    /// relay at `url` can't be read (the new relay of a move this phone joined, or the move
-    /// notices on the current one). Try again, or cancel the move to stay.
     #[error("can't reach {url} to check the vault's move")]
     MoveUnconfirmed { url: String },
-    /// Before the switch, the new relay holds an entry that the vault's history doesn't
-    /// have where the old relay has another (a member wrote there early, or the old relay
-    /// forked its members): the move can't complete. "The new server's history doesn't
-    /// match this one. Start the move again."
     #[error("the new relay's history doesn't match the vault's: start the move again")]
     MoveConflict,
 }
@@ -167,7 +111,6 @@ impl From<DecodeError> for NodeError {
     }
 }
 
-/// Keeps version errors typed; everything else becomes a protocol error.
 fn vault_err(e: crate::vault::VaultError) -> NodeError {
     match e {
         crate::vault::VaultError::UnsupportedVersion(v) => NodeError::UnsupportedVersion(v),
@@ -177,7 +120,6 @@ fn vault_err(e: crate::vault::VaultError) -> NodeError {
 
 fn chain_err(e: zafe_proto::ChainError) -> NodeError {
     match e {
-        // An entry that doesn't extend the head we hold: the relay forked the history.
         zafe_proto::ChainError::Fork(index) => NodeError::RelayForked { index },
         zafe_proto::ChainError::Invalid {
             source: ProtoError::UnsupportedVersion(v),
@@ -187,11 +129,6 @@ fn chain_err(e: zafe_proto::ChainError) -> NodeError {
     }
 }
 
-/// A vault's two ids on a relay. `vault` is the vault id: the descriptor names it, every
-/// log entry carries it (`EntryHeader::mailbox`) and the keys are bound to it. `label` is
-/// the mailbox id the relay files the vault under, used for everything addressed to the
-/// relay: envelope headers, signed requests, appends (`docs/relay-move.md` §4.6). A new
-/// vault's label is random; vaults made before labels have label = vault id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VaultIds {
     pub vault: MailboxId,
@@ -199,7 +136,6 @@ pub struct VaultIds {
 }
 
 impl VaultIds {
-    /// A vault from before labels: its mailbox id is its vault id.
     pub const fn legacy(id: MailboxId) -> Self {
         Self {
             vault: id,
@@ -208,20 +144,14 @@ impl VaultIds {
     }
 }
 
-/// Where a vault lives: its relay, its mailbox label there and the relay's create token
-/// (a private relay's `ZAFE_RELAY_CREATE_TOKEN`, needed to restore the vault there). Part
-/// of [`VaultMaterial`] (so it is in secure storage and backups) and never in invites or
-/// links: the token travels only sealed between members.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultRelay {
-    /// `None`: the app-wide relay setting (vaults made before per-vault relays).
     pub url: Option<String>,
     pub label: MailboxId,
     pub create_token: Option<String>,
 }
 
 impl VaultRelay {
-    /// A vault from before per-vault relays: on the app-wide relay, under its vault id.
     pub fn legacy(vault_id: MailboxId) -> Self {
         Self {
             url: None,
@@ -230,13 +160,11 @@ impl VaultRelay {
         }
     }
 
-    /// The relay URL, or `default` (the app-wide setting) for a vault without one.
     pub fn url_or<'a>(&'a self, default: &'a str) -> &'a str {
         self.url.as_deref().unwrap_or(default)
     }
 }
 
-/// Redacted: the create token is a secret of the relay's operator.
 impl core::fmt::Debug for VaultRelay {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("VaultRelay")
@@ -247,25 +175,18 @@ impl core::fmt::Debug for VaultRelay {
     }
 }
 
-/// Everything a new member needs to join (shared out of band as a string or QR code).
-/// Never carries the relay's create token.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invite {
-    /// The vault id (keys, descriptor and log entries are bound to it).
     pub vault_id: MailboxId,
-    /// The relay's mailbox id for the vault ([`VaultIds::label`]).
     pub label: MailboxId,
-    /// The vault's relay. `None` only from a version 2 invite: the joiner's default relay.
     pub relay_url: Option<String>,
     pub join_token: [u8; 32],
-    /// Creator's Ed25519 key, so joiners know whose round-1 message carries the birthday.
     pub creator: [u8; 32],
     pub threshold: u16,
     pub members: u16,
     pub name: String,
 }
 
-/// A version 2 invite: the mailbox id was the vault id, on the joiner's relay.
 #[derive(Deserialize)]
 struct InviteV2 {
     mailbox: MailboxId,
@@ -277,7 +198,6 @@ struct InviteV2 {
 }
 
 impl Invite {
-    /// Text form: `zafe-invite-v<version::INVITE>:<hex postcard>`.
     const PREFIX: &'static str = "zafe-invite-v";
 
     pub fn encode(&self) -> String {
@@ -289,9 +209,6 @@ impl Invite {
         )
     }
 
-    /// Parses an invite; one from another version of Zafe fails with
-    /// [`NodeError::UnsupportedVersion`] rather than "invalid invite". A version 2 invite
-    /// reads as label = vault id with no relay URL.
     pub fn decode(s: &str) -> Result<Self, NodeError> {
         let rest = s
             .trim()
@@ -325,16 +242,9 @@ impl Invite {
     }
 }
 
-/// Per-sender envelope sequence numbers: strictly increasing and clock-based, so they stay
-/// increasing across separate processes without persistence.
 #[derive(Default)]
 pub struct SeqCounter(u64);
 
-/// The last sequence number this process handed out, from any counter. The relay refuses
-/// a seq not above the sender's last one, and the wall clock can step back (WSL corrects
-/// it by a second at a time; phones on a network time update), so a fresh counter's clock
-/// reading alone could fall below what an earlier one sent milliseconds before (the setup
-/// safety values, then key generation: "replayed or reordered envelope").
 static LAST_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl SeqCounter {
@@ -359,11 +269,6 @@ impl SeqCounter {
     }
 }
 
-/// Sends an envelope sealed by `seal` with a fresh seq, sealing it again on a 409. Two
-/// steps of one member can send at nearly the same time (the app and a background check,
-/// or the setup screen's poll and a tap), and over Tor each request takes its own circuit,
-/// so the later seq can arrive first; the relay then refuses the earlier one ("replayed or
-/// reordered envelope").
 pub async fn send_fresh(
     relay: &RelayClient,
     me: &Identity,
@@ -379,8 +284,6 @@ pub async fn send_fresh(
     }
 }
 
-/// A member's long-lived vault material after creation. `vault_secret`, `key_package` and
-/// `log_key` are secrets: on devices they belong in secure storage (spec §14).
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VaultMaterial {
     pub descriptor: VaultDescriptor,
@@ -389,11 +292,9 @@ pub struct VaultMaterial {
     pub vault_secret: [u8; 32],
     pub log_key_epoch: u32,
     pub log_key: [u8; 32],
-    /// The vault's relay, label and create token (version 2).
     pub relay: VaultRelay,
 }
 
-/// Version 1 material: no relay (the app-wide one, label = vault id).
 #[derive(Deserialize)]
 struct VaultMaterialV1 {
     descriptor: VaultDescriptor,
@@ -414,12 +315,10 @@ impl core::fmt::Debug for VaultMaterial {
 }
 
 impl VaultMaterial {
-    /// Versioned storage form (device secure storage, CLI `vault.bin`, backups). Secret.
     pub fn to_bytes(&self) -> Result<Vec<u8>, NodeError> {
         Ok(version::encode(Format::VaultMaterial, self)?)
     }
 
-    /// Reads versions 1 (as a vault on the app-wide relay under its vault id) and 2.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, NodeError> {
         let material: Self = match version::split(Format::VaultMaterial, bytes)? {
             (1, body) => {
@@ -441,7 +340,6 @@ impl VaultMaterial {
         Ok(material)
     }
 
-    /// The vault id and its relay label.
     pub fn ids(&self) -> VaultIds {
         VaultIds {
             vault: self.descriptor.vault_id,
@@ -449,7 +347,6 @@ impl VaultMaterial {
         }
     }
 
-    /// The relay's mailbox id for this vault.
     pub fn label(&self) -> MailboxId {
         self.relay.label
     }
@@ -482,7 +379,6 @@ impl VaultMaterial {
 mod relay_move;
 pub use relay_move::*;
 
-/// The vault's address: its viewing key's external address at index 0, Orchard only.
 fn vault_address(
     fvk: &orchard::keys::FullViewingKey,
     network: &impl Parameters,
@@ -498,7 +394,6 @@ fn vault_address(
     .encode(network))
 }
 
-/// The address `descriptor`'s viewing key gives (what screens show, never the stored one).
 pub fn ufvk_address(descriptor: &VaultDescriptor) -> Result<String, NodeError> {
     let network = crate::wallet::ZafeNetwork::from_name(&descriptor.network)
         .ok_or_else(|| proto("unknown network"))?;
@@ -510,8 +405,6 @@ pub fn ufvk_address(descriptor: &VaultDescriptor) -> Result<String, NodeError> {
     vault_address(fvk, &network)
 }
 
-/// Refuses a descriptor whose stored address isn't its viewing key's (rule 3: derive,
-/// don't store). Checked wherever a vault is accepted: a log's `Created` entry, a backup.
 pub fn check_address(descriptor: &VaultDescriptor) -> Result<(), NodeError> {
     if ufvk_address(descriptor)? != descriptor.address {
         return Err(NodeError::Verification(
@@ -521,14 +414,6 @@ pub fn check_address(descriptor: &VaultDescriptor) -> Result<(), NodeError> {
     Ok(())
 }
 
-// --- Setup: create, join, seal, safety number ------------------------------------------
-
-/// Creates a vault's mailbox on `relay` and returns the invite. The vault id and the
-/// mailbox label are both random and different (`docs/relay-move.md` §4.6), so the relay
-/// must have labelled mailboxes: an older one fails with
-/// [`RelayClientError::RelayTooOld`] before anything is created. A private relay needs
-/// its create token on `relay` ([`RelayClient::with_create_token`]); the creator's
-/// key-generation steps then seal it to every member.
 pub async fn create_vault<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     creator: &Identity,
@@ -544,13 +429,10 @@ pub async fn create_vault<R: RngCore + CryptoRng>(
     rng.fill_bytes(&mut label);
     rng.fill_bytes(&mut join_token);
     KeygenParams::new(vault_id, threshold, members).map_err(proto)?;
-    // `/v1/info` came with labelled mailboxes: a relay without it can't hold this vault.
     relay.info().await?;
     relay
         .create_mailbox(creator, label, &join_token, members)
         .await?;
-    // Lets the relay check approvals when a lost member's seat moves (spec §10.1). An
-    // older relay without the route still hosts the vault, without seat moves.
     relay.set_threshold(creator, label, threshold).await?;
     Ok(Invite {
         vault_id,
@@ -573,23 +455,14 @@ pub async fn join_vault(
     Ok(())
 }
 
-/// Setup state as this member sees it.
 #[derive(Clone, Debug)]
 pub struct Membership {
-    /// Members as the relay reports them.
     pub members: Vec<IdentityPublic>,
     pub sealed: bool,
-    /// The safety words to compare out of band (`sas::words`), once membership is locked
-    /// and every member's commitment and value arrived. `None` until then.
     pub safety_words: Option<String>,
-    /// Members whose part of the safety check hasn't arrived yet (empty before sealing).
     pub waiting_for: Vec<[u8; 32]>,
 }
 
-/// The current membership and, once it is sealed, one step of the safety check: this
-/// member publishes its commitment, then (once it holds every other member's
-/// commitment, pinned in `state_dir` with `key`) its value; when every value is in, the
-/// words. Call it repeatedly (the app polls it): each call does what it can and returns.
 pub async fn membership(
     relay: &RelayClient,
     who: &Identity,
@@ -613,15 +486,10 @@ pub async fn membership(
     Ok(out)
 }
 
-/// Relay URL, mailbox label, sender, envelope kind, payload.
 type SafetySent = (String, MailboxId, [u8; 32], u8, [u8; 32]);
 
-/// Commitments and values this process already sent, per relay, so polling doesn't send
-/// them again (a restarted app sends them once more; receivers keep the first of each).
 static SAFETY_SENT: std::sync::Mutex<BTreeSet<SafetySent>> = std::sync::Mutex::new(BTreeSet::new());
 
-/// Polls [`membership`] until the safety words are known (membership must get sealed
-/// meanwhile). For the CLI and tests; the app polls `membership` itself.
 pub async fn wait_for_safety_words(
     relay: &RelayClient,
     me: &Identity,
@@ -641,16 +509,10 @@ pub async fn wait_for_safety_words(
         if Instant::now() > deadline {
             return Err(NodeError::Timeout("the other members' safety values"));
         }
-        // Two requests per poll: once a second stays well under the hosted per-key rate.
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
-/// This member's safety value for this setup attempt: random, sealed in `state_dir`
-/// (`state_dir::SAFETY_SECRET`) before its commitment is sent, so a restarted app reveals
-/// what it committed to, while an attempt whose state was deleted (left, then the same
-/// invite opened again) never brings a revealed value back (rule 1). Unreadable is an
-/// error; missing once pinned (it was revealed) too. Deleted with the keygen state.
 fn safety_secret(state_dir: &Path, key: &NonceKey, pinned: bool) -> Result<[u8; 32], NodeError> {
     let path = state_dir.join(state_dir::SAFETY_SECRET);
     let load = || -> Result<Option<[u8; 32]>, NodeError> {
@@ -677,18 +539,12 @@ fn safety_secret(state_dir: &Path, key: &NonceKey, pinned: bool) -> Result<[u8; 
                 &version::encode(Format::SafetySecret, &secret)?,
             );
             fs::create_dir_all(state_dir).map_err(|e| NodeError::Io(e.to_string()))?;
-            // The first one written wins (the app and a background check may race).
             crate::durable::create_new(&path, &sealed).map_err(|e| NodeError::Io(e.to_string()))?;
             load()?.ok_or_else(|| NodeError::Io("safety value".into()))
         }
     }
 }
 
-/// What this member revealed its safety value against: the sealed member list (sorted)
-/// and every other member's commitment (rule 1). Written before the value leaves the phone
-/// (`state_dir::SAFETY_PIN`, sealed with the vault's [`NonceKey`]); from then on the words
-/// are only over these, and any other list or commitment the relay serves stops the setup.
-/// Deleted with the key-generation state.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SafetyPin {
     members: Vec<IdentityPublic>,
@@ -702,15 +558,12 @@ impl SafetyPin {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(NodeError::Io(e.to_string())),
         };
-        // Unreadable is an error, never "not revealed yet": the value is already out.
         let plain = key.open(state_dir::SAFETY_PIN, &bytes).ok_or_else(|| {
             NodeError::Protocol("this phone's safety word record can't be read".into())
         })?;
         Ok(Some(version::decode(Format::SafetyPin, &plain)?))
     }
 
-    /// Writes the pin unless one exists (the app and a background check may race; the
-    /// first wins) and returns the one on disk.
     fn create(&self, state_dir: &Path, key: &NonceKey) -> Result<Self, NodeError> {
         let path = state_dir.join(state_dir::SAFETY_PIN);
         let sealed = key.seal(
@@ -723,8 +576,6 @@ impl SafetyPin {
     }
 }
 
-/// The words are bound to the vault id (shared out of band in the invite); messages go
-/// to the relay's label.
 async fn safety_check(
     relay: &RelayClient,
     me: &Identity,
@@ -757,8 +608,6 @@ async fn safety_check(
     }
     let others: Vec<[u8; 32]> = by_pk.keys().filter(|pk| **pk != my_pk).copied().collect();
 
-    // Every commitment served from each member (a restarted app sends the same one again);
-    // the first value from each member.
     let mut commits = BTreeMap::<[u8; 32], Vec<[u8; 32]>>::new();
     let mut reveals = BTreeMap::<[u8; 32], [u8; 32]>::new();
     for (_, sender, env) in read_inbox(relay, me, label, &by_pk, 0).await? {
@@ -824,14 +673,12 @@ async fn safety_check(
                 members: sorted,
                 commitments: others.iter().map(|pk| (*pk, commits[pk][0])).collect(),
             };
-            // Another step of this phone may have pinned first, from another answer.
             if pin.create(state_dir, key)? != pin {
                 return Err(changed("What the relay shows"));
             }
             pin
         }
     };
-    // Pinned: only now does this value leave the phone.
     send(Kind::SafetyReveal, secret).await?;
     let missing_reveals: Vec<_> = others
         .iter()
@@ -856,9 +703,6 @@ async fn safety_check(
     Ok((Some(crate::sas::words(&vault, &values)), Vec::new()))
 }
 
-/// Creator only, before membership is locked: abandons the setup and deletes it on the
-/// relay, so the invite stops working. `Ok(false)` if the relay had nothing to delete
-/// (older relay, or already gone); the caller forgets the vault locally either way.
 pub async fn cancel_setup(
     relay: &RelayClient,
     creator: &Identity,
@@ -872,8 +716,6 @@ pub async fn cancel_setup(
     Ok(relay.cancel_setup(creator, invite.label).await?)
 }
 
-/// Creator only: restarts the invite's 72-hour clock (before the setup locks), e.g. when
-/// it is shared again. `Ok(false)`: the relay doesn't have invite expiry.
 pub async fn renew_invite(
     relay: &RelayClient,
     creator: &Identity,
@@ -887,7 +729,6 @@ pub async fn renew_invite(
     Ok(relay.renew_invite(creator, invite.label).await?)
 }
 
-/// Creator only: freezes membership once all `n` members have joined.
 pub async fn seal(
     relay: &RelayClient,
     creator: &Identity,
@@ -911,20 +752,14 @@ pub async fn seal(
     Ok(())
 }
 
-// --- Key generation over the relay -----------------------------------------------------
-
 #[derive(Serialize, Deserialize)]
 struct Round1Msg {
     package: Vec<u8>,
-    /// Set by the creator only: the vault birthday height all descriptors use.
     birthday_height: Option<u32>,
-    /// Set by the creator only: the proposal expiry window, in blocks.
     proposal_expiry_blocks: Option<u32>,
-    /// Commitment to this member's `sk` contribution (revealed in round 2). Format 3.
     sk_commitment: [u8; 32],
 }
 
-/// The first message of each kind from each member, opened (sealed ones decrypted).
 type Received = BTreeMap<(u8, [u8; 32]), Vec<u8>>;
 
 fn kind_tag(kind: Kind) -> u8 {
@@ -940,7 +775,6 @@ async fn read_received(
     let mut received = Received::new();
     for (_, sender, envelope) in read_inbox(relay, me, mailbox, members, 0).await? {
         if let Ok(payload) = envelope.open(me, &sender) {
-            // First message of each kind from each sender wins; later copies are ignored.
             received
                 .entry((kind_tag(envelope.header.kind), envelope.header.from))
                 .or_insert(payload);
@@ -949,51 +783,33 @@ async fn read_received(
     Ok(received)
 }
 
-/// Where key generation is: waiting (for what, and on whom), or done.
 #[derive(Debug)]
 pub enum KeygenProgress {
-    /// `stage` names the step; `missing` the members it waits for (empty: nobody in
-    /// particular, e.g. this member's own confirmation).
     Waiting {
         stage: &'static str,
         missing: Vec<[u8; 32]>,
     },
-    /// The vault exists. Save the material, then [`forget_keygen`].
     Done(Box<VaultMaterial>),
 }
 
-/// Values only the first step uses: round 1 fixes them for the rest of the ceremony.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KeygenOptions {
-    /// Creator only: the vault's birthday height.
     pub creator_birthday_height: Option<u32>,
-    /// Creator only: the proposal expiry window in blocks (`None`: the default).
     pub creator_expiry_blocks: Option<u32>,
-    /// Joiners: the highest creator birthday to accept (their server's tip +
-    /// [`BIRTHDAY_LEEWAY_BLOCKS`]; audit L8). `None` skips the check.
     pub max_birthday: Option<u32>,
 }
 
-/// Highest birthday a joiner accepts above its server's tip (blocks found meanwhile).
 pub const BIRTHDAY_LEEWAY_BLOCKS: u32 = 10;
 
-/// This member's key-generation state between steps (`state_dir::KEYGEN`, encrypted with
-/// the vault's [`NonceKey`]). Written before anything it covers is sent: round 1 is never
-/// generated twice, and everything after it is recomputed deterministically.
 #[derive(Serialize, Deserialize)]
 struct KeygenState {
-    /// The safety words this member confirmed.
     words: String,
     round1_secret: Vec<u8>,
     round1_package: Vec<u8>,
-    /// The encoded `Round1Msg` this member sends.
     round1_msg: Vec<u8>,
     sk_contribution: [u8; 32],
     max_birthday: Option<u32>,
-    /// Creator only, made before it is sent.
     log_key: Option<[u8; 32]>,
-    /// `SENT_*` flags: what already went out (a crash between sending and saving the flag
-    /// sends it once more; receivers keep the first copy).
     sent: u8,
 }
 
@@ -1009,8 +825,6 @@ impl KeygenState {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(NodeError::Io(e.to_string())),
         };
-        // Unreadable is an error, never "not started": a fresh round 1 after one went
-        // out would split the ceremony.
         let plain = key.open(state_dir::KEYGEN, &bytes).ok_or_else(|| {
             NodeError::Protocol("this phone's key-generation state can't be read".into())
         })?;
@@ -1029,14 +843,10 @@ impl KeygenState {
     }
 }
 
-/// Whether this member has confirmed the safety words and started key generation for the
-/// setup whose state lives in `state_dir`.
 pub fn keygen_started(state_dir: &Path) -> bool {
     state_dir.join(state_dir::KEYGEN).exists()
 }
 
-/// Deletes the key-generation state, the safety value and its pin once the vault's
-/// material is saved (or the setup was abandoned).
 pub fn forget_keygen(state_dir: &Path) -> std::io::Result<()> {
     for name in [
         state_dir::KEYGEN,
@@ -1051,16 +861,6 @@ pub fn forget_keygen(state_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// One step of key generation for this member (spec §7.2): does whatever it can with the
-/// messages that have arrived, sends what follows, and returns. Call it again later (the
-/// app's poll, a background check after a push): nobody has to be online at the same
-/// time. `membership` is the current [`membership`] (sealed, with the safety words).
-///
-/// `confirmed` is the safety words the user compared out of band; it starts the ceremony
-/// (this member's round 1). Later steps can pass `None`: the state file remembers it.
-/// Every member signs the descriptor that holds the creator's birthday and expiry window,
-/// so a creator can't give members different values.
-#[allow(clippy::too_many_arguments)]
 pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -1088,7 +888,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         KeygenParams::new(invite.vault_id, invite.threshold, invite.members).map_err(proto)?;
     let frost_id = |pk: &[u8; 32]| member_identifier(pk, &invite.vault_id).map_err(proto);
 
-    // This member's state: made once, when it confirms the words.
     let path = state_dir.join(state_dir::KEYGEN);
     let mut st = match KeygenState::load(&path, key)? {
         Some(st) => st,
@@ -1102,8 +901,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
                     confirmed: confirmed.into(),
                 });
             }
-            // Its state is gone once the vault is saved: a late step from another process
-            // must not start a second round 1 for a vault that already exists.
             if !relay.read_log(me, invite.label, 0).await?.is_empty() {
                 return Err(NodeError::NotReady(
                     "this vault's keys were already made".into(),
@@ -1140,8 +937,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
                 sent: 0,
             };
             fs::create_dir_all(state_dir).map_err(|e| NodeError::Io(e.to_string()))?;
-            // Create-if-absent: the app and a background check may both get here; the
-            // first file wins and both continue with it.
             crate::durable::create_new(&path, &st.sealed(key)?)
                 .map_err(|e| NodeError::Io(e.to_string()))?;
             KeygenState::load(&path, key)?.ok_or_else(|| NodeError::Io("keygen state".into()))?
@@ -1166,7 +961,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         move |n| Envelope::public(me, invite.label, n, kind, &payload).map_err(proto)
     };
 
-    // Round 1: broadcast, with a commitment to this member's `sk` contribution.
     if st.sent & SENT_ROUND1 == 0 {
         send_fresh(
             relay,
@@ -1235,8 +1029,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             NodeError::Protocol("creator sent no valid proposal expiry window".into())
         })?;
 
-    // Round 2 (deterministic from the saved round 1): echo hash (broadcast), round-2
-    // packages and sk contributions (sealed).
     let round1 = Round1::restore(
         params,
         frost_id(&my_pk)?,
@@ -1246,7 +1038,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     .map_err(proto)?;
     let contribution = SkContribution::from_bytes(st.sk_contribution);
     let (round2, outgoing) = round1.advance(received1).map_err(proto)?;
-    // Members also agree on every `sk` commitment before any contribution counts.
     let echo = crate::keygen::echo_with_commitments(&round2.echo(), &commitments);
     if st.sent & SENT_ROUND2 == 0 {
         send_fresh(relay, me, &mut seq, public(Kind::DkgEcho, echo.to_vec())).await?;
@@ -1305,7 +1096,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     }
     let output = dkg_result.finish(&contributions).map_err(proto)?;
 
-    // Descriptor: identical on every member, then signed by all.
     let address = vault_address(output.vault_keys.fvk(), network)?;
     let descriptor = VaultDescriptor {
         vault_id: invite.vault_id,
@@ -1338,7 +1128,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         transcript_hash: output.transcript_hash,
     };
     let message = descriptor.signing_message().map_err(proto)?;
-    // Ed25519 is deterministic: a resumed step makes the same signature.
     let my_sig = me.sign(&message).to_vec();
     if st.sent & SENT_SIGNATURE == 0 {
         send_fresh(
@@ -1363,9 +1152,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         signatures.push((pk, sig));
     }
 
-    // Log key: the creator makes it (saved before it leaves), seals it to every member
-    // with the relay's create token, then writes the VaultCreated entry. Others wait for
-    // both.
     let ids = invite.ids();
     let (log_key, create_token) = if is_creator {
         let key_bytes = match st.log_key {
@@ -1402,7 +1188,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
                 rng,
             )
             .map_err(proto)?;
-            // A conflict means an earlier step appended it; the check below compares it.
             append_entry(relay, me, ids, &entry).await?;
             st.sent |= SENT_LOG;
             st.save(&path, key)?;
@@ -1416,7 +1201,6 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
         decode_log_key_message(&msgs[&invite.creator])?
     };
 
-    // Everyone checks the log's first entry is the descriptor they signed.
     let entries = relay.read_log(me, invite.label, 0).await?;
     if entries.is_empty() {
         return waiting("vault log", vec![invite.creator]);
@@ -1447,12 +1231,10 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     })))
 }
 
-/// The creator's sealed `Kind::LogKey` payload ([`version::LOG_KEY_MESSAGE`]).
 #[derive(Serialize, Deserialize)]
 struct LogKeyMessage {
     epoch: u32,
     key: [u8; 32],
-    /// The relay's create token, so any member can restore the vault on a private relay.
     create_token: Option<String>,
 }
 
@@ -1467,8 +1249,6 @@ fn encode_log_key_message(key: &LogKey, create_token: Option<&str>) -> Result<Ve
     )?)
 }
 
-/// Reads a [`LogKeyMessage`], or the untagged payload of creators from before it: epoch
-/// (u32 LE, 0 at setup) || key. Its first two bytes are then 0, never a version tag.
 fn decode_log_key_message(bytes: &[u8]) -> Result<(LogKey, Option<String>), NodeError> {
     if bytes.len() == 36 && bytes[..2] == [0, 0] {
         let epoch = u32::from_le_bytes(bytes[..4].try_into().expect("4 bytes"));
@@ -1482,8 +1262,6 @@ fn decode_log_key_message(bytes: &[u8]) -> Result<(LogKey, Option<String>), Node
     Ok((LogKey::from_bytes(m.epoch, m.key), token))
 }
 
-/// Appends `entry` to the vault's mailbox `ids.label` (`/v1/log/append-labelled`, signed by
-/// `me`, a member of that mailbox).
 async fn append_entry(
     relay: &RelayClient,
     me: &Identity,
@@ -1493,9 +1271,6 @@ async fn append_entry(
     relay.append_log_to(me, ids.label, entry).await
 }
 
-/// The creator locks membership as soon as every seat is taken (no tap: the safety words
-/// that follow are the check). Others, and a full or sealed setup, do nothing. Returns
-/// the membership after it.
 pub async fn seal_when_full(
     relay: &RelayClient,
     me: &Identity,
@@ -1514,11 +1289,6 @@ pub async fn seal_when_full(
     self::membership(relay, me, invite, state_dir, key).await
 }
 
-/// Runs key generation to the end for this member, stepping once a second (three relay requests a step: under the hosted per-key rate) ([`keygen_step`]
-/// with the state in `state_dir`), for the CLI and tests; the app steps it itself. Seals
-/// membership when this member is the creator and every seat is taken. Deletes the state
-/// once done. Gives up after `timeout` with [`NodeError::KeygenStalled`].
-#[allow(clippy::too_many_arguments)]
 pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -1566,11 +1336,6 @@ pub async fn run_keygen<P: Parameters, R: RngCore + CryptoRng>(
     }
 }
 
-// --- Relay reads -------------------------------------------------------------------------
-
-/// Reads every envelope delivered to `me` after `after`, following pagination. Envelopes
-/// for another mailbox, from non-members, with bad signatures, or replayed/reordered
-/// (non-increasing seq per sender) are dropped. Returns `(cursor, sender, envelope)`.
 pub async fn read_inbox(
     relay: &RelayClient,
     me: &Identity,
@@ -1602,11 +1367,6 @@ pub async fn read_inbox(
     Ok(out)
 }
 
-// --- Vault log helpers -------------------------------------------------------------------
-
-/// Reads new log entries after the chain's head from the vault's mailbox `label`
-/// (following pagination), verifying each against the membership as of that entry (seats
-/// can move) and applying it to `state`. Saves nothing.
 async fn fetch_rest(
     relay: &RelayClient,
     me: &Identity,
@@ -1630,7 +1390,6 @@ async fn fetch_rest(
     Ok(())
 }
 
-/// [`fetch_rest`], then saves the longer chain to this device's copy.
 async fn catch_up(
     relay: &RelayClient,
     me: &Identity,
@@ -1647,9 +1406,6 @@ async fn catch_up(
     Ok(())
 }
 
-/// Saves the verified chain to this device's log copy, when there is one. Best effort: a
-/// failed write leaves the older (shorter) anchor in place, and the log itself is safe on
-/// the relay.
 pub(crate) fn save_copy(relay: &RelayClient, chain: &Chain) {
     if let Some(cache) = relay.log_cache() {
         if let Err(e) = cache.write(&chain.mailbox(), chain.entries()) {
@@ -1658,7 +1414,6 @@ pub(crate) fn save_copy(relay: &RelayClient, chain: &Chain) {
     }
 }
 
-/// Starts a chain and replay from `first`, which must be the vault's `Created` entry.
 fn start_chain(
     first: &LogEntry,
     vault_id: MailboxId,
@@ -1678,7 +1433,6 @@ fn start_chain(
     Ok((chain, state))
 }
 
-/// Verifies `entries` on top of `chain` and applies them to `state`.
 fn extend_chain(
     chain: &mut Chain,
     state: &mut VaultState,
@@ -1694,8 +1448,6 @@ fn extend_chain(
     Ok(())
 }
 
-/// The chain and state rebuilt from the entries this device saved, verified like entries
-/// from the relay. `None` when there is no usable copy.
 fn load_copy(
     relay: &RelayClient,
     vault_id: MailboxId,
@@ -1716,8 +1468,6 @@ fn copy_in(
     let Some((first, rest)) = saved.split_first() else {
         return Ok(None);
     };
-    // A copy that no longer verifies is an error, never a silent first load: the relay
-    // would be trusted again without the anchor.
     start_chain(first, vault_id, key)
         .and_then(|(mut chain, mut state)| {
             extend_chain(&mut chain, &mut state, rest.iter().cloned(), key)?;
@@ -1727,12 +1477,6 @@ fn copy_in(
         .map_err(|e| NodeError::LogCopyInvalid(e.to_string()))
 }
 
-/// The vault's state from this device's log copy alone, without the relay: for what must
-/// keep working while the relay can't be reached (the unapproved-spend alert, spec
-/// §10.4.4; `docs/relay-move.md` §5). Also returns when the copy was last known to match
-/// the relay (Unix seconds: the last time this phone reached the relay, else when the copy
-/// was written), so the app can say "based on this phone's history from 09:14". `None`
-/// without a copy.
 pub fn state_from_copy(
     relay: &RelayClient,
     material: &VaultMaterial,
@@ -1752,12 +1496,6 @@ pub fn state_from_copy(
     Ok(Some((state, as_of)))
 }
 
-/// Installs `entries` (a vault's log as [`LogEntry::to_bytes`], e.g. from a backup) as this
-/// device's copy of the vault's log, once they verify against `material` (signatures,
-/// chain, the vault's keys). From then on a relay must hold that history, or a longer one
-/// that extends it (spec §6.3; `docs/relay-move.md` §6): a restored phone is anchored
-/// before its first relay load. A longer copy already on the device is kept. Returns the
-/// number of entries the copy now has.
 pub fn install_log_copy(
     cache: &crate::log_cache::LogCache,
     material: &VaultMaterial,
@@ -1784,8 +1522,6 @@ pub fn install_log_copy(
     Ok(cache.read(&material.descriptor.vault_id)?.len() as u64)
 }
 
-/// A point in a vault's log another member vouches for: its length and the hash of its
-/// last entry. A first load must match or extend it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogAnchor {
     pub vault_id: MailboxId,
@@ -1802,8 +1538,6 @@ impl LogAnchor {
         }
     }
 
-    /// Refuses `chain` unless it holds this anchor's history: shorter is a rollback,
-    /// another entry at the anchor's head a fork.
     pub fn check(&self, chain: &Chain) -> Result<(), NodeError> {
         if chain.mailbox() != self.vault_id {
             return Err(NodeError::Protocol(
@@ -1830,7 +1564,6 @@ impl LogAnchor {
     }
 }
 
-/// How long a passed membership check is trusted (per mailbox, per process).
 const MEMBERSHIP_RECHECK: std::time::Duration = std::time::Duration::from_secs(60);
 
 type MembershipChecks =
@@ -1841,15 +1574,6 @@ fn membership_checks() -> &'static MembershipChecks {
     CHECKS.get_or_init(Default::default)
 }
 
-/// Compares the relay's member list and threshold for the vault's mailbox `label` with
-/// the membership the replayed log ends with (spec §6.3). `reseed` lets whoever restores a
-/// relay choose both, and the relay can't read the log to check them, so every member
-/// does. A seat move the relay hasn't finished yet (log ahead of the relay) is tolerated:
-/// the old key may still hold the seat. Keys the relay holds as seat moves' pending keys
-/// aren't compared: they can't write, read only ciphertext and their own inbox, and honest
-/// phones address one only for a move pending in their log. Any other difference in the
-/// member list is [`NodeError::RelayMembership`]. A relay without the route (older) is checked on its
-/// member list alone; the threshold is then unknown.
 pub async fn check_relay_membership(
     relay: &RelayClient,
     me: &Identity,
@@ -1859,8 +1583,6 @@ pub async fn check_relay_membership(
     check_relay_membership_with(relay, me, label, state, None).await
 }
 
-/// Whether this relay's member list for `label` was compared within
-/// [`MEMBERSHIP_RECHECK`] (a seat move since then still forces a new check).
 fn membership_checked_recently(relay: &RelayClient, label: MailboxId) -> bool {
     let cache_key = (relay.base_url().to_string(), label);
     membership_checks()
@@ -1872,7 +1594,6 @@ fn membership_checked_recently(relay: &RelayClient, label: MailboxId) -> bool {
 
 type RelayMembers = (Vec<IdentityPublic>, Option<u16>);
 
-/// The relay's members and threshold for `mailbox` (`None` from an older relay).
 async fn relay_members(
     relay: &RelayClient,
     me: &Identity,
@@ -1881,16 +1602,12 @@ async fn relay_members(
     match relay.mailbox_info(me, mailbox).await {
         Ok(info) => Ok((info.members, Some(info.threshold))),
         Err(RelayClientError::Status { status: 404, .. }) => {
-            // Either an older relay without the route, or one that doesn't know the vault
-            // (the log load reports that); fall back to the older route.
             Ok((relay.members(me, mailbox).await?.members, None))
         }
         Err(e) => Err(e.into()),
     }
 }
 
-/// [`check_relay_membership`] with the relay's list already read (by `load_state`, at
-/// the same time as the log), if it was.
 async fn check_relay_membership_with(
     relay: &RelayClient,
     me: &Identity,
@@ -1914,8 +1631,6 @@ async fn check_relay_membership_with(
     for want in &state.descriptor.members {
         let want = want.identity;
         let exact = held.iter().position(|h| *h == want);
-        // Log ahead of the relay, possibly by several moves of the seat (Y <- X <- A): any
-        // earlier key of the seat may still hold it on the relay.
         let moved = || {
             let mut key = want.sig_pk;
             for _ in 0..=state.replacements.len() {
@@ -1951,8 +1666,6 @@ async fn check_relay_membership_with(
     Ok(())
 }
 
-/// Reads and verifies the whole log, returning the chain and the replayed state. Records
-/// whether the relay could be reached (`log_cache::LogCache::relay_status`).
 pub async fn load_state(
     relay: &RelayClient,
     me: &Identity,
@@ -1963,8 +1676,6 @@ pub async fn load_state(
     result
 }
 
-/// Notes in the device's relay status whether `result` came from the relay or the relay
-/// couldn't be reached. Errors of this device's own (a bad copy, an encoding) say nothing.
 fn record_reach<T>(relay: &RelayClient, vault: MailboxId, result: &Result<T, NodeError>) {
     let Some(cache) = relay.log_cache() else {
         return;
@@ -1983,7 +1694,6 @@ fn record_reach<T>(relay: &RelayClient, vault: MailboxId, result: &Result<T, Nod
     cache.record_relay(&vault, reached);
 }
 
-/// Whether `e` means the relay couldn't be reached (as opposed to an answer from it).
 pub fn relay_unreachable(e: &NodeError) -> bool {
     matches!(e, NodeError::Relay(r) if r.is_unreachable())
 }
@@ -1993,10 +1703,6 @@ async fn load_state_inner(
     me: &Identity,
     material: &VaultMaterial,
 ) -> Result<(Chain, VaultState), NodeError> {
-    // Boxed: callers nest this in large async functions, and the unboxed future made
-    // their layout deeper than rustc's query depth limit.
-    // The relay's member list doesn't depend on the log: when it is due for a check, read
-    // both at once (over Tor each request is a new stream, ~1 s).
     let ids = material.ids();
     let members = async {
         match membership_checked_recently(relay, ids.label) {
@@ -2023,24 +1729,12 @@ async fn load_state_inner(
     Ok((chain, state))
 }
 
-/// What [`follow_relay`] dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Followed {
-    /// Entries of this device's copy that the relay's history doesn't have.
     pub dropped: u64,
-    /// Entries the device now holds (the relay's log).
     pub entries: u64,
 }
 
-/// Leaves a fork (spec §6.3): after [`NodeError::RelayForked`] this device's copy of the log
-/// and the relay's history disagree. A device that trusts the relay (the other members
-/// agree with it) discards its copy and follows the relay: the relay's whole log is
-/// verified from the first entry (signatures, chain, membership at each entry) before the
-/// copy is replaced, so a relay serving junk can't make a device drop its anchor.
-/// Entries only this device saw are lost; they were never in the history the other members
-/// share. Refuses when there is no fork (a rollback is restored from a copy, not followed),
-/// except after [`NodeError::LogCopyInvalid`]: a copy that doesn't verify is replaced the
-/// same way.
 pub async fn follow_relay(
     relay: &RelayClient,
     me: &Identity,
@@ -2054,7 +1748,6 @@ pub async fn follow_relay(
     };
     let ours: Vec<LogEntry> = match load_copy(relay, ids.vault, key) {
         Ok(Some((copy, _))) => {
-            // Only a real fork qualifies.
             match Box::pin(load_log(relay, me, ids, key)).await {
                 Err(NodeError::RelayForked { .. }) => {}
                 Err(e) => return Err(e),
@@ -2071,15 +1764,12 @@ pub async fn follow_relay(
                 "this device has no copy to discard".into(),
             ))
         }
-        // A copy that doesn't verify is no anchor to keep.
         Err(NodeError::LogCopyInvalid(_)) => cache.read(&ids.vault)?,
         Err(e) => return Err(e),
     };
-    // The relay's log must stand on its own, checked without the anchor.
     let bare = relay.clone().with_log_cache(None);
     let (theirs, state) = Box::pin(load_log(&bare, me, ids, key)).await?;
     Box::pin(check_relay_membership(&bare, me, ids.label, &state)).await?;
-    // Where the two histories part.
     let common = ours
         .iter()
         .zip(theirs.entries())
@@ -2092,11 +1782,6 @@ pub async fn follow_relay(
     })
 }
 
-/// Reads and verifies the log of the vault `ids` names with `key`, without the member's
-/// material (a device recovering a seat has only the log key at first). The `Created`
-/// entry is checked against the descriptor it carries, which every member signed; later
-/// entries against the membership as of each entry. Saves the result as this device's
-/// copy (the anchor of later loads).
 pub async fn load_log(
     relay: &RelayClient,
     me: &Identity,
@@ -2110,8 +1795,6 @@ pub async fn load_log(
     Ok((chain, state))
 }
 
-/// [`load_log`] without saving the copy: the caller checks more first (a recovering
-/// phone's anchors). Also returns how many entries the device's copy had.
 pub(crate) async fn read_log_verified(
     relay: &RelayClient,
     me: &Identity,
@@ -2122,8 +1805,6 @@ pub(crate) async fn read_log_verified(
     let (mut chain, mut state, saved_len, rest) = match load_copy(relay, ids.vault, key)? {
         Some((mut chain, mut state)) => {
             let saved_len = chain.len();
-            // The copy is the anchor: the relay must still hold its last entry, and the
-            // same one. Everything after it is new and verified on top.
             let last = chain.entries().last().expect("a saved copy has entries");
             let last_hash = last.hash().map_err(proto)?;
             let from = saved_len - 1;
@@ -2158,38 +1839,21 @@ pub(crate) async fn read_log_verified(
             (chain, state, 0, rest)
         }
     };
-    // A short page was the end of the log (unless the relay's byte budget cut it): one
-    // round trip instead of two.
     if rest {
         fetch_rest(relay, me, label, key, &mut chain, &mut state).await?;
     }
     Ok((chain, state, saved_len))
 }
 
-/// What [`reseed_relay`] did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reseeded {
-    /// The relay had no such vault: it was recreated with this many log entries.
     Restored { entries: u64 },
-    /// The relay had an older part of the log: this many entries were appended to it.
     CaughtUp { appended: u64 },
-    /// The relay's log is as long as, or longer than, this device's copy and agrees with it.
     Current,
 }
 
-/// Roughly how much log goes into one reseed request (the relay's body limit is 1 MiB).
 const RESEED_BATCH_BYTES: usize = 512 * 1024;
 
-/// Restores the vault's log on the relay, under its label there, from this device's copy
-/// (spec §6.3): after the relay lost its database (or was rolled back to an older one). A
-/// relay that doesn't know the vault is recreated with the membership the log ends with
-/// and the whole log (a private relay needs the vault's create token on `relay`); one that
-/// holds an older part of the same log gets the missing entries appended. Pending messages
-/// (signing requests, repair messages) are not restored: they are asked for again. The
-/// device re-registers its push token after.
-///
-/// Never makes the relay agree with a log it doesn't already match: a relay whose entries
-/// differ from the copy is [`NodeError::RelayForked`].
 pub async fn reseed_relay(
     relay: &RelayClient,
     me: &Identity,
@@ -2224,20 +1888,16 @@ pub async fn reseed_relay(
             from: from as u64,
             entries: raw[from..end].to_vec(),
             finish: end == raw.len(),
-            timestamp: 0, // set by the client when it signs
+            timestamp: 0,
         };
         let answer = relay.reseed(me, request).await?;
         if !answer.restored {
-            // The relay had the vault already: check its members against the log, its
-            // history against our copy, and catch it up.
             Box::pin(check_relay_membership(relay, me, ids.label, &state)).await?;
             return catch_relay_up(relay, me, ids, &chain, answer.len).await;
         }
         if answer.open {
             return Ok(Reseeded::Restored { entries: total });
         }
-        // Continue where the relay says its log ends (it differs from `end` only when a
-        // request was lost or repeated).
         from = usize::try_from(answer.len)
             .ok()
             .filter(|n| *n <= raw.len())
@@ -2248,8 +1908,6 @@ pub async fn reseed_relay(
     ))
 }
 
-/// The relay holds `relay_len` entries of the vault's log: checks that they are this
-/// device's, and appends what's missing.
 async fn catch_relay_up(
     relay: &RelayClient,
     me: &Identity,
@@ -2288,17 +1946,6 @@ async fn catch_relay_up(
     Ok(Reseeded::CaughtUp { appended })
 }
 
-/// Appends `event` on top of an already-loaded chain and state. The event is checked
-/// against the current state first (so members don't write entries everyone will ignore);
-/// on a conflict, only the new entries are fetched, the check is repeated, and the append
-/// is retried.
-///
-/// During a relay move (`docs/relay-move.md` §4.5) it also keeps the history whole: no new
-/// entry on the new relay before `VaultMoved` (rule 1); a phone that sent its arrival
-/// checks the new relay for `VaultMoved` before writing to the old one and, once it is
-/// there, writes the same event bytes to the new relay instead, with `chain` and `state`
-/// becoming the new relay's (rule 2); a phone that only learned of the switch from a move
-/// notice refuses with [`NodeError::VaultMoved`] (rule 3).
 pub async fn append_event<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -2328,8 +1975,6 @@ pub async fn append_event<R: RngCore + CryptoRng>(
     }
 }
 
-/// [`append_event`] on `relay` under `ids`, without the move rules.
-#[allow(clippy::too_many_arguments)]
 async fn append_on<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -2367,8 +2012,6 @@ async fn append_on<R: RngCore + CryptoRng>(
     ))
 }
 
-// --- Proposals and signing over the relay ----------------------------------------------
-
 use std::collections::BTreeSet;
 
 use pczt::{
@@ -2403,7 +2046,6 @@ struct SigningRequestMsg {
 #[derive(Serialize, Deserialize)]
 struct SharesMsg {
     proposal: ProposalId,
-    /// Hash of the encoded signing request these shares answer (binds shares to one round).
     request_hash: [u8; 32],
     shares: Vec<Vec<u8>>,
 }
@@ -2418,12 +2060,10 @@ fn hash_request_bytes(bytes: &[u8]) -> [u8; 32] {
         .expect("32 bytes")
 }
 
-/// Hash identifying a signing request (and the round its shares belong to).
 pub fn request_hash(request: &SigningRequest) -> Result<[u8; 32], NodeError> {
     Ok(hash_request_bytes(&encode_request(request)?))
 }
 
-/// Hash identifying one member's set of round-1 commitments (to avoid reusing them).
 pub fn commitments_hash(commitments: &[Vec<u8>]) -> [u8; 32] {
     let mut state = blake2b_simd::Params::new()
         .hash_length(32)
@@ -2436,7 +2076,6 @@ pub fn commitments_hash(commitments: &[Vec<u8>]) -> [u8; 32] {
     state.finalize().as_bytes().try_into().expect("32 bytes")
 }
 
-/// Decodes a unified (or Orchard-receiver-bearing) address to its Orchard receiver.
 pub fn orchard_receiver<P: Parameters>(
     network: &P,
     address: &str,
@@ -2452,8 +2091,6 @@ pub fn orchard_receiver<P: Parameters>(
     }
 }
 
-/// What this member expects for a proposal, from the log (payments), the vault descriptor
-/// (expiry window) and its own wallet (chain tip), never from the proposer.
 pub fn expectations<P: Parameters>(
     network: &P,
     payments: &[ProposedPayment],
@@ -2478,9 +2115,6 @@ pub fn expectations<P: Parameters>(
         consensus_branch_id: BranchId::for_height(network, BlockHeight::from_u32(tip_height + 1))
             .into(),
         tip_height,
-        // The proposer sets expiry = its target height (tip + 1) + the vault's window, in
-        // blocks scaled for the block time at its target. Its tip may be up to the slack
-        // ahead of ours, so a proposer already on NU7 is allowed the scaled window.
         max_expiry_delta: 1 + crate::wallet::block_scale(
             network,
             tip_height + 1 + crate::vault::EXPIRY_TIP_SLACK_BLOCKS,
@@ -2490,7 +2124,6 @@ pub fn expectations<P: Parameters>(
     })
 }
 
-/// The current members (after seat moves) by signing key.
 pub fn members_by_pk(state: &VaultState) -> BTreeMap<[u8; 32], IdentityPublic> {
     state
         .member_identities()
@@ -2499,24 +2132,14 @@ pub fn members_by_pk(state: &VaultState) -> BTreeMap<[u8; 32], IdentityPublic> {
         .collect()
 }
 
-/// What this member's own wallet says about the chain, for the checks a vote needs beyond
-/// the PCZT: its synced tip, the vault spends it has seen, and which sent payments dropped
-/// out of lightwalletd's mempool. lightwalletd supplies all three (a residual: a lying
-/// server can make a cancelled payment look dead to a member using it; every approving
-/// member's server must be fooled).
 #[derive(Clone, Debug, Default)]
 pub struct ChainView {
     pub tip: u32,
     pub spends: Vec<crate::wallet::VaultSpend>,
-    /// Txids of broadcast proposals that dropped: not mined here, and not in lightwalletd's
-    /// mempool when it was read (whole, never a lookup of one txid) for them
-    /// ([`ChainView::with_mempool`]). A broadcast sent after that read isn't in it, so a
-    /// stale view never takes a fresh send for a dropped one.
     pub dropped: Vec<[u8; 32]>,
 }
 
 impl ChainView {
-    /// The wallet's tip and spends, without the mempool.
     pub fn of<P: Parameters + Clone + Send + Sync + 'static>(
         wallet: &VaultWallet<P>,
     ) -> Result<Self, NodeError> {
@@ -2529,9 +2152,6 @@ impl ChainView {
         })
     }
 
-    /// Reads lightwalletd's mempool when `state` has a broadcast that may still be pending
-    /// (not mined in this view, before its expiry plus the margin) and records the ones not
-    /// in it as dropped: they count as still sendable ([`still_sendable`]).
     pub async fn with_mempool(
         mut self,
         state: &VaultState,
@@ -2553,7 +2173,6 @@ impl ChainView {
         Ok(self)
     }
 
-    /// A broadcast proposal that isn't mined here and could still be.
     fn pending_broadcast(&self, state: &VaultState, p: &ProposalState) -> bool {
         p.status == ProposalStatus::Broadcast
             && self.tip < p.expiry_height.saturating_add(state.reorg_margin(self.tip))
@@ -2566,17 +2185,8 @@ impl ChainView {
     }
 }
 
-/// How far a proposal's claimed tip may be ahead of this member's synced tip (75-second
-/// blocks, scaled): more means this phone is behind and should sync first.
 pub const TIP_LEAD_BLOCKS: u32 = 10;
 
-/// Proposals that may be signed, aren't going out, and can still mine, as far as `chain`
-/// shows (rule 5), in log order: cancelled or rejected ones, and broadcast ones that
-/// dropped (not mined, not in the mempool: anyone holding the signed bytes can send them
-/// later, a valid copy too when the logged one doesn't verify), before their expiry plus a
-/// reorg margin and while none of their notes has a spend that deep. A shallower spend
-/// doesn't count: a reorg can undo it and let the old transaction in. A broadcast that is
-/// in the mempool or mined is going out: nobody pays it again.
 pub fn still_sendable<'a>(state: &'a VaultState, chain: &ChainView) -> Vec<&'a ProposalState> {
     let margin = state.reorg_margin(chain.tip);
     let spent_deep = |p: &ProposalState| {
@@ -2606,16 +2216,6 @@ pub fn still_sendable<'a>(state: &'a VaultState, chain: &ChainView) -> Vec<&'a P
     live
 }
 
-/// This member's checks of `proposal` against its own view of the chain, before a vote
-/// (also shown on the review screen):
-/// - the tip it claims to be built on is at most [`TIP_LEAD_BLOCKS`] ahead of ours (else
-///   this phone syncs first) and at most the vault's window behind (a proposal's tip
-///   bounds how long it reserves notes, `VaultState::reservation_end`);
-/// - it spends a note of every proposal that may be signed and can still mine
-///   ([`still_sendable`]) and is earlier in the log, so at most one of them can mine (rule
-///   5). A later one can't block a logged proposal (a member could otherwise stall every
-///   payment, sweeps included, by posting its own shares and cancelling); it may duplicate
-///   it, but t members approved both.
 pub fn check_vote(
     state: &VaultState,
     proposal: &ProposalId,
@@ -2651,11 +2251,6 @@ pub fn check_vote(
     Ok(())
 }
 
-/// Builds a PCZT for `payments` from this member's wallet and logs it as a proposal.
-/// Notes that other live proposals spend are held back first; if another member's
-/// proposal takes the same notes meanwhile (the log accepts only the first), the PCZT is
-/// rebuilt from the notes left.
-#[allow(clippy::too_many_arguments)]
 pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -2668,9 +2263,6 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
     rng: &mut R,
 ) -> Result<ProposalId, NodeError> {
     check_payees(material, wallet.params(), payments)?;
-    // A network upgrade this version doesn't know would get the payment rejected after
-    // everyone approved it: refuse up front. Read the log meanwhile (over Tor each
-    // request is a new circuit stream, ~1 s).
     let params = wallet.params().clone();
     let (branch, loaded) = tokio::join!(
         crate::wallet::ensure_current_branch(lightwalletd, &params),
@@ -2694,8 +2286,6 @@ pub async fn propose<P: Parameters + Clone + Send + Sync + 'static, R: RngCore +
     .await
 }
 
-/// Refuses payments every member's check would reject: an output to the vault itself
-/// counts as change.
 pub fn check_payees<P: Parameters>(
     material: &VaultMaterial,
     params: &P,
@@ -2713,10 +2303,6 @@ pub fn check_payees<P: Parameters>(
     Ok(())
 }
 
-/// [`propose`] with the log already loaded and the branch already checked (the caller
-/// read both at once, without the wallet lock). `chain`/`state` include the proposal
-/// afterwards, so the proposer can approve without reading the log again.
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_loaded<
     P: Parameters + Clone + Send + Sync + 'static,
     R: RngCore + CryptoRng,
@@ -2738,9 +2324,6 @@ pub async fn propose_loaded<
     let me_pk = me.public().sig_pk;
     for _ in 0..3 {
         reserve_notes(state, &me_pk, wallet, lightwalletd, sent).await?;
-        // A payment that may be signed and can still mine (cancelled, rejected or dropped):
-        // members approve this one only if it spends one of its notes (`check_vote`), so it
-        // spends one of each.
         let chain_view = ChainView::of(wallet)?
             .with_mempool(state, lightwalletd)
             .await?;
@@ -2791,7 +2374,6 @@ pub async fn propose_loaded<
         };
         match append_event(relay, me, material, chain, state, &event, rng).await {
             Ok(_) => return Ok(id),
-            // `state` now includes the proposal that won the notes: hold them and rebuild.
             Err(NodeError::Invalid(VaultError::NotesInUse(_))) => continue,
             Err(e) => return Err(e),
         }
@@ -2801,14 +2383,6 @@ pub async fn propose_loaded<
     ))
 }
 
-/// Makes a cancelled (or rejected) proposal unsendable: proposes spending exactly its notes
-/// back to the vault (its internal address; no payments, so members check every output is
-/// the vault's). Needs t approvals like any spend; once mined, the cancelled transaction
-/// can never be valid, even if every signature for it is out. Sent automatically when the
-/// approvals complete. The notes of every other cancelled payment that can still be sent
-/// go along: members approve a new proposal only if it spends a note of each
-/// (`check_vote`).
-#[allow(clippy::too_many_arguments)]
 pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -2883,11 +2457,6 @@ pub async fn invalidate<P: Parameters + Clone + Send + Sync + 'static, R: RngCor
     Ok(id)
 }
 
-/// Proposer: cancels `proposal` and proposes the same payments again, with fresh one-tap
-/// commitments. For a payment that can no longer be completed the one-tap way
-/// ([`one_tap_stuck`]): everyone then approves once more, with one tap. A sweep is
-/// proposed again for the cancelled payment it makes unsendable. Returns the new id.
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_again<
     P: Parameters + Clone + Send + Sync + 'static,
     R: RngCore + CryptoRng,
@@ -2926,7 +2495,6 @@ pub async fn propose_again<
             })
         })
         .collect::<Result<Vec<_>, NodeError>>()?;
-    // A sweep (no payments) makes a cancelled payment unsendable: find that payment.
     let swept = payments
         .is_empty()
         .then(|| {
@@ -2964,11 +2532,6 @@ pub async fn propose_again<
     }
 }
 
-/// Whether an open one-tap proposal can no longer be completed the one-tap way, as far as
-/// this device can tell: no signer group could still get every member's shares. A member
-/// who already posted shares can't add a group (its vote is final), and this member can't
-/// sign a group whose nonces this device doesn't hold (a restore, or a phone that took
-/// over a seat). The proposer should then propose it again ([`propose_again`]).
 pub fn one_tap_stuck(
     state: &VaultState,
     proposal: &ProposalId,
@@ -2995,16 +2558,6 @@ pub fn one_tap_stuck(
     !(0..pre.subsets.len()).any(|g| pre.subsets[g].iter().all(|m| can_still_sign(m, g)))
 }
 
-/// Refreshes this member's note holds from the vault log (see [`note_holds`]), so its
-/// spendable balance and its next proposal leave out notes live proposals spend.
-///
-/// A broadcast transaction that isn't mined and isn't in lightwalletd's mempool any more
-/// (dropped) is sent again from the signed bytes this device kept when it broadcast it
-/// (`sent`) or the ones the log's broadcast carries (version 12); if there are none, or
-/// the node refuses them now, it releases its notes. The whole mempool is fetched rather
-/// than looking up the txid, so lightwalletd doesn't learn which transaction belongs to
-/// the vault. If the chain moved past the wallet meanwhile, nothing is released this time
-/// (the transaction may just have been mined).
 pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
     state: &VaultState,
     me: &[u8; 32],
@@ -3019,7 +2572,7 @@ pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
             if p.expiry_height > tip && !wallet.tx_mined(&txid)? {
                 pending.push((p.id, txid, p.signed_tx.as_deref()));
             } else {
-                sent.remove(&txid); // mined or expired: nothing left to resend
+                sent.remove(&txid);
             }
         }
     }
@@ -3027,17 +2580,11 @@ pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
     if !pending.is_empty() {
         let mempool = crate::wallet::mempool_txids(lightwalletd).await?;
         let chain_tip = crate::wallet::latest_height(lightwalletd).await?;
-        // Only when lightwalletd agrees with the wallet's tip: behind (a restarting node
-        // reports 0) or ahead (the transaction may just have been mined) proves nothing.
         if chain_tip == tip {
             for (id, txid, logged) in pending {
                 if mempool.contains(&txid) {
                     continue;
                 }
-                // Dropped from the mempool: send the signed bytes again; without them, or
-                // if the node refuses them now, let the notes go. Kept bytes stay until the
-                // transaction is mined or expires: a refusal can be temporary, and
-                // resending a transaction that lost its notes is harmless.
                 let raw = sent.get(&txid).or_else(|| logged.map(<[u8]>::to_vec));
                 let resent = match raw {
                     Some(raw) => send_raw(&raw, lightwalletd).await?.is_ok(),
@@ -3052,20 +2599,6 @@ pub async fn reserve_notes<P: Parameters + Clone + Send + Sync + 'static>(
     Ok(wallet.reserve(&note_holds(state, &dropped, me))?)
 }
 
-/// The notes each live proposal spends, in log order, each held until it can no longer
-/// spend them:
-/// - open and approved ones that reserve their notes in the log (a second member approved,
-///   `ProposalState::reserves`), and this member's own: until
-///   `VaultState::reservation_end` (their expiry if they may be signed);
-/// - broadcast ones: until their expiry; those in `dropped` (not mined, not in the mempool,
-///   not resent) until their expiry plus the reorg margin under their own owner, like
-///   cancelled ones that may be signed: the signed bytes can still be sent;
-/// - cancelled and rejected ones that may be signed: until their expiry plus the reorg
-///   margin, while they can still mine (`still_sendable`; once their notes are spent the
-///   hold is moot). Their own lock owner lets a new proposal draw on them first
-///   (`VaultWallet::propose`), which it must.
-///
-/// Other cancelled or rejected proposals hold nothing.
 pub fn note_holds(
     state: &VaultState,
     dropped: &BTreeSet<ProposalId>,
@@ -3124,8 +2657,6 @@ fn proposal_pczt(
     Ok((pczt, p.payments.clone()))
 }
 
-/// Verifies a logged proposal independently against this member's view of the chain,
-/// without voting (what the review screen shows): [`check_vote`] and the PCZT.
 pub fn review<P: Parameters>(
     state: &VaultState,
     material: &VaultMaterial,
@@ -3150,23 +2681,15 @@ pub fn review<P: Parameters>(
     .map_err(|e| NodeError::Verification(e.to_string()))
 }
 
-/// What an approval did.
 #[derive(Debug)]
 pub struct Approved {
     pub verified: VerifiedTx,
-    /// Signed at approval time (one-tap); otherwise commitments were published and
-    /// signing happens in a later interactive round.
     pub signed: bool,
-    /// This approval completed a signer group: the proposal can be sent now.
     pub completed: bool,
-    /// The proposer asked for the completing member to send right away.
     pub auto_send: bool,
-    /// How long each step took (ms): `history` (log read), `sign` (check + sign),
-    /// `post` (the vote's append). For the app's diagnostic timings; nothing else.
     pub timings: Vec<(&'static str, u128)>,
 }
 
-/// Step timer for [`Approved::timings`].
 struct Laps(Instant, Vec<(&'static str, u128)>);
 
 impl Laps {
@@ -3180,11 +2703,6 @@ impl Laps {
     }
 }
 
-/// Verifies a proposal independently and, if it passes, votes Approve. For a preprocessed
-/// proposal whose nonces this device holds, the vote carries this member's signature
-/// shares for every signer group it is in (one tap: nothing more is needed from this
-/// member). Otherwise it carries fresh round-1 commitments for interactive signing.
-#[allow(clippy::too_many_arguments)]
 pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -3206,9 +2724,6 @@ pub async fn approve<P: Parameters, R: RngCore + CryptoRng>(
     .await
 }
 
-/// [`approve`] by the proposer right after [`propose_loaded`], with the log state its
-/// proposal left (no second read of the log).
-#[allow(clippy::too_many_arguments)]
 pub async fn approve_after_propose<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -3239,7 +2754,6 @@ pub async fn approve_after_propose<P: Parameters, R: RngCore + CryptoRng>(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -3272,16 +2786,9 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
     let p = &state.proposals[&proposal];
     let (pczt_hash, auto_send, signing_spends) = (p.pczt_hash, p.auto_send, p.signing_spends);
 
-    // An earlier one-tap approval signed (consuming the nonces) but may not have reached
-    // the log: the relay timed out, the app was closed, or the reply was lost after the
-    // append. Its vote was kept, so post the very same shares. Once they are logged, this
-    // member adds interactive commitments only if no signer group can complete any more
-    // (another approver signs interactively): a one-tap vote then doesn't strand the
-    // payment (version 12).
     let add_commitments = p.shares.contains_key(&my_pk);
     if add_commitments {
         pool.drop_vote(&proposal, &pczt_hash);
-        // Needed once no group can complete, and again after a round used its last ones.
         let needed = p.one_tap_blocked()
             && (p.approvals.get(&my_pk).is_none_or(Vec::is_empty)
                 || !store.contains(&proposal, &pczt_hash));
@@ -3307,7 +2814,6 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
                 if *id == proposal && *h == pczt_hash && !shares.is_empty()
         );
         if kept_ok {
-            // Verified again: the same check as when the shares were made.
             let verified = verify_pczt(&pczt, keys.fvk(), &expected)
                 .map_err(|e| NodeError::Verification(e.to_string()))?;
             check_signing_spends(&verified, signing_spends)?;
@@ -3327,7 +2833,6 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
         pool.drop_vote(&proposal, &pczt_hash);
     }
 
-    // One-tap path: every commitment assigned to us must still have its nonce here.
     let one_tap = match &p.preprocessed {
         Some(pre) if !add_commitments => {
             let mut groups = Vec::new();
@@ -3368,15 +2873,11 @@ async fn approve_loaded<P: Parameters, R: RngCore + CryptoRng>(
             commitments: vec![],
             shares,
         };
-        // Before the append: the nonces are gone, so these bytes are the only copy.
         if let Err(e) = pool.keep_vote(&proposal, &pczt_hash, &event.to_bytes().map_err(proto)?) {
             tracing::warn!("could not keep the one-tap vote: {e}");
         }
         (event, verified, true)
     } else {
-        // Nonces stored by an approval whose vote never reached the log (the append failed
-        // after they were saved): no share can have left (`respond` signs only for logged
-        // votes), so post those same commitments.
         let unlogged = store
             .commitments(&proposal, &pczt_hash)
             .map(|c| {
@@ -3440,8 +2941,6 @@ fn approve_error(e: crate::session::SessionError) -> NodeError {
     }
 }
 
-/// The proposer declares how many spends need signatures (it sizes the preprocessed
-/// groups); a mismatch with the PCZT means the proposal is malformed.
 fn check_signing_spends(verified: &VerifiedTx, declared: u16) -> Result<(), NodeError> {
     if verified.spends_to_sign.len() != usize::from(declared) {
         return Err(NodeError::Verification(format!(
@@ -3462,32 +2961,16 @@ pub(crate) fn frost_id_of(
     Identifier::deserialize(&info.frost_id).map_err(proto)
 }
 
-// --- One-tap signing: nonce pools and sending ---------------------------------------------
-
-/// Single-spend proposals a full pool covers. Every proposal takes commitments from
-/// **every** member's pool when it enters the log (one per signing group the member is in,
-/// per spend), approving or not, so a member who is offline for a while drains too; a
-/// deep pool keeps one-tap working until their next background check tops it up.
 pub const POOL_PROPOSALS: usize = 16;
 
-/// Smallest pool target (commitments are 64 bytes on the log; small vaults can afford it).
 pub const MIN_POOL_TARGET: usize = 32;
 
-/// Commitments this member keeps available for one-tap signing: [`POOL_PROPOSALS`]
-/// single-spend proposals' worth (each takes C(n-1, t-1)), at least [`MIN_POOL_TARGET`] and
-/// at most one `Commitments` batch. Refilled when below half (see [`top_up_pool`]).
 pub fn pool_target(descriptor: &crate::vault::VaultDescriptor) -> usize {
     pool_target_for(descriptor.members.len(), usize::from(descriptor.threshold))
 }
 
-/// Most commitments a member keeps when sizing for the vault's notes (four batches; the
-/// log carries 64 bytes each). Above it, a proposal spending that many notes still falls
-/// back to interactive signing for this member's groups.
 pub const MAX_DEEP_POOL: usize = 4 * crate::vault::MAX_COMMITMENT_BATCH;
 
-/// [`pool_target`], deepened so that one proposal spending every one of the vault's
-/// `notes` unspent notes still gets one-tap (it takes C(n-1, t-1) commitments per spend
-/// from each member), up to [`MAX_DEEP_POOL`]. `None` (note count unknown) = `pool_target`.
 pub fn pool_target_for_notes(
     descriptor: &crate::vault::VaultDescriptor,
     notes: Option<usize>,
@@ -3520,17 +3003,6 @@ fn binomial(n: usize, k: usize) -> usize {
     (0..k).fold(1usize, |acc, i| acc.saturating_mul(n - i) / (i + 1))
 }
 
-/// Publishes fresh commitments when this member's pool is below half its target. Nonces
-/// are stored before the commitments are logged. Returns how many were published.
-///
-/// `reset`: this device was just restored from a backup, which carries no nonces. The
-/// commitments the previous device published and no proposal has used are dead (nothing
-/// here can sign with them), yet proposals would be assigned them one by one, and an
-/// approval that already carries shares is final, so a vault that needs this member could
-/// not complete a proposal for as long as they last. So the unassigned ones are retired
-/// first (`VaultEvent::PoolReset`) and a full fresh pool follows. Only the restore asks
-/// for it: two devices of one member (the advised way to move to a new phone) must not
-/// retire each other's pools.
 pub async fn top_up_pool<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -3547,10 +3019,6 @@ pub async fn top_up_pool<R: RngCore + CryptoRng>(
     .await
 }
 
-/// [`top_up_pool`] on a log the caller already loaded (`load_state`), which it keeps up
-/// to date: anything appended here is applied to `chain` and `state`. Saves a second
-/// load (a relay round trip and a replay) when the caller needs the state anyway.
-#[allow(clippy::too_many_arguments)]
 pub async fn top_up_pool_loaded<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -3608,9 +3076,6 @@ pub async fn top_up_pool_loaded<R: RngCore + CryptoRng>(
     Ok(count)
 }
 
-/// Deletes this device's nonces for commitments assigned to proposals that are closed
-/// (sent, rejected, cancelled, or expired as of the synced tip `tip_height`): they can
-/// never be used. Returns how many were deleted.
 pub fn forget_closed(
     state: &VaultState,
     me: &[u8; 32],
@@ -3643,9 +3108,6 @@ pub fn forget_closed(
     n
 }
 
-/// Deletes this device's interactive-signing nonces for proposals that are closed or
-/// expired (as `forget_closed`): no signing round can use them any more. Returns how many
-/// proposals had nonces here.
 pub fn forget_closed_nonces(
     state: &VaultState,
     tip_height: Option<u32>,
@@ -3665,12 +3127,10 @@ pub fn forget_closed_nonces(
                         | ProposalStatus::Cancelled
                 )
         })
-        // `take` deletes before returning; the nonces are dropped unused.
         .filter(|p| store.take(&p.id, &p.pczt_hash).is_some())
         .count()
 }
 
-/// Whether a proposal has a complete signer group (one-tap) and can be sent by anyone.
 pub fn is_ready(state: &VaultState, proposal: &ProposalId) -> bool {
     state
         .proposals
@@ -3678,9 +3138,6 @@ pub fn is_ready(state: &VaultState, proposal: &ProposalId) -> bool {
         .is_some_and(|p| p.ready_group.is_some() && p.status == ProposalStatus::Approved)
 }
 
-/// Sends a one-tap proposal: aggregates the complete signer group's shares from the log
-/// (verifying each), proves, broadcasts, and logs the broadcast. Needs no other member.
-#[allow(clippy::too_many_arguments)]
 pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -3701,9 +3158,6 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
             "no signer group is complete yet".into(),
         ));
     };
-    // Every complete group, the first one first. Shares are only length-checked when they
-    // are logged, so one member's bad shares could make the first group fail; another
-    // complete group must still be able to send.
     let complete: Vec<usize> = std::iter::once(usize::from(ready))
         .chain((0..pre.subsets.len()).filter(|g| {
             *g != usize::from(ready)
@@ -3715,7 +3169,6 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
         }))
         .collect();
     let (pczt, payments) = proposal_pczt(&state, &proposal)?;
-    // The sender verifies the transaction like any signer before broadcasting it.
     let keys = material.vault_keys()?;
     let verified = verify_pczt(
         &pczt,
@@ -3791,7 +3244,6 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
         tx: sent.raw.clone(),
     };
     if let Err(e) = append_event(relay, me, material, &mut chain, &mut state, &event, rng).await {
-        // Another member may have sent it first; the transaction is the same either way.
         if !matches!(
             state.proposals.get(&proposal).map(|p| p.status),
             Some(ProposalStatus::Broadcast)
@@ -3805,14 +3257,12 @@ pub async fn send_ready<P: Parameters, R: RngCore + CryptoRng>(
     Ok(sent)
 }
 
-/// A transaction this device broadcast: its id and raw bytes (kept to resend it).
 #[derive(Clone, Debug)]
 pub struct Sent {
     pub txid: [u8; 32],
     pub raw: Vec<u8>,
 }
 
-/// Extracts (fully verifying) and broadcasts a signed, proved PCZT.
 pub async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, NodeError> {
     let transaction = TransactionExtractor::new(signed)
         .with_orchard(verifying_key())
@@ -3822,16 +3272,11 @@ pub async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, 
     transaction.write(&mut raw).map_err(proto)?;
     let txid = *transaction.txid().as_ref();
     if let Err(m) = send_raw(&raw, lightwalletd).await? {
-        // A node on a newer branch rejects a transaction built for the old one.
         if m.to_ascii_lowercase().contains("consensus branch id") {
             return Err(NodeError::Wallet(crate::wallet::WalletError::AppOutdated(
                 m,
             )));
         }
-        // Another member (or this member's other process: the app and a background check)
-        // sent the same proposal first. The txid leaves out signatures and proof, so both
-        // copies have the same id and the node refuses the second: that is a success.
-        // The whole mempool is read, never this txid (privacy, as in `reserve_notes`).
         let already = crate::wallet::mempool_txids(lightwalletd)
             .await
             .is_ok_and(|txids| txids.contains(&txid));
@@ -3842,7 +3287,6 @@ pub async fn broadcast(signed: Pczt, lightwalletd: &mut Client) -> Result<Sent, 
     Ok(Sent { txid, raw })
 }
 
-/// Submits raw transaction bytes. `Ok(Err(message))` when the node refused it.
 async fn send_raw(raw: &[u8], lightwalletd: &mut Client) -> Result<Result<(), String>, NodeError> {
     let reply = lightwalletd
         .send_transaction(zcash_client_backend::proto::service::RawTransaction {
@@ -3859,10 +3303,6 @@ async fn send_raw(raw: &[u8], lightwalletd: &mut Client) -> Result<Result<(), St
     })
 }
 
-/// Who a leader asks first: itself (it always answers), then members who haven't left one
-/// of its rounds unanswered, then those who have (`silent`, see [`SilentSigners`]), each
-/// group by identifier. Without this the same first t approvers were always chosen, so
-/// one member who sorts first could stall every round by never answering (audit M5-B).
 pub fn order_signers(
     available: Vec<Identifier>,
     mine: Identifier,
@@ -3873,9 +3313,6 @@ pub fn order_signers(
     ordered
 }
 
-/// Signers this leader saw leave a round unanswered (`<leader dir>/silent.bin`), asked
-/// last next time ([`order_signers`]). A signer leaves the set once it answers a round.
-/// Only a preference: an unreadable file counts as empty.
 pub struct SilentSigners(std::path::PathBuf);
 
 impl SilentSigners {
@@ -3895,7 +3332,6 @@ impl SilentSigners {
             .unwrap_or_default()
     }
 
-    /// Adds `silent` and removes `answered`. Best effort, like the preference it stores.
     pub fn update(&self, silent: &[Identifier], answered: &[Identifier]) {
         let mut set = self.load();
         set.extend(silent.iter().copied());
@@ -3913,8 +3349,6 @@ impl SilentSigners {
     }
 }
 
-/// Leader: the request's signers (other than this member) whose shares haven't arrived,
-/// for [`SilentSigners`] after a round timed out.
 pub async fn unanswered_signers(
     relay: &RelayClient,
     me: &Identity,
@@ -3932,10 +3366,6 @@ pub async fn unanswered_signers(
         .collect())
 }
 
-/// Raw transactions this device broadcast, one file per txid, kept until mined or expired
-/// so a transaction that drops out of the mempool can be sent again (`reserve_notes`).
-/// Since version 12 the log's broadcast carries the same bytes for every member; this copy
-/// covers the moments before that entry is logged, and logs from before.
 pub struct SentTxs(Option<std::path::PathBuf>);
 
 impl SentTxs {
@@ -3943,7 +3373,6 @@ impl SentTxs {
         Self(Some(dir.into()))
     }
 
-    /// Keeps nothing (nothing is resent).
     pub fn none() -> Self {
         Self(None)
     }
@@ -3954,7 +3383,6 @@ impl SentTxs {
             .map(|d| d.join(format!("{}.tx", hex::encode(txid))))
     }
 
-    /// Best effort: losing the file only means the transaction can't be resent.
     pub fn put(&self, sent: &Sent) {
         if let (Some(dir), Some(file)) = (&self.0, self.file(&sent.txid)) {
             let _ = std::fs::create_dir_all(dir);
@@ -3976,15 +3404,6 @@ impl SentTxs {
     }
 }
 
-/// Votes Reject, unless this phone may already have released its signature for the
-/// proposal (finding G): then it fails with [`NodeError::AlreadySigned`] and logs nothing,
-/// since a reject would tell the others no signature exists. Released means a one-tap vote
-/// with shares (logged, or kept to post), a reply to a signing request (kept to send, or
-/// sent: an interactive approval in the log whose nonces aren't here, once the proposal
-/// reached Approved), or a reply being
-/// made right now by another process (a claimed nonce file, `NonceStore::claimed`). This
-/// phone's own nonces are claimed and deleted first, so nothing can sign from them after
-/// the checks.
 pub async fn reject<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4005,10 +3424,6 @@ pub async fn reject<R: RngCore + CryptoRng>(
         return Err(NodeError::AlreadySigned);
     }
     let held = store.take(&proposal, &pczt_hash).is_some();
-    // Our logged interactive approval without its nonces here: a reply may have used them,
-    // but only for a proposal that reached Approved (a share needs t logged approvals,
-    // `check_request_logged`). Before that, missing nonces (a restored phone: backups
-    // carry none) can't mean a signature.
     let approved_here = p.possibly_signed && p.approvals.get(&my_pk).is_some_and(|c| !c.is_empty());
     let replied = store.kept_replies().iter().any(|bytes| {
         version::decode::<SharesMsg>(Format::SignatureShares, bytes)
@@ -4028,9 +3443,6 @@ pub async fn reject<R: RngCore + CryptoRng>(
     Ok(())
 }
 
-/// Cancels a proposal this member authored (open or approved, not yet sent). A proposal
-/// whose signatures are already complete could still be sent by anyone holding them until
-/// it expires; respending its notes in a new proposal invalidates it.
 pub async fn cancel<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4044,8 +3456,6 @@ pub async fn cancel<R: RngCore + CryptoRng>(
     Ok(())
 }
 
-/// Sets this member's display name for the other members (trimmed; empty clears it).
-/// Logged only when it changes. Members on an older app skip the entry.
 pub async fn set_name<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4069,9 +3479,6 @@ pub async fn set_name<R: RngCore + CryptoRng>(
     Ok(())
 }
 
-/// Records in the log that this member has a backup of its current keys that opens
-/// (spec §12.2, backup health). Logged only when the member has no attestation for the
-/// current epoch yet, so repeated exports don't grow the log.
 pub async fn attest_backup<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4106,18 +3513,11 @@ fn member_by_frost_id(
         .ok_or_else(|| NodeError::Protocol("unknown FROST identifier".into()))
 }
 
-/// A signing request sent by the leader, plus the commitment sets it consumed (the leader
-/// must not put them in another request).
 pub struct SentRequest {
     pub request: SigningRequest,
     pub used_commitments: Vec<[u8; 32]>,
 }
 
-/// A send the relay refused for this one recipient (507 with exactly
-/// [`zafe_proto::relay::RECIPIENT_FULL`]: the sender's share of its inbox is full; 403: not
-/// a recipient there), not because it is down, full, limiting us, older, or without the
-/// vault. Any other 507 (the vault's or the relay's storage, our own total) refuses every
-/// recipient, so the round fails instead of marking signers silent.
 fn undeliverable(e: &RelayClientError) -> bool {
     match e {
         RelayClientError::StorageFull { detail } => detail == zafe_proto::relay::RECIPIENT_FULL,
@@ -4126,12 +3526,6 @@ fn undeliverable(e: &RelayClientError) -> bool {
     }
 }
 
-/// Leader: once the proposal is approved, sends sealed signing requests to `threshold`
-/// approvers whose current commitments are not in `used` (commitment sets already put in an
-/// earlier request). Members re-approve to provide fresh commitments after a failed round.
-/// Signers in `silent` are asked last; an approver whose logged commitments are unusable
-/// joins them.
-#[allow(clippy::too_many_arguments)]
 pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4179,12 +3573,9 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
             .member(author)
             .ok_or_else(|| NodeError::Protocol("approval from non-member".into()))?;
         let member = Identifier::deserialize(&info.frost_id).map_err(proto)?;
-        // One-tap approvals carry none: nothing to use here.
         if commitments.is_empty() {
             continue;
         }
-        // A member's malformed commitments must not block everyone's signing: skip that
-        // approval, and ask that member last from now on.
         let parsed = commitments
             .iter()
             .map(|c| SigningCommitments::deserialize(c))
@@ -4209,10 +3600,6 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     let threshold = usize::from(material.descriptor.threshold);
     let mine = *material.key_package()?.identifier();
     let available = leader.available_signers();
-    // Signers the relay refused to deliver to in this call: a round that names one can't
-    // complete, so it is rebuilt without them. Signers that already got the abandoned
-    // request stay used (answering it consumes their nonces) and count as used for good;
-    // the rest are released for the next try.
     let mut refused: BTreeSet<Identifier> = BTreeSet::new();
     let mut reached_before: Vec<Identifier> = Vec::new();
     let mut last_refusal = None;
@@ -4242,8 +3629,6 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
         }
         let request = leader.request(&chosen).map_err(proto)?;
         let bytes = encode_request(&request)?;
-        // A signer the relay refused before is asked first: if it still can't be reached,
-        // nobody else has been sent a request that can't complete.
         let mut order: Vec<Identifier> = request.signers.iter().copied().collect();
         order.sort_by_key(|id| !silent_now.contains(id));
         let mut seq = SeqCounter::default();
@@ -4252,7 +3637,7 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
         for id in &order {
             let to = member_by_frost_id(&state.descriptor, id)?;
             if to.sig_pk == me.public().sig_pk {
-                continue; // the leader signs its own part locally (`sign_own_shares`)
+                continue;
             }
             let env = Envelope::sealed(
                 me,
@@ -4266,10 +3651,6 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
             .map_err(proto)?;
             match relay.send(me, &env).await {
                 Ok(()) => reached.push(*id),
-                // The relay is fine but won't deliver to this signer (the leader's share of
-                // its inbox is full, it isn't a recipient there any more): ask it last from
-                // now on and rebuild the round without it. A relay that is down fails the
-                // round as before.
                 Err(e) if undeliverable(&e) => {
                     eprintln!("signing request to a signer not delivered: {e}");
                     silent.update(&[*id], &[]);
@@ -4306,12 +3687,6 @@ pub async fn request_signatures<P: Parameters, R: RngCore + CryptoRng>(
     }
 }
 
-/// Whether `request` is built only from votes in the log: every signer's commitments in it
-/// are the ones its latest vote logged for interactive signing, and nobody else's. A share
-/// leaves this phone only for such a request, so the log then holds t approvals with
-/// exactly those commitments and the proposal reached Approved (possibly signed, for every
-/// member: rule 5). Never for a vote whose append failed, a vote a reject replaced, or a
-/// pool commitment assigned to a one-tap group.
 fn check_request_logged(state: &VaultState, request: &SigningRequest) -> Result<(), NodeError> {
     let unlogged =
         || NodeError::NotReady("the signing request isn't from approvals in the log".into());
@@ -4346,25 +3721,13 @@ fn check_request_logged(state: &VaultState, request: &SigningRequest) -> Result<
     Ok(())
 }
 
-/// Outcome of answering signing requests.
 #[derive(Debug, Default)]
 pub struct RespondReport {
     pub answered: Vec<ProposalId>,
-    /// Requests that were not answered, with the reason (stale, expired, forged, ...).
     pub skipped: Vec<(ProposalId, String)>,
-    /// Handled envelopes the relay deleted (0 on a relay without `/v1/inbox/ack`).
     pub acknowledged: u64,
 }
 
-/// Member: answers every pending signing request addressed to this member. Each request is
-/// re-verified from the log; a bad or stale request is skipped and reported, never fatal.
-///
-/// Also asks the relay to delete what this member is done with (best effort): keygen
-/// messages (the vault exists, so its material is saved), signing requests that were
-/// answered or can never be (no nonces), and, as a leader, shares for proposals that are
-/// closed (sent, rejected, cancelled or expired at `tip_height`). A request that failed for
-/// a reason that may pass (e.g. a stale tip) stays for the next attempt.
-#[allow(clippy::too_many_arguments)]
 pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4431,15 +3794,13 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
         };
         let request_hash = hash_request_bytes(&bytes);
         if closed(&msg.proposal) {
-            // Sent, rejected, cancelled or expired: nothing to sign for it (audit L4).
             store.drop_reply(&request_hash);
             done.push(cursor);
             continue;
         }
-        // Signed earlier but never sent (the send failed): send the same shares.
         let kept = store.kept_reply(&request_hash);
         if kept.is_none() && !store.contains(&msg.proposal, &msg.pczt_hash) {
-            done.push(cursor); // already answered, or never approved: never answerable
+            done.push(cursor);
             continue;
         }
         let result: Result<Vec<u8>, NodeError> = kept.map(Ok).unwrap_or_else(|| {
@@ -4465,15 +3826,11 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
                 shares: shares.iter().map(|s| s.serialize()).collect(),
             };
             let reply = version::encode(Format::SignatureShares, &reply)?;
-            // The nonces are gone: keep the shares until they are sent. A failure to keep
-            // them doesn't stop this send.
             let _ = store.keep_reply(&request_hash, &reply);
             Ok(reply)
         });
         match result {
             Ok(reply) => {
-                // The nonces are spent: these shares must get out (sealed again on a 409
-                // rather than lost).
                 send_fresh(relay, me, &mut seq, |n| {
                     Envelope::sealed(
                         me,
@@ -4495,7 +3852,6 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
         }
     }
     if !done.is_empty() {
-        // Best effort: whatever stays expires on the relay after its retention period.
         report.acknowledged = relay
             .ack_inbox(me, material.label(), &done)
             .await
@@ -4504,7 +3860,6 @@ pub async fn respond<P: Parameters, R: RngCore + CryptoRng>(
     Ok(report)
 }
 
-/// The Ironwood (post-NU6.3) proving key, built once per process (seconds on a phone).
 pub fn proving_key() -> &'static orchard::circuit::ProvingKey {
     static PK: std::sync::OnceLock<orchard::circuit::ProvingKey> = std::sync::OnceLock::new();
     PK.get_or_init(|| {
@@ -4512,7 +3867,6 @@ pub fn proving_key() -> &'static orchard::circuit::ProvingKey {
     })
 }
 
-/// The Ironwood verifying key, built once per process.
 pub fn verifying_key() -> &'static orchard::circuit::VerifyingKey {
     static VK: std::sync::OnceLock<orchard::circuit::VerifyingKey> = std::sync::OnceLock::new();
     VK.get_or_init(|| {
@@ -4520,14 +3874,12 @@ pub fn verifying_key() -> &'static orchard::circuit::VerifyingKey {
     })
 }
 
-/// How far the leader got with collecting shares for a request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShareProgress {
     pub received: usize,
     pub needed: usize,
 }
 
-/// Leader: reads the shares answering exactly `request` that have arrived so far.
 async fn read_shares(
     relay: &RelayClient,
     me: &Identity,
@@ -4549,7 +3901,7 @@ async fn read_shares(
             continue;
         };
         if msg.proposal != request.proposal || msg.request_hash != wanted {
-            continue; // a share from another proposal or an earlier round
+            continue;
         }
         let Some(info) = state.descriptor.member(&from.sig_pk) else {
             continue;
@@ -4571,7 +3923,6 @@ async fn read_shares(
     Ok(shares)
 }
 
-/// Leader: how many of the request's signers have answered so far.
 pub async fn share_progress(
     relay: &RelayClient,
     me: &Identity,
@@ -4587,12 +3938,6 @@ pub async fn share_progress(
     })
 }
 
-/// Leader: its own signature shares when it is one of the request's signers (the relay
-/// never carries a member's envelope to itself). Re-verifies the proposal like any signer.
-/// Returns serialized shares for the caller to keep until `finalize` succeeds: the nonces
-/// are consumed here, so a retry must reuse these shares rather than sign again. `None` if
-/// the leader is not a signer of this request.
-#[allow(clippy::too_many_arguments)]
 pub async fn sign_own_shares<P: Parameters>(
     relay: &RelayClient,
     me: &Identity,
@@ -4631,15 +3976,6 @@ pub async fn sign_own_shares<P: Parameters>(
     Ok(Some(shares.iter().map(|s| s.serialize()).collect()))
 }
 
-/// Leader: waits for the shares answering exactly `request` (plus `own_shares` from
-/// `sign_own_shares` when the leader is a signer), aggregates (verifying every
-/// share), and broadcasts via lightwalletd, then logs the broadcast. Returns the txid.
-///
-/// The proof does not depend on the spend authorization signatures, so it is created on a
-/// blocking thread while the shares arrive (as hardware-signer wallets do). `on_progress` is
-/// called whenever the number of received shares changes. Safe to call again with the
-/// same request after a timeout: shares already sent are still in the inbox.
-#[allow(clippy::too_many_arguments)]
 pub async fn finalize<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -4700,8 +4036,6 @@ pub async fn finalize<R: RngCore + CryptoRng>(
     let spends = tx::spends_to_sign(&pczt, keys.fvk()).map_err(proto)?;
     let signatures = aggregate_request(request, &spends, &shares, &material.public_key_package()?)
         .map_err(|e| match &e {
-            // A share that doesn't verify (FROST names who sent it): this round can't
-            // complete with that signer, so the caller starts another without it.
             crate::session::SessionError::Signing(crate::signing::SigningError::Frost(f))
                 if !f.culprits().is_empty() =>
             {
@@ -4716,8 +4050,6 @@ pub async fn finalize<R: RngCore + CryptoRng>(
     let signed = tx::apply_signatures(proved, &signatures).map_err(proto)?;
     let sent = broadcast(signed, lightwalletd).await?;
     let txid = sent.txid;
-    // The transaction is on its way regardless; if the log entry is no longer valid (e.g.
-    // the author cancelled meanwhile), report the txid anyway.
     let event = VaultEvent::SignedBroadcast {
         proposal: request.proposal,
         tx: sent.raw.clone(),
@@ -4731,7 +4063,6 @@ pub async fn finalize<R: RngCore + CryptoRng>(
     Ok(sent)
 }
 
-/// Serializes a signing request (versioned; the leader also keeps it as `<id>.req`).
 pub fn encode_request(request: &SigningRequest) -> Result<Vec<u8>, NodeError> {
     let msg = SigningRequestMsg {
         proposal: request.proposal,
@@ -4764,7 +4095,6 @@ pub fn decode_request(bytes: &[u8]) -> Result<SigningRequest, NodeError> {
     })
 }
 
-/// The leader's own serialized shares, kept until broadcast (`<id>.own`).
 pub fn encode_own_shares(shares: &[Vec<u8>]) -> Result<Vec<u8>, NodeError> {
     Ok(version::encode(Format::OwnShares, shares)?)
 }
@@ -4773,13 +4103,10 @@ pub fn decode_own_shares(bytes: &[u8]) -> Result<Vec<Vec<u8>>, NodeError> {
     Ok(version::decode(Format::OwnShares, bytes)?)
 }
 
-/// The leader's set of commitment sets already put in requests (`used_commitments.bin`).
 pub fn encode_used_commitments(used: &BTreeSet<[u8; 32]>) -> Result<Vec<u8>, NodeError> {
     Ok(version::encode(Format::UsedCommitments, used)?)
 }
 
-/// Fails on an unreadable file instead of starting empty: forgetting used commitment
-/// sets could put one in a second request.
 pub fn decode_used_commitments(bytes: &[u8]) -> Result<BTreeSet<[u8; 32]>, NodeError> {
     Ok(version::decode(Format::UsedCommitments, bytes)?)
 }
@@ -4791,7 +4118,6 @@ mod tests {
         use super::SeqCounter;
         let mut last = 0;
         for _ in 0..1000 {
-            // A fresh counter each time, as each send path makes its own.
             let seq = SeqCounter::default().next_seq();
             assert!(seq > last);
             last = seq;
@@ -4803,15 +4129,12 @@ mod tests {
         use super::{order_signers, Identifier};
         let id = |n: u16| Identifier::try_from(n).unwrap();
         let all = vec![id(1), id(2), id(3), id(4)];
-        // Before anyone stalls: the leader (3), then by identifier.
         assert_eq!(
             order_signers(all.clone(), id(3), &Default::default()),
             vec![id(3), id(1), id(2), id(4)]
         );
-        // Member 1 left a round unanswered: a 2-of-4 now goes to 3 and 2, not 3 and 1.
         let silent = [id(1)].into_iter().collect();
         assert_eq!(order_signers(all, id(3), &silent)[..2], [id(3), id(2)]);
-        // The leader isn't among the approvers: silent members still come last.
         assert_eq!(
             order_signers(vec![id(1), id(2)], id(9), &silent),
             vec![id(2), id(1)]
@@ -4824,7 +4147,6 @@ mod tests {
         let base = pool_target_for(3, 2);
         assert_eq!(deep_pool_target_for(3, 2, None), base);
         assert_eq!(deep_pool_target_for(3, 2, Some(3)), base);
-        // 2-of-3: each spend takes C(2, 1) = 2 of this member's commitments.
         assert_eq!(deep_pool_target_for(3, 2, Some(100)), 200);
         assert_eq!(deep_pool_target_for(3, 2, Some(100_000)), MAX_DEEP_POOL);
     }
@@ -4861,7 +4183,6 @@ mod tests {
         assert_eq!(sent.get(&tx.txid), Some(vec![1, 2, 3]));
         sent.remove(&tx.txid);
         assert_eq!(sent.get(&tx.txid), None);
-        // Keeping nothing is allowed (CLI tests, callers without a directory).
         let none = super::SentTxs::none();
         none.put(&tx);
         assert_eq!(none.get(&tx.txid), None);
@@ -4882,9 +4203,6 @@ mod tests {
         }
     }
 
-    /// The app embeds invites in `zafe://join?invite=...` links and QR codes unescaped,
-    /// which relies on this character set; it also bounds the QR size (a version 10 QR
-    /// code holds 395 alphanumeric characters at medium error correction).
     #[test]
     fn invite_text_is_url_safe_and_small() {
         let invite = invite("Grants committee — Ops fund 2026");
@@ -4896,8 +4214,6 @@ mod tests {
         assert_eq!(Invite::decode(&text).unwrap(), invite);
     }
 
-    /// A version 2 invite (no relay, mailbox = vault id) still joins: label = vault id,
-    /// on the joiner's default relay.
     #[test]
     fn version_2_invites_still_decode() {
         #[derive(Serialize)]
@@ -4946,7 +4262,6 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        // An invite from before the safety words (version 1) is refused as older.
         let older = text.replacen(&tag, "zafe-invite-v1:", 1);
         match Invite::decode(&older) {
             Err(NodeError::UnsupportedVersion(v)) => assert!(!v.is_newer()),
@@ -4958,8 +4273,6 @@ mod tests {
         ));
     }
 
-    /// The setup log key message carries the create token; the untagged 36-byte payload
-    /// of older creators still reads.
     #[test]
     fn log_key_messages_old_and_new() {
         let key = LogKey::from_bytes(0, [5; 32]);
@@ -4975,7 +4288,6 @@ mod tests {
         assert_eq!((back.epoch, *back.as_bytes(), token), (0, [5; 32], None));
     }
 
-    /// Version 1 material reads as a vault on the app-wide relay under its vault id.
     #[test]
     fn version_1_material_reads_as_legacy_relay() {
         let descriptor = crate::vault::VaultDescriptor {
@@ -5019,7 +4331,6 @@ mod tests {
         assert_eq!(m.relay, VaultRelay::legacy([7; 16]));
         assert_eq!(m.ids(), VaultIds::legacy([7; 16]));
         assert_eq!(m.relay.url_or("https://r"), "https://r");
-        // Saved again, it is version 2 and keeps its relay.
         let again = VaultMaterial::from_bytes(&m.to_bytes().unwrap()).unwrap();
         assert_eq!(again.relay, m.relay);
         assert_eq!(

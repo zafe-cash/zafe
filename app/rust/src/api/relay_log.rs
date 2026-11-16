@@ -1,5 +1,3 @@
-//! Restoring the vault log on a relay that lost it (spec §6.3), from this device's copy.
-
 use zafe_core::node::{self, Reseeded};
 
 use super::{
@@ -7,13 +5,6 @@ use super::{
     vault::{identity, material, runtime, vault_relay},
 };
 
-/// Restores the vault's log on the relay from this phone's copy: recreates the vault
-/// after a wiped relay, or appends the entries a rewound relay lost. Returns how many log
-/// entries were put back (0: the relay already had everything this phone has). Refuses a
-/// relay whose history differs from this phone's copy (`RelayForked`). Messages that were
-/// in flight (signing requests) are not restored: members are asked again. Re-register
-/// the push token afterwards. Runs on the vault's own relay, under its label, with its
-/// create token (a private relay refuses a restore without it: `CreateTokenRefused`).
 pub fn restore_relay(
     relay_url: String,
     seeds: Vec<u8>,
@@ -30,10 +21,6 @@ pub fn restore_relay(
     })
 }
 
-/// Leaves a fork (spec §6.3): after `RelayForked`, discards this phone's copy of the vault
-/// log and follows the relay's history instead. The relay's whole log is verified first;
-/// entries that only this phone's copy has are dropped. Returns how many. Refuses when the
-/// relay does not actually show another history. Ask the user to confirm first.
 pub fn follow_relay(
     relay_url: String,
     seeds: Vec<u8>,

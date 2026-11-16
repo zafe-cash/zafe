@@ -23,10 +23,6 @@ import 'proposal_status.dart';
 import 'proposal_timeline.dart';
 import '../../core/widgets/line_icon.dart';
 
-// The parts of the proposal screen below the nav bar, apart from the action buttons.
-// Public so tool/screens/ can render them with fake data.
-
-/// Payment card, details (with this device's independent check) and approvals.
 class ProposalBody extends ConsumerWidget {
   const ProposalBody({
     super.key,
@@ -42,10 +38,8 @@ class ProposalBody extends ConsumerWidget {
   final String? me;
   final SendState? send;
 
-  /// Who the signers are to this phone.
   final SignerNames? names;
 
-  /// Synced chain tip, to show expiry.
   final int? height;
 
   @override
@@ -103,7 +97,6 @@ class ProposalBody extends ConsumerWidget {
             sending: sending,
           ),
         ),
-        // Message, this phone's check and the Tx ID, when there are any.
         if (details.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           MobileSurfaceCard(
@@ -124,10 +117,6 @@ class ProposalBody extends ConsumerWidget {
   }
 }
 
-/// A payment that waits for this member's vote, shown as a request: who asks, how
-/// much, to whom, and whether this phone's own check of the transaction agrees.
-/// Everything else (fee, change, signers) is folded under "Details". The actions (Approve,
-/// Decline) are pinned below it by the screen.
 class PaymentRequestView extends ConsumerStatefulWidget {
   const PaymentRequestView({
     super.key,
@@ -156,7 +145,6 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
     final p = widget.proposal;
     final hide = ref.watch(privacyModeProvider);
     final payment = p.payments.isEmpty ? null : p.payments.first;
-    // A sweep pays nobody: what it moves is its change, known once this phone checked it.
     final review = payment == null
         ? ref.watch(proposalReviewProvider(p.id)).value
         : null;
@@ -179,7 +167,6 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
         Center(child: SignerTile(keyHex: p.author, size: 56)),
         const SizedBox(height: AppSpacing.s),
         Text(
-          // Your own payment can come here too (its approval failed after proposing).
           p.author == widget.me
               ? (payment == null
                     ? 'You proposed moving funds'
@@ -314,7 +301,6 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.xxs),
-                // The forward chevron turned down (closed) or up (open).
                 AnimatedRotation(
                   turns: _details ? 0.75 : 0.25,
                   duration: const Duration(milliseconds: 200),
@@ -369,8 +355,6 @@ class _PaymentRequestViewState extends ConsumerState<PaymentRequestView> {
   }
 }
 
-/// The one trust line of a request: this phone's own check of the transaction. Tap for
-/// what was checked. A mismatch is spelled out (never approve it).
 class _DeviceCheck extends ConsumerWidget {
   const _DeviceCheck({required this.id});
   final String id;
@@ -439,12 +423,10 @@ class _DeviceCheck extends ConsumerWidget {
   }
 }
 
-/// Fee, change and the "verified on this device" line, from `review_proposal`.
 class _ReviewRows extends ConsumerWidget {
   const _ReviewRows({required this.id, this.withCheck = true});
   final String id;
 
-  /// The "Checked on this phone" row too (a request shows the check above instead).
   final bool withCheck;
 
   @override
@@ -530,16 +512,11 @@ class _ReviewRows extends ConsumerWidget {
   }
 }
 
-/// One payment of a batch, as plain data (proposal or draft).
 typedef RecipientLine = ({String address, BigInt amountZat, String memo});
 
-/// Every recipient of a batch payment: short address, amount and message, each address
-/// tappable in full. [onRemove] (drafts only) shows a remove button per line while there
-/// is more than one.
 class RecipientsCard extends ConsumerWidget {
   const RecipientsCard({super.key, required this.lines, this.onRemove});
 
-  /// From a draft's `PaymentInput`s or a proposal's `PaymentInfo`s.
   RecipientsCard.fromInputs(
     List<rust.PaymentInput> payments, {
     Key? key,
@@ -657,8 +634,6 @@ class RecipientsCard extends ConsumerWidget {
   }
 }
 
-/// A proposal with no payments: it spends a cancelled payment's funds back to the vault
-/// (`invalidate_proposal`), so that payment can never be sent.
 class SweepCard extends StatelessWidget {
   const SweepCard({super.key});
 
@@ -700,7 +675,6 @@ class SweepCard extends StatelessWidget {
   }
 }
 
-/// Explains "Checked on this phone": what the phone verified in the transaction itself.
 Future<void> showDeviceCheckSheet(
   BuildContext context,
 ) => showAppMobileSheet<void>(

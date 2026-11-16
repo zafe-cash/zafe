@@ -8,21 +8,12 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `decode`
 
-/// The recovery code of a new phone's identity (`seeds`, a fresh identity kept until the
-/// seat has moved).
 RecoveryCode recoveryCode({required List<int> seeds}) =>
     RustLib.instance.api.crateApiRepairRecoveryCode(seeds: seeds);
 
-/// Parses a recovery code a co-signer pasted or scanned (also inside a message or a
-/// `zafe://recover?code=` link).
 RecoveryCodeInfo parseRecoveryCode({required String code}) =>
     RustLib.instance.api.crateApiRepairParseRecoveryCode(code: code);
 
-/// Co-signer: one step of the safety check with the phone that showed `code` (poll it
-/// while the screen is open). `None` until the new phone has taken part; then the four
-/// words to compare with it on a call before approving. Runs on the vault's relay (from
-/// `material`; `relay_url` for a vault from before per-vault relays), where the new phone
-/// takes part after opening the co-signer's [`seat_link`].
 Future<String?> newPhoneWords({
   required String relayUrl,
   required List<int> seeds,
@@ -35,9 +26,6 @@ Future<String?> newPhoneWords({
   code: code,
 );
 
-/// Approves moving the seat of `old_key_hex` (a signer who lost their phone) to the phone
-/// that showed `code`. Returns whether this was the last approval needed: the move is then
-/// pending (the old phone is asked first; the helpers' parts complete it after their 72 h).
 Future<bool> approveSeatMove({
   required String relayUrl,
   required List<int> seeds,
@@ -54,9 +42,6 @@ Future<bool> approveSeatMove({
   words: words,
 );
 
-/// The old phone: its owner still has it and keeps the seat, voiding the pending move of it
-/// (only a first-round move; behind unlock, never automatic). Returns whether a move was
-/// voided now.
 Future<bool> keepSeat({
   required String relayUrl,
   required List<int> seeds,
@@ -67,8 +52,6 @@ Future<bool> keepSeat({
   material: material,
 );
 
-/// A helper stops helping the pending move at `replacement`, for good (its owner says they
-/// didn't lose their phone). Behind a confirm and the unlock; never automatic.
 Future<void> stopHelping({
   required String relayUrl,
   required List<int> seeds,
@@ -81,9 +64,6 @@ Future<void> stopHelping({
   replacement: replacement,
 );
 
-/// The co-signer's link for a phone recovering a seat in this vault: the vault's relay
-/// and mailbox (`zafe-seat-v1:...`; `default_relay_url` stands in for a vault on the
-/// app-wide relay). The new phone opens it before the safety check.
 String seatLink({
   required List<int> material,
   required String defaultRelayUrl,
@@ -92,19 +72,9 @@ String seatLink({
   defaultRelayUrl: defaultRelayUrl,
 );
 
-/// Parses a seat link a co-signer sent (also inside a message or a `zafe://seat?link=`
-/// URL).
 SeatLinkInfo parseSeatLink({required String text}) =>
     RustLib.instance.api.crateApiRepairParseSeatLink(text: text);
 
-/// The new phone: checks whether its seat moved and the repaired key has arrived. On
-/// `Done` the key has been checked against the vault (spec §10.4.2), and its relay history
-/// against what every helper vouched for. `relay_url` and `label`: from the co-signer's
-/// seat link ([`parse_seat_link`]); without a label (no link: the app-wide relay), every
-/// mailbox the relay lists for this phone is checked. `confirmed`: the co-signers (hex
-/// keys) whose words the person confirmed (kept with the recovery identity); a vault is
-/// taken only through one of them. `recovery_dir`: where this phone pins what it reveals
-/// to each co-signer (`ZafePaths.recoveryDir`; deleted with the recovery identity).
 Future<RecoveryProgress> checkRecovery({
   required String relayUrl,
   required List<int> seeds,
@@ -119,7 +89,6 @@ Future<RecoveryProgress> checkRecovery({
   recoveryDir: recoveryDir,
 );
 
-/// The words a co-signer (`cosigner_key_hex`) sees for this new phone.
 class CosignerWords {
   final String cosignerKeyHex;
   final String words;
@@ -139,7 +108,6 @@ class CosignerWords {
 }
 
 class RecoveryCode {
-  /// `zafe-recover-v1:...`: sent to a co-signer (text, link or QR code).
   final String code;
 
   const RecoveryCode({required this.code});
@@ -156,7 +124,6 @@ class RecoveryCode {
 }
 
 class RecoveryCodeInfo {
-  /// The new phone's signing key (hex).
   final String keyHex;
 
   const RecoveryCodeInfo({required this.keyHex});
@@ -174,18 +141,12 @@ class RecoveryCodeInfo {
 
 class RecoveryProgress {
   final RecoveryStage stage;
-
-  /// Repair messages received and needed so far (`Repairing`; needed is 0 until known).
   final int received;
   final int needed;
   final String vaultId;
   final String name;
-
-  /// `VaultMaterial::to_bytes` (secret; `Done` only).
   final Uint8List material;
   final String invite;
-
-  /// Until done: the words each co-signer that started the safety check shows.
   final List<CosignerWords> checks;
 
   const RecoveryProgress({
@@ -225,26 +186,10 @@ class RecoveryProgress {
           checks == other.checks;
 }
 
-enum RecoveryStage {
-  /// No vault has moved a seat to this phone yet: waiting for co-signers to approve.
-  waiting,
+enum RecoveryStage { waiting, pending, repairing, done }
 
-  /// Co-signers approved; their phones wait up to 3 days before finishing, in case the old
-  /// phone still works.
-  pending,
-
-  /// The seat moved; the co-signers' phones are repairing the key.
-  repairing,
-
-  /// Done: `material` and `invite` hold the vault (save them like a restored backup).
-  done,
-}
-
-/// Where a co-signer's seat link points.
 class SeatLinkInfo {
   final String relayUrl;
-
-  /// The vault's mailbox on that relay (hex), for [`check_recovery`].
   final String label;
 
   const SeatLinkInfo({required this.relayUrl, required this.label});

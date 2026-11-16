@@ -1,30 +1,12 @@
 name: Release (Android)
 
-# Builds a signed testnet APK and publishes it as a GitHub pre-release.
-#
-#   git tag v0.1.0 && git push origin v0.1.0
-#
-# Needs, see docs/releasing.md:
-#   repository variables
-#     ZAFE_RELAY_URL             the deployed testnet relay (https://testnet.relay.zafe.cash)
-#     ZAFE_TESTNET_LINK_HOST     required: host of the invite landing site for testnet builds
-#                                (testnet.zafe.cash: the same site, a second domain; infra/site/),
-#                                e.g. zafe.cash; without it invites are zafe:// links
-#   secrets of the environment `android-release` (only v* tags may use it, so no branch or
-#   pull-request workflow can read the signing key)
-#     ANDROID_KEYSTORE_BASE64    base64 of the upload keystore (.jks)
-#     ANDROID_KEYSTORE_PASSWORD
-#     ANDROID_KEY_ALIAS
-#     ANDROID_KEY_PASSWORD
-#     GOOGLE_SERVICES_JSON       optional: Firebase config for push notifications
-
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: write
-  actions: write   # start the site workflow so its download links follow this release
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -54,7 +36,6 @@ jobs:
           fi
           echo "name=$v" >> "$GITHUB_OUTPUT"
 
-      # Never publish an APK that talks to no relay, or one signed with a debug key.
       - name: Check configuration
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -66,8 +47,6 @@ jobs:
           [ -n "$ZAFE_RELAY_URL" ] || { echo "::error::Set the repository variable ZAFE_RELAY_URL"; missing=1; }
           case "$ZAFE_RELAY_URL" in https://*|'') ;; *) echo "::error::ZAFE_RELAY_URL must be https://"; missing=1;; esac
           case "$ZAFE_LINK_HOST" in
-            # Required: a release must open invites through verified https App Links; any
-            # app can claim the zafe:// scheme and receive the invite instead.
             '') echo "::error::Set ZAFE_LINK_HOST: without it invites are zafe:// links, which another app can claim"; missing=1 ;;
             *[!a-z0-9.-]*|.*|*.|*..*) echo "::error::ZAFE_LINK_HOST must be a bare lower-case host like zafe.example"; missing=1 ;;
           esac
@@ -85,10 +64,6 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      # Cargokit builds the Rust library into app/build/rust_lib_zafe/build. Restored from
-      # the cache android-build.yml saves on main: a tag run can only read caches of its own
-      # tag or of main, so one saved here would never be read again (every release
-      # compiled the Rust from scratch, ~13 min).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> app/build/rust_lib_zafe/build'
@@ -127,10 +102,6 @@ jobs:
             echo "::warning::No GOOGLE_SERVICES_JSON: the APK relies on background checks, no push"
           fi
 
-      # Version code: Flutter adds 2000 for arm64 split APKs, so this ships 4100 + run
-      # number. The base moved up on 2026-10-16 (a local release build reached 4019 on a
-      # tester's phone; a lower code is a downgrade Android refuses). Testnet is sideloaded
-      # only, so its codes are free to jump.
       - name: Build
         working-directory: app
         run: |
@@ -143,9 +114,6 @@ jobs:
             --build-name='${{ steps.version.outputs.name }}' \
             --build-number=$((2100 + ${{ github.run_number }}))
 
-      # The release notes are written here, at tag time, from this file as of the tagged commit:
-      # a later change to this text reaches only the next tag (fix an old release with
-      # `gh release edit <tag> --notes-file ...`).
       - name: Package
         id: package
         run: |
@@ -190,7 +158,6 @@ jobs:
             dist/${{ steps.package.outputs.apk }}
             dist/${{ steps.package.outputs.apk }}.sha256
 
-      # The site's download links are the newest release of each kind; rebuild it now.
       - name: Refresh the site links
         continue-on-error: true
         env:
