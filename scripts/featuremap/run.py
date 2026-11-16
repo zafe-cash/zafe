@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import catalog
-from .check import ROOT, features
+from .check import ROOT, by_hand, features
 from .model import Flutter, Rust, Script
 
 
@@ -110,6 +110,7 @@ def record(path: Path, version: str, base: str | None, head: str, touched, outco
                 "name": f.name,
                 "proofs": [r.__dict__ for r in outcome["proofs"].get(f.id, [])],
                 "flows": [outcome["flows"][n].__dict__ for n in f.flows if n in outcome["flows"]],
+                "check_on_a_phone": by_hand(f) and touched is not None and f.id in touched.features,
             }
             for area in catalog.AREAS for f in area.features
         ],

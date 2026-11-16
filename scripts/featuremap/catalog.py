@@ -142,7 +142,7 @@ SETUP = Area("setup", "Setting up a vault", (
             Flutter("test/invite_link_test.dart"),
             Flutter("test/setup_waiting_test.dart"),
         ),
-        flows=("join_vault", "scan_invite"),
+        flows=("join_vault",),
     ),
     Feature(
         "vault.safety_words", "Compare safety words",
@@ -178,7 +178,7 @@ SETUP = Area("setup", "Setting up a vault", (
                  "the_creator_cancels_a_sealed_setup_with_no_keys", "member_cap_and_creator_removal"),
             Flutter("test/cancel_setup_back_test.dart"),
         ),
-        flows=("cancel_setup",),
+        flows=(),
     ),
 ))
 
@@ -240,7 +240,7 @@ PAYMENTS = Area("pay", "Payments", (
                  "fields_are_quoted_and_formulas_defused"),
             Flutter("test/activity_feed_test.dart"),
         ),
-        flows=("activity_export",),
+        flows=(),
     ),
     Feature(
         "pay.payment_link", "Pay a payment link",
@@ -254,7 +254,7 @@ PAYMENTS = Area("pay", "Payments", (
             Flutter("test/payment_request_test.dart"),
             Flutter("tool/screens/payment_request_render_test.dart"),
         ),
-        flows=("payment_link",),
+        flows=(),
     ),
     Feature(
         "pay.propose", "Propose a payment",
@@ -284,14 +284,14 @@ PAYMENTS = Area("pay", "Payments", (
                  "a_lone_members_cancelled_shares_dont_block_other_payments"),
             Rust(CORE, "regtest_e2e", "vault_pays_on_regtest", needs="regtest"),
         ),
-        flows=("propose_from_app", "scan_recipient"),
+        flows=("propose_from_app",),
     ),
     Feature(
         "pay.csv", "Pay many from a CSV",
         owns=(dart("features/send/recipients_csv.dart"),),
         reach=(Label("Import recipients from CSV"),),
         proofs=(Flutter("test/recipients_csv_test.dart"),),
-        flows=("csv_import",),
+        flows=(),
     ),
     Feature(
         "pay.approve", "Check and approve",
@@ -395,7 +395,7 @@ PAYMENTS = Area("pay", "Payments", (
             Flutter("test/respond_policy_test.dart"),
             Script("scripts/m0-e2e.sh", needs="regtest"),
         ),
-        flows=("interactive_signing",),
+        flows=(),
     ),
     Feature(
         "pay.decline_cancel", "Decline or cancel",
@@ -411,7 +411,7 @@ PAYMENTS = Area("pay", "Payments", (
             Rust(CORE, "vault", "rejection_threshold_is_n_minus_t_plus_one", "a_member_changing_their_vote_counts_once",
                  "broadcast_racing_a_cancel_does_not_brick_the_log"),
         ),
-        flows=("decline_payment", "cancel_payment"),
+        flows=(),
     ),
     Feature(
         "pay.sweep", "Make a signed payment unsendable",
@@ -427,7 +427,7 @@ PAYMENTS = Area("pay", "Payments", (
             Rust(CORE, "vault", "a_cancelled_signed_payment_must_be_respent"),
             Flutter("test/sweep_request_test.dart"),
         ),
-        flows=("make_unsendable",),
+        flows=(),
     ),
     Feature(
         "pay.expiry", "Expiry and proposing again",
@@ -446,7 +446,7 @@ PAYMENTS = Area("pay", "Payments", (
                  "an_unknown_network_upgrade_is_reported_as_an_outdated_app"),
             Flutter("test/proposal_expiry_test.dart"),
         ),
-        flows=("expired_payment",),
+        flows=(),
     ),
     Feature(
         "pay.spend_alert", "Money left without approval",
@@ -462,7 +462,7 @@ PAYMENTS = Area("pay", "Payments", (
                  "a_proposal_nobody_signed_explains_nothing", "rows_of_one_transaction_are_one_spend"),
             Rust(CORE, "relay_rollback", "the_spend_alert_falls_back_to_the_log_copy_when_the_relay_is_down"),
         ),
-        flows=("spend_alert",),
+        flows=(),
     ),
 ))
 
@@ -532,7 +532,7 @@ RECOVERY = Area("recovery", "Backups and lost phones", (
             Rust(BRIDGE, "repair_bridge", "a_lost_phone_is_replaced_through_the_bridge"),
             Flutter("tool/screens/repair_render_test.dart"),
         ),
-        flows=("recover_seat",),
+        flows=(),
     ),
     Feature(
         "seat.replace", "Move a lost phone's seat",
@@ -564,7 +564,7 @@ RECOVERY = Area("recovery", "Backups and lost phones", (
                  "finishes_switch_a_cancelled_row_at_t", "one_seats_junk_rows_dont_block_another_seat"),
             Rust(RELAY, "rule7", "seat_approvals_that_repeat_a_key_or_outnumber_the_members_are_refused"),
         ),
-        flows=("cosign_seat_move",),
+        flows=(),
     ),
     Feature(
         "seat.keep", "Keep a seat",
@@ -582,7 +582,7 @@ RECOVERY = Area("recovery", "Backups and lost phones", (
             Rust(RELAY, "labels", "a_cancel_touches_only_the_move_it_names"),
             Rust(RELAY, "rule7", "a_replayed_cancel_doesnt_spend_the_old_keys_rate"),
         ),
-        flows=("keep_seat",),
+        flows=(),
     ),
     Feature(
         "seat.stalled", "Stop or take over a stalled move",
@@ -597,7 +597,7 @@ RECOVERY = Area("recovery", "Backups and lost phones", (
                  "a_helper_that_stopped_stays_stopped", "a_stopped_helpers_new_key_stays_stopped"),
             Rust(CORE, "seat_move_attacks", "a_helper_that_stopped_never_helps"),
         ),
-        flows=("stop_helping",),
+        flows=(),
     ),
 ))
 
@@ -629,7 +629,7 @@ SERVERS = Area("servers", "Servers", (
             Flutter("tool/screens/servers_render_test.dart"),
             Flutter("tool/screens/relay_render_test.dart"),
         ),
-        flows=("choose_server", "scan_relay"),
+        flows=(),
     ),
     Feature(
         "server.move", "Move to another server",
@@ -676,7 +676,7 @@ SERVERS = Area("servers", "Servers", (
             Flutter("test/relay_move_test.dart"),
             Flutter("tool/screens/relay_move_render_test.dart"),
         ),
-        flows=("move_server", "follow_move"),
+        flows=(),
     ),
     Feature(
         "server.history", "Keep the vault's history honest",
@@ -719,7 +719,7 @@ SERVERS = Area("servers", "Servers", (
             Rust(RELAY, "quotas", "a_stale_reseed_is_refused"),
             Flutter("test/sync_failure_test.dart"),
         ),
-        flows=("server_lost",),
+        flows=(),
     ),
     Feature(
         "server.messages", "Private messages between phones",
@@ -768,7 +768,7 @@ SERVERS = Area("servers", "Servers", (
             Rust(RELAY, None, "bucket_allows_a_burst_then_refills", "daily_bucket_refills_slowly", "idle_buckets_are_pruned",
                  "client_ip_comes_from_the_configured_header_only"),
         ),
-        flows=("server_full",),
+        flows=(),
     ),
     Feature(
         "server.live", "Live updates",
@@ -813,7 +813,7 @@ SERVERS = Area("servers", "Servers", (
             Flutter("test/vault_updates_test.dart"),
             Flutter("test/check_lock_test.dart"),
         ),
-        flows=("notify_payment",),
+        flows=(),
     ),
     Feature(
         "chain.sync", "Sync with the Zcash chain",
@@ -837,7 +837,7 @@ SERVERS = Area("servers", "Servers", (
                  "wallet_database_is_encrypted"),
             Flutter("test/mobile_top_nav_motion_test.dart"),
         ),
-        flows=("sync_status",),
+        flows=(),
     ),
     Feature(
         "chain.server", "Choose a Zcash server",
@@ -847,7 +847,7 @@ SERVERS = Area("servers", "Servers", (
         ),
         reach=(App("/zcash-server", ("Settings", "Zcash server")),),
         proofs=(Flutter("test/lightwalletd_presets_test.dart"),),
-        flows=("zcash_server",),
+        flows=(),
     ),
 ))
 
@@ -871,7 +871,7 @@ PRIVACY = Area("privacy", "Privacy and security", (
             Flutter("test/tor_setting_test.dart"),
             Flutter("tool/screens/tor_render_test.dart"),
         ),
-        flows=("tor_testnet",),
+        flows=(),
     ),
     Feature(
         "privacy.lock", "Lock the app",
@@ -881,7 +881,7 @@ PRIVACY = Area("privacy", "Privacy and security", (
         ),
         reach=(Label("Lock app"),),
         proofs=(Flutter("test/app_lock_test.dart"), Flutter("test/device_auth_test.dart")),
-        flows=("app_lock",),
+        flows=(),
     ),
     Feature(
         "privacy.hide_amounts", "Hide amounts",
@@ -889,7 +889,7 @@ PRIVACY = Area("privacy", "Privacy and security", (
                    "core/privacy/privacy_mask.dart"),),
         reach=(Label("Hide amounts"), Label("Hide balance")),
         proofs=(Flutter("test/vault_updates_test.dart"),),
-        flows=("hide_amounts",),
+        flows=(),
     ),
     Feature(
         "privacy.screen_cover", "Secret screens can't be captured",
@@ -897,7 +897,7 @@ PRIVACY = Area("privacy", "Privacy and security", (
               Files("app/android/app/src/main/kotlin/xyz/zafe/zafe/MainActivity.kt")),
         reach=(Auto("a screen showing a secret is open"),),
         proofs=(Flutter("test/app_lock_test.dart"),),
-        flows=("secure_screens",),
+        flows=(),
     ),
     Feature(
         "privacy.names", "Member names",
@@ -918,21 +918,21 @@ PRIVACY = Area("privacy", "Privacy and security", (
             Flutter("test/member_names_test.dart"),
             Flutter("test/member_impersonation_test.dart"),
         ),
-        flows=("member_names",),
+        flows=(),
     ),
     Feature(
         "privacy.viewing_key", "Share the viewing key",
         owns=(dart("features/settings/viewing_key_screen.dart"), bridge_vault("vault_viewing_key")),
         reach=(App("/viewing-key", ("Settings", "Viewing key")),),
         proofs=(Rust(CORE, None, "ufvk_is_orchard_only"),),
-        flows=("viewing_key",),
+        flows=(),
     ),
     Feature(
         "privacy.how_it_works", "How the vault is protected",
         owns=(dart("features/settings/vault_protection_screen.dart"),),
         reach=(App("/vault-protection", ("Settings",)),),
         proofs=(Flutter("tool/screens/protection_render_test.dart"),),
-        flows=("vault_protection",),
+        flows=(),
     ),
     Feature(
         "privacy.diagnostics", "Diagnostic report",
@@ -949,7 +949,7 @@ PRIVACY = Area("privacy", "Privacy and security", (
             Flutter("tool/screens/diagnostics_render_test.dart"),
             Script("scripts/check-no-telemetry.sh"),
         ),
-        flows=("diagnostics",),
+        flows=(),
     ),
 ))
 
@@ -970,7 +970,7 @@ APP = Area("app", "Around the app", (
                    "core/storage/vault_summaries.dart", "core/storage/vault_name.dart"),),
         reach=(App("/vaults", ("Manage vaults",)),),
         proofs=(Flutter("tool/screens/emblem_render_test.dart"),),
-        flows=("two_vaults",),
+        flows=(),
     ),
     Feature(
         "app.update", "Updates",
@@ -991,7 +991,7 @@ APP = Area("app", "Around the app", (
             Rust(CORE, None, "version_1_material_reads_as_legacy_relay"),
             Flutter("test/app_update_test.dart"),
         ),
-        flows=("update_prompt",),
+        flows=(),
     ),
     Feature(
         "app.price", "Dollar prices",
@@ -1000,14 +1000,14 @@ APP = Area("app", "Around the app", (
         proofs=(Rust(CORE, None, "reads_coingecko", "reads_exchange_rate"),
                 Rust(CORE, None, "live_direct_price", needs="network"),
                 Flutter("test/zec_price_test.dart")),
-        flows=("price_mainnet",),
+        flows=(),
     ),
     Feature(
         "app.theme", "Light and dark theme",
         owns=(dart("providers/theme_mode_provider.dart"),),
         reach=(Label("Theme"),),
         proofs=(Script("scripts/check_theme_pairs.py"), Script("scripts/check_typography.py")),
-        flows=("theme",),
+        flows=(),
     ),
     Feature(
         "app.sounds", "Payment sounds and haptics",
@@ -1015,7 +1015,7 @@ APP = Area("app", "Around the app", (
                    "providers/payment_sounds_provider.dart"),),
         reach=(Label("Payment sounds"),),
         proofs=(Flutter("test/payment_feedback_test.dart"),),
-        flows=("payment_sounds",),
+        flows=(),
     ),
     Feature(
         "app.interop", "Share a vault with frost-zec",

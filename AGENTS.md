@@ -69,10 +69,12 @@ rule once, centrally (`clippy.toml`, `analysis_options.yaml`, the check script).
 **Feature map** (`scripts/featuremap/catalog.py`, run with `python3 scripts/features.py`):
 every feature, the code it owns (files, or functions in a shared file), how a person
 reaches it (app route and labels, `zafe` command, relay route) and what proves it (tests
-by name, scripts, live flows in `featuremap/flows.py`). `check` fails unless every source
-file, app route, CLI command, relay route and test is claimed, every name exists, every
-app feature has a flow, every route is visited by a flow and every Dart file is imported:
-add a feature or extend one in the same change. `touched A..B` lists what a diff touched;
+by name, scripts, live flows in `featuremap/flows.py`). `check` (Rules, every push) fails
+unless every source file, app route, CLI command, relay route and test is claimed, every
+name exists and every Dart file is imported: add a feature or extend one in the same
+change. Live flows cover only the essential paths; an app feature without one is listed as
+"check on a phone" when a release touches its own code. Add a flow when a wiring bug ships,
+not ahead of one. `touched A..B` lists what a diff touched;
 `verify --essential` runs the core flows on the emulator against the regtest harness
 (needs the testnet app installed: flows read the clipboard through its join field);
 `verify --range <last tag>..HEAD --flows --needs regtest --record <version>` runs the

@@ -18,7 +18,8 @@ git tag mainnet-v<version> && git push origin mainnet-v<version>  # same commit,
 v<last>..HEAD --flows --needs regtest --record <version>` runs every proof and live flow of
 the features the release touched (all of them when plumbing changed) and writes
 `docs/releases/<version>.features.json`; commit it with the release notes. A failure or
-an unexplained skip stops the release.
+an unexplained skip stops the release. Features it lists as "check on a phone" (app
+features without a live flow whose own code changed) go into the testnet dry run below.
 
 **Testnet first.** Testnet is the staging step for mainnet: tag the commit `v<version>`,
 install the testnet APK, run the dry run (create, receive, propose, sign, send, restore),

@@ -199,6 +199,10 @@ def dart_reachable() -> set[str]:
     return {p.relative_to(ROOT).as_posix() for p in seen}
 
 
+def by_hand(f) -> bool:
+    return not f.flows and any(isinstance(r, (App, Label)) for r in f.reach)
+
+
 def check() -> list[str]:
     errors: list[str] = []
     files = tracked()
@@ -252,9 +256,6 @@ def check() -> list[str]:
             errors.append(f"{f.id}: no way in")
         if not f.proofs:
             errors.append(f"{f.id}: nothing proves it")
-        app_facing = any(isinstance(r, (App, Label)) for r in f.reach)
-        if app_facing and not f.flows:
-            errors.append(f"{f.id}: an app feature without a live flow")
         for r in f.reach:
             if isinstance(r, App):
                 claimed_routes.add(r.route)
@@ -335,9 +336,6 @@ def check() -> list[str]:
     for flow in catalog.ESSENTIAL_FLOWS:
         if flow not in defined:
             errors.append(f"essential flow {flow} isn't written")
-    visited = set().union(*visits.values()) if visits else set()
-    for route in sorted(app_routes - visited):
-        errors.append(f"route {route}: no flow visits it")
     for flow, routes_seen in visits.items():
         for route in routes_seen - set(screens):
             errors.append(f"flow {flow}: visits {route}, which has no Screen")

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from . import catalog
-from .check import ROOT, check, features
+from .check import ROOT, by_hand, check, features
 from .run import record, verify
 from .touched import touched
 
@@ -73,6 +73,10 @@ def cmd_verify(args) -> int:
         log(f"FAILED {r.proof}\n{r.detail}")
     for proof, why in sorted(skipped.items()):
         log(f"skipped {proof} ({why})")
+    direct = set(t.features) if t else ids
+    for f in features():
+        if f.id in direct and by_hand(f):
+            log(f"check on a phone: {f.name}")
     return 1 if failed else 0
 
 
