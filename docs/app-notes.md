@@ -1129,6 +1129,13 @@ Learned while studying it:
   sudo, `apt-get download libxkbfile1`, `dpkg-deb -x` it under `~/android/extra-libs`
   and set `LD_LIBRARY_PATH`. When the emulator dies mid-send the broadcast can still
   complete: check the vault log (`zafe proposals`) before retrying.
+- **Android 10 unlock**: AVD `zafe29` (API 29, `-gpu host` runs Impeller) covers the
+  pre-Android-11 path, where `MainActivity.unlock` asks for the PIN alone through
+  `createConfirmDeviceCredentialIntent` and the Activity Result API. Set a PIN with
+  `adb shell locksettings set-pin 1234`, then Settings > Viewing key: right PIN shows the
+  key, Back (twice: keyboard, then screen) returns to Settings, wrong PIN keeps the
+  prompt (all passed 2026-11-17). Typing a whole invite there times out in `agent-device
+  fill`: open `zafe://join?invite=<invite>` instead. No notification prompt below 13.
 - **Harness**: `scripts/app-harness.sh` runs the relay plus CLI members B and C and sets
   `adb reverse` for 8787/9067, so the app's localhost defaults work on a device. Its
   `cli` subcommand does not rebuild: `cargo build -p zafe-cli` after core changes.
