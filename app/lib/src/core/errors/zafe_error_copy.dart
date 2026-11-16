@@ -98,6 +98,12 @@ String zafeErrorMessage(
     ZafeErrorKind.moveStale =>
       'This link is from an earlier move. Ask for a new one.',
     ZafeErrorKind.twoMoves => 'Two moves found: ask your group.',
+    ZafeErrorKind.moveCancelled => 'You left this move. Ask for a new link.',
+    ZafeErrorKind.moveUnconfirmed =>
+      'Can\'t reach ${_host(error.message)} to check the move, so nothing was sent. '
+          'Try again, or cancel your move to stay on this server.',
+    ZafeErrorKind.moveConflict =>
+      'The new server\'s history doesn\'t match this one. Cancel the move and start a new one.',
     ZafeErrorKind.alreadySigned =>
       'Your signature is already out, so you can\'t decline this payment. Its proposer can cancel it.',
     ZafeErrorKind.other => fallback,

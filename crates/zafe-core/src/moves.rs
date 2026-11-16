@@ -1,6 +1,7 @@
 //! Moving a vault to another relay: the formats (`docs/relay-move.md` §4.2-4.7).
 //!
-//! A move has a target ([`MoveTarget`]): the vault, a random move id, the new relay's URL,
+//! A move has a target ([`MoveTarget`]): the vault, a move id naming the mover
+//! ([`move_id_for`]), the new relay's URL,
 //! the vault's new mailbox label there, the point of the log the mover started from
 //! (`base`) and an expiry. Each member who moves signs the target with its identity key:
 //! its **arrival**, sent sealed to every other member on the new relay. The first phone
@@ -20,8 +21,11 @@ use zafe_proto::{
 
 const ARRIVAL_DOMAIN: &[u8] = b"Zafe relay move arrival v1";
 const STATE_KEY_DOMAIN: &str = "Zafe relay move state key v1";
+const MOVE_ID_DOMAIN: &str = "Zafe relay move id v1";
 
-/// How long a move stays open: 14 days from when the mover started it.
+/// How long a move stays open: 14 days from when the mover started it. Shorter than a
+/// relay keeps undelivered messages (`zafe_relay::DELIVERY_RETENTION_SECS`), so a member's
+/// cancel stays readable for the whole move.
 pub const MOVE_LIFETIME_SECS: u64 = 14 * 24 * 3600;
 
 /// The site the move link points at (only its fragment matters, and the site never sees it).
@@ -37,6 +41,18 @@ pub const MOVE_PAD_BYTES: usize = 1024;
 /// one): `max(t, n − t + 1)`. 2-of-3 and 3-of-5: t; 2-of-4: 3; 2-of-5: 4.
 pub fn switch_threshold(members: usize, threshold: usize) -> usize {
     threshold.max(members.saturating_sub(threshold) + 1)
+}
+
+/// The move id a mover gives its move to `label`: it names the mover inside the signed
+/// target (rule: the mover is never inferred from the order a relay serves arrivals). Anyone
+/// can compute it for anyone, so it only says *who* the mover is; that member's own arrival
+/// signature over the exact target is what counts. Moves made by apps before 2026-11-16
+/// have random ids and no derivable mover: they can't be followed.
+pub fn move_id_for(mover: &[u8; 32], label: &MailboxId) -> [u8; 16] {
+    let mut input = mover.to_vec();
+    input.extend_from_slice(label);
+    let key = blake3::derive_key(MOVE_ID_DOMAIN, &input);
+    key[..16].try_into().expect("16 bytes")
 }
 
 /// What every arrival of a move signs.
@@ -70,6 +86,19 @@ impl MoveTarget {
     /// Whether `signature` is `who`'s arrival for this target.
     pub fn verify(&self, who: &IdentityPublic, signature: &[u8]) -> bool {
         who.verify(&self.message(), signature).is_ok()
+    }
+
+    /// The member (signing key) among `members` whose key derives this move's id
+    /// ([`move_id_for`]): the mover. `None` for a move whose mover isn't a member (any
+    /// more) or an older app's move.
+    pub fn mover_among<'a>(
+        &self,
+        members: impl IntoIterator<Item = &'a [u8; 32]>,
+    ) -> Option<[u8; 32]> {
+        members
+            .into_iter()
+            .find(|pk| move_id_for(pk, &self.label) == self.move_id)
+            .copied()
     }
 
     pub fn expired(&self, now: u64) -> bool {

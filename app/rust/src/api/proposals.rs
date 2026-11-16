@@ -605,9 +605,14 @@ pub fn list_proposals(
                     let _ = std::fs::remove_file(&reset_marker);
                 }
             }
-            // The vault moved and this phone hasn't followed yet: still list what is here
-            // (the Home card offers the move).
-            Err(node::NodeError::VaultMoved { .. }) => {}
+            // The vault moved and this phone hasn't followed yet, or this phone can't tell
+            // where it lives (rule 6: it writes nowhere): still list what is here (the Home
+            // card offers the move; the Server screen its cancel).
+            Err(
+                node::NodeError::VaultMoved { .. }
+                | node::NodeError::MoveUnconfirmed { .. }
+                | node::NodeError::MoveConflict,
+            ) => {}
             Err(e) => return Err(e.into()),
         }
         watch.lap("pool");

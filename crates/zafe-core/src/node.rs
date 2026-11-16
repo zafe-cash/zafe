@@ -136,6 +136,22 @@ pub enum NodeError {
     /// signed both): neither is followed. "Two moves found: ask your group."
     #[error("two moves found for the same history: ask your group")]
     TwoMoves,
+    /// This phone left the move (a cancel is final: the others count no arrival of a member
+    /// who cancelled, on either relay, whatever order they arrive in). "You left this move.
+    /// Ask for a new one."
+    #[error("you left this move: ask for a new one")]
+    MoveCancelled,
+    /// This phone can't tell where the vault lives, so it writes nowhere (rule 6): the
+    /// relay at `url` can't be read (the new relay of a move this phone joined, or the move
+    /// notices on the current one). Try again, or cancel the move to stay.
+    #[error("can't reach {url} to check the vault's move")]
+    MoveUnconfirmed { url: String },
+    /// Before the switch, the new relay holds an entry that the vault's history doesn't
+    /// have where the old relay has another (a member wrote there early, or the old relay
+    /// forked its members): the move can't complete. "The new server's history doesn't
+    /// match this one. Start the move again."
+    #[error("the new relay's history doesn't match the vault's: start the move again")]
+    MoveConflict,
 }
 
 fn proto(e: impl core::fmt::Debug) -> NodeError {
@@ -2069,8 +2085,7 @@ pub async fn follow_relay(
         .zip(theirs.entries())
         .take_while(|(a, b)| matches!((a.hash(), b.hash()), (Ok(x), Ok(y)) if x == y))
         .count() as u64;
-    cache.remove(&ids.vault);
-    save_copy(relay, &theirs);
+    cache.replace(&ids.vault, theirs.entries())?;
     Ok(Followed {
         dropped: ours.len() as u64 - common,
         entries: theirs.len(),

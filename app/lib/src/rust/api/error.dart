@@ -167,4 +167,14 @@ enum ZafeErrorKind {
   /// This phone's signature for the payment may already be out, so it can't decline it
   /// (nothing was logged); its proposer can cancel it.
   alreadySigned,
+
+  /// This phone cancelled this move: a cancel is final.
+  moveCancelled,
+
+  /// This phone can't tell whether the vault moved, so it writes nowhere (`message` names
+  /// the relay it can't read): try again, or cancel the move to stay.
+  moveUnconfirmed,
+
+  /// The new relay's history doesn't match the vault's: start the move again.
+  moveConflict,
 }

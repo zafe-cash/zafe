@@ -118,6 +118,9 @@ pub const NEARLY_FULL_PERCENT: u64 = 90;
 pub const YOUNG_MAILBOX_DAYS: i64 = 30;
 
 /// Undelivered envelopes older than this are pruned (spec §6.1).
+/// Must outlive a relay move (`zafe_core::moves::MOVE_LIFETIME_SECS`, 14 days): a move
+/// cancel is never acknowledged, and the others drop a cancelled member's arrival only while
+/// they can read its cancel (`relay_move.rs` pins this).
 pub const DELIVERY_RETENTION_SECS: u64 = 30 * 24 * 3600;
 
 /// Most members one mailbox may have (created or restored). Vaults have at most 15.

@@ -79,9 +79,10 @@ Done on the branch:
       `scripts/check_docs_links.py` in CI (2026-10-27; `docs/site.md`).
 
 Open from moves:
-- [ ] Leaving a fork after a move: a write that races the switch forks the old relay, and
-      `follow_move` then fails with `RelayForked`. No screen offers `node::follow_relay`
-      for the new relay.
+- [x] Leaving a fork after a move: following voids the copy's old-relay entries after the
+      point the histories part when they are intent only (security review 2026-11, batch 5).
+- [ ] A fork after a move that holds evidence (shares, seat moves) still ends in
+      `RelayForked`, and no screen offers `node::follow_relay` for the new relay.
 - [ ] The mover's waiting room updates only on the next vault refresh (up to a minute in
       the emulator run): refresh it when an arrival lands.
 - [ ] Site page `zafe.cash/move` (opens the app with the fragment; explains a move to

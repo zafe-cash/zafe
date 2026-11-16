@@ -355,12 +355,34 @@ Status 2026-11-14 (implemented, not committed; `VAULT_EVENT` 12, `PROPOSAL_RULES
 
 ### Relay moves (rule 6)
 
+- **C, a withdrawn arrival** (dishonest member + hostile new relay): Bob tapped Move, then
+  cancelled; the new relay withheld his cancel from Carol, who switched with his arrival,
+  and Bob's next write followed on its own. Now a cancel is final and goes to both relays;
+  the switching phone reads both and never counts an arrival from a member who cancelled,
+  in any order. A cancelled phone that sees a verified switch stops writing and follows
+  only on a tap.
+- **D, an early write** (one member): appending to the new relay before `VaultMoved` made
+  every follower's copy take that entry (its next old-relay load then looked rolled back:
+  no writes, no signing) or made the move fork. Now a copy takes new-relay entries only
+  once they hold the switch, and a new-relay entry that conflicts with the old relay is
+  `MoveConflict` ("start the move again"); arrived phones keep writing to the old relay
+  (refusing would let that one entry freeze every phone that tapped Move). No culprit is named: a forking old relay can
+  produce the same picture from two honest members. A relay-side gate on appends was
+  rejected: every member receives every arrival, so the attacker holds the m arrivals such
+  a gate could ask for by the time a switch is possible.
 - A phone that can't read its move notices, or can't tell whether its own move switched,
-  refuses to write instead of writing to the old relay.
-- A phone that wrote to the old relay after a verified switch can still follow: entries
-  after the switch's base on the old relay are void by rule, so following drops them.
-- The mover is named in the signed move target, not inferred from the order a relay
-  serves arrivals, and a cancel goes to both relays.
+  refuses to write instead of writing to the old relay (`MoveUnconfirmed`; Cancel move or
+  the move's expiry ends it). Only transport fails there: a member's malformed move
+  messages are skipped.
+- A phone that wrote to the old relay after a verified switch can still follow: its
+  entries after the point the histories part are void, but only intent may be dropped
+  (names, backup checks, commitments, proposals, votes without shares, cancels), no
+  proposal possibly signed in the copy may lose that state, and members and switches must
+  match; anything else stays `RelayForked`. The copy is replaced in one rename; a backup
+  from before still holds the dropped part and goes through the same check on restore.
+- The mover is named in the signed move target: the move id is derived from the mover's
+  key and the label, and a move is on only while that member's own arrival stands. Moves
+  started by older apps (random ids) can't be followed.
 
 ### Relay server (rule 7)
 
@@ -564,6 +586,15 @@ Batch 4 (2026-11-14; failing tests in `crates/zafe-relay/tests/rule7.rs`,
   2026-11-16: before, every deploy added two copies kept 14 days); fewer local copies or
   off-site ones would allow a larger cap. Operator calls; the owner chose to leave
   creation open for now (2026-11-16).
+- **A relay move can still be blocked** while the old relay answers, by one member who
+  writes a conflicting entry to the new relay, or by an old relay that forks its members
+  (`MoveConflict`); the vault keeps working where it is. A withdrawn arrival can still be
+  counted when the new relay withholds the cancel and the old relay can't be read; the
+  withdrawn phone then follows only on its tap, so the history stays one. A dishonest
+  switcher whose old relay doesn't answer can leave out members' intent entries from
+  before the switch (names, proposals, votes without shares); following drops those and
+  members tap again. Voiding only at the switch entry itself was rejected: it would stop
+  honest phones from following a move off a dead relay whenever their copies differ.
 - **The log is a lifetime limit per relay**: 512 MiB hosted is about seven years at 10
   payments a day, one author's half about three and a half; a move copies the log, so
   only a relay with a larger cap helps (the app says so).

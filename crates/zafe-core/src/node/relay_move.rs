@@ -338,9 +338,9 @@ pub async fn move_vault<R: RngCore + CryptoRng>(
     if !behind.is_empty() {
         return Err(NodeError::MembersMustUpdate(behind));
     }
-    let (mut label, mut move_id) = ([0u8; 16], [0u8; 16]);
+    let mut label = [0u8; 16];
     rng.fill_bytes(&mut label);
-    rng.fill_bytes(&mut move_id);
+    let move_id = crate::moves::move_id_for(&me.public().sig_pk, &label);
     let target = MoveTarget {
         vault_id: material.descriptor.vault_id,
         move_id,
@@ -400,14 +400,35 @@ pub async fn move_vault<R: RngCore + CryptoRng>(
 #[derive(Default)]
 struct Arrivals {
     target: Option<MoveTarget>,
-    /// Sender → signature, for senders whose arrival stands (not withdrawn).
+    /// Sender → signature, for senders whose arrival stands (no cancel from them seen).
     by: BTreeMap<[u8; 32], Vec<u8>>,
-    /// The first member whose arrival came (the mover, from a link).
-    first: Option<[u8; 32]>,
-    /// The token the mover's arrival carried.
+    /// The mover (from the move id), when it is a current member.
+    mover: Option<[u8; 32]>,
+    /// The token the mover's own arrival carried.
     token: Option<String>,
     /// Members who sent a cancel for the move.
     cancelled: BTreeSet<[u8; 32]>,
+}
+
+impl Arrivals {
+    /// The mover's own arrival stands: the move is on.
+    fn mover_arrived(&self) -> bool {
+        self.mover.is_some_and(|m| self.by.contains_key(&m))
+    }
+
+    /// Drops the arrivals of members who cancelled (seen on any relay). A cancel is final
+    /// for that move, so the order the relays serve them in never matters.
+    fn withdraw(&mut self, cancelled: impl IntoIterator<Item = [u8; 32]>) {
+        self.cancelled.extend(cancelled);
+        let gone = &self.cancelled;
+        self.by.retain(|pk, _| !gone.contains(pk));
+    }
+}
+
+/// The current member whose key derives the move's id ([`crate::moves::move_id_for`]).
+fn mover_of(state: &VaultState, target: &MoveTarget) -> Option<[u8; 32]> {
+    let members: Vec<[u8; 32]> = state.member_identities().iter().map(|m| m.sig_pk).collect();
+    target.mover_among(&members)
 }
 
 /// Reads this member's inbox on the new relay for the move `link` names: arrivals signed by
@@ -428,6 +449,7 @@ async fn read_arrivals(
         })) => return Ok(out),
         Err(e) => return Err(e),
     };
+    let mut cancelled = BTreeSet::new();
     for (_, sender, env) in inbox {
         if !matches!(env.header.kind, Kind::Arrival | Kind::MoveCancelled) {
             continue;
@@ -454,28 +476,65 @@ async fn read_arrivals(
                 if !matches {
                     continue;
                 }
-                out.target.get_or_insert(target);
-                out.first.get_or_insert(sender.sig_pk);
-                if out.first == Some(sender.sig_pk) && create_token.is_some() {
+                if out.target.is_none() {
+                    out.mover = mover_of(state, &target);
+                    out.target = Some(target);
+                }
+                if out.mover == Some(sender.sig_pk) && create_token.is_some() {
                     out.token = create_token;
                 }
-                out.cancelled.remove(&sender.sig_pk);
                 out.by.insert(sender.sig_pk, signature);
             }
             MoveMessage::Cancelled { move_id } if move_id == link.move_id => {
-                out.by.remove(&sender.sig_pk);
-                out.cancelled.insert(sender.sig_pk);
+                cancelled.insert(sender.sig_pk);
             }
             _ => {}
         }
     }
+    out.withdraw(cancelled);
     Ok(out)
 }
 
+/// Members who sent a cancel for `move_id` on the vault's current relay. Best effort: an
+/// old relay that can't be read is the usual reason to move, and the new relay's cancels
+/// still count; a withdrawn phone never follows on its own either way.
+async fn cancels_on_old(
+    old: &RelayClient,
+    me: &Identity,
+    material: &VaultMaterial,
+    state: &VaultState,
+    move_id: &[u8; 16],
+) -> BTreeSet<[u8; 32]> {
+    let members = members_by_pk(state);
+    let inbox = match read_inbox(old, me, material.label(), &members, 0).await {
+        Ok(inbox) => inbox,
+        Err(e) => {
+            tracing::warn!("move cancels on the old relay not read: {e}");
+            return BTreeSet::new();
+        }
+    };
+    inbox
+        .into_iter()
+        .filter(|(_, _, env)| env.header.kind == Kind::MoveCancelled)
+        .filter_map(|(_, sender, env)| {
+            let msg = MoveMessage::from_padded(&env.open(me, &sender).ok()?).ok()?;
+            matches!(msg, MoveMessage::Cancelled { move_id: id } if &id == move_id)
+                .then_some(sender.sig_pk)
+        })
+        .collect()
+}
+
 /// The new relay's log, verified on its own, and how it stands against this phone's copy:
-/// the longer of the two histories (they must agree where both have entries, else
-/// [`NodeError::RelayForked`]) and the relay's length. Checks the relay's member list and
-/// threshold too. Extends this phone's copy when the relay is ahead.
+/// the history to count and write on (the longer of the two where they agree), the relay's
+/// length and a client for it. Checks the relay's member list and threshold too.
+///
+/// The copy takes the new relay's entries only once they hold this move's switch: before
+/// it, an entry there past the copy is no one's history yet (a member who wrote there early
+/// must not cut this phone off from the old relay, where its next load would then look
+/// rolled back). Where the two differ, a switch for this move after the point they part,
+/// from a base they share, voids the copy's entries from there (written on the old relay
+/// after the base, never copied) if [`droppable`] lets them go; the copy is then replaced
+/// in one rename. Without such a switch the move can't complete ([`NodeError::MoveConflict`]).
 async fn new_relay_history(
     old: &RelayClient,
     me: &Identity,
@@ -499,30 +558,96 @@ async fn new_relay_history(
         ));
     }
     let relay_len = theirs.len();
+    let switched = switched_by(&their_state, &link.move_id);
+    let mut replace = false;
     let (chain, state) = match load_copy(old, ids.vault, &key)? {
         None => (theirs, their_state),
         Some((ours, our_state)) => {
-            let common = ours.len().min(theirs.len());
-            if common > 0 {
-                let i = (common - 1) as usize;
-                if ours.entries()[i].hash().map_err(proto)?
-                    != theirs.entries()[i].hash().map_err(proto)?
-                {
-                    return Err(NodeError::RelayForked { index: common - 1 });
+            let mut part = None;
+            for (i, (a, b)) in ours.entries().iter().zip(theirs.entries()).enumerate() {
+                if a.hash().map_err(proto)? != b.hash().map_err(proto)? {
+                    part = Some(i as u64);
+                    break;
                 }
             }
-            if ours.len() > theirs.len() {
-                (ours, our_state)
-            } else {
-                (theirs, their_state)
+            match part {
+                None if ours.len() > theirs.len() => (ours, our_state),
+                None => (theirs, their_state),
+                Some(i) => {
+                    let voids = their_state.moves.iter().any(|m| {
+                        m.target.move_id == link.move_id && m.index >= i && m.target.base_index < i
+                    });
+                    if !voids {
+                        return Err(if switched {
+                            NodeError::RelayForked { index: i }
+                        } else {
+                            NodeError::MoveConflict
+                        });
+                    }
+                    if !droppable(
+                        &ours.entries()[i as usize..],
+                        &key,
+                        &our_state,
+                        &their_state,
+                    ) {
+                        return Err(NodeError::RelayForked { index: i });
+                    }
+                    replace = true;
+                    (theirs, their_state)
+                }
             }
         }
     };
     Box::pin(check_relay_membership(&bare, me, link.label, &state)).await?;
-    if chain.len() == relay_len {
+    if replace {
+        if let Some(cache) = old.log_cache() {
+            cache.replace(&ids.vault, chain.entries())?;
+        }
+    } else if switched && chain.len() == relay_len {
         save_copy(old, &chain);
     }
     Ok((chain, state, relay_len, new))
+}
+
+/// Whether this copy's entries `dropped` (written on the old relay after a switch's base,
+/// never copied to the new history) may go when this phone follows the switch: only intent
+/// the members can state again (names, backup checks, unassigned commitments, proposals,
+/// votes without shares, cancels). Everything else is evidence and stays, now and for
+/// event kinds added later: shares, broadcasts, seat moves, keeps, stops, pool resets,
+/// switches. Also refused when a proposal possibly signed here isn't possibly signed
+/// there (rule 5: another payment could then be approved through other notes), when the
+/// members differ, or when this copy knows a switch the new history doesn't.
+fn droppable(dropped: &[LogEntry], key: &LogKey, ours: &VaultState, theirs: &VaultState) -> bool {
+    let intent_only = dropped.iter().all(|e| {
+        let Ok(bytes) = e.decrypt(key) else {
+            return false;
+        };
+        match VaultEvent::from_bytes_versioned(&bytes) {
+            Ok((
+                VaultEvent::Name { .. }
+                | VaultEvent::BackupVerified { .. }
+                | VaultEvent::Commitments { .. }
+                | VaultEvent::Proposal { .. }
+                | VaultEvent::Cancelled { .. },
+                _,
+            )) => true,
+            Ok((VaultEvent::Vote { shares, .. }, _)) => shares.is_empty(),
+            _ => false,
+        }
+    });
+    let signed_kept = ours
+        .proposals
+        .iter()
+        .filter(|(_, p)| p.possibly_signed)
+        .all(|(id, _)| theirs.proposals.get(id).is_some_and(|p| p.possibly_signed));
+    let members = |s: &VaultState| -> BTreeSet<[u8; 32]> {
+        s.member_identities().iter().map(|m| m.sig_pk).collect()
+    };
+    let moves_kept = ours
+        .moves
+        .iter()
+        .all(|m| switched_by(theirs, &m.target.move_id));
+    intent_only && signed_kept && moves_kept && members(ours) == members(theirs)
 }
 
 /// The state's switch for `move_id`, if it has one.
@@ -601,7 +726,7 @@ pub async fn follow_move<R: RngCore + CryptoRng>(
             .filter(|ms| ms.target.move_id == link.move_id)
             .unwrap_or(MoveState {
                 target: m.target.clone(),
-                mover: m.arrived.first().copied().unwrap_or(m.author),
+                mover: mover_of(&state, &m.target).unwrap_or(m.author),
                 arrived: false,
                 create_token: None,
                 notified: Vec::new(),
@@ -622,12 +747,20 @@ pub async fn follow_move<R: RngCore + CryptoRng>(
         let _ = relay.forget_push(me, material.label()).await;
         return Box::pin(status_of(relay, me, material)).await;
     }
-    let arrivals = Box::pin(read_arrivals(&new, me, &state, link)).await?;
-    let Some(target) = arrivals.target.clone().filter(|_| !arrivals.by.is_empty()) else {
+    // A cancel is final: the others count no arrival of this member for the move.
+    if existing
+        .as_ref()
+        .is_some_and(|ms| ms.target.move_id == link.move_id && ms.cancelled)
+    {
+        return Err(NodeError::MoveCancelled);
+    }
+    let mut arrivals = Box::pin(read_arrivals(&new, me, &state, link)).await?;
+    arrivals.withdraw(Box::pin(cancels_on_old(relay, me, material, &state, &link.move_id)).await);
+    // The move is on while its mover's own arrival stands.
+    let (Some(target), Some(mover)) = (arrivals.target.clone(), arrivals.mover) else {
         return Err(NodeError::MoveNotFound);
     };
-    let mover = arrivals.first.expect("set with the target");
-    if arrivals.cancelled.contains(&mover) {
+    if !arrivals.mover_arrived() {
         return Err(NodeError::MoveNotFound);
     }
     if target.expired(now()) {
@@ -766,7 +899,18 @@ pub async fn move_progress<R: RngCore + CryptoRng>(
         let _ = relay.forget_push(me, material.label()).await;
         return Ok(Some(Box::pin(status_of(relay, me, material)).await?));
     }
-    let arrivals = Box::pin(read_arrivals(&new, me, &state, &link)).await?;
+    let mut arrivals = Box::pin(read_arrivals(&new, me, &state, &link)).await?;
+    // Cancels left on the old relay count too (the new relay may withhold them).
+    arrivals.withdraw(
+        Box::pin(cancels_on_old(
+            relay,
+            me,
+            material,
+            &state,
+            &ms.target.move_id,
+        ))
+        .await,
+    );
     if arrivals.cancelled.contains(&ms.mover) && ms.mover != me.public().sig_pk {
         ms.cancelled = true;
         save_move(relay, material, &ms)?;
@@ -827,8 +971,16 @@ async fn switch_relay<R: RngCore + CryptoRng>(
         vault: material.descriptor.vault_id,
         label: ms.target.label,
     };
-    // Last entries from the old relay, if it still answers and agrees with our copy.
+    // Last entries from the old relay, if it still answers and agrees with our copy. Where
+    // it answers, the new relay must not hold an entry the old one has another of: that
+    // entry was written there before the switch (or the old relay forked its members), and
+    // the switch would void history the old relay's members hold.
     if let Ok((old_chain, old_state)) = Box::pin(load_state(old, me, material)).await {
+        for (a, b) in old_chain.entries().iter().zip(chain.entries()) {
+            if a.hash().map_err(proto)? != b.hash().map_err(proto)? {
+                return Err(NodeError::MoveConflict);
+            }
+        }
         if old_chain.len() > chain.len() {
             chain = old_chain;
             state = old_state;
@@ -839,11 +991,12 @@ async fn switch_relay<R: RngCore + CryptoRng>(
         relay_len = chain.len();
     }
     let _ = relay_len;
-    // The notice on the old relay carries the mover's arrival, or this phone's own when
-    // the mover's isn't among them.
-    let (notice_mover, notice_sig) = match signatures.get(&ms.mover) {
-        Some(sig) => (ms.mover, sig.clone()),
-        None => (me.public().sig_pk, ms.target.sign(me)),
+    // The notice on the old relay names the mover and carries its arrival, or this
+    // phone's own when the mover's isn't among them (the `VaultMoved` entry it carries is
+    // the proof then).
+    let notice_sig = match signatures.get(&ms.mover) {
+        Some(sig) => sig.clone(),
+        None => ms.target.sign(me),
     };
     let arrivals: Vec<([u8; 32], Vec<u8>)> = signatures
         .into_iter()
@@ -889,7 +1042,6 @@ async fn switch_relay<R: RngCore + CryptoRng>(
     save_move(old, material, ms)?;
     if let Some(entry) = entry_bytes {
         let mut notice = ms.clone();
-        notice.mover = notice_mover;
         ms.moved_notice_sent = Box::pin(send_notices(
             old,
             me,
@@ -907,9 +1059,13 @@ async fn switch_relay<R: RngCore + CryptoRng>(
     Ok(())
 }
 
-/// Withdraws this phone from its open move: a sealed cancel to every other member on the
-/// new relay (and, from the mover, on the old relay so the Home cards go). The mover's
-/// cancel ends the move; anyone else's only voids their arrival. Can't undo a switch.
+/// Withdraws this phone from its open move, for good: a sealed cancel to every other member
+/// on the new relay and on the old one (the switching phone reads both; the Home cards go
+/// on the mover's). The mover's cancel ends the move; anyone else's only voids their
+/// arrival. Can't undo a switch; a switch made with a withheld cancel still needs this
+/// phone's tap to follow. Needs no relay to answer: the flag is saved first. The others
+/// count the cancel as long as relays keep it: their retention (30 days hosted) outlives the
+/// move (`MOVE_LIFETIME_SECS`).
 pub async fn cancel_move<R: RngCore + CryptoRng>(
     relay: &RelayClient,
     me: &Identity,
@@ -952,7 +1108,9 @@ pub async fn cancel_move<R: RngCore + CryptoRng>(
             }
         }
     }
-    if ms.mover == me.public().sig_pk {
+    // On the old relay too, from anyone: a new relay that withholds the cancel can't make
+    // the others count this arrival (they read the old relay's cancels before switching).
+    {
         let mut seq = SeqCounter::default();
         for to in others(&state, me) {
             if let Err(e) = send_move_message(
@@ -1045,7 +1203,7 @@ pub async fn move_notice(
     };
     let members = members_by_pk(&state);
     let mut notices: Vec<MoveNotice> = Vec::new();
-    let mut cancelled: BTreeSet<[u8; 16]> = BTreeSet::new();
+    let mut cancels: Vec<([u8; 16], [u8; 32])> = Vec::new();
     let mut tokens: BTreeMap<[u8; 16], String> = BTreeMap::new();
     for (_, sender, env) in read_inbox(relay, me, material.label(), &members, 0).await? {
         if !matches!(env.header.kind, Kind::MoveNotice | Kind::MoveCancelled) {
@@ -1066,15 +1224,25 @@ pub async fn move_notice(
                 create_token,
                 moved,
             } => {
-                let Some(m) = members.get(&mover) else {
-                    continue;
-                };
-                if target.vault_id != material.descriptor.vault_id || !target.verify(m, &signature)
-                {
+                if target.vault_id != material.descriptor.vault_id {
                     continue;
                 }
+                // A notice stands on a verified switch (m arrivals), or on the mover's own
+                // signature: the mover is the member the move id names, never the sender's
+                // claim (a member who read the arrival could otherwise announce itself).
                 let moved =
                     moved.is_some_and(|e| verify_moved_entry(&e, &target, &state, &copy, &key));
+                let named = mover_of(&state, &target);
+                let signed_by_mover = named == Some(mover)
+                    && members
+                        .get(&mover)
+                        .is_some_and(|m| target.verify(m, &signature));
+                if !moved && !signed_by_mover {
+                    continue;
+                }
+                let Some(mover) = named.or(moved.then_some(mover)) else {
+                    continue;
+                };
                 if let Some(token) = create_token {
                     tokens.insert(target.move_id, token);
                 }
@@ -1087,18 +1255,20 @@ pub async fn move_notice(
                     }),
                 }
             }
-            MoveMessage::Cancelled { move_id } => {
-                // Only the mover can call a move off for everyone.
-                if notices
-                    .iter()
-                    .any(|n| n.target.move_id == move_id && n.mover == sender.sig_pk)
-                {
-                    cancelled.insert(move_id);
-                }
-            }
+            MoveMessage::Cancelled { move_id } => cancels.push((move_id, sender.sig_pk)),
             MoveMessage::Arrival { .. } => {}
         }
     }
+    // Only the mover calls a move off for everyone (any order of notice and cancel).
+    let cancelled: BTreeSet<[u8; 16]> = cancels
+        .into_iter()
+        .filter(|(id, from)| {
+            notices
+                .iter()
+                .any(|n| &n.target.move_id == id && &n.mover == from)
+        })
+        .map(|(id, _)| id)
+        .collect();
     // A switch from the same point as one this vault made (or as another notice's) means
     // a member signed two moves: follow neither.
     let same_base = |a: &MoveTarget, b: &MoveTarget| {
@@ -1188,9 +1358,15 @@ pub(super) async fn write_target(
         }),
         // Two switches from one point: follow neither, so the vault stays here.
         Ok(_) | Err(NodeError::TwoMoves) => Ok(None),
+        // The write would fail the same way.
+        Err(e) if relay_unreachable(&e) => Err(e),
+        // Rule 6: unread notices may hold a switch; a write here would fork from it. Only
+        // transport fails here (bad envelopes are skipped), so no member can cause it.
         Err(e) => {
             tracing::warn!("could not read the move notices before writing: {e}");
-            Ok(None)
+            Err(NodeError::MoveUnconfirmed {
+                url: relay.base_url().to_owned(),
+            })
         }
     }
 }
@@ -1221,12 +1397,15 @@ async fn own_move_target(
     let moved = || NodeError::VaultMoved {
         url: ms.target.relay.clone(),
     };
+    // A withdrawn arrival counts as none: a switch made with it (its cancel withheld)
+    // never moves this phone without a new tap.
+    let standing = ms.arrived && !ms.cancelled;
     if !ms.switched {
-        if ms.moved_seen && !ms.arrived {
+        if ms.moved_seen && !standing {
             // Rule 3: it moved, and this phone hasn't followed.
             return Err(moved());
         }
-        if !ms.moved_seen && (ms.cancelled || !ms.arrived || ms.target.expired(now())) {
+        if !ms.moved_seen && (!standing || ms.target.expired(now())) {
             return Ok(None);
         }
     }
@@ -1259,11 +1438,18 @@ async fn own_move_target(
             tracing::warn!("the vault moved, and its new relay can't be read: {e}");
             Err(moved())
         }
-        // The old relay can't complete a payment after a switch (too few members are left
-        // there), so a write that can't check the new relay goes ahead.
+        // The new relay answered and holds no switch: the pending case, which writes here
+        // (a later switch voids it by rule). Refusing would let one member's early write
+        // there freeze every phone that tapped Move; the Server screen shows the conflict.
+        Err(NodeError::MoveConflict) => Ok(None),
+        // Rule 6: this phone's arrival may have switched the vault, and it can't tell. A
+        // write here could fork the history it must follow, so it writes nowhere until the
+        // new relay answers, the move expires, or this phone cancels its move.
         Err(e) => {
             tracing::warn!("could not check the new relay before writing: {e}");
-            Ok(None)
+            Err(NodeError::MoveUnconfirmed {
+                url: ms.target.relay.clone(),
+            })
         }
     }
 }

@@ -96,6 +96,13 @@ pub enum ZafeErrorKind {
     /// This phone's signature for the payment may already be out, so it can't decline it
     /// (nothing was logged); its proposer can cancel it.
     AlreadySigned,
+    /// This phone cancelled this move: a cancel is final.
+    MoveCancelled,
+    /// This phone can't tell whether the vault moved, so it writes nowhere (`message` names
+    /// the relay it can't read): try again, or cancel the move to stay.
+    MoveUnconfirmed,
+    /// The new relay's history doesn't match the vault's: start the move again.
+    MoveConflict,
 }
 
 /// Which server an error came from, when it came from one.
@@ -243,6 +250,9 @@ impl From<NodeError> for ZafeError {
             NodeError::MoveStale => ZafeErrorKind::MoveStale,
             NodeError::TwoMoves => ZafeErrorKind::TwoMoves,
             NodeError::AlreadySigned => ZafeErrorKind::AlreadySigned,
+            NodeError::MoveCancelled => ZafeErrorKind::MoveCancelled,
+            NodeError::MoveUnconfirmed { .. } => ZafeErrorKind::MoveUnconfirmed,
+            NodeError::MoveConflict => ZafeErrorKind::MoveConflict,
             _ => ZafeErrorKind::Other,
         };
         let members = match &e {
@@ -252,7 +262,7 @@ impl From<NodeError> for ZafeError {
         };
         let message = match &e {
             // The relay the vault moved to, for the "Move to continue" screen.
-            NodeError::VaultMoved { url } => url.clone(),
+            NodeError::VaultMoved { url } | NodeError::MoveUnconfirmed { url } => url.clone(),
             e => e.to_string(),
         };
         Self {

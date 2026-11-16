@@ -382,7 +382,17 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   a verified switch (`with_followed_relay`) before anything is built from the material.
   **Every write to the current relay reads its move notices first** (`write_target`): a
   phone that was off during a switch learns of it only there, and one write after it forks
-  the history it must follow from (follow then fails with `RelayForked`). A move state
+  the history it must follow from. **Unknown means stop** (rule 6): unreadable notices, or
+  an arrived phone that can't read its new relay, write nowhere (`MoveUnconfirmed`; the way
+  out is Cancel move or the 14-day expiry). **The mover is named by the move id**
+  (`moves::move_id_for(mover, label)`); a move is on while the mover's own arrival stands.
+  **A cancel is final and goes to both relays**; an arrival from a member whose cancel any
+  relay shows never counts (relay retention > `MOVE_LIFETIME_SECS`, pinned by a test), and
+  a cancelled phone never follows without a tap. **Before a switch the copy never takes
+  new-relay entries** past it; a new-relay entry that conflicts with the old relay is
+  `MoveConflict` (the switch refuses; writes stay on the old relay, never frozen). Following a switch voids the copy's entries after the point they part
+  only if `relay_move::droppable` allows (intent only, nothing possibly signed lost;
+  `LogCache::replace`), else `RelayForked`. A move state
   keeps the relay it left from (`MoveState.from`), so starting the next move before the
   app saved the last switch never sends the phone back to an older relay.
 - **Relay membership check**: `reseed` lets the restorer pick members, so

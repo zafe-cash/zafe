@@ -109,6 +109,19 @@ impl LogCache {
         if self.read(mailbox)?.len() >= entries.len() {
             return Ok(false);
         }
+        self.write_locked(mailbox, entries)?;
+        Ok(true)
+    }
+
+    /// Replaces the copy with `entries` in one rename, shorter or not: only for leaving a
+    /// fork (`node::follow_relay`, or following a relay move whose switch voids this copy's
+    /// last entries), after the caller checked what is dropped. A crash leaves either copy.
+    pub fn replace(&self, mailbox: &MailboxId, entries: &[LogEntry]) -> Result<(), LogCacheError> {
+        let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_locked(mailbox, entries)
+    }
+
+    fn write_locked(&self, mailbox: &MailboxId, entries: &[LogEntry]) -> Result<(), LogCacheError> {
         let raw = entries
             .iter()
             .map(|e| e.to_bytes().map_err(|_| io::Error::other("encoding")))
@@ -130,7 +143,7 @@ impl LogCache {
         file.sync_all()?;
         drop(file);
         fs::rename(&tmp, &path)?;
-        Ok(true)
+        Ok(())
     }
 
     /// Deletes a vault's copy (removing the vault from this device, or following a fork).

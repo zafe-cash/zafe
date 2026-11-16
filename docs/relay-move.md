@@ -130,7 +130,8 @@ for the vault's relay. While a move runs it becomes the move's waiting room.
 - **Move to another server** opens the server list ("Move to"; the current relay is shown,
   never chosen), then the unlock. It is off, with the reason, while a member's app is too old
   ("Bob must update Zafe first.", §4.7) or two moves were found.
-- `node::move_vault` picks a random mailbox label and move id, creates the mailbox on the new
+- `node::move_vault` picks a random mailbox label and derives the move id from its own key and
+  the label (`moves::move_id_for`: the id names the mover), creates the mailbox on the new
   relay from this phone's history (`reseed_relay`, with the create token for a private relay),
   sends a sealed **arrival** (§4.4) to every member there, and leaves a sealed **move notice**
   for every member on the old relay if it answers.
@@ -166,11 +167,14 @@ for the vault's relay. While a move runs it becomes the move's waiting room.
 - **Nothing connects to the new relay before Bob taps Move.** "Alice is moving it" and the count
   come from the move notice (if the old relay delivered it); a link alone shows "From a link".
   Then the phone connects (`node::follow_move`), and **refuses** unless:
-  1. the new relay holds a valid arrival for this move id **signed by a current member** (so a
-     link alone, or one forged by a hostile relay, is never enough);
+  1. the new relay holds the **mover's own** valid arrival for this move id (the member the id
+     names), with no cancel from the mover on either relay (so a link alone, or one forged by
+     a hostile relay, is never enough), and this phone hasn't cancelled it (a cancel is
+     final: `MoveCancelled`);
   2. the move isn't expired or older than this phone's last switch;
   3. the relay's history passes the checks every load does (`RelayRolledBack`/`RelayForked`/
-     `RelayMembership`).
+     `RelayMembership`); before the switch, an entry there that conflicts with this phone's
+     copy is `MoveConflict`, and the copy never takes the relay's entries past its own.
   It then adds any entries its copy has that the relay lacks and sends its own arrival.
 - **Lines shown only when true:** "No notifications on this server"; "relay.dao.org will see
   your IP address. Tor hides it." for a relay not on the built-in list.

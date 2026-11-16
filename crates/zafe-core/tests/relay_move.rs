@@ -497,8 +497,12 @@ async fn a_cancelled_move_is_not_followed() {
     w.move_to(0, &again).await.unwrap();
 }
 
+/// The mover's cancel goes to both relays; here both withhold it from Carol, who switches
+/// with Alice's withdrawn arrival. Still one history: nobody writes to the old relay after
+/// the switch, and the two phones that didn't take part (Alice withdrew, Bob never tapped)
+/// follow only on their own tap (`relay_move_attacks.rs` has the narrower cases).
 #[tokio::test]
-async fn a_cancel_withheld_from_one_phone_still_leaves_one_history() {
+async fn a_cancel_withheld_on_both_relays_still_leaves_one_history() {
     let w = world(2, 3, 9).await;
     w.announce_all().await;
     let new = serve(Relay::new()).await;
@@ -511,36 +515,37 @@ async fn a_cancel_withheld_from_one_phone_still_leaves_one_history() {
     )
     .await
     .unwrap();
-    // The new relay withholds the cancel from Carol (simulated: it's gone from her inbox).
-    let new_client = RelayClient::new(&new).with_log_cache(None);
-    let inbox = new_client
-        .inbox(&w.ids[2], started.target.label, 0)
-        .await
-        .unwrap();
-    let cursors: Vec<u64> = inbox
-        .iter()
-        .filter(|(_, e)| e.header.kind == Kind::MoveCancelled)
-        .map(|(c, _)| *c)
-        .collect();
-    assert_eq!(cursors.len(), 1);
-    new_client
-        .ack_inbox(&w.ids[2], started.target.label, &cursors)
-        .await
-        .unwrap();
-    // Carol follows with Alice's stale arrival: 2 of 3, the vault switches.
+    // Both relays withhold the cancel from Carol (simulated: it's gone from her inboxes).
+    for (url, label) in [
+        (new.clone(), started.target.label),
+        (w.old.clone(), w.material[2].label()),
+    ] {
+        let client = RelayClient::new(&url).with_log_cache(None);
+        let inbox = client.inbox(&w.ids[2], label, 0).await.unwrap();
+        let cursors: Vec<u64> = inbox
+            .iter()
+            .filter(|(_, e)| e.header.kind == Kind::MoveCancelled)
+            .map(|(c, _)| *c)
+            .collect();
+        assert_eq!(cursors.len(), 1);
+        client.ack_inbox(&w.ids[2], label, &cursors).await.unwrap();
+    }
+    // Carol follows with Alice's withdrawn arrival: 2 of 3, the vault switches.
     assert!(w.follow(2, &started.link).await.unwrap().switched);
-    // Everyone acts on that one entry. Bob finds it in the old relay's notices and stops
-    // writing there until he follows; Alice, who had arrived, writes to the new relay.
-    assert!(w.notice(1).await.unwrap().unwrap().moved);
-    let err = w.name(1, "x").await.unwrap_err();
-    assert!(matches!(err, NodeError::VaultMoved { .. }), "{err:?}");
-    assert!(w.notice(0).await.unwrap().unwrap().moved);
+    // Everyone acts on that one entry: Bob and Alice find it in the old relay's notices and
+    // stop writing there until they tap.
     let old_len = w.old_len().await;
-    w.name(0, "Alice").await.unwrap();
-    assert_eq!(w.here(0).base_url(), new);
+    for i in [1, 0] {
+        assert!(w.notice(i).await.unwrap().unwrap().moved);
+        let err = w.name(i, "x").await.unwrap_err();
+        assert!(matches!(err, NodeError::VaultMoved { .. }), "{err:?}");
+    }
     assert_eq!(w.old_len().await, old_len);
-    assert!(w.follow(1, &started.link).await.unwrap().switched);
-    w.name(1, "Bob").await.unwrap();
+    for (i, name) in [(0, "Alice"), (1, "Bob")] {
+        assert!(w.follow(i, &started.link).await.unwrap().switched);
+        w.name(i, name).await.unwrap();
+        assert_eq!(w.here(i).base_url(), new);
+    }
     let (_, state) = load_state(&w.here(1), &w.ids[1], &w.material(1))
         .await
         .unwrap();
@@ -655,7 +660,7 @@ async fn an_expired_or_replayed_move_is_refused() {
         .unwrap();
     let target = MoveTarget {
         vault_id: w.material[0].descriptor.vault_id,
-        move_id: [7; 16],
+        move_id: zafe_core::moves::move_id_for(&w.ids[0].public().sig_pk, &[8; 16]),
         relay: zafe_core::moves::normalize_relay_url(&new).unwrap(),
         label: [8; 16],
         base_index: chain.len() - 1,
@@ -915,4 +920,12 @@ async fn safety_words(
         std::time::Duration::from_secs(30),
     )
     .await
+}
+
+/// A cancel is never acknowledged and is the only thing that keeps a withdrawn arrival
+/// from counting: the relays must keep it longer than a move lives.
+#[test]
+fn a_cancel_outlives_its_move_on_the_relay() {
+    const _: () =
+        assert!(zafe_relay::DELIVERY_RETENTION_SECS > zafe_core::moves::MOVE_LIFETIME_SECS);
 }

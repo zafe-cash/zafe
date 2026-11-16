@@ -4596,6 +4596,9 @@ impl SseDecode for crate::api::error::ZafeErrorKind {
             35 => crate::api::error::ZafeErrorKind::MoveStale,
             36 => crate::api::error::ZafeErrorKind::TwoMoves,
             37 => crate::api::error::ZafeErrorKind::AlreadySigned,
+            38 => crate::api::error::ZafeErrorKind::MoveCancelled,
+            39 => crate::api::error::ZafeErrorKind::MoveUnconfirmed,
+            40 => crate::api::error::ZafeErrorKind::MoveConflict,
             _ => unreachable!("Invalid variant for ZafeErrorKind: {}", inner),
         };
     }
@@ -5994,6 +5997,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::error::ZafeErrorKind {
             Self::MoveStale => 35.into_dart(),
             Self::TwoMoves => 36.into_dart(),
             Self::AlreadySigned => 37.into_dart(),
+            Self::MoveCancelled => 38.into_dart(),
+            Self::MoveUnconfirmed => 39.into_dart(),
+            Self::MoveConflict => 40.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -7031,6 +7037,9 @@ impl SseEncode for crate::api::error::ZafeErrorKind {
                 crate::api::error::ZafeErrorKind::MoveStale => 35,
                 crate::api::error::ZafeErrorKind::TwoMoves => 36,
                 crate::api::error::ZafeErrorKind::AlreadySigned => 37,
+                crate::api::error::ZafeErrorKind::MoveCancelled => 38,
+                crate::api::error::ZafeErrorKind::MoveUnconfirmed => 39,
+                crate::api::error::ZafeErrorKind::MoveConflict => 40,
                 _ => {
                     unimplemented!("");
                 }
