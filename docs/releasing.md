@@ -14,12 +14,8 @@ git tag v<version> && git push origin v<version>                  # testnet buil
 git tag mainnet-v<version> && git push origin mainnet-v<version>  # same commit, after the dry run
 ```
 
-**Verify the features first.** `python3 scripts/features.py verify --range
-v<last>..HEAD --flows --needs regtest --record <version>` runs every proof and live flow of
-the features the release touched (all of them when plumbing changed) and writes
-`docs/releases/<version>.features.json`; commit it with the release notes. A failure or
-an unexplained skip stops the release. Features it lists as "check on a phone" (app
-features without a live flow whose own code changed) go into the testnet dry run below.
+**Run the app flows first.** `python3 scripts/app-flows.py` (emulator + regtest harness,
+about 6 minutes) must pass on the release commit.
 
 **Testnet first.** Testnet is the staging step for mainnet: tag the commit `v<version>`,
 install the testnet APK, run the dry run (create, receive, propose, sign, send, restore),

@@ -5,13 +5,26 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import catalog
-from .check import ROOT
 
+ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "xyz.zafe.zafe"
 READER = "xyz.zafe.zafe.testnet"
 HARNESS = ROOT / "scripts/app-harness.sh"
-SCREENS = {s.route: s.landmark for s in catalog.SCREENS}
+SCREENS = {
+    "/welcome": "Create a vault",
+    "/create": "New vault",
+    "/join": "Join a vault",
+    "/home": "Vault balance",
+    "/settings": "Settings",
+    "/receive": "Receive",
+    "/received/:txid": "Received",
+    "/export": "Back up vault",
+    "/backup-prompt": "Back up vault",
+    "/restore": "Restore vault",
+    "/send": "Select recipient",
+    "/proposal/:id": "Payment",
+    "/proposal/:id/send": "Sending",
+}
 NODE = re.compile(r'^\s*(@e\d+(?:~s\d+)?) \[([^\]]+)\](.*)$')
 FLAGS = re.compile(r'((?: \[[a-z-]+\])*)$')
 

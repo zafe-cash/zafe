@@ -5,8 +5,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from .check import ROOT
-from .device import FlowError, Session
+from .device import ROOT, FlowError, Session
+
+FLOWS = ("join_vault", "receive", "propose_from_app", "approve_cli_payment", "backup_restore", "create_vault")
 
 REGTEST = ROOT / "infra/regtest"
 NOTES = 6
