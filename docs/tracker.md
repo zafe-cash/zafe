@@ -448,9 +448,13 @@ Security audit and races (2026-10-14, fixed by 2026-10-15; `docs/audit-scope.md`
       honest builder: zcash-devtool's `--min-split-output-value` goes to 0), or pick extra
       vault notes > 5,000 zat to spend (5,000 zat each; note selection is the proposer's
       choice, the fee row shows it).
-- [ ] Ship the action bound in the next app release (and `zafe` CLI members): class
+- [x] Ship the action bound in the next app release (and `zafe` CLI members): class
       `essential` (security fix), notes credit "@danielgorgonha from @deegalabs"
-      (`docs/releases/0.1.29.md`, 2026-11-16).
+      (`docs/releases/0.1.29.md`, 2026-11-16). 0.1.29 (a5e8061): testnet dry run on a
+      debug build and on the signed `v0.1.29` APK (receive, propose, sign, send, wipe +
+      restore, sign after restore; CLI co-signer); mainnet relay promoted (digest
+      `4277502e…`, 7.6 h soak by the owner's call); Play production 100%, essential,
+      code 3009, sent for review 2026-11-16.
 
 Security review 2026-11, batch 1: safety words, recovery and address
 (`docs/security-review-2026-11.md`; not committed yet, 2026-11-13):
