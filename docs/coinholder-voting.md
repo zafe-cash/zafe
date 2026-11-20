@@ -193,7 +193,8 @@ the holder's keys ("Why VAN Nullifier Domain Separation"). Each vote is signed w
 - **Status:** a search of `valargroup/voting-circuits`, `zcash_voting` and `vote-sdk` for
   multisig, FROST, external signer and `vsk` found no issues or PRs (2026-11-20).
 - **Prototype:** [zafe-cash/voting-circuits `threshold-vote-signer`](https://github.com/zafe-cash/voting-circuits/tree/threshold-vote-signer)
-  (9f07e9b, on 0.15.0).
+  (9f07e9b, on 0.15.0). Proposed upstream in
+  [valargroup/voting-circuits#145](https://github.com/valargroup/voting-circuits/issues/145) (2026-11-20).
   - **Change:** ZKP2 witnesses `vsk_ak`. It adds `build_vote_proof_from_fvk` and
     `VotePrfKey`; the `SpendingKey` path derives byte-identical shares.
   - **Size:** the circuit diff is about 60 lines. It saves one fixed column; the
