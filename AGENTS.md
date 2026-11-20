@@ -131,6 +131,15 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   round-2 packages and `sk` contributions are HPKE-sealed; every member signs the descriptor.
   Each `sk` contribution is committed in round 1 (`Round1Msg.sk_commitment`, part of the echo);
   a reveal that doesn't match aborts. `reddsa` 0.5.2's `post_dkg` normalizes `ak` to even Y.
+- **`sk` never crosses the relay under X25519 alone** (spec §7.6, `zafe_core::pq`): setup
+  contributions and recovery sigmas get an inner ML-KEM-768 seal, with the key derived from
+  the identity seeds. Setup carries the key in signed round 1, and the echo binds it.
+  Recovery keys come from `/v1/seat-check/pq`, signed by their owner. A helper with no key
+  for `r.new` waits; there is never a classical send. The recovering phone commits only
+  to co-signers that published a key; `retry_repair` names a stand-in only if it has one.
+  `REPAIR` 4 also retags deltas on purpose, so an older helper can finish a classical sigma
+  only when every helper is old (pinned by a test; keep the deltas on tag 4).
+  A new message that carries `sk`, `qsk` or `qk` needs the same layer.
 - **Safety words** (`zafe_core::sas`): after sealing, `Kind::SafetyCommit`, then (only holding
   every other commitment) `Kind::SafetyReveal`; 4 BIP-39 words hash every key and value, so a
   relay gets one guess (2^-44). The setup value is **random per attempt**
@@ -357,17 +366,20 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
     reuse (`sign_groups` deletes each nonce before sending a share), which is why any change
     to one-tap assignment must be gated on every member. Never make core refuse or fall back
     on a newer tag (one entry would freeze the vault; interactive fallback deadlocks a 2-of-2).
-  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 7 (4: vault
+  - `BACKUP` 3 (2: signer names; 3: log copy; v1 and v2 still restore), `RELAY_DB` 8 (4: vault
     id + expiry columns, migrated from 1-3, old rows get `vault_id = id`, seen today, shared;
     5: `recovery_values` per (new phone, co-signer), dropped and made again; 6:
     `seat_moves` + `seat_finishes`, new tables, in `delete_mailbox`; 7: `deliveries.sender`
     (read from each stored envelope), `inbox_counts`, `log_counts` (from each entry's
-    author), `deliveries_by_age`), `RELAY_API` 2 (every
+    author), `deliveries_by_age`; 8: `recovery_pq_keys`, new table, pruned with the
+    recovery values), `RELAY_API` 2 (every
     body; no version 1 read),
-    `REPAIR` 3 (sigma carries the helper's `LogAnchor` + create token; v2 still read),
+    `REPAIR` 4 (3: sigma carries the helper's `LogAnchor` + create token; 4: sigma payload
+    ML-KEM-sealed to the new phone; v2/v3 still read, never sent),
     `INVITE` 3 (2: safety words; 3: vault id + label + relay URL, v2 reads as label = vault
     id on the default relay), `VAULT_MATERIAL` 2 (`relay`; v1 reads as legacy),
-    `NONCES`/`POOL_NONCE` 2 (encrypted; v1 still read), `DKG_ROUND1` 3, `LOG_CACHE` 1,
+    `NONCES`/`POOL_NONCE` 2 (encrypted; v1 still read), `DKG_ROUND1` 4 (ML-KEM key; v3 refused, so
+    there is no classical setup), `LOG_CACHE` 1,
     `LOG_KEY_MESSAGE` 1 (setup log key + create token; the untagged 36-byte payload still
     reads), `SEAT_LINK` 1 (`zafe-seat-v1:`), `RELAY_STATUS` 1, `MOVE_MESSAGE` 1 (arrival /
     notice / cancel payloads, padded to 1 KiB), `MOVE_STATE` 1 (`<vault id>.move`,

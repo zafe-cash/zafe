@@ -63,7 +63,7 @@ class VaultProtectionBody extends StatelessWidget {
           icon: AppIcons.warningCircle,
           title: 'Quantum computers',
           body:
-              'If quantum computers ever break today\'s cryptography, one signer\'s copy of the vault secret, or a recording of the server traffic from the vault\'s setup or a phone recovery, could be enough to spend. Then move the funds to a quantum-safe vault once Zcash offers one.',
+              'If quantum computers ever break today\'s cryptography, one signer\'s copy of the vault secret could be enough to spend, and so could a recording of the server traffic from a setup or phone recovery done with Zafe 0.1.29 or earlier. Then move the funds to a quantum-safe vault once Zcash offers one.',
           last: true,
         ),
       ],

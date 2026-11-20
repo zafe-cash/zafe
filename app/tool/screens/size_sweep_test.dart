@@ -91,8 +91,12 @@ final _cases = <(String, String?, Widget)>[
     const RecoverBody(
       code: _code,
       checks: [
-        CosignerWords(cosignerKeyHex: _key, words: 'guilt afford pear gasp'),
-        CosignerWords(cosignerKeyHex: _key2, words: 'say green fiction stick'),
+        CosignerWords(
+          cosignerKeyHex: _key,
+          words: 'guilt afford pear gasp',
+          updateNeeded: false,
+        ),
+        CosignerWords(cosignerKeyHex: _key2, words: '', updateNeeded: true),
       ],
       confirmed: [_key],
     ),

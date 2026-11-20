@@ -3746,11 +3746,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CosignerWords dco_decode_cosigner_words(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return CosignerWords(
       cosignerKeyHex: dco_decode_String(arr[0]),
       words: dco_decode_String(arr[1]),
+      updateNeeded: dco_decode_bool(arr[2]),
     );
   }
 
@@ -4745,7 +4746,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_cosignerKeyHex = sse_decode_String(deserializer);
     var var_words = sse_decode_String(deserializer);
-    return CosignerWords(cosignerKeyHex: var_cosignerKeyHex, words: var_words);
+    var var_updateNeeded = sse_decode_bool(deserializer);
+    return CosignerWords(
+      cosignerKeyHex: var_cosignerKeyHex,
+      words: var_words,
+      updateNeeded: var_updateNeeded,
+    );
   }
 
   @protected
@@ -5989,6 +5995,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.cosignerKeyHex, serializer);
     sse_encode_String(self.words, serializer);
+    sse_encode_bool(self.updateNeeded, serializer);
   }
 
   @protected

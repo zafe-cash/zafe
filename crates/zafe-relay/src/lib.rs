@@ -46,6 +46,7 @@ use zafe_proto::{
 };
 
 pub const RECOVERY_RETENTION_SECS: u64 = 7 * 24 * 3600;
+pub const MAX_PQ_KEYS_PER_SUBJECT: i64 = 64;
 
 const PAGE: i64 = zafe_proto::relay::READ_PAGE as i64;
 
@@ -2038,6 +2039,14 @@ async fn recovery_pq_put(
     let signed = req.to_bytes().map_err(|_| RelayError::BadRequest)?;
     relay.charge_daily(ip)?;
     let db = relay.db.lock().expect("lock");
+    let (count, present): (i64, bool) = db.query_row(
+        "SELECT COUNT(*), COALESCE(MAX(owner = ?2), 0) FROM recovery_pq_keys WHERE subject = ?1",
+        params![&p.subject[..], &p.owner[..]],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if !present && count >= MAX_PQ_KEYS_PER_SUBJECT {
+        return Err(RelayError::Forbidden);
+    }
     db.execute(
         "INSERT OR IGNORE INTO recovery_pq_keys (subject, owner, signed, created_at)
          VALUES (?1, ?2, ?3, ?4)",

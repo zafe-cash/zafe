@@ -154,6 +154,7 @@ pub struct RecoveryProgress {
 pub struct CosignerWords {
     pub cosigner_key_hex: String,
     pub words: String,
+    pub update_needed: bool,
 }
 
 #[flutter_rust_bridge::frb(sync)]
@@ -220,6 +221,7 @@ pub fn check_recovery(
         .map(|c| CosignerWords {
             cosigner_key_hex: hex::encode(c.cosigner),
             words: c.words,
+            update_needed: c.update_needed,
         })
         .collect();
     let waiting = |stage, received, needed| RecoveryProgress {

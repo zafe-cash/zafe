@@ -155,6 +155,34 @@ impl RecoveryPin {
 pub struct RecoveryCheck {
     pub cosigner: [u8; 32],
     pub words: String,
+    pub update_needed: bool,
+}
+
+const PERSONAL_SIGMA_SEAL: &[u8] = b"Zafe repair sigma v1";
+
+fn sigma_context(from: &[u8; 32], to: &[u8; 32], replacement: u64, attempt: u32) -> Vec<u8> {
+    let mut context = PERSONAL_SIGMA_SEAL.to_vec();
+    context.extend_from_slice(from);
+    context.extend_from_slice(to);
+    context.extend_from_slice(&replacement.to_le_bytes());
+    context.extend_from_slice(&attempt.to_le_bytes());
+    context
+}
+
+async fn ensure_pq_key(
+    relay: &RelayClient,
+    me: &Identity,
+    subject: [u8; 32],
+    keys: &BTreeMap<[u8; 32], crate::pq::PqPublic>,
+) -> Result<(), NodeError> {
+    let mine = crate::pq::PqKeys::derive(me.seeds());
+    if keys.get(&me.public().sig_pk) != Some(mine.public()) {
+        relay
+            .pq_key_put(me, subject, mine.public())
+            .await
+            .map_err(older_relay)?;
+    }
+    Ok(())
 }
 
 pub async fn recovery_checks(
@@ -164,16 +192,27 @@ pub async fn recovery_checks(
 ) -> Result<Vec<RecoveryCheck>, NodeError> {
     use RecoveryValueKind::*;
     let subject = me.public().sig_pk;
-    let values = relay
-        .recovery_read(me, subject)
-        .await
-        .map_err(older_relay)?;
+    let (values, keys) = tokio::join!(
+        relay.recovery_read(me, subject),
+        relay.pq_keys_read(me, subject)
+    );
+    let values = values.map_err(older_relay)?;
+    let keys = keys.map_err(older_relay)?;
+    ensure_pq_key(relay, me, subject, &keys).await?;
     let mut checks = Vec::new();
     for cosigner in values
         .iter()
         .filter(|v| v.payload.kind == Announce)
         .map(|v| v.payload.cosigner)
     {
+        if !keys.contains_key(&cosigner) && value_of(&values, &cosigner, Commit).is_none() {
+            checks.push(RecoveryCheck {
+                cosigner,
+                words: String::new(),
+                update_needed: true,
+            });
+            continue;
+        }
         let secret = recovery_secret(me, &cosigner);
         let commitment = crate::sas::recovery_commitment(me.public(), &secret);
         let has = |kind| value_of(&values, &cosigner, kind);
@@ -207,6 +246,7 @@ pub async fn recovery_checks(
         checks.push(RecoveryCheck {
             cosigner,
             words: crate::sas::recovery_words(me.public(), &cosigner, &secret, &pin.challenge),
+            update_needed: false,
         });
     }
     Ok(checks)
@@ -230,6 +270,8 @@ pub async fn new_phone_words(
         .await
         .map_err(older_relay)?;
     let mine = |kind| value_of(&values, &my_pk, kind);
+    let keys = relay.pq_keys_read(me, subject).await.map_err(older_relay)?;
+    ensure_pq_key(relay, me, subject, &keys).await?;
     if mine(Announce).is_none() {
         relay
             .recovery_put(me, subject, my_pk, Announce, [0; 32])
@@ -563,6 +605,13 @@ struct SigmaMsg {
     create_token: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct SealedSigmaMsg {
+    replacement: u64,
+    attempt: u32,
+    sealed: Vec<u8>,
+}
+
 #[derive(Deserialize)]
 struct SigmaMsgV2 {
     replacement: u64,
@@ -571,8 +620,14 @@ struct SigmaMsgV2 {
     data: VaultData,
 }
 
-fn decode_sigma(bytes: &[u8]) -> Result<SigmaMsg, version::DecodeError> {
+fn decode_sigma(
+    bytes: &[u8],
+    me: &Identity,
+    from: &[u8; 32],
+) -> Result<SigmaMsg, version::DecodeError> {
+    let malformed = || version::DecodeError::Malformed(Format::Repair);
     match version::split(Format::Repair, bytes)? {
+        (3, body) => postcard::from_bytes(body).map_err(|_| malformed()),
         (2, body) => {
             let v2: SigmaMsgV2 = postcard::from_bytes(body)
                 .map_err(|_| version::DecodeError::Malformed(Format::Repair))?;
@@ -585,13 +640,25 @@ fn decode_sigma(bytes: &[u8]) -> Result<SigmaMsg, version::DecodeError> {
                 create_token: None,
             })
         }
-        _ => version::decode(Format::Repair, bytes),
+        _ => {
+            let outer: SealedSigmaMsg = version::decode(Format::Repair, bytes)?;
+            let context =
+                sigma_context(from, &me.public().sig_pk, outer.replacement, outer.attempt);
+            let inner = crate::pq::PqKeys::derive(me.seeds())
+                .open(&context, &outer.sealed)
+                .map_err(|_| malformed())?;
+            let msg: SigmaMsg = postcard::from_bytes(&inner).map_err(|_| malformed())?;
+            if (msg.replacement, msg.attempt) != (outer.replacement, outer.attempt) {
+                return Err(malformed());
+            }
+            Ok(msg)
+        }
     }
 }
 
 fn decode_repair<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, version::DecodeError> {
     match version::split(Format::Repair, bytes)? {
-        (2, body) => {
+        (2 | 3, body) => {
             postcard::from_bytes(body).map_err(|_| version::DecodeError::Malformed(Format::Repair))
         }
         _ => version::decode(Format::Repair, bytes),
@@ -875,6 +942,15 @@ async fn help_one<R: RngCore + CryptoRng>(
         report.waiting += 1;
         return Ok(switched);
     }
+    let Some(new_key) = relay
+        .pq_keys_read(me, r.new.sig_pk)
+        .await
+        .map_err(older_relay)?
+        .remove(&r.new.sig_pk)
+    else {
+        report.waiting += 1;
+        return Ok(switched);
+    };
     let sigma = repairable::repair_share_part2(&deltas);
     let msg = SigmaMsg {
         replacement: r.index,
@@ -889,7 +965,17 @@ async fn help_one<R: RngCore + CryptoRng>(
         anchor: Some(LogAnchor::of(chain)),
         create_token: material.relay.create_token.clone(),
     };
-    let payload = version::encode(Format::Repair, &msg)?;
+    let inner = postcard::to_allocvec(&msg).map_err(proto)?;
+    let sealed = SealedSigmaMsg {
+        replacement: r.index,
+        attempt: r.attempt,
+        sealed: new_key.seal(
+            &sigma_context(&my_pk, &r.new.sig_pk, r.index, r.attempt),
+            &inner,
+            rng,
+        ),
+    };
+    let payload = version::encode(Format::Repair, &sealed)?;
     send_fresh(relay, me, seq, |n| {
         Envelope::sealed(me, &r.new, mailbox, n, Kind::RepairSigma, &payload, rng).map_err(proto)
     })
@@ -959,7 +1045,7 @@ async fn recover_from(
         let Ok(bytes) = env.open(me, &from) else {
             continue;
         };
-        if let Ok(msg) = decode_sigma(&bytes) {
+        if let Ok(msg) = decode_sigma(&bytes, me, &from.sig_pk) {
             messages
                 .entry((from.sig_pk, msg.replacement, msg.attempt))
                 .or_insert((cursor, msg));
@@ -1171,6 +1257,19 @@ pub async fn retry_repair<R: RngCore + CryptoRng>(
             "that signer isn't helping, the other one already is, or you wouldn't be".into(),
         ));
     }
+    let keys = relay
+        .pq_keys_read(me, r.new.sig_pk)
+        .await
+        .map_err(older_relay)?;
+    if taker == my_pk {
+        ensure_pq_key(relay, me, r.new.sig_pk, &keys).await?;
+    } else if !keys.contains_key(&taker) {
+        return Err(NodeError::NotReady(
+            "that signer's Zafe hasn't joined this recovery yet: ask them to open Zafe, \
+             updating it if it's old, then try again"
+                .into(),
+        ));
+    }
     let event = VaultEvent::RepairRetry {
         replacement,
         helpers,
@@ -1284,7 +1383,11 @@ mod tests {
             })
             .unwrap(),
         );
-        let m = decode_sigma(&bytes).unwrap();
+        let mut rng = rand::rngs::OsRng;
+        let me = Identity::generate(&mut rng);
+        let other = Identity::generate(&mut rng);
+        let from = [3u8; 32];
+        let m = decode_sigma(&bytes, &me, &from).unwrap();
         assert_eq!((m.replacement, m.attempt, m.sigma), (7, 1, vec![9]));
         assert!(m.data == data() && m.anchor.is_none() && m.create_token.is_none());
 
@@ -1297,8 +1400,14 @@ mod tests {
         old.extend(postcard::to_allocvec(&delta).unwrap());
         let back: DeltaMsg = decode_repair(&old).unwrap();
         assert_eq!(back.delta, vec![5]);
-        let now: DeltaMsg =
-            decode_repair(&version::encode(Format::Repair, &delta).unwrap()).unwrap();
+        let encoded = version::encode(Format::Repair, &delta).unwrap();
+        assert_eq!(
+            version::split(Format::Repair, &encoded).unwrap().0,
+            4,
+            "deltas share REPAIR 4 on purpose: a 0.1.29 helper (tags 2-3) can't finish an \
+             attempt with an updated helper, so it can't send its classical sigma (spec 7.6)"
+        );
+        let now: DeltaMsg = decode_repair(&encoded).unwrap();
         assert_eq!(now.replacement, 7);
 
         let current = SigmaMsg {
@@ -1313,12 +1422,41 @@ mod tests {
             }),
             create_token: Some("t".into()),
         };
-        let back = decode_sigma(&version::encode(Format::Repair, &current).unwrap()).unwrap();
+        let mut v3 = 3u16.to_le_bytes().to_vec();
+        v3.extend(postcard::to_allocvec(&current).unwrap());
+        let back = decode_sigma(&v3, &me, &from).unwrap();
         assert_eq!(back.anchor, current.anchor);
         assert_eq!(back.create_token.as_deref(), Some("t"));
-        let mut newer = version::encode(Format::Repair, &current).unwrap();
+
+        let mut seal = |to: &Identity, attempt: u32| {
+            let sealed = SealedSigmaMsg {
+                replacement: 7,
+                attempt,
+                sealed: crate::pq::PqKeys::derive(to.seeds()).public().seal(
+                    &sigma_context(&from, &to.public().sig_pk, 7, 1),
+                    &postcard::to_allocvec(&current).unwrap(),
+                    &mut rng,
+                ),
+            };
+            version::encode(Format::Repair, &sealed).unwrap()
+        };
+        let back = decode_sigma(&seal(&me, 1), &me, &from).unwrap();
+        assert_eq!(back.anchor, current.anchor);
+        assert!(
+            decode_sigma(&seal(&other, 1), &me, &from).is_err(),
+            "sealed to another phone"
+        );
+        assert!(
+            decode_sigma(&seal(&me, 2), &me, &from).is_err(),
+            "outer attempt doesn't match the sealed context"
+        );
+        assert!(
+            decode_sigma(&seal(&me, 1), &me, &[4u8; 32]).is_err(),
+            "from another helper"
+        );
+        let mut newer = seal(&me, 1);
         newer[..2].copy_from_slice(&(version::REPAIR + 1).to_le_bytes());
-        assert!(decode_sigma(&newer).is_err());
+        assert!(decode_sigma(&newer, &me, &from).is_err());
     }
 
     #[test]

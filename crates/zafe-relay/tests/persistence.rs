@@ -447,7 +447,7 @@ fn database_schema_is_versioned() {
         Err(zafe_relay::RelayError::UnsupportedVersion(v)) if v.is_newer()
     ));
 
-    let mut seven = rusqlite::Connection::open(&path).unwrap();
+    let seven = rusqlite::Connection::open(&path).unwrap();
     seven
         .execute_batch("DROP TABLE recovery_pq_keys; PRAGMA user_version = 7;")
         .unwrap();

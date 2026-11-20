@@ -392,14 +392,24 @@ class RecoverBody extends StatelessWidget {
                 color: colors.text.secondary,
               ),
             ),
-            Text(
-              c.words,
-              style: AppTypography.headlineMedium.copyWith(
-                color: colors.text.accent,
+            if (c.updateNeeded)
+              Text(
+                'Needs to update Zafe before you can compare words',
+                style: AppTypography.bodyMedium.copyWith(
+                  color: colors.text.primary,
+                ),
+              )
+            else
+              Text(
+                c.words,
+                style: AppTypography.headlineMedium.copyWith(
+                  color: colors.text.accent,
+                ),
               ),
-            ),
             const SizedBox(height: AppSpacing.xxs),
-            if (confirmed.contains(c.cosignerKeyHex))
+            if (c.updateNeeded)
+              const SizedBox.shrink()
+            else if (confirmed.contains(c.cosignerKeyHex))
               Row(
                 children: [
                   AppIcon(

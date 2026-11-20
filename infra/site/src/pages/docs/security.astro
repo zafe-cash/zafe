@@ -33,7 +33,7 @@ const repo = 'https://github.com/zafe-cash/zafe';
   <ul>
     <li>Members and the rule can’t change. Anyone who was a member can still see the vault, and their key share still counts. To rule someone out, make a new vault and move the funds.</li>
     <li>Every member sees every payment, memo and the balance, past and future.</li>
-    <li>If quantum computers ever break today’s cryptography, one member’s copy of the vault secret, or a recording of the server traffic from the vault’s setup or a phone recovery, could be enough to spend. The funds would then need to move to a quantum-safe vault, once Zcash offers one.</li>
+    <li>If quantum computers ever break today’s cryptography, one member’s copy of the vault secret could be enough to spend, and so could a recording of the server traffic from a setup or phone recovery done with Zafe 0.1.29 or earlier. Newer versions add post-quantum encryption (ML-KEM) to the messages that carry the vault secret. The funds would then need to move to a quantum-safe vault, once Zcash offers one.</li>
     <li>The first time a phone loads a vault, it trusts the server’s history once. After that it checks every change.</li>
     <li>Android only for now.</li>
   </ul>

@@ -433,7 +433,7 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
 - **Zafe v1 decision:** use `frost-core` 3.0.0 DKG (`reddsa` 0.5.2 redpallas `dkg`) with Zafe's own versions of COCKTAIL's protections: HPKE-sealed round 2 (§5.2), the echo check, and all-member transcript signatures (§7.2 steps 5 and 8). The DKG code lives in `keygen.rs`, so it can switch to COCKTAIL-DKG, plus the standardized `sk` agreement from zips#895, once a production crate exists. A switch only affects **new** vaults. Existing vaults keep their keys.
 - The DKG choice doesn't change the key material a vault ends up with (`ak`, shares, `sk`). It only changes how that material is agreed. So existing vaults stay valid.
 
-### 7.6 Post-quantum transport of `sk` (design, 2026-11-20; being built)
+### 7.6 Post-quantum transport of `sk` (built 2026-11-20, after 0.1.29)
 
 **Problem** (§2.3). Two messages carry `sk` material over the relay, and both are sealed only with X25519 HPKE:
 - `SkContribution`: the `r_i` contributions at setup;
@@ -451,7 +451,7 @@ Anyone who keeps those ciphertexts and later breaks discrete logs gets `qsk`. zi
    - `key = BLAKE2b-256("Zafe_PqSealKey__", ss || ct || H(ek) || context)`;
    - output `ct || nonce || XChaCha20-Poly1305(key, nonce, plaintext, aad = context)`.
    - The result is then HPKE-sealed as today. A recorder must break both X25519 and ML-KEM.
-   - `context` binds the format, kind, vault id, sender and recipient.
+   - `context` is domain-separated per use and binds sender and recipient: for setup also the vault id (`keygen::contribution_context`); for recovery the replacement and attempt (`repair::sigma_context`).
 3. **Setup.**
    - `Round1Msg` (`DKG_ROUND1` 4) carries each member's `ek`. It travels in the member's signed public envelope, and the echo covers `H(ek)` for every member.
    - Each `r_i` is `pq_seal`ed to the recipient's `ek` from its round-1 message.
@@ -461,11 +461,14 @@ Anyone who keeps those ciphertexts and later breaks discrete logs gets `qsk`. zi
    - The recovering phone puts its own key (`owner = subject`).
    - A fixed co-signer puts its key next to its `Announce`. A fixed member also puts it when it sees a pending seat move in the log, so it can be named in a retry.
    - A helper sends `RepairSigma` (`REPAIR` 4) only with the whole payload `pq_seal`ed to the `ek` that `r.new` signed. With no such key, it waits. It never sends classically.
-   - The recovering phone opens only a `REPAIR` 4 sigma. A `REPAIR` 3 sigma (from an older helper) is refused, and the phone tells the user to update that signer.
+   - The recovering phone still opens a `REPAIR` 2/3 sigma from an older helper. By then the ciphertext has crossed the relay, so refusing it would only strand the recovery. Only a real helper can produce one, since it's signed by the helper's identity. The protection is on the sending side: fixed helpers never send classically, and the gate below keeps older apps from becoming helpers.
 5. **Gate on the helpers, not on all members.** Helpers are the approving co-signers (`vault.rs` replay), and approving needs the safety words, which need the recovering phone's commit. So:
    - The recovering phone posts its commit only to co-signers that have put a key. Without the words, an older app can't approve, so it can't become a helper.
-   - Fixed apps name a helper in `retry_repair` only if that helper has put a key for this subject.
-   - What's left: an older app that writes a retry naming older helpers can still leak. That needs two older apps acting together, and it's documented.
+   - `retry_repair` names a stand-in only if it has put a key for this subject, and a stand-in that names itself puts its key then. (Every helper a retry names must log it, so the stand-in always runs this.)
+   - A second bound comes from `REPAIR` 4 retagging the helper-to-helper deltas too. A 0.1.29 helper (tags 2-3) can't read an updated helper's delta, so it can finish its classical sigma only if every helper of the attempt is old. This is intended and pinned by a test: keep the deltas on tag 4.
+   - What's left:
+     - a recovery whose helpers are all older apps (for example, an older app writing a retry that names older helpers);
+     - recoveries whose commits went out before the update: such an older co-signer already has its words and can still approve, but its sigma then needs every helper to be old (above).
    - Gating on all members would let one unreachable non-helper block recovery for good.
 6. **What it doesn't fix.**
    - Vaults whose setup or recovery traffic was already sent keep a fixed `sk`; only moving the funds helps.

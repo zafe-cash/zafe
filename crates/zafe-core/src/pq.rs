@@ -62,10 +62,11 @@ impl PqPublic {
         plaintext: &[u8],
         rng: &mut R,
     ) -> Vec<u8> {
-        let mut m = B32::default();
+        let mut m = Zeroizing::new(B32::default());
         rng.fill_bytes(&mut m);
         let (ct, shared) = self.0.encapsulate_deterministic(&m);
-        let key = seal_key(&shared, &ct, &self.hash(), context);
+        let shared = Zeroizing::new(shared);
+        let key = seal_key(shared.as_slice(), &ct, &self.hash(), context);
         let mut nonce = [0u8; NONCE_LEN];
         rng.fill_bytes(&mut nonce);
         let body = XChaCha20Poly1305::new(chacha20poly1305::Key::from_slice(key.as_ref()))
@@ -92,7 +93,7 @@ pub struct PqKeys {
 
 impl PqKeys {
     pub fn derive(seeds: &IdentitySeeds) -> Self {
-        let mut seed = Seed::default();
+        let mut seed = Zeroizing::new(Seed::default());
         let hash = blake2b_simd::Params::new()
             .hash_length(64)
             .personal(PERSONAL_SEED)
@@ -101,7 +102,7 @@ impl PqKeys {
             .update(&seeds.enc_seed)
             .finalize();
         seed.copy_from_slice(hash.as_bytes());
-        let dk = DecapsulationKey768::from_seed(seed);
+        let dk = DecapsulationKey768::from_seed(*seed);
         let public = PqPublic(dk.encapsulation_key().clone());
         Self { dk, public }
     }
@@ -117,8 +118,8 @@ impl PqKeys {
         let (ct, rest) = sealed.split_at(CIPHERTEXT_LEN);
         let (nonce, body) = rest.split_at(NONCE_LEN);
         let ct: Ciphertext<MlKem768> = ct.try_into().map_err(|_| PqError::Open)?;
-        let shared = self.dk.decapsulate(&ct);
-        let key = seal_key(&shared, &ct, &self.public.hash(), context);
+        let shared = Zeroizing::new(self.dk.decapsulate(&ct));
+        let key = seal_key(shared.as_slice(), &ct, &self.public.hash(), context);
         XChaCha20Poly1305::new(chacha20poly1305::Key::from_slice(key.as_ref()))
             .decrypt(
                 XNonce::from_slice(nonce),

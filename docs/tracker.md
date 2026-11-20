@@ -106,26 +106,22 @@ no external audit yet.
 
 - [ ] **(you)** External security audit (`docs/audit-scope.md`); record the audited
       commit here. It is the last mainnet gate; the beta label stays until then.
-- [ ] Post-quantum `sk` transport (zips#895, 2026-11-20). Setup contributions
-      (`SkContribution`) and seat recovery's vault secret (`RepairSigma`) cross the
-      relay sealed only with X25519, so recorded traffic + a future discrete-log break
-      gives `qsk` (spec §2.3).
-      - Proposed fix: a hybrid X25519 + ML-KEM layer on those two payloads, with the key
-        derived from the identity seed and carried in round 1 / the recovery announce.
-      - It works for new vaults and recoveries only. Old apps can't join new setups.
-      - Gaps found in review:
-        - Every helper sends `vault_secret` in its sigma, so one un-updated helper
-          leaks it. Recovery needs a hard break or an all-helpers gate.
-        - The ML-KEM key must be bound in the signed round 1, the echo and the
-          safety/recovery words, with no classical fallback.
-        - Each `r_i` reaches n−1 recipients, so two broken X25519 keys suffice.
-      - No-new-crypto option for recovery: stop sending `vault_secret` in the sigma.
-        A recovered seat signs with its share and the UFVK; check every other use of
-        `sk` first (e.g. the move-state key, `moves.rs:202`).
-      - ZIP 312 says implementations SHOULD NOT retain Round 1/2 messages. Setup
-        envelopes are never acked, so the relay keeps them 30 days (backups 14). Ack
-        them once keygen is done.
-      - App and site wording updated 2026-11-20. Waiting on a decision.
+- [ ] Post-quantum `sk` transport (zips#895; spec §7.6). Built 2026-11-20: a hybrid
+      ML-KEM-768 layer under the X25519 envelope for setup contributions (`DKG_ROUND1` 4)
+      and recovery sigmas (`REPAIR` 4).
+      - Recovery keys travel on the relay's `/v1/seat-check/pq` (`RELAY_DB` 8).
+      - The gate: the recovering phone commits only to co-signers that published a key,
+        and retries name only helpers that have one.
+      - To finish:
+        - promote the relay before the app ships (older relays answer 404, and recovery
+          says "update the server");
+        - an independent audit.
+      - What stays open: vaults set up or recovered with 0.1.29 or earlier stay exposed
+        (`sk` is fixed). An older app that writes a retry naming older helpers can still
+        send classically. The FROST shares and the setup log key stay classical (§7.6
+        item 6).
+      - Retention: `respond` acks the setup envelopes after keygen, so the relay doesn't
+        keep them the full 30 days.
 - [ ] NU7 activates on mainnet at block 3,543,405 (about 2026-11-05). Watch the first
       vault sends after it. Releases from 0.1.18 support it (`/docs/updates`).
 - [ ] *(check)* Record the Play update test 0.1.16 → 0.1.21 planned on 2026-10-22.

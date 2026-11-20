@@ -997,7 +997,13 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     if !missing.is_empty() {
         return waiting("round-1 packages", missing);
     }
-    let my_msg: Round1Msg = version::decode(Format::DkgRound1, &st.round1_msg)?;
+    let my_msg: Round1Msg =
+        version::decode(Format::DkgRound1, &st.round1_msg).map_err(|e| match e {
+            DecodeError::Unsupported(v) if !v.is_newer() => NodeError::Protocol(
+                "this setup was started on an older Zafe: start the setup again".into(),
+            ),
+            e => e.into(),
+        })?;
     let mut birthday_height = my_msg.birthday_height;
     let mut expiry_blocks = my_msg.proposal_expiry_blocks;
     let mut received1 = BTreeMap::new();
@@ -1006,7 +1012,10 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     let mut pq_hashes = BTreeMap::from([(frost_id(&my_pk)?, my_pq.public().hash())]);
     let mut pq_keys = BTreeMap::new();
     for (pk, bytes) in &r1 {
-        let m: Round1Msg = version::decode(Format::DkgRound1, bytes)?;
+        let m: Round1Msg = version::decode(Format::DkgRound1, bytes).map_err(|e| match e {
+            DecodeError::Unsupported(v) if !v.is_newer() => NodeError::MembersMustUpdate(vec![*pk]),
+            e => e.into(),
+        })?;
         commitments.insert(frost_id(pk)?, m.sk_commitment);
         let pq_key = crate::pq::PqPublic::from_bytes(&m.pq_key)
             .map_err(|e| NodeError::Protocol(e.to_string()))?;

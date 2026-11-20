@@ -3330,9 +3330,11 @@ impl SseDecode for crate::api::repair::CosignerWords {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_cosignerKeyHex = <String>::sse_decode(deserializer);
         let mut var_words = <String>::sse_decode(deserializer);
+        let mut var_updateNeeded = <bool>::sse_decode(deserializer);
         return crate::api::repair::CosignerWords {
             cosigner_key_hex: var_cosignerKeyHex,
             words: var_words,
+            update_needed: var_updateNeeded,
         };
     }
 }
@@ -4810,6 +4812,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::repair::CosignerWords {
         [
             self.cosigner_key_hex.into_into_dart().into_dart(),
             self.words.into_into_dart().into_dart(),
+            self.update_needed.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6101,6 +6104,7 @@ impl SseEncode for crate::api::repair::CosignerWords {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.cosigner_key_hex, serializer);
         <String>::sse_encode(self.words, serializer);
+        <bool>::sse_encode(self.update_needed, serializer);
     }
 }
 

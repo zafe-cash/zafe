@@ -1063,6 +1063,31 @@ async fn recovery_pq_keys_are_posted_only_by_their_owner_at_full_size() {
     let mut expected = vec![put(new, 1, PQ_KEY_LEN), put(cosigner, 3, PQ_KEY_LEN)];
     expected.sort_by_key(|k| k.owner);
     assert_eq!(keys, expected, "the first key per owner stays");
+
+    for i in 0..zafe_relay::MAX_PQ_KEYS_PER_SUBJECT - 2 {
+        let filler = Identity::generate(&mut StdRng::seed_from_u64(1000 + i as u64));
+        assert_eq!(
+            signed(&w.app, path, &filler, put(&filler, 4, PQ_KEY_LEN))
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+    let late = Identity::generate(&mut StdRng::seed_from_u64(999));
+    assert_eq!(
+        signed(&w.app, path, &late, put(&late, 5, PQ_KEY_LEN))
+            .await
+            .0,
+        StatusCode::FORBIDDEN,
+        "a recovery holds at most MAX_PQ_KEYS_PER_SUBJECT keys"
+    );
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(cosigner, 3, PQ_KEY_LEN))
+            .await
+            .0,
+        StatusCode::OK,
+        "an owner already there can post again"
+    );
 }
 
 #[tokio::test]

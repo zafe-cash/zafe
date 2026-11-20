@@ -304,6 +304,7 @@ async fn a_lost_seat_moves_to_a_new_device() {
     );
     let again = help(&relay, &ids[1], b, &dir_b).await;
     assert_eq!(again, Default::default());
+    recorded_sigmas_hide_the_vault_secret(&relay, &fresh, &ids, a).await;
 
     let RecoveryStatus::Done { material, invite } = try_recover(&relay, &fresh, label, &confirmed)
         .await
@@ -393,6 +394,13 @@ async fn a_stalled_repair_is_taken_over_by_another_member() {
         retry_repair(&relay, &ids[3], &m[3], index, taker, taker, &mut rng)
             .await
             .is_err()
+    );
+    let keyless = retry_repair(&relay, &ids[1], &m[1], index, stalled, taker, &mut rng)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&keyless, NodeError::NotReady(m) if m.contains("hasn't joined this recovery")),
+        "a stand-in that never published a post-quantum key isn't named: {keyless:?}"
     );
     retry_repair(&relay, &ids[3], &m[3], index, stalled, taker, &mut rng)
         .await
@@ -756,4 +764,82 @@ async fn safety_words(
 
 fn pins() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("zafe-recovery-pins-{}", std::process::id()))
+}
+
+async fn recorded_sigmas_hide_the_vault_secret(
+    relay: &RelayClient,
+    new: &Identity,
+    ids: &[Identity],
+    material: &VaultMaterial,
+) {
+    use zafe_proto::envelope::Kind;
+    let by_pk: BTreeMap<[u8; 32], &Identity> =
+        ids.iter().map(|id| (id.public().sig_pk, id)).collect();
+    let mut seen = 0;
+    for (_, envelope) in relay.inbox(new, material.label(), 0).await.unwrap() {
+        if envelope.header.kind != Kind::RepairSigma {
+            continue;
+        }
+        seen += 1;
+        let helper = by_pk[&envelope.header.from];
+        let after_x25519 = envelope.open(new, helper.public()).unwrap();
+        for (what, secret) in [
+            ("vault secret", material.vault_secret),
+            ("log key", material.log_key),
+        ] {
+            assert!(
+                !after_x25519.windows(32).any(|w| w == secret.as_slice()),
+                "with the new phone's X25519 secret a recorder still can't see the {what}"
+            );
+        }
+    }
+    assert!(seen >= 2, "every helper's sigma checked");
+}
+
+#[tokio::test]
+async fn a_cosigner_without_a_post_quantum_key_gets_no_words() {
+    use zafe_proto::relay::RecoveryValueKind;
+    let relay = RelayClient::new(start_relay().await);
+    let (ids, _m) = vault(&relay, 3).await;
+    let new = Identity::generate(&mut StdRng::seed_from_u64(77));
+    let subject = new.public().sig_pk;
+    let older_app = ids[1].public().sig_pk;
+    relay
+        .recovery_put(
+            &ids[1],
+            subject,
+            older_app,
+            RecoveryValueKind::Announce,
+            [0; 32],
+        )
+        .await
+        .unwrap();
+
+    let rows = recovery_checks(&relay, &new, &pins()).await.unwrap();
+    let row = rows.iter().find(|r| r.cosigner == older_app).unwrap();
+    assert!(row.update_needed && row.words.is_empty());
+    let values = relay.recovery_read(&new, subject).await.unwrap();
+    assert!(
+        !values
+            .iter()
+            .any(|v| v.payload.cosigner == older_app && v.payload.kind == RecoveryValueKind::Commit),
+        "no commit, so an older app never gets words to approve with"
+    );
+
+    assert_eq!(
+        new_phone_words(&relay, &ids[1], new.public())
+            .await
+            .unwrap(),
+        None
+    );
+    let rows = recovery_checks(&relay, &new, &pins()).await.unwrap();
+    assert!(!rows
+        .iter()
+        .any(|r| r.cosigner == older_app && r.update_needed));
+    let values = relay.recovery_read(&new, subject).await.unwrap();
+    assert!(
+        values.iter().any(|v| v.payload.cosigner == older_app
+            && v.payload.kind == RecoveryValueKind::Commit),
+        "once it runs an updated app and publishes its key, the check goes ahead"
+    );
 }

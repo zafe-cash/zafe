@@ -92,11 +92,17 @@ Future<RecoveryProgress> checkRecovery({
 class CosignerWords {
   final String cosignerKeyHex;
   final String words;
+  final bool updateNeeded;
 
-  const CosignerWords({required this.cosignerKeyHex, required this.words});
+  const CosignerWords({
+    required this.cosignerKeyHex,
+    required this.words,
+    required this.updateNeeded,
+  });
 
   @override
-  int get hashCode => cosignerKeyHex.hashCode ^ words.hashCode;
+  int get hashCode =>
+      cosignerKeyHex.hashCode ^ words.hashCode ^ updateNeeded.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -104,7 +110,8 @@ class CosignerWords {
       other is CosignerWords &&
           runtimeType == other.runtimeType &&
           cosignerKeyHex == other.cosignerKeyHex &&
-          words == other.words;
+          words == other.words &&
+          updateNeeded == other.updateNeeded;
 }
 
 class RecoveryCode {

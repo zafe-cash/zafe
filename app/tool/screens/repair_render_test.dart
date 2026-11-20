@@ -55,11 +55,13 @@ void main() {
               cosignerKeyHex:
                   '97c9ce4b0d2f6a1e8c3b5d7f9a1c3e5f7b9d1f3a5c7e9b1d3f5a7c9e1b3d123e',
               words: 'ancient cinnamon zebra legend',
+              updateNeeded: false,
             ),
             CosignerWords(
               cosignerKeyHex:
                   '41d07a9e3c5b7d9f1e3a5c7b9d1f3e5a7c9b1d3f5e7a9c1b3d5f7e9a1c3b8f02',
-              words: 'harbor velvet orbit candle',
+              words: '',
+              updateNeeded: true,
             ),
           ],
           confirmed: const [

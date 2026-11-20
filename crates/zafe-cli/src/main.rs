@@ -832,12 +832,21 @@ async fn main() -> Result<()> {
             println!("{}", request.encode());
             let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
             let mut shown = std::collections::BTreeSet::new();
+            let mut warned = std::collections::BTreeSet::new();
             loop {
                 if let Ok(checks) =
                     repair::recovery_checks(&relay, &me, &home.path(state_dir::RECOVERY)).await
                 {
                     for c in checks {
-                        if shown.insert(c.cosigner) {
+                        if c.update_needed {
+                            if !warned.insert(c.cosigner) {
+                                continue;
+                            }
+                            eprintln!(
+                                "co-signer {} must update Zafe before it can check words",
+                                hex::encode(c.cosigner)
+                            );
+                        } else if shown.insert(c.cosigner) {
                             eprintln!("safety words with {}: {}", hex::encode(c.cosigner), c.words);
                         }
                     }
