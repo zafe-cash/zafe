@@ -379,10 +379,12 @@ Paths in parentheses are in Vizor's repo (chainapsis/vizor-wallet) unless they s
 - Avatar step after creating or joining a vault.
 - Android back-exit guard; iOS number-pad Done bar.
 - Widgetbook galleries and headless PNG renders for design review.
-- Coinholder voting for vaults (`docs/coinholder-voting.md`, 2026-11-19): t members
-  FROST-sign the delegation. First move to the stable librustzcash NU7 releases, then add
-  `zcash_voting` with `lrz` (as ZODL does). Still open: who casts the vote (a delegate's
-  hotkey today, or the vault itself, which needs an external `VoteSigner` upstream).
+- Coinholder voting for vaults (`docs/coinholder-voting.md`, revised 2026-11-20): t members
+  FROST-sign the delegation; the leader's hotkey for that ballot casts the t-approved
+  answers in the same message, then reveals the hotkey so every member can check the vote.
+  Casting with the vault key itself needs a new ZKP2 circuit (upstream). First move to the
+  stable librustzcash NU7 releases, then add `zcash_voting` with `lrz` (as ZODL does), then
+  a regtest spike. Coinholder grants rounds (a Q3 one ran) are likely to recur.
 - Multi-part QR to move a vault between phones without a file.
 - Reproducible / F-Droid builds (Vizor's `scripts/build-android-reproducible.sh`).
 
