@@ -15,6 +15,12 @@ pub enum TxError {
     NotVaultSpend(usize),
     #[error("Ironwood action {index}: rk does not match the vault key and alpha: {reason}")]
     RkMismatch { index: usize, reason: String },
+    #[error("Ironwood action {0} still carries a dummy spending key (dummy_sk)")]
+    DummyKey(usize),
+    #[error("Ironwood action {0}: alpha is zero, so rk would reveal the vault key")]
+    ZeroAlpha(usize),
+    #[error("Ironwood action {0}: alpha repeats another spend's, so their rk would match")]
+    RepeatedAlpha(usize),
     #[error(
         "the PCZT has unsigned Orchard-pool spends; Zafe vaults never hold Orchard-pool notes"
     )]
@@ -39,8 +45,24 @@ pub fn spends_to_sign(
     if has_unsigned_orchard_spends(pczt)? {
         return Err(TxError::UnexpectedOrchardSpend);
     }
+    if pczt
+        .orchard()
+        .actions()
+        .iter()
+        .any(|action| action.spend().dummy_sk().is_some())
+    {
+        return Err(TxError::UnexpectedOrchardSpend);
+    }
+    if let Some(index) = pczt
+        .ironwood()
+        .actions()
+        .iter()
+        .position(|action| action.spend().dummy_sk().is_some())
+    {
+        return Err(TxError::DummyKey(index));
+    }
 
-    let mut found = Vec::new();
+    let mut found: Vec<SpendToSign> = Vec::new();
     Verifier::new(pczt.clone())
         .with_ironwood::<TxError, _>(|bundle| {
             for (index, action) in bundle.actions().iter().enumerate() {
@@ -65,6 +87,12 @@ pub fn spends_to_sign(
                 )
                 .into_option()
                 .ok_or(OrchardError::Custom(TxError::MissingAlpha(index)))?;
+                if bool::from(ff::Field::is_zero(&alpha)) {
+                    return Err(OrchardError::Custom(TxError::ZeroAlpha(index)));
+                }
+                if found.iter().any(|s| s.alpha == alpha) {
+                    return Err(OrchardError::Custom(TxError::RepeatedAlpha(index)));
+                }
                 found.push(SpendToSign {
                     action_index: index,
                     alpha,

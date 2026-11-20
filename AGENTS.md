@@ -187,7 +187,11 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
   value (zero-value vault spends exist). Reject any unsigned Orchard-pool spend.
 - **Member verification** (`verify::verify_pczt`) before approving and again before signing:
   v6 + branch id + expiry; Ironwood only; **all spends checked before any output**; each spend
-  is a vault note (nullifier/rk vs vault FVK) or a zero-value pre-signed dummy; each payment
+  is a vault note (nullifier/rk vs vault FVK) or a zero-value pre-signed dummy; no spend's
+  `alpha` is zero or shared with another spend, and no spend carries a `dummy_sk`
+  (`tx::spends_to_sign`, so every signing path checks it; local only, never in replay);
+  every output's `user_address`, when present, has the output's recipient as its Orchard
+  receiver (ZIP 374 Signer rules; Ironwood shares that receiver); each payment
   output recovered with the vault **external OVK** and matched exactly (recipient, amount,
   memo); every output to the vault (zero-value too) must **trial-decrypt** with its IVK and be
   recovered with the **internal OVK** as exactly the change address (internal, 0), its value

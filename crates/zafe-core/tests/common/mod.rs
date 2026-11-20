@@ -253,6 +253,26 @@ pub fn build_pczt_custom(
     fixed_fee: Option<u64>,
     ironwood_padding: BundlePadding,
 ) -> Pczt {
+    IoFinalizer::new(build_pczt_unfinalized(
+        spend_fvk,
+        spends,
+        anchor,
+        outputs,
+        fixed_fee,
+        ironwood_padding,
+    ))
+    .finalize_io(zafe_core::zrng::zrng())
+    .unwrap()
+}
+
+pub fn build_pczt_unfinalized(
+    spend_fvk: &FullViewingKey,
+    spends: Vec<(Note, MerklePath)>,
+    anchor: Anchor,
+    outputs: Vec<Out>,
+    fixed_fee: Option<u64>,
+    ironwood_padding: BundlePadding,
+) -> Pczt {
     use zcash_primitives::transaction::fees::fixed;
 
     let mut builder = Builder::new(
@@ -292,9 +312,7 @@ pub fn build_pczt_custom(
             )
             .unwrap(),
     };
-    IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
-        .finalize_io(zafe_core::zrng::zrng())
-        .unwrap()
+    Creator::build_from_parts(pczt_parts).unwrap()
 }
 
 pub fn expectations(payments: Vec<zafe_core::verify::Payment>) -> zafe_core::verify::Expectations {

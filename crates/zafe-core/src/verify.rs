@@ -83,6 +83,12 @@ pub enum VerifyError {
     WrongFee { expected: u64, actual: u64 },
     #[error("transaction has {actions} actions where {needed} suffice: padding raises the fee")]
     TooManyActions { actions: u64, needed: u64 },
+    #[error("action {0}: the PCZT still carries a dummy spending key")]
+    DummyKey(usize),
+    #[error("action {0}: user_address does not contain the output's recipient")]
+    UserAddressMismatch(usize),
+    #[error("action {0}: degenerate spend randomizer (zero or repeated alpha)")]
+    DegenerateAlpha(usize),
     #[error("{0}")]
     Tx(String),
 }
@@ -91,9 +97,39 @@ impl From<TxError> for VerifyError {
     fn from(e: TxError) -> Self {
         match e {
             TxError::NotVaultSpend(i) => VerifyError::ForeignSpend(i),
+            TxError::ZeroAlpha(i) | TxError::RepeatedAlpha(i) => VerifyError::DegenerateAlpha(i),
+            TxError::DummyKey(i) => VerifyError::DummyKey(i),
             other => VerifyError::Tx(other.to_string()),
         }
     }
+}
+
+struct OrchardReceiver([u8; 43]);
+
+impl zcash_address::TryFromAddress for OrchardReceiver {
+    type Error = ();
+
+    fn try_from_unified(
+        _net: zcash_protocol::consensus::NetworkType,
+        data: zcash_address::unified::Address,
+    ) -> Result<Self, zcash_address::ConversionError<()>> {
+        use zcash_address::unified::{Container, Receiver};
+        data.items()
+            .into_iter()
+            .find_map(|receiver| match receiver {
+                Receiver::Orchard(bytes) => Some(Self(bytes)),
+                _ => None,
+            })
+            .ok_or(zcash_address::ConversionError::User(()))
+    }
+}
+
+fn orchard_receiver(encoded: &str) -> Option<[u8; 43]> {
+    zcash_address::ZcashAddress::try_from_encoded(encoded)
+        .ok()?
+        .convert::<OrchardReceiver>()
+        .ok()
+        .map(|receiver| receiver.0)
 }
 
 pub fn verify_pczt(
@@ -202,6 +238,11 @@ pub fn verify_pczt(
                 let recipient = output
                     .recipient()
                     .expect("checked by verify_note_commitment");
+                if let Some(user_address) = output.user_address() {
+                    if orchard_receiver(user_address) != Some(recipient.to_raw_address_bytes()) {
+                        return Err(custom(VerifyError::UserAddressMismatch(i)));
+                    }
+                }
                 let domain = IronwoodDomain::for_pczt_action(action);
                 if let Some(scope) = vault_fvk.scope_for_address(&recipient) {
                     let ivk = vault_fvk.to_ivk(scope).prepare();

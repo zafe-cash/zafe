@@ -738,3 +738,219 @@ fn a_forced_extra_spend_adds_an_action_and_its_fee() {
         Err(VerifyError::WrongFee { .. })
     ));
 }
+
+fn two_spend_pczt(v: &Vault) -> (Pczt, Expectations) {
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(v, 2, 500_000);
+    let pczt = build_pczt_custom(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(payee, 700_000, &m),
+            v.change(1_000_000 - 700_000 - FEE_2_ACTIONS),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    (pczt, expect(vec![payment(payee, 700_000, &m)]))
+}
+
+fn replace_once(bytes: &mut [u8], from: &[u8; 32], to: &[u8; 32]) {
+    let at: Vec<usize> = bytes
+        .windows(32)
+        .enumerate()
+        .filter(|(_, w)| *w == from)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(at.len(), 1, "field occurs exactly once");
+    bytes[at[0]..at[0] + 32].copy_from_slice(to);
+}
+
+fn alpha_bytes(alpha: &pasta_curves::pallas::Scalar) -> [u8; 32] {
+    ff::PrimeField::to_repr(alpha)
+}
+
+#[test]
+fn rejects_a_zero_alpha_whose_rk_is_the_vault_key() {
+    let v = Vault::new(61);
+    let (pczt, expected) = two_spend_pczt(&v);
+    let spends = verify_pczt(&pczt, &v.fvk, &expected)
+        .unwrap()
+        .spends_to_sign;
+    let ak: [u8; 32] = v.fvk.to_bytes()[..32].try_into().unwrap();
+
+    let mut bytes = pczt.serialize().unwrap();
+    replace_once(&mut bytes, &alpha_bytes(&spends[0].alpha), &[0; 32]);
+    replace_once(&mut bytes, &spends[0].rk, &ak);
+    let tampered = Pczt::parse(&bytes).unwrap();
+
+    let err = verify_pczt(&tampered, &v.fvk, &expected).unwrap_err();
+    assert!(
+        matches!(err, VerifyError::DegenerateAlpha(i) if i == spends[0].action_index),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn rejects_two_spends_sharing_one_alpha() {
+    let v = Vault::new(62);
+    let (pczt, expected) = two_spend_pczt(&v);
+    let spends = verify_pczt(&pczt, &v.fvk, &expected)
+        .unwrap()
+        .spends_to_sign;
+    assert_eq!(spends.len(), 2);
+
+    let mut bytes = pczt.serialize().unwrap();
+    replace_once(
+        &mut bytes,
+        &alpha_bytes(&spends[1].alpha),
+        &alpha_bytes(&spends[0].alpha),
+    );
+    replace_once(&mut bytes, &spends[1].rk, &spends[0].rk);
+    let tampered = Pczt::parse(&bytes).unwrap();
+
+    let err = verify_pczt(&tampered, &v.fvk, &expected).unwrap_err();
+    assert!(
+        matches!(err, VerifyError::DegenerateAlpha(i) if i == spends[1].action_index),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn rejects_a_pczt_that_still_carries_a_dummy_spending_key() {
+    let v = Vault::new(63);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let (anchor, spends) = vault_notes(&v, 1, FUNDS);
+    let unfinalized = build_pczt_unfinalized(
+        &v.fvk,
+        spends,
+        anchor,
+        vec![
+            v.pay(payee, 400_000, &m),
+            v.change(FUNDS - 400_000 - FEE_2_ACTIONS),
+        ],
+        None,
+        BundlePadding::DEFAULT,
+    );
+    assert!(unfinalized
+        .ironwood()
+        .actions()
+        .iter()
+        .any(|a| a.spend().dummy_sk().is_some()));
+
+    assert!(matches!(
+        zafe_core::tx::spends_to_sign(&unfinalized, &v.fvk),
+        Err(zafe_core::tx::TxError::DummyKey(_))
+    ));
+
+    let finalized = pczt::roles::io_finalizer::IoFinalizer::new(unfinalized.clone())
+        .finalize_io(zafe_core::zrng::zrng())
+        .unwrap();
+    let signed_with_key =
+        pczt::roles::combiner::Combiner::new(vec![finalized, unfinalized.clone()])
+            .combine()
+            .unwrap();
+    let dummy = signed_with_key
+        .ironwood()
+        .actions()
+        .iter()
+        .position(|a| a.spend().dummy_sk().is_some())
+        .unwrap();
+    assert!(signed_with_key.ironwood().actions()[dummy]
+        .spend()
+        .spend_auth_sig()
+        .is_some());
+    let err = verify_pczt(
+        &signed_with_key,
+        &v.fvk,
+        &expect(vec![payment(payee, 400_000, &m)]),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, VerifyError::DummyKey(i) if i == dummy),
+        "{err:?}"
+    );
+    assert!(verify_pczt(
+        &unfinalized,
+        &v.fvk,
+        &expect(vec![payment(payee, 400_000, &m)])
+    )
+    .is_err());
+}
+
+fn with_user_address(pczt: Pczt, output_action: usize, user_address: String) -> Pczt {
+    pczt::roles::updater::Updater::new(pczt)
+        .update_ironwood_with(|mut updater| {
+            updater.update_action_with(output_action, |mut action| {
+                action.set_output_user_address(user_address);
+                Ok(())
+            })
+        })
+        .unwrap()
+        .finish()
+}
+
+fn unified_with_orchard(receiver: &Address) -> String {
+    use zcash_address::unified::{self, Encoding};
+    let ua = unified::Address::try_from_items(
+        unified::Revision::R0,
+        vec![unified::Uitem::Data(unified::Receiver::Orchard(
+            receiver.to_raw_address_bytes(),
+        ))],
+    )
+    .unwrap();
+    ua.encode(&zcash_protocol::consensus::NetworkType::Test)
+}
+
+fn payment_action(pczt: &Pczt, payee: &Address) -> usize {
+    pczt.ironwood()
+        .actions()
+        .iter()
+        .position(|a| {
+            a.output()
+                .recipient()
+                .map(|r| r.as_slice() == payee.to_raw_address_bytes().as_slice())
+                .unwrap_or(false)
+        })
+        .expect("payment output")
+}
+
+#[test]
+fn user_address_must_contain_the_output_recipient() {
+    let v = Vault::new(64);
+    let payee = outside_address(7);
+    let m = memo("x");
+    let pay = || {
+        v.pczt(vec![
+            v.pay(payee, 400_000, &m),
+            v.change(FUNDS - 400_000 - FEE_2_ACTIONS),
+        ])
+    };
+    let expected = expect(vec![payment(payee, 400_000, &m)]);
+
+    let honest = pay();
+    let index = payment_action(&honest, &payee);
+    let honest = with_user_address(honest, index, unified_with_orchard(&payee));
+    verify_pczt(&honest, &v.fvk, &expected).expect("the payee's own address verifies");
+
+    let lying = pay();
+    let index = payment_action(&lying, &payee);
+    let lying = with_user_address(lying, index, unified_with_orchard(&outside_address(8)));
+    let err = verify_pczt(&lying, &v.fvk, &expected).unwrap_err();
+    assert!(
+        matches!(err, VerifyError::UserAddressMismatch(i) if i == index),
+        "{err:?}"
+    );
+
+    let garbage = pay();
+    let index = payment_action(&garbage, &payee);
+    let garbage = with_user_address(garbage, index, "not an address".into());
+    let err = verify_pczt(&garbage, &v.fvk, &expected).unwrap_err();
+    assert!(
+        matches!(err, VerifyError::UserAddressMismatch(_)),
+        "{err:?}"
+    );
+}
