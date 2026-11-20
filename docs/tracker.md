@@ -382,7 +382,8 @@ Paths in parentheses are in Vizor's repo (chainapsis/vizor-wallet) unless they s
 - Coinholder voting for vaults (`docs/coinholder-voting.md`, revised 2026-11-20): t members
   FROST-sign the delegation. Target: votes FROST-signed too, which needs ZKP2 to witness
   `ak` instead of `vsk` (a small circuit diff, a new verifying key on the vote chain) and an
-  external `VoteSigner` upstream; not yet raised with Valar. Fallback: the leader's
+  external `VoteSigner` upstream; prototype on zafe-cash/voting-circuits
+  `threshold-vote-signer`, not yet raised with Valar. Fallback: the leader's
   per-ballot hotkey, revealed afterwards for members to check. First move to the
   stable librustzcash NU7 releases, then add `zcash_voting` with `lrz` (as ZODL does), then
   a regtest spike. Coinholder grants rounds (a Q3 one ran) are likely to recur.

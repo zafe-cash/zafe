@@ -192,6 +192,26 @@ the holder's keys ("Why VAN Nullifier Domain Separation"). Each vote is signed w
     (to check: the chain doesn't seem to reject a repeated `r_vpk`).
 - **Status:** a search of `valargroup/voting-circuits`, `zcash_voting` and `vote-sdk` for
   multisig, FROST, external signer and `vsk` found no issues or PRs (2026-11-20).
+- **Prototype:** [zafe-cash/voting-circuits `threshold-vote-signer`](https://github.com/zafe-cash/voting-circuits/tree/threshold-vote-signer)
+  (9f07e9b, on 0.15.0).
+  - **Change:** ZKP2 witnesses `vsk_ak`. It adds `build_vote_proof_from_fvk` and
+    `VotePrfKey`; the `SpendingKey` path derives byte-identical shares.
+  - **Size:** the circuit diff is about 60 lines. It saves one fixed column; the
+    2,015-row high-water mark and K=11 stay. Only the vote-proof VK changes.
+  - **Tests:** a 2-of-3 FROST group proves and signs a vote with no spending key,
+    checked by both vote-chain verifiers (zakura-reddsa 5.4, reddsa 0.6). There are
+    negative tests for a signer key that doesn't own the VAN, an identity `ak` and the
+    accepted `-ak` case. All suites pass on both backends.
+  - **Review:** an independent review found no soundness or circuit defect. One
+    consequence to state upstream: the proof no longer shows knowledge of `ask`, so the
+    vote-chain signature check is the only authority check. Every cast path already
+    requires it (`validate.go` 199, 342, 397).
+  - **Open:**
+    - The test signs a stand-in digest, not the cast-vote sighash.
+    - The FROST dev-dependencies add about 22 lockfile packages; Valar may want the
+      test elsewhere.
+    - vote-sdk pins `voting-circuits =0.12.0`, so adoption needs a version bump and a
+      coordinated chain and wallet release.
 - **Verdict:** the target design. It depends on Valar agreeing, a review of the circuit
   diff and a chain upgrade between rounds. Option 1 is the fallback if that stalls.
 
