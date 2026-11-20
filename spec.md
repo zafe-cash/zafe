@@ -433,6 +433,46 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
 - **Zafe v1 decision:** use `frost-core` 3.0.0 DKG (`reddsa` 0.5.2 redpallas `dkg`) with Zafe's own versions of COCKTAIL's protections: HPKE-sealed round 2 (§5.2), the echo check, and all-member transcript signatures (§7.2 steps 5 and 8). The DKG code lives in `keygen.rs`, so it can switch to COCKTAIL-DKG, plus the standardized `sk` agreement from zips#895, once a production crate exists. A switch only affects **new** vaults. Existing vaults keep their keys.
 - The DKG choice doesn't change the key material a vault ends up with (`ak`, shares, `sk`). It only changes how that material is agreed. So existing vaults stay valid.
 
+### 7.6 Post-quantum transport of `sk` (design, 2026-11-20; being built)
+
+**Problem** (§2.3). Two messages carry `sk` material over the relay, and both are sealed only with X25519 HPKE:
+- `SkContribution`: the `r_i` contributions at setup;
+- `RepairSigma`: the whole `vault_secret` at seat recovery.
+
+Anyone who keeps those ciphertexts and later breaks discrete logs gets `qsk`. zips#895 records the same issue: implementations SHOULD NOT retain the messages, and quantum-resistant encryption is an open issue there.
+
+**Fix: a hybrid layer on those two payloads only.** The outer envelope stays the same; an inner layer is added under it.
+
+1. **Key.** Every identity has an ML-KEM-768 key pair (FIPS 203, `ml-kem` crate).
+   - It is derived from the identity seeds: `seed = BLAKE2b-512("Zafe_PqKemSeed__", sig_seed || enc_seed)`, then `DecapsulationKey::from_seed`.
+   - So no new secret is stored, and backups and restores keep it.
+2. **Inner seal.** `pq_seal(ek, context, plaintext)`:
+   - `(ct, ss) = Encaps(ek)`;
+   - `key = BLAKE2b-256("Zafe_PqSealKey__", ss || ct || H(ek) || context)`;
+   - output `ct || nonce || XChaCha20-Poly1305(key, nonce, plaintext, aad = context)`.
+   - The result is then HPKE-sealed as today. A recorder must break both X25519 and ML-KEM.
+   - `context` binds the format, kind, vault id, sender and recipient.
+3. **Setup.**
+   - `Round1Msg` (`DKG_ROUND1` 4) carries each member's `ek`. It travels in the member's signed public envelope, and the echo covers `H(ek)` for every member.
+   - Each `r_i` is `pq_seal`ed to the recipient's `ek` from its round-1 message.
+   - A round-1 message without `ek` can't be decoded: older apps get `UpdateRequired`, and there is no classical fallback.
+4. **Recovery.** Keys travel with the seat-recovery values (§10.1), scoped to one recovery `subject` (the new phone's key) and pruned with them:
+   - A new route `/v1/seat-check/pq` (`/v1/seat-check/pq-read`) stores `Signed<PqKeyPut { subject, owner, ek }>`, where `owner` signs it. The relay can withhold a key but can't swap one. The size is exact (1,184 bytes), checked and charged before the lock (rule 7). `RELAY_DB` 8, no `RELAY_API` bump: an older relay answers 404 and recovery says "update the server".
+   - The recovering phone puts its own key (`owner = subject`).
+   - A fixed co-signer puts its key next to its `Announce`. A fixed member also puts it when it sees a pending seat move in the log, so it can be named in a retry.
+   - A helper sends `RepairSigma` (`REPAIR` 4) only with the whole payload `pq_seal`ed to the `ek` that `r.new` signed. With no such key, it waits. It never sends classically.
+   - The recovering phone opens only a `REPAIR` 4 sigma. A `REPAIR` 3 sigma (from an older helper) is refused, and the phone tells the user to update that signer.
+5. **Gate on the helpers, not on all members.** Helpers are the approving co-signers (`vault.rs` replay), and approving needs the safety words, which need the recovering phone's commit. So:
+   - The recovering phone posts its commit only to co-signers that have put a key. Without the words, an older app can't approve, so it can't become a helper.
+   - Fixed apps name a helper in `retry_repair` only if that helper has put a key for this subject.
+   - What's left: an older app that writes a retry naming older helpers can still leak. That needs two older apps acting together, and it's documented.
+   - Gating on all members would let one unreachable non-helper block recovery for good.
+6. **What it doesn't fix.**
+   - Vaults whose setup or recovery traffic was already sent keep a fixed `sk`; only moving the funds helps.
+   - The FROST shares (`DkgRound2`, `RepairDelta`) stay classical: a discrete-log break gives `ask` from `ak` (in the public round-1 envelopes) anyway.
+   - The log key sent at setup (`LogKey`) stays classical too; the one inside `RepairSigma` is covered, since the whole sigma payload is sealed. With it, a recorder sees the vault's viewing key and history, a privacy loss but not `qsk`. Under ZIP 2005's recovery rules that can't move funds.
+   - Identity and TLS remain classical. An *active* quantum attacker during setup is out of scope; this fix is about recorded traffic.
+
 ---
 
 ## 8. Balance and history

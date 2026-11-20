@@ -164,6 +164,8 @@ async fn three_members_create_a_vault_over_the_relay() {
     );
     assert_eq!(*a.key_package().unwrap().min_signers(), 2);
 
+    recorded_contributions_need_the_post_quantum_key(&relay, &ids, &invite).await;
+
     for (id, material) in ids.iter().zip([&a, &b, &c]) {
         let vault = material.label();
         assert!(!relay.inbox(id, vault, 0).await.unwrap().is_empty());
@@ -598,4 +600,55 @@ async fn safety_words(
         std::time::Duration::from_secs(30),
     )
     .await
+}
+
+async fn recorded_contributions_need_the_post_quantum_key(
+    relay: &RelayClient,
+    ids: &[Identity],
+    invite: &Invite,
+) {
+    use zafe_core::{keygen::contribution_context, pq::PqKeys};
+    use zafe_proto::envelope::Kind;
+
+    let by_pk: std::collections::BTreeMap<[u8; 32], &Identity> =
+        ids.iter().map(|id| (id.public().sig_pk, id)).collect();
+    let mut seen = 0;
+    for recipient in ids {
+        let mine = PqKeys::derive(recipient.seeds());
+        for (_, envelope) in relay.inbox(recipient, invite.label, 0).await.unwrap() {
+            if envelope.header.kind != Kind::SkContribution {
+                continue;
+            }
+            seen += 1;
+            let sender = by_pk[&envelope.header.from];
+            let after_x25519 = envelope.open(recipient, sender.public()).unwrap();
+            let context = contribution_context(
+                &invite.vault_id,
+                &sender.public().sig_pk,
+                &recipient.public().sig_pk,
+            );
+            let contribution = mine.open(&context, &after_x25519).unwrap();
+            assert_eq!(contribution.len(), 32);
+            assert!(
+                after_x25519.len() > 32
+                    && !after_x25519
+                        .windows(32)
+                        .any(|w| w == contribution.as_slice()),
+                "with every X25519 secret, a recorder still sees only ML-KEM ciphertext"
+            );
+            for other in ids.iter().filter(|o| o.public() != recipient.public()) {
+                assert!(
+                    PqKeys::derive(other.seeds())
+                        .open(&context, &after_x25519)
+                        .is_err(),
+                    "only the recipient's post-quantum key opens it"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        seen,
+        ids.len() * (ids.len() - 1),
+        "every contribution checked"
+    );
 }

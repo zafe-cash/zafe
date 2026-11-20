@@ -758,6 +758,7 @@ struct Round1Msg {
     birthday_height: Option<u32>,
     proposal_expiry_blocks: Option<u32>,
     sk_commitment: [u8; 32],
+    pq_key: Vec<u8>,
 }
 
 type Received = BTreeMap<(u8, [u8; 32]), Vec<u8>>;
@@ -909,6 +910,7 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
             let round1 = Round1::start(params, frost_id(&my_pk)?, rng).map_err(proto)?;
             let contribution = SkContribution::generate(rng);
             let msg = Round1Msg {
+                pq_key: crate::pq::PqKeys::derive(me.seeds()).public().to_bytes(),
                 sk_commitment: contribution.commitment(&invite.vault_id, &my_pk),
                 package: round1.package().serialize().map_err(proto)?,
                 birthday_height: if is_creator {
@@ -999,10 +1001,17 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     let mut birthday_height = my_msg.birthday_height;
     let mut expiry_blocks = my_msg.proposal_expiry_blocks;
     let mut received1 = BTreeMap::new();
+    let my_pq = crate::pq::PqKeys::derive(me.seeds());
     let mut commitments = BTreeMap::from([(frost_id(&my_pk)?, my_msg.sk_commitment)]);
+    let mut pq_hashes = BTreeMap::from([(frost_id(&my_pk)?, my_pq.public().hash())]);
+    let mut pq_keys = BTreeMap::new();
     for (pk, bytes) in &r1 {
         let m: Round1Msg = version::decode(Format::DkgRound1, bytes)?;
         commitments.insert(frost_id(pk)?, m.sk_commitment);
+        let pq_key = crate::pq::PqPublic::from_bytes(&m.pq_key)
+            .map_err(|e| NodeError::Protocol(e.to_string()))?;
+        pq_hashes.insert(frost_id(pk)?, pq_key.hash());
+        pq_keys.insert(*pk, pq_key);
         if *pk == invite.creator {
             birthday_height = m.birthday_height;
             expiry_blocks = m.proposal_expiry_blocks;
@@ -1038,15 +1047,23 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     .map_err(proto)?;
     let contribution = SkContribution::from_bytes(st.sk_contribution);
     let (round2, outgoing) = round1.advance(received1).map_err(proto)?;
-    let echo = crate::keygen::echo_with_commitments(&round2.echo(), &commitments);
+    let echo = crate::keygen::echo_with_pq_keys(
+        &crate::keygen::echo_with_commitments(&round2.echo(), &commitments),
+        &pq_hashes,
+    );
     if st.sent & SENT_ROUND2 == 0 {
         send_fresh(relay, me, &mut seq, public(Kind::DkgEcho, echo.to_vec())).await?;
         for (to_id, package) in &outgoing {
             let to = by_pk[&id_to_pk[to_id]];
             let bytes = package.serialize().map_err(proto)?;
+            let sealed_contribution = pq_keys[&to.sig_pk].seal(
+                &crate::keygen::contribution_context(&invite.vault_id, &my_pk, &to.sig_pk),
+                contribution.as_bytes(),
+                rng,
+            );
             for (kind, payload) in [
                 (Kind::DkgRound2, bytes.as_slice()),
-                (Kind::SkContribution, contribution.as_bytes().as_slice()),
+                (Kind::SkContribution, sealed_contribution.as_slice()),
             ] {
                 send_fresh(relay, me, &mut seq, |n| {
                     Envelope::sealed(me, &to, invite.label, n, kind, payload, rng).map_err(proto)
@@ -1087,7 +1104,13 @@ pub async fn keygen_step<P: Parameters, R: RngCore + CryptoRng>(
     let mut contributions = BTreeMap::new();
     contributions.insert(frost_id(&my_pk)?, contribution);
     for (pk, bytes) in sk_msgs {
-        let arr: [u8; 32] = bytes.as_slice().try_into().map_err(proto)?;
+        let opened = my_pq
+            .open(
+                &crate::keygen::contribution_context(&invite.vault_id, &pk, &my_pk),
+                &bytes,
+            )
+            .map_err(|e| NodeError::Protocol(e.to_string()))?;
+        let arr: [u8; 32] = opened.as_slice().try_into().map_err(proto)?;
         let id = frost_id(&pk)?;
         let revealed = SkContribution::from_bytes(arr);
         crate::keygen::check_contribution(&invite.vault_id, &pk, &commitments[&id], &revealed)

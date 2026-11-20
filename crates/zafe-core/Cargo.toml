@@ -10,6 +10,7 @@ license.workspace = true
 zafe-proto = { path = "../zafe-proto" }
 serde.workspace = true
 postcard.workspace = true
+ml-kem = { version = "=0.3.4", default-features = false, features = ["zeroize"] }
 reqwest = { workspace = true, features = ["rustls-tls"] }
 hex.workspace = true
 tokio.workspace = true

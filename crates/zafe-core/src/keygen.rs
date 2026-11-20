@@ -17,6 +17,8 @@ const PERSONAL_TRANSCRIPT: &[u8; 16] = b"Zafe_DKG_Transcr";
 const PERSONAL_VAULT_SK: &[u8; 16] = b"Zafe_VaultSecret";
 const PERSONAL_SK_COMMIT: &[u8; 16] = b"Zafe_SkCommit___";
 const PERSONAL_ECHO_COMMITS: &[u8; 16] = b"Zafe_DKG_EchoSk_";
+const PERSONAL_ECHO_PQ: &[u8; 16] = b"Zafe_DKG_EchoPq_";
+const PERSONAL_SK_SEAL: &[u8] = b"Zafe sk contribution v1";
 const PERSONAL_IDENTIFIER: &[u8] = b"Zafe member identifier v1";
 
 pub type VaultId = [u8; 16];
@@ -288,6 +290,26 @@ pub fn echo_with_commitments(
         state.update(c);
     }
     finalize_32(state)
+}
+
+pub fn echo_with_pq_keys(echo: &[u8; 32], pq_keys: &BTreeMap<Identifier, [u8; 32]>) -> [u8; 32] {
+    let mut state = blake2b_256(PERSONAL_ECHO_PQ);
+    state.update(echo);
+    for (id, key_hash) in pq_keys {
+        let id_bytes = id.serialize();
+        state.update(&(id_bytes.len() as u32).to_le_bytes());
+        state.update(&id_bytes);
+        state.update(key_hash);
+    }
+    finalize_32(state)
+}
+
+pub fn contribution_context(vault_id: &VaultId, from: &[u8; 32], to: &[u8; 32]) -> Vec<u8> {
+    let mut context = PERSONAL_SK_SEAL.to_vec();
+    context.extend_from_slice(vault_id);
+    context.extend_from_slice(from);
+    context.extend_from_slice(to);
+    context
 }
 
 pub fn combine_vault_secret(

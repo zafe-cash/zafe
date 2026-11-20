@@ -9,6 +9,7 @@ pub mod moves;
 pub mod net;
 pub mod node;
 pub mod nonce_store;
+pub mod pq;
 pub mod price;
 pub mod relay_client;
 pub mod repair;
