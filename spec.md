@@ -453,7 +453,7 @@ ZIP 2005 requires the participants to *privately agree* on `sk`. Zafe uses a con
 | `pczt` 0.9.3 (2026-08-07) | **Ironwood signing supported** | `roles::low_level_signer::Signer::{sign_ironwood_with, sign_orchard_with}` (this closes the rest of V3) |
 | Zebra 6.3+ | Built-in lightwalletd-compatible server (off by default) | Lets a self-hosted relay tier run one binary instead of Zebra plus lightwalletd |
 | Zaino 0.10.0 (Z3 stack indexer) | Not verified | Possible future backend |
-| Public mainnet endpoints | **In use (2026-10-06)** | The app lists Zec Rocks (global, na, eu, ap, sa), Stardust (us, eu) and Zcash Explorer for mainnet, and testnet.zec.rocks for testnet (`lightwalletd_presets.dart`) |
+| Public mainnet endpoints | **In use (2026-10-06)** | The app lists Zec Rocks (global, na, eu, ap, sa), Fastz (global, na, eu, ap; added 2026-11-20), Stardust (us, eu) and Zcash Explorer for mainnet, and testnet.zec.rocks for testnet (`lightwalletd_presets.dart`) |
 
 **Zafe policy:**
 - **Check the server on connect.** Call `GetLightdInfo` on every sync and refuse a server on the wrong network or more than 3 blocks behind the wallet's known tip (`wallet::check_server`: "server behind", not a sync error). Before proposing, compare its consensus branch id with the one the app expects for the tip (`wallet::ensure_current_branch`); a mismatch means the app predates a network upgrade ("update Zafe"), while syncing and balances keep working.

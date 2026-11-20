@@ -43,6 +43,26 @@ const List<LightwalletdPreset> kMainnetLightwalletdPresets = [
     url: 'https://sa.zec.rocks:443',
   ),
   LightwalletdPreset(
+    operator: 'Fastz',
+    region: 'Global',
+    url: 'https://rpc.fastz.cash:443',
+  ),
+  LightwalletdPreset(
+    operator: 'Fastz',
+    region: 'North America',
+    url: 'https://na.fastz.cash:443',
+  ),
+  LightwalletdPreset(
+    operator: 'Fastz',
+    region: 'Europe',
+    url: 'https://eu.fastz.cash:443',
+  ),
+  LightwalletdPreset(
+    operator: 'Fastz',
+    region: 'Asia-Pacific',
+    url: 'https://ap.fastz.cash:443',
+  ),
+  LightwalletdPreset(
     operator: 'Stardust',
     region: 'United States',
     url: 'https://us.zec.stardust.rest:443',

@@ -44,7 +44,8 @@ new findings here, and a one-line rule to `AGENTS.md` only if breaking it causes
 
 - **Zcash server list** (2026-10-06, Vizor-style): `core/config/lightwalletd_presets.dart`
   holds the public servers per network (first = the build default; mainnet: Zec Rocks
-  global/na/eu/ap/sa, Stardust us/eu, Zcash Explorer; testnet: only testnet.zec.rocks
+  global/na/eu/ap/sa, Fastz global/na/eu/ap (Zcash Labs' Ztreamer, mainnet only, added
+  2026-11-20), Stardust us/eu, Zcash Explorer; testnet: only testnet.zec.rocks
   answered). Settings > This phone > Zcash server (`/zcash-server`) lists them with a
   latency probe each (`probeLightwalletd`, a `checkLightwalletd` call, through Tor when
   it's on) plus "Custom server". Sync fails over (`serverFailoverProvider`, from
