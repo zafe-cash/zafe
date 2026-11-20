@@ -996,6 +996,76 @@ async fn recovery_values_keep_the_first_of_each_and_who_may_post() {
 }
 
 #[tokio::test]
+async fn recovery_pq_keys_are_posted_only_by_their_owner_at_full_size() {
+    use zafe_proto::relay::{PqKeyPut, RecoveryRead, RecoveryValues, PQ_KEY_LEN};
+    let w = World::new(true).await;
+    let (new, cosigner) = (&w.ids[3], &w.ids[1]);
+    let subject = new.public().sig_pk;
+    let put = |owner: &Identity, byte: u8, len: usize| PqKeyPut {
+        subject,
+        owner: owner.public().sig_pk,
+        key: vec![byte; len],
+        timestamp: NOW,
+    };
+    let path = "/v1/seat-check/pq";
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(new, 1, PQ_KEY_LEN))
+            .await
+            .0,
+        StatusCode::FORBIDDEN,
+        "nobody posts another identity's key"
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(new, 1, PQ_KEY_LEN - 1))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(new, 1, PQ_KEY_LEN)).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&w.app, path, new, put(new, 2, PQ_KEY_LEN)).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        signed(&w.app, path, cosigner, put(cosigner, 3, PQ_KEY_LEN))
+            .await
+            .0,
+        StatusCode::OK
+    );
+
+    let (status, body) = signed(
+        &w.app,
+        "/v1/seat-check/pq-read",
+        cosigner,
+        RecoveryRead {
+            subject,
+            timestamp: NOW,
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let mut keys: Vec<PqKeyPut> = decode_body::<RecoveryValues>(&body)
+        .unwrap()
+        .values
+        .iter()
+        .map(|b| {
+            Signed::<PqKeyPut>::from_bytes(b)
+                .unwrap()
+                .verify()
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    keys.sort_by_key(|k| k.owner);
+    let mut expected = vec![put(new, 1, PQ_KEY_LEN), put(cosigner, 3, PQ_KEY_LEN)];
+    expected.sort_by_key(|k| k.owner);
+    assert_eq!(keys, expected, "the first key per owner stays");
+}
+
+#[tokio::test]
 async fn recovery_checks_are_charged_per_address_and_junk_cant_lock_out_a_cosigner() {
     use zafe_proto::relay::{RecoveryPut, RecoveryValueKind as K};
     use zafe_relay::limits::{DailyRate, Limits};

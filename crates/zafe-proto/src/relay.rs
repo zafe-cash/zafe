@@ -320,6 +320,16 @@ pub struct RecoveryPut {
     pub timestamp: u64,
 }
 
+pub const PQ_KEY_LEN: usize = 1184;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PqKeyPut {
+    pub subject: [u8; 32],
+    pub owner: [u8; 32],
+    pub key: Vec<u8>,
+    pub timestamp: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryRead {
     pub subject: [u8; 32],

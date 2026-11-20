@@ -447,6 +447,29 @@ fn database_schema_is_versioned() {
         Err(zafe_relay::RelayError::UnsupportedVersion(v)) if v.is_newer()
     ));
 
+    let mut seven = rusqlite::Connection::open(&path).unwrap();
+    seven
+        .execute_batch("DROP TABLE recovery_pq_keys; PRAGMA user_version = 7;")
+        .unwrap();
+    drop(seven);
+    drop(Relay::open(&path).unwrap());
+    let migrated = rusqlite::Connection::open(&path).unwrap();
+    let has_table: bool = migrated
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'recovery_pq_keys')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let after: u16 = migrated
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert!(
+        has_table && after == version::RELAY_DB,
+        "schema 7 gains the key table"
+    );
+    drop(migrated);
+
     let old = dir.join("old.sqlite");
     let _ = std::fs::remove_file(&old);
     rusqlite::Connection::open(&old)

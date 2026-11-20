@@ -34,12 +34,12 @@ use zafe_proto::{
         encode_body, join_token_hash, AppendResult, CancelSetup, CancelledSeat, CreateMailbox,
         ForgetPush, InboxAck, InboxAckResponse, InboxRead, InboxResponse, Join, LabelledAppend,
         LabelledReplace, LogRead, LogResponse, MailboxInfo, MailboxesRead, MailboxesResponse,
-        MembersRead, MembersResponse, PendingSeat, PostEnvelope, PushPlatform, RecoveryPut,
-        RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, RelayExpiry, RelayInfo,
-        RelayLimits, RelayVersions, Remove, RenewInvite, Reseed, ReseedResponse, Seal, SeatCancel,
-        SeatCancelPost, SeatFinishPost, SeatMoveApproval, SetThreshold, Signed, WaitRequest,
-        WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS, MAX_WAIT_SECS,
-        UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
+        MembersRead, MembersResponse, PendingSeat, PostEnvelope, PqKeyPut, PushPlatform,
+        RecoveryPut, RecoveryRead, RecoveryValueKind, RecoveryValues, RegisterPush, RelayExpiry,
+        RelayInfo, RelayLimits, RelayVersions, Remove, RenewInvite, Reseed, ReseedResponse, Seal,
+        SeatCancel, SeatCancelPost, SeatFinishPost, SeatMoveApproval, SetThreshold, Signed,
+        WaitRequest, WaitResponse, CREATE_TOKEN_HEADER, MAX_ACK_CURSORS, MAX_REQUEST_SKEW_SECS,
+        MAX_WAIT_SECS, UNKNOWN_MAILBOX, UNSUPPORTED_VERSION_HEADER,
     },
     version::{self, UnsupportedVersion},
     Envelope, IdentityPublic, LogEntry, MailboxId, ProtoError, Recipient,
@@ -308,6 +308,13 @@ CREATE TABLE IF NOT EXISTS recovery_values (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (subject, cosigner, kind)
 );
+CREATE TABLE IF NOT EXISTS recovery_pq_keys (
+    subject BLOB NOT NULL,
+    owner BLOB NOT NULL,
+    signed BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (subject, owner)
+);
 ";
 
 fn system_clock() -> Clock {
@@ -354,7 +361,7 @@ impl Relay {
             |r| r.get(0),
         )?;
         match found {
-            1..=6 => {
+            1..=7 => {
                 if found == 1 {
                     migrate_from_v1(&conn)?;
                 }
@@ -367,7 +374,9 @@ impl Relay {
                 if found <= 4 {
                     migrate_from_v4(&conn)?;
                 }
-                migrate_from_v6(&conn)?;
+                if found <= 6 {
+                    migrate_from_v6(&conn)?;
+                }
             }
             0 if !has_tables => {}
             _ => version::check(version::Format::RelayDb, found)?,
@@ -544,6 +553,8 @@ impl Relay {
             .route("/v1/mailboxes", post(mailboxes))
             .route("/v1/seat-check/put", post(recovery_put))
             .route("/v1/seat-check/read", post(recovery_read))
+            .route("/v1/seat-check/pq", post(recovery_pq_put))
+            .route("/v1/seat-check/pq-read", post(recovery_pq_read))
             .route("/v1/push/register", post(register_push))
             .route("/v1/push/forget", post(forget_push))
             .route("/v1/envelope", post(retired))
@@ -601,6 +612,10 @@ impl Relay {
         let db = self.db.lock().expect("lock");
         db.execute(
             "DELETE FROM recovery_values WHERE created_at < ?1",
+            params![recovery_cutoff],
+        )?;
+        db.execute(
+            "DELETE FROM recovery_pq_keys WHERE created_at < ?1",
             params![recovery_cutoff],
         )?;
         Ok(deleted)
@@ -1998,6 +2013,50 @@ async fn recovery_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
     let db = relay.db.lock().expect("lock");
     let mut stmt = db
         .prepare("SELECT signed FROM recovery_values WHERE subject = ?1 ORDER BY cosigner, kind")?;
+    let values = stmt
+        .query_map(params![&req.payload.subject[..]], |r| {
+            r.get::<_, Vec<u8>>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    ok(&RecoveryValues { values })
+}
+
+async fn recovery_pq_put(
+    State(relay): State<Relay>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
+    body: Bytes,
+) -> RelayResult {
+    let req = verified::<PqKeyPut>(&relay, &body)?;
+    let p = &req.payload;
+    relay.check_fresh(p.timestamp)?;
+    if req.signer.sig_pk != p.owner {
+        return Err(RelayError::Forbidden);
+    }
+    if p.key.len() != zafe_proto::relay::PQ_KEY_LEN {
+        return Err(RelayError::BadRequest);
+    }
+    let signed = req.to_bytes().map_err(|_| RelayError::BadRequest)?;
+    relay.charge_daily(ip)?;
+    let db = relay.db.lock().expect("lock");
+    db.execute(
+        "INSERT OR IGNORE INTO recovery_pq_keys (subject, owner, signed, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            &p.subject[..],
+            &p.owner[..],
+            &signed[..],
+            relay.now() as i64
+        ],
+    )?;
+    ok(&())
+}
+
+async fn recovery_pq_read(State(relay): State<Relay>, body: Bytes) -> RelayResult {
+    let req = verified::<RecoveryRead>(&relay, &body)?;
+    relay.check_fresh(req.payload.timestamp)?;
+    let db = relay.db.lock().expect("lock");
+    let mut stmt =
+        db.prepare("SELECT signed FROM recovery_pq_keys WHERE subject = ?1 ORDER BY owner")?;
     let values = stmt
         .query_map(params![&req.payload.subject[..]], |r| {
             r.get::<_, Vec<u8>>(0)

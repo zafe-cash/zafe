@@ -637,6 +637,47 @@ impl RelayClient {
             .await
     }
 
+    pub async fn pq_key_put(
+        &self,
+        who: &Identity,
+        subject: [u8; 32],
+        key: &crate::pq::PqPublic,
+    ) -> Result<(), RelayClientError> {
+        let payload = zafe_proto::relay::PqKeyPut {
+            subject,
+            owner: who.public().sig_pk,
+            key: key.to_bytes(),
+            timestamp: now(),
+        };
+        self.signed::<_, ()>("/v1/seat-check/pq", who, payload)
+            .await
+    }
+
+    pub async fn pq_keys_read(
+        &self,
+        who: &Identity,
+        subject: [u8; 32],
+    ) -> Result<std::collections::BTreeMap<[u8; 32], crate::pq::PqPublic>, RelayClientError> {
+        let read = RecoveryRead {
+            subject,
+            timestamp: now(),
+        };
+        let response: RecoveryValues = self.signed("/v1/seat-check/pq-read", who, read).await?;
+        Ok(response
+            .values
+            .iter()
+            .filter_map(|b| Signed::<zafe_proto::relay::PqKeyPut>::from_bytes(b).ok())
+            .filter_map(|s| {
+                let p = s.verify().ok()?;
+                if p.subject != subject || s.signer.sig_pk != p.owner {
+                    return None;
+                }
+                let key = crate::pq::PqPublic::from_bytes(&p.key).ok()?;
+                Some((p.owner, key))
+            })
+            .collect())
+    }
+
     pub async fn recovery_read(
         &self,
         who: &Identity,
