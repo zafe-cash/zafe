@@ -532,7 +532,8 @@ State dir names live in `zafe_core::state_dir`; CLI home files are consts at the
 - Exact pins live in `Cargo.toml` (spec §4.4): `reddsa =0.5.2` (`frost`; 0.6 removed FROST),
   `frost-core`/`frost-rerandomized` 3.0.0, `orchard =0.16.0`, and the NU7 pre-release line
   (`pczt =0.10.0-pre.1`, `zcash_client_backend =0.25.0-pre.1`, `zcash_client_sqlite
-  =0.23.0-pre.1`). No stable librustzcash release supports NU7 yet.
+  =0.23.0-pre.1`). Stable NU7 releases exist (zcash_protocol 0.11.0, zcash_client_backend
+  0.25.0, pczt 0.10.0; seen 2026-11-19); `zcash_voting` needs them (`docs/coinholder-voting.md`).
 - The Zcash APIs take `rand_core` 0.10 (`zafe_core::zrng`); our crypto stays on 0.6. `alpha`
   crosses pasta_curves 0.5 ↔ 0.6 through canonical bytes.
 - `zcash_client_sqlite` needs `transparent-inputs` **and** `serde`; `zcash_keys`
