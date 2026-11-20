@@ -93,7 +93,7 @@ isn't rebuilt. Trust the crate and the circuits. Service discovery is
 
 ## Options for who holds the hotkey
 
-### 1. A hotkey for each ballot, held by the leader and revealed afterwards (recommended)
+### 1. A hotkey for each ballot, held by the leader and revealed afterwards (works today)
 
 The leader derives a fresh hotkey from its own identity seed, the vault id, the round and
 the attempt, and passes the 64 bytes to `VotingHotkey::from_stored_secret` (`src/hotkey.rs`).
@@ -145,12 +145,55 @@ and it suits a DAO that delegates to someone.
 
 ### 3. The vault's own key casts (t of n for the answers too)
 
-- Needs a ZKP2 variant that takes `ak` as a point, as ZKP1 does, plus FROST signing of the
-  batch digest. That means a new verifying key, adopted by Valar and the vote-chain
-  validators.
-- **It is the only option that prevents a deviating leader** rather than detecting one.
-- **Verdict:** an upstream ask, low priority until option 1 is in use. Record it in
-  `upstream-asks.md` when we build.
+The VAN goes to the vault's own address. The draft ZIP already allows a hotkey that reuses
+the holder's keys ("Why VAN Nullifier Domain Separation"). Each vote is signed with FROST.
+
+- **What it gives:**
+  - The answers need t signatures, so there is nothing to front-run and no leader to
+    trust.
+  - No reveal or audit step.
+  - The delegation and the vote batch are signed in one session: members approve the
+    ballot once and sign once.
+- **The circuit change is small.**
+  - In ZKP2, `vsk` appears only in conditions 3-4 (`src/vote_proof/circuit.rs:912-923`,
+    used again at `:957`). There it computes `ak = [vsk]·SpendAuthG`.
+  - Witnessing `ak_P` as a `NonIdentityPoint` instead is exactly what ZKP1 does
+    (`src/delegation/circuit.rs:776-790`) and what Orchard's action circuit does. The
+    circuit even drops a fixed-base multiplication.
+  - Security stays Orchard's: the authority is the vote signature under `r_vpk`, checked
+    out of circuit. The circuit's own comment above condition 4 says so.
+  - Software hotkeys keep working: they compute `ak` outside the circuit.
+- **The chain change is routine for Valar.** It needs a new vote-proof verifying key, and
+  Valar has shipped several:
+  - v0.9 moved to orchard 0.15;
+  - v0.10 brought K=11;
+  - v0.12 brought 50 proposals (`voting-circuits` CHANGELOG).
+
+  Each needed validators to deploy the new key between rounds (`vote-sdk`
+  `docs/runbooks/software-upgrades.md`). `MsgCastVote` already carries `r_vpk` and the
+  vote signature, so the wire format stays the same.
+- **Crate changes in `zcash_voting`:**
+  - a `VoteSigner` variant for an external signer (the enum is `#[non_exhaustive]`), which
+    hands out signing requests and takes signatures back, as the Keystone delegation path
+    does;
+  - ZKP2 built from an FVK rather than a hotkey seed (`src/zkp2.rs:45`, `:229`);
+  - a caller-chosen `alpha_v` (today `OsRng`, `src/zkp2.rs:272`), because FROST needs it
+    before round 1, as for payments;
+  - VAN blinding and share randomness from a secret the caller gives
+    (`src/van_blinding.rs:30`, `src/vote_commitment.rs:129`); for us, derived from the
+    vault secret.
+- **Every other client** (ZODL, Vizor, Zkool) has to update the crate when the key
+  changes. Valar already coordinates that for each key change.
+- **Our side:**
+  - FROST-sign the vote batch digest (`SVOTE_DELEGATE_AND_CAST_VOTE_BATCH_SIGHASH_V1`,
+    `src/delegate_and_vote_batch/authorization.rs`), which every member rebuilds from the
+    logged ballot before signing;
+  - one signature per vote, or one per batch if every vote in a batch shares `alpha_v`
+    (to check: the chain doesn't seem to reject a repeated `r_vpk`).
+- **Status:** a search of `valargroup/voting-circuits`, `zcash_voting` and `vote-sdk` for
+  multisig, FROST, external signer and `vsk` found no issues or PRs (2026-11-20).
+- **Verdict:** the target design. It depends on Valar agreeing, a review of the circuit
+  diff and a chain upgrade between rounds. Option 1 is the fallback if that stalls.
 
 ### 4. Split the weight across members' hotkeys
 
@@ -164,7 +207,7 @@ and it suits a DAO that delegates to someone.
 The default. A custodial vault, or one whose members can't agree, ignores rounds. Voting
 is opt-in for each round.
 
-## Recommended flow (option 1)
+## Flow (option 1 today; option 3 replaces steps 5-6 with FROST-signed votes)
 
 1. **Find rounds.** Use ZIP 1244 discovery with the pinned config hash. Show a vote card
    only when the vault held at least 0.125 ZEC in Ironwood at the snapshot.

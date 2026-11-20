@@ -380,9 +380,10 @@ Paths in parentheses are in Vizor's repo (chainapsis/vizor-wallet) unless they s
 - Android back-exit guard; iOS number-pad Done bar.
 - Widgetbook galleries and headless PNG renders for design review.
 - Coinholder voting for vaults (`docs/coinholder-voting.md`, revised 2026-11-20): t members
-  FROST-sign the delegation; the leader's hotkey for that ballot casts the t-approved
-  answers in the same message, then reveals the hotkey so every member can check the vote.
-  Casting with the vault key itself needs a new ZKP2 circuit (upstream). First move to the
+  FROST-sign the delegation. Target: votes FROST-signed too, which needs ZKP2 to witness
+  `ak` instead of `vsk` (a small circuit diff, a new verifying key on the vote chain) and an
+  external `VoteSigner` upstream; not yet raised with Valar. Fallback: the leader's
+  per-ballot hotkey, revealed afterwards for members to check. First move to the
   stable librustzcash NU7 releases, then add `zcash_voting` with `lrz` (as ZODL does), then
   a regtest spike. Coinholder grants rounds (a Q3 one ran) are likely to recur.
 - Multi-part QR to move a vault between phones without a file.
